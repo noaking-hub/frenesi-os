@@ -16,7 +16,7 @@ import {
 } from '@/domain'
 import type { ApuracaoLote, CoberturaBase, PerdaReal, ResumoSync } from '@/domain'
 
-import { repositorio } from './repository'
+import { origemDados, repositorio } from './repository'
 
 /**
  * Consultas derivadas compartilhadas pelas telas.
@@ -106,10 +106,16 @@ export interface Pendencia {
   etiqueta: string
   tom: 'ok' | 'atencao' | 'erro' | 'info' | 'ouro' | 'neutro'
   href: string
+  /** De onde a contagem vem. 'demonstracao' some quando o Supabase está ligado. */
+  origem: 'banco' | 'demonstracao'
 }
 
 export async function carregarDashboard() {
   const repo = repositorio()
+  // Com o Supabase conectado, o Dashboard só mostra o que vem do banco.
+  // Módulos ainda em fixtures (pedidos, financeiro, CRM, IA) ficam de fora
+  // em vez de exibir número de demonstração misturado com dado real.
+  const sincronizado = origemDados() === 'supabase'
   const [estoque, lotes, sync, parametros, solicitacoes, ocorrencias, envios] = await Promise.all([
     carregarEstoque(),
     carregarLotes(),
@@ -147,6 +153,7 @@ export async function carregarDashboard() {
       etiqueta: 'Urgente',
       tom: 'atencao',
       href: '/pedidos',
+      origem: 'demonstracao',
     },
     {
       contagem: lotes.perda.subestimado ? 1 : 0,
@@ -155,6 +162,7 @@ export async function carregarDashboard() {
       etiqueta: 'Preço',
       tom: 'atencao',
       href: '/estoque/lotes',
+      origem: 'banco',
     },
     {
       contagem: emRisco,
@@ -165,6 +173,7 @@ export async function carregarDashboard() {
       etiqueta: 'Bloqueia',
       tom: 'erro',
       href: '/estoque',
+      origem: 'banco',
     },
     {
       contagem: sync.esgotar + sync.reduzir + sync.repor,
@@ -173,6 +182,7 @@ export async function carregarDashboard() {
       etiqueta: 'Estoque',
       tom: sync.esgotar ? 'erro' : 'atencao',
       href: '/estoque/sincronia',
+      origem: 'banco',
     },
     {
       contagem: devAguardando.length,
@@ -183,6 +193,7 @@ export async function carregarDashboard() {
       etiqueta: 'Devoluções',
       tom: 'ouro',
       href: '/pedidos/devolucoes',
+      origem: 'demonstracao',
     },
     {
       contagem: filaBaixa.length,
@@ -192,6 +203,7 @@ export async function carregarDashboard() {
       etiqueta: 'Entregas',
       tom: 'info',
       href: '/pedidos/envios',
+      origem: 'demonstracao',
     },
     {
       contagem: resumoOe.abertas,
@@ -200,6 +212,7 @@ export async function carregarDashboard() {
       etiqueta: 'Transporte',
       tom: 'erro',
       href: '/pedidos/ocorrencias',
+      origem: 'demonstracao',
     },
     {
       contagem: pendentesFin.length,
@@ -208,6 +221,7 @@ export async function carregarDashboard() {
       etiqueta: 'Financeiro',
       tom: fin.vencidoQtd ? 'erro' : 'atencao',
       href: '/financeiro/lancamentos',
+      origem: 'demonstracao',
     },
     {
       contagem: CARRINHOS_PRIORIDADE_ALTA,
@@ -216,6 +230,7 @@ export async function carregarDashboard() {
       etiqueta: 'CRM',
       tom: 'ouro',
       href: '/crm/carrinhos',
+      origem: 'demonstracao',
     },
     {
       contagem: COMANDOS_IA_AGUARDANDO,
@@ -224,10 +239,20 @@ export async function carregarDashboard() {
       etiqueta: 'Assessor IA',
       tom: 'ouro',
       href: '/assessor',
+      origem: 'demonstracao',
     },
   ]
 
-  return { estoque, lotes, sync, parametros, bases, pendencias, calcularPreco }
+  return {
+    estoque,
+    lotes,
+    sync,
+    parametros,
+    bases,
+    sincronizado,
+    pendencias: sincronizado ? pendencias.filter((p) => p.origem === 'banco') : pendencias,
+    calcularPreco,
+  }
 }
 
 function brlSimples(n: number): string {

@@ -8,7 +8,8 @@ import { AGOSTO, JULHO } from '@/data/fixtures'
 import { brl, pad2, pct, volume } from '@/domain'
 
 export default async function Dashboard() {
-  const { estoque, lotes, sync, parametros, bases, pendencias } = await carregarDashboard()
+  const { estoque, lotes, sync, parametros, bases, pendencias, sincronizado } =
+    await carregarDashboard()
 
   const esgotadas = bases.filter((b) => b.volumeMl === 0)
   const emRisco = estoque.criticos + estoque.esgotados
@@ -16,18 +17,24 @@ export default async function Dashboard() {
   const total = acionaveis.reduce((a, p) => a + p.contagem, 0)
 
   // Cada hint qualifica o próprio valor — nada de descrever outro evento.
+  // Com o Supabase ligado, os cards do Financeiro declaram que o módulo ainda
+  // não foi integrado em vez de exibir número de demonstração.
   const kpis: Kpi[] = [
     {
       label: 'Vendas em agosto',
-      valor: brl(AGOSTO.entradas),
-      hint: `${AGOSTO.dias} dias · julho fechou em ${brl(JULHO.receitaBruta)}`,
-      tom: 'ouro',
+      valor: sincronizado ? '—' : brl(AGOSTO.entradas),
+      hint: sincronizado
+        ? 'Financeiro ainda não integrado'
+        : `${AGOSTO.dias} dias · julho fechou em ${brl(JULHO.receitaBruta)}`,
+      tom: sincronizado ? 'neutro' : 'ouro',
     },
     {
       label: 'Resultado em agosto',
-      valor: brl(AGOSTO.resultado),
-      hint: `Entradas menos saídas · julho fechou em ${brl(JULHO.resultado)}`,
-      tom: AGOSTO.resultado >= 0 ? 'ok' : 'erro',
+      valor: sincronizado ? '—' : brl(AGOSTO.resultado),
+      hint: sincronizado
+        ? 'Financeiro ainda não integrado'
+        : `Entradas menos saídas · julho fechou em ${brl(JULHO.resultado)}`,
+      tom: sincronizado ? 'neutro' : AGOSTO.resultado >= 0 ? 'ok' : 'erro',
     },
     {
       label: 'Volume em estoque',
@@ -144,6 +151,15 @@ export default async function Dashboard() {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {acionaveis.length === 0 && (
+              <span
+                className="font-sans"
+                style={{ padding: '18px 20px', fontSize: 11.5, lineHeight: 1.5, color: 'var(--color-terciario)' }}
+              >
+                Nada pendente pelos dados do banco. Cadastre perfumes base e lotes — as ações
+                aparecem aqui conforme os dados entram.
+              </span>
+            )}
             {acionaveis.map((p) => (
               <Link
                 key={p.titulo}
@@ -213,6 +229,14 @@ export default async function Dashboard() {
               </TituloSecao>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+              {alertas.length === 0 && (
+                <span
+                  className="font-sans"
+                  style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+                >
+                  Nenhum alerta: estoque, lotes e sincronia não acusam nada nos dados atuais.
+                </span>
+              )}
               {alertas.map((a) => (
                 <div
                   key={a.texto}
@@ -251,10 +275,21 @@ export default async function Dashboard() {
             }}
           >
             <div style={{ marginBottom: 15 }}>
-              <TituloSecao tamanho={14}>Resumo financeiro · julho fechado</TituloSecao>
+              <TituloSecao tamanho={14}>
+                {sincronizado ? 'Resumo financeiro' : 'Resumo financeiro · julho fechado'}
+              </TituloSecao>
             </div>
+            {sincronizado && (
+              <span
+                className="font-sans"
+                style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+              >
+                O módulo Financeiro ainda não foi integrado ao banco — o resumo aparece aqui
+                quando os lançamentos passarem a ser reais.
+              </span>
+            )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-              {financeiro.map((f) => (
+              {!sincronizado && financeiro.map((f) => (
                 <div key={f.label} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <span
                     className="font-sans"
@@ -300,11 +335,13 @@ export default async function Dashboard() {
                 </div>
               ))}
             </div>
-            <div style={{ marginTop: 16 }}>
-              <Rotulo>
-                {`${Math.round((JULHO.resultado / JULHO.receitaBruta) * 100)}% de margem sobre a receita bruta`}
-              </Rotulo>
-            </div>
+            {!sincronizado && (
+              <div style={{ marginTop: 16 }}>
+                <Rotulo>
+                  {`${Math.round((JULHO.resultado / JULHO.receitaBruta) * 100)}% de margem sobre a receita bruta`}
+                </Rotulo>
+              </div>
+            )}
           </section>
         </div>
       </div>
