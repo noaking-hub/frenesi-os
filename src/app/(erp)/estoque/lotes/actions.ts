@@ -31,7 +31,10 @@ export async function registrarCompra(dados: {
     p_custo_total: dados.custoTotal,
     p_fornecedor: dados.fornecedor.trim(),
   })
-  if (error) return { ok: false, erro: error.message }
+  if (error) {
+    console.error('[compras] registrar_compra falhou:', error)
+    return { ok: false, erro: error.message || error.details || 'Falha ao registrar a compra.' }
+  }
 
   revalidatePath('/', 'layout')
   return { ok: true, loteId: String(data) }

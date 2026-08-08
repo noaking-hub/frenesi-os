@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { importarCatalogoShopify } from '@/data/shopify'
+import { importarCatalogoShopify, mensagemDe } from '@/data/shopify'
 import type { ResultadoImportacao } from '@/data/shopify'
 
 export type RespostaImportacao =
@@ -16,6 +16,8 @@ export async function importarCatalogo(): Promise<RespostaImportacao> {
     revalidatePath('/', 'layout')
     return { ok: true, resultado }
   } catch (e) {
-    return { ok: false, erro: e instanceof Error ? e.message : 'Erro inesperado na importação' }
+    // O erro completo fica no terminal do servidor; a tela recebe a mensagem.
+    console.error('[shopify] importação falhou:', e)
+    return { ok: false, erro: mensagemDe(e) }
   }
 }

@@ -21,6 +21,22 @@ import { supabaseConfigurado, supabaseServer } from './supabase'
 
 const VERSAO_API = '2026-07'
 
+/** Extrai mensagem legível de qualquer formato de erro (Error, PostgrestError, objeto). */
+export function mensagemDe(e: unknown): string {
+  if (e instanceof Error && e.message) return e.message
+  if (e && typeof e === 'object') {
+    const m = (e as { message?: unknown; details?: unknown; hint?: unknown })
+    const partes = [m.message, m.details, m.hint].filter((x): x is string => typeof x === 'string' && x.length > 0)
+    if (partes.length) return partes.join(' · ')
+    try {
+      return JSON.stringify(e).slice(0, 300)
+    } catch {
+      /* segue para o String */
+    }
+  }
+  return String(e)
+}
+
 /** Normaliza o domínio: aceita colado com https://, barra final ou espaços. */
 function lojaNormalizada(valor: string): string {
   return valor
@@ -129,7 +145,7 @@ interface RespostaGraphql {
 
 const CONSULTA_PRODUTOS = /* GraphQL */ `
   query CatalogoErp($cursor: String) {
-    products(first: 100, after: $cursor) {
+    products(first: 50, after: $cursor) {
       pageInfo {
         hasNextPage
         endCursor
@@ -147,7 +163,7 @@ const CONSULTA_PRODUTOS = /* GraphQL */ `
             }
           }
         }
-        variants(first: 100) {
+        variants(first: 25) {
           nodes {
             id
             title
@@ -160,7 +176,7 @@ const CONSULTA_PRODUTOS = /* GraphQL */ `
   }
 `
 
-/** Lê o catálogo inteiro da loja, paginando de 100 em 100. */
+/** Lê o catálogo inteiro da loja, paginando de 50 em 50 (custo de query baixo). */
 export async function lerCatalogoShopify(): Promise<ProdutoShopify[]> {
   const { loja } = credenciais()
   if (!loja) {
@@ -257,88 +273,78 @@ export async function importarCatalogoShopify(): Promise<ResultadoImportacao> {
   const catalogo = mapearCatalogo(produtos)
   const sb = supabaseServer()
 
-  // Novos entram com custo/volume 0; existentes só atualizam o que é da loja.
+  // Lê o estado atual UMA vez e escreve em upserts em lote — nada de milhares
+  // de round-trips. Campos do ERP (custo, volume, consumo, envasadas,
+  // reservadas, gênero) são preservados linha a linha.
   const { data: existentes, error: erroExistentes } = await sb
     .from('perfumes_base')
-    .select('id')
+    .select('id, custo_por_ml, volume_ml, consumo_diario_ml, genero, ativo')
   if (erroExistentes) throw erroExistentes
-  const idsExistentes = new Set((existentes ?? []).map((e) => e.id))
+  const basePorId = new Map((existentes ?? []).map((e) => [e.id as string, e]))
 
-  const novos = catalogo.bases.filter((b) => !idsExistentes.has(b.id))
-  const conhecidos = catalogo.bases.filter((b) => idsExistentes.has(b.id))
+  const novos = catalogo.bases.filter((b) => !basePorId.has(b.id))
 
-  if (novos.length) {
-    const { error } = await sb.from('perfumes_base').insert(
-      novos.map((b) => ({
-        id: b.id,
-        nome: b.nome,
-        marca: b.marca,
-        custo_por_ml: 0,
-        volume_ml: 0,
-        consumo_diario_ml: 0,
-        shopify_product_id: b.shopifyProductId,
-        shopify_handle: b.id,
-        imagem_url: b.imagemUrl,
-      })),
-    )
-    if (error) throw error
-  }
-  for (const b of conhecidos) {
-    const { error } = await sb
-      .from('perfumes_base')
-      .update({
-        nome: b.nome,
-        marca: b.marca,
-        shopify_product_id: b.shopifyProductId,
-        shopify_handle: b.id,
-        imagem_url: b.imagemUrl,
-      })
-      .eq('id', b.id)
+  const linhasBases = catalogo.bases.map((b) => {
+    const atual = basePorId.get(b.id)
+    return {
+      id: b.id,
+      nome: b.nome,
+      marca: b.marca,
+      genero: atual?.genero ?? null,
+      custo_por_ml: atual ? atual.custo_por_ml : 0,
+      volume_ml: atual ? atual.volume_ml : 0,
+      consumo_diario_ml: atual ? atual.consumo_diario_ml : 0,
+      ativo: atual ? atual.ativo : true,
+      shopify_product_id: b.shopifyProductId,
+      shopify_handle: b.id,
+      imagem_url: b.imagemUrl,
+    }
+  })
+  for (const parte of emLotes(linhasBases, 500)) {
+    const { error } = await sb.from('perfumes_base').upsert(parte, { onConflict: 'id' })
     if (error) throw error
   }
 
-  // Variantes: preço praticado (sem mexer em envasadas/reservadas) e publicado.
   const { data: derivadosExistentes, error: erroDerivados } = await sb
     .from('produtos_derivados')
-    .select('base_id, variante')
+    .select('base_id, variante, envasadas, reservadas')
   if (erroDerivados) throw erroDerivados
-  const chavesDerivados = new Set(
-    (derivadosExistentes ?? []).map((d) => `${d.base_id}|${d.variante}`),
+  const derivadoPorChave = new Map(
+    (derivadosExistentes ?? []).map((d) => [`${d.base_id}|${d.variante}`, d]),
   )
 
-  for (const v of catalogo.variantes) {
-    if (chavesDerivados.has(`${v.baseId}|${v.variante}`)) {
-      const { error } = await sb
-        .from('produtos_derivados')
-        .update({ preco_praticado: v.preco, shopify_variant_id: v.shopifyVariantId })
-        .eq('base_id', v.baseId)
-        .eq('variante', v.variante)
-      if (error) throw error
-    } else {
-      const { error } = await sb.from('produtos_derivados').insert({
-        base_id: v.baseId,
-        variante: v.variante,
-        envasadas: 0,
-        reservadas: 0,
-        preco_praticado: v.preco,
-        shopify_variant_id: v.shopifyVariantId,
-      })
-      if (error) throw error
+  const linhasDerivados = catalogo.variantes.map((v) => {
+    const atual = derivadoPorChave.get(`${v.baseId}|${v.variante}`)
+    return {
+      base_id: v.baseId,
+      variante: v.variante,
+      envasadas: atual?.envasadas ?? 0,
+      reservadas: atual?.reservadas ?? 0,
+      preco_praticado: v.preco,
+      shopify_variant_id: v.shopifyVariantId,
     }
+  })
+  for (const parte of emLotes(linhasDerivados, 500)) {
+    const { error } = await sb
+      .from('produtos_derivados')
+      .upsert(parte, { onConflict: 'base_id,variante' })
+    if (error) throw error
   }
 
   const agora = new Date().toISOString()
-  const { error: erroPublicado } = await sb.from('shopify_publicado').upsert(
-    catalogo.variantes.map((v) => ({
-      base_id: v.baseId,
-      variante: v.variante,
-      publicado: v.publicado,
-      lido_em: agora,
-      shopify_variant_id: v.shopifyVariantId,
-    })),
-    { onConflict: 'base_id,variante' },
-  )
-  if (erroPublicado) throw erroPublicado
+  const linhasPublicado = catalogo.variantes.map((v) => ({
+    base_id: v.baseId,
+    variante: v.variante,
+    publicado: v.publicado,
+    lido_em: agora,
+    shopify_variant_id: v.shopifyVariantId,
+  }))
+  for (const parte of emLotes(linhasPublicado, 500)) {
+    const { error } = await sb
+      .from('shopify_publicado')
+      .upsert(parte, { onConflict: 'base_id,variante' })
+    if (error) throw error
+  }
 
   const { error: erroLog } = await sb.from('sincronizacoes').insert({
     origem: 'shopify',
@@ -352,10 +358,16 @@ export async function importarCatalogoShopify(): Promise<ResultadoImportacao> {
 
   return {
     perfumesNovos: novos.length,
-    perfumesAtualizados: conhecidos.length,
+    perfumesAtualizados: catalogo.bases.length - novos.length,
     variantes: catalogo.variantes.length,
     ignorados: catalogo.ignorados,
   }
+}
+
+function emLotes<T>(itens: T[], tamanho: number): T[][] {
+  const partes: T[][] = []
+  for (let i = 0; i < itens.length; i += tamanho) partes.push(itens.slice(i, i + tamanho))
+  return partes
 }
 
 export interface RegistroSincronizacao {
