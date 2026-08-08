@@ -2,24 +2,37 @@ import 'server-only'
 
 import { PARAMETROS_PADRAO } from '@/domain'
 import type {
+  AutorizadoIa,
+  AvaliacaoCupom,
+  CarrinhoAbandonado,
+  ClienteCrm,
+  ComandoIa,
   EnvioContabil,
   Integracao,
   PerfilAcesso,
   RegistroAuditoria,
+  RegraIa,
   RegraNotificacao,
   SolicitacaoErp,
   UsuarioErp,
 } from './fixtures'
 import type {
+  CampanhaMkt,
   CategoriaFinanceira,
   ContaBancaria,
+  CupomPromo,
+  EtapaFluxo,
+  FluxoEmail,
   FonteConcorrente,
+  GiftbackEmitido,
+  ItemVitrine,
   Kit,
   ContagemInventario,
   Envio,
   Lancamento,
   Ocorrencia,
   OrdemProducao,
+  RegraCashback,
   Repasse,
   Lote,
   Movimentacao,
@@ -27,6 +40,8 @@ import type {
   Pedido,
   PerfumeBase,
   ProdutoDerivado,
+  SaldoCashback,
+  TicketAtendimento,
   TipoMovimentacao,
   VarianteMl,
 } from '@/domain'
@@ -65,6 +80,21 @@ export interface Repositorio {
   integracoes(): Promise<Integracao[]>
   notificacoes(): Promise<RegraNotificacao[]>
   auditoria(): Promise<RegistroAuditoria[]>
+  clientes(): Promise<ClienteCrm[]>
+  carrinhos(): Promise<CarrinhoAbandonado[]>
+  campanhasMkt(): Promise<CampanhaMkt[]>
+  fluxos(): Promise<FluxoEmail[]>
+  etapasFluxo(): Promise<Record<string, EtapaFluxo[]>>
+  cupons(): Promise<CupomPromo[]>
+  vitrine(): Promise<ItemVitrine[]>
+  avaliacoesCupons(): Promise<AvaliacaoCupom[]>
+  regrasCashback(): Promise<RegraCashback[]>
+  saldosCashback(): Promise<SaldoCashback[]>
+  giftbacks(): Promise<GiftbackEmitido[]>
+  atendimento(): Promise<TicketAtendimento[]>
+  iaRegras(): Promise<RegraIa[]>
+  iaAutorizados(): Promise<AutorizadoIa[]>
+  iaComandos(): Promise<ComandoIa[]>
 }
 
 const repositorioFixtures: Repositorio = {
@@ -145,6 +175,51 @@ const repositorioFixtures: Repositorio = {
   },
   async auditoria() {
     return fixtures.LOGS_AUDITORIA
+  },
+  async clientes() {
+    return fixtures.CLIENTES
+  },
+  async carrinhos() {
+    return fixtures.CARRINHOS
+  },
+  async campanhasMkt() {
+    return fixtures.CAMPANHAS_MKT
+  },
+  async fluxos() {
+    return fixtures.FLUXOS
+  },
+  async etapasFluxo() {
+    return fixtures.ETAPAS_FLUXO
+  },
+  async cupons() {
+    return fixtures.CUPONS
+  },
+  async vitrine() {
+    return fixtures.VITRINE
+  },
+  async avaliacoesCupons() {
+    return fixtures.AVALIACOES_CUPONS
+  },
+  async regrasCashback() {
+    return fixtures.REGRAS_CASHBACK
+  },
+  async saldosCashback() {
+    return fixtures.SALDOS_CASHBACK
+  },
+  async giftbacks() {
+    return fixtures.GIFTBACKS
+  },
+  async atendimento() {
+    return fixtures.ATENDIMENTO
+  },
+  async iaRegras() {
+    return fixtures.IA_REGRAS
+  },
+  async iaAutorizados() {
+    return fixtures.IA_AUTORIZADOS
+  },
+  async iaComandos() {
+    return fixtures.IA_COMANDOS
   },
 }
 
@@ -387,6 +462,22 @@ const repositorioSupabase: Repositorio = {
   integracoes: repositorioFixtures.integracoes,
   notificacoes: repositorioFixtures.notificacoes,
   auditoria: repositorioFixtures.auditoria,
+  // CRM, promoções, atendimento e Assessor IA também aguardam migrations.
+  clientes: repositorioFixtures.clientes,
+  carrinhos: repositorioFixtures.carrinhos,
+  campanhasMkt: repositorioFixtures.campanhasMkt,
+  fluxos: repositorioFixtures.fluxos,
+  etapasFluxo: repositorioFixtures.etapasFluxo,
+  cupons: repositorioFixtures.cupons,
+  vitrine: repositorioFixtures.vitrine,
+  avaliacoesCupons: repositorioFixtures.avaliacoesCupons,
+  regrasCashback: repositorioFixtures.regrasCashback,
+  saldosCashback: repositorioFixtures.saldosCashback,
+  giftbacks: repositorioFixtures.giftbacks,
+  atendimento: repositorioFixtures.atendimento,
+  iaRegras: repositorioFixtures.iaRegras,
+  iaAutorizados: repositorioFixtures.iaAutorizados,
+  iaComandos: repositorioFixtures.iaComandos,
 }
 
 /**

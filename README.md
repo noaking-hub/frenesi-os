@@ -87,10 +87,25 @@ nenhuma tela muda.
 | `/configuracoes/integracoes` | Integrações e donos de e-mail · um gatilho, um remetente |
 | `/configuracoes/notificacoes` | Regras de notificação com switch por regra |
 | `/configuracoes/logs` | Logs e auditoria · diff antes → depois, filtro por autor |
+| `/crm` | Clientes · busca e filtros por status, ticket derivado |
+| `/crm/carrinhos` | Carrinhos abandonados · cards com prioridade |
+| `/crm/campanhas` | Campanhas · retorno derivado, melhor formato apontado |
+| `/crm/giftback` | Giftback e cashback · saldo = gerado − usado |
+| `/crm/emails` | E-mails e fluxos · sequência por fluxo, cupom conferido |
+| `/promocoes` | Cupons · sincronia Shopify × Yampi e margem por código |
+| `/promocoes/ofertas` | Rodízio de ofertas · sorteio com semente e piso de margem |
+| `/promocoes/avaliacoes` | Cupons de avaliação · Judge.me → Yampi |
+| `/atendimento` | Fila de ocorrências · espera derivada em min/h/dias |
+| `/assessor` | Conversas · ação proposta com impacto antes → depois |
+| `/assessor/email` | Criar e-mail com IA · produtos e preços saem do ERP |
+| `/assessor/regras` | Regras e limites · o que executa sozinha e o que confirma |
+| `/assessor/autorizados` | Usuários autorizados no WhatsApp |
+| `/assessor/logs` | Logs de comandos · comando, interpretação e resultado |
+| `/relatorios` | Relatórios · vendas por canal e curva ABC derivada |
 | `/devolucoes` | **Portal público do cliente**, 6 passos, mobile |
 
-As demais telas do handoff estão na navegação e caem numa página que declara o
-que falta e aponta para as telas prontas do mesmo grupo. Nada finge existir.
+As 44 telas do handoff estão construídas. Rotas fora da navegação caem numa
+página que aponta para as telas do grupo. Nada finge existir.
 
 ## Arquitetura
 
@@ -228,6 +243,43 @@ Integrações deriva os conflitos da tabela de responsáveis e o status do
 remetente herda o estado da integração — a Klaviyo com domínio pendente aparece
 âmbar na lista de donos também.
 → `src/app/(erp)/configuracoes/integracoes/`
+
+**Cupom existe nas DUAS plataformas ou não existe.** O checkout é da Yampi:
+cupom ativo só na Shopify é recusado na hora de pagar. `cupomDessincronizado`
+acusa a divergência na tela de Cupons, no giftback (que é cupom de valor) e
+dentro dos fluxos de e-mail que citam um código — a mesma checagem nos três
+lugares.
+→ `src/domain/promocoes.ts`, `cuponsDoFluxo` em `src/domain/crm.ts`
+
+**O rodízio de ofertas respeita o piso sem exceção.** O sorteio é ponderado
+(encalhado pelo tempo parado, campeão pelo giro) e estável por semente — 
+"Sortear novamente" troca a semente, não chama um aleatório solto. Base
+esgotada sai sozinha, e quem furaria o piso até no desconto mínimo fica de
+fora com o motivo dito na tela. `descontoMaximo` corta o desconto de quem
+aguenta menos.
+→ `montarRodada` em `src/domain/promocoes.ts`
+
+**Saldo de cashback é gerado − usado.** Nunca um terceiro número digitado.
+O saldo que aparece na tabela de Clientes é o MESMO da tela de Giftback, e o
+"custo real" do programa conta só o que foi efetivamente resgatado.
+→ `saldoDe` e `resumirCashback` em `src/domain/crm.ts`
+
+**A IA propõe, o humano confirma.** Acima do limite (R$ 1.000 em lançamentos),
+a ação fica pendente com o impacto antes → depois derivado das mesmas contas
+das telas de Financeiro. Criar cupom novo, alterar preço e mexer em permissão
+são bloqueados por política — e número de WhatsApp não autorizado é ignorado
+e registrado. O e-mail gerado pela IA só usa produtos, preços e públicos que
+existem no ERP: a campanha da coleção Ofertas monta a grade com a MESMA rodada
+do rodízio, piso incluso.
+→ `src/app/(erp)/assessor/`, `IA_REGRAS` em `src/data/fixtures.ts`
+
+**Médias ponderadas, não simples.** Abertura média dos fluxos pondera por
+envio; margem média com cupom pondera por receita; campanha sem custo não tem
+"retorno infinito" — fica sem retorno. E a curva ABC deriva classe e acumulado
+da participação, em vez de vir classificada à mão (a frase-resumo também é
+derivada — a do protótipo afirmava uma comparação falsa).
+→ `resumirFluxos`, `resumirCampanhas` em `src/domain/crm.ts`,
+`resumirCupons` em `src/domain/promocoes.ts`, `src/app/(erp)/relatorios/`
 
 **Vocabulário do usuário, não do sistema.** "Estoque acaba em 12 dias", não
 "ruptura". E o critério interno de aceitação (tolerância de 10% abaixo do volume

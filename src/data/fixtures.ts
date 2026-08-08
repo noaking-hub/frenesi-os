@@ -9,8 +9,14 @@
 
 import { aferirItem } from '@/domain'
 import type {
+  CampanhaMkt,
   CategoriaFinanceira,
+  CupomPromo,
+  EtapaFluxo,
+  FluxoEmail,
   FonteConcorrente,
+  GiftbackEmitido,
+  ItemVitrine,
   Kit,
   ContaBancaria,
   ContagemInventario,
@@ -25,8 +31,11 @@ import type {
   Pedido,
   PerfumeBase,
   ProdutoDerivado,
+  RegraCashback,
   Repasse,
+  SaldoCashback,
   StatusSolicitacao,
+  TicketAtendimento,
   TipoSolicitacao,
   VarianteMl,
 } from '@/domain'
@@ -980,6 +989,335 @@ export const EMPRESA = {
   },
 }
 
+export const PEDIDOS_A_SEPARAR = 17
+
+// ── CRM ────────────────────────────────────────────────────────────────────
+
+export interface ClienteCrm {
+  nome: string
+  cidade: string
+  iniciais: string
+  email: string
+  telefone: string
+  /** Total comprado e nº de pedidos: o ticket médio é derivado (total ÷ pedidos). */
+  total: number
+  pedidos: number
+  ultimaCompra: string
+  status: 'VIP' | 'Recorrente' | 'Novo' | 'Inativo'
+}
+
+export const CLIENTES: ClienteCrm[] = [
+  { nome: 'Camila Rocha', cidade: 'São Paulo · SP', iniciais: 'CR', email: 'camila.rocha@email.com', telefone: '11 98421-0032', total: 4180, pedidos: 11, ultimaCompra: '03/08', status: 'VIP' },
+  { nome: 'Rafael Andrade', cidade: 'Campinas · SP', iniciais: 'RA', email: 'rafael.andrade@email.com', telefone: '19 99120-8874', total: 2640, pedidos: 7, ultimaCompra: '03/08', status: 'Recorrente' },
+  { nome: 'Juliana Prado', cidade: 'Belo Horizonte · MG', iniciais: 'JP', email: 'ju.prado@email.com', telefone: '31 98003-1177', total: 1980, pedidos: 5, ultimaCompra: '02/08', status: 'Recorrente' },
+  { nome: 'Tiago Nunes', cidade: 'Curitiba · PR', iniciais: 'TN', email: 'tiago.nunes@email.com', telefone: '41 99887-2210', total: 298, pedidos: 1, ultimaCompra: '02/08', status: 'Novo' },
+  { nome: 'Beatriz Lima', cidade: 'Rio de Janeiro · RJ', iniciais: 'BL', email: 'bia.lima@email.com', telefone: '21 98554-9021', total: 6320, pedidos: 16, ultimaCompra: '02/08', status: 'VIP' },
+  { nome: 'Marcos Ferreira', cidade: 'Santos · SP', iniciais: 'MF', email: 'marcos.f@email.com', telefone: '13 99441-7788', total: 1408, pedidos: 4, ultimaCompra: '01/08', status: 'Recorrente' },
+  { nome: 'Larissa Duarte', cidade: 'Goiânia · GO', iniciais: 'LD', email: 'larissa.d@email.com', telefone: '62 98220-4410', total: 3290, pedidos: 6, ultimaCompra: '01/08', status: 'VIP' },
+  { nome: 'Eduardo Salles', cidade: 'Porto Alegre · RS', iniciais: 'ES', email: 'edu.salles@email.com', telefone: '51 99612-3345', total: 640, pedidos: 3, ultimaCompra: '12/04', status: 'Inativo' },
+]
+
+export interface CarrinhoAbandonado {
+  cliente: string
+  telefone: string
+  valor: number
+  tempo: string
+  prioridade: 'Alta' | 'Média' | 'Baixa'
+  itens: { nome: string; qtd: string }[]
+  contatado: boolean
+}
+
+export const CARRINHOS: CarrinhoAbandonado[] = [
+  { cliente: 'Fernanda Belmonte', telefone: '11 97722-1180', valor: 682, tempo: 'há 42 min', prioridade: 'Alta', itens: [{ nome: 'Baccarat Rouge 540 · 15 ml', qtd: '1×' }, { nome: 'Delina · 10 ml', qtd: '1×' }], contatado: false },
+  { cliente: 'Paulo Vasques', telefone: '11 98330-4471', valor: 512, tempo: 'há 2h', prioridade: 'Alta', itens: [{ nome: 'Aventus · 15 ml', qtd: '1×' }, { nome: 'Refil 10 ml', qtd: '2×' }], contatado: false },
+  { cliente: 'Renata Coelho', telefone: '21 99441-2087', valor: 438.9, tempo: 'há 5h', prioridade: 'Alta', itens: [{ nome: 'Erba Pura · 15 ml', qtd: '1×' }, { nome: 'Kit descoberta', qtd: '1×' }], contatado: true },
+  { cliente: 'Gustavo Aguiar', telefone: '31 98110-6654', valor: 289, tempo: 'há 1 dia', prioridade: 'Média', itens: [{ nome: 'Sauvage Elixir · 10 ml', qtd: '1×' }], contatado: false },
+  { cliente: 'Sofia Menezes', telefone: '48 99225-3390', valor: 198, tempo: 'há 2 dias', prioridade: 'Média', itens: [{ nome: 'Bleu de Chanel · 10 ml', qtd: '1×' }], contatado: true },
+  { cliente: 'Henrique Dantas', telefone: '85 98774-1102', valor: 149, tempo: 'há 4 dias', prioridade: 'Baixa', itens: [{ nome: 'Good Girl · 10 ml', qtd: '1×' }], contatado: false },
+]
+
+/**
+ * Fatos dos últimos 7/30 dias que os 6 cards acima (uma amostra) não cobrem.
+ * A recuperação bate com a receita do fluxo "Carrinho abandonado" em FLUXOS.
+ */
+export const CARRINHOS_7D = { abertos: 31, valor: 12840 }
+export const CARRINHOS_RECUPERADOS = { qtd: 14, valor: 5610, taxaPct: 31 }
 export const CARRINHOS_PRIORIDADE_ALTA = 6
 export const COMANDOS_IA_AGUARDANDO = 2
-export const PEDIDOS_A_SEPARAR = 17
+
+export const CAMPANHAS_MKT: CampanhaMkt[] = [
+  { nome: 'Lançamento Layton', canal: 'E-mail + Instagram', publico: 'Compraram amadeirados', periodo: '01/08 a 07/08', alcance: 1284, conversaoPct: 4.8, receita: 8420, custo: 1200, estado: 'Em veiculação' },
+  { nome: 'Coleção Ofertas · ciclo 48h', canal: 'E-mail + site', publico: 'Base completa', periodo: '03/08 a 05/08', alcance: 4820, conversaoPct: 2.1, receita: 6480, custo: 0, estado: 'Em veiculação' },
+  { nome: 'Dia dos Pais · kits', canal: 'Meta Ads', publico: 'Lookalike de compradores', periodo: '25/07 a 08/08', alcance: 42600, conversaoPct: 0.9, receita: 18940, custo: 4800, estado: 'Em veiculação' },
+  { nome: 'Reativação 90 dias', canal: 'E-mail + WhatsApp', publico: 'Sem comprar há 90 dias', periodo: '20/07 a 27/07', alcance: 742, conversaoPct: 5.4, receita: 4120, custo: 380, estado: 'Encerrada' },
+  { nome: 'Pré-venda VIP', canal: 'WhatsApp', publico: 'VIP', periodo: '10/08 a 12/08', alcance: 186, conversaoPct: 0, receita: 0, custo: 0, estado: 'Agendada' },
+  { nome: 'Black Friday · aquecimento', canal: 'E-mail', publico: 'Base completa', periodo: '15/07 a 22/07', alcance: 4610, conversaoPct: 1.6, receita: 5210, custo: 620, estado: 'Encerrada' },
+]
+
+export const FLUXOS: FluxoEmail[] = [
+  { id: 'carrinho', nome: 'Carrinho abandonado', gatilho: 'Carrinho parado há 1h', etapas: 3, enviados: 412, aberturaPct: 48.2, cliquesPct: 12.4, receita: 5610, status: 'Ativo' },
+  { id: 'poscompra', nome: 'Pós-compra · pedido entregue', gatilho: 'Entrega confirmada na Yampi', etapas: 2, enviados: 386, aberturaPct: 61.5, cliquesPct: 9.1, receita: 3240, status: 'Ativo' },
+  { id: 'avaliacao', nome: 'Convite para avaliar', gatilho: '7 dias após a entrega', etapas: 2, enviados: 298, aberturaPct: 54.8, cliquesPct: 18.6, receita: 1980, status: 'Ativo' },
+  { id: 'recompra', nome: 'Hora de repor', gatilho: '45 dias sem comprar', etapas: 3, enviados: 174, aberturaPct: 39.4, cliquesPct: 7.2, receita: 4120, status: 'Ativo' },
+  { id: 'aniversario', nome: 'Aniversário do cliente', gatilho: 'Data de nascimento', etapas: 1, enviados: 38, aberturaPct: 66.1, cliquesPct: 21.3, receita: 1640, status: 'Ativo' },
+  { id: 'boasvindas', nome: 'Boas-vindas', gatilho: 'Cadastro na newsletter', etapas: 2, enviados: 0, aberturaPct: 0, cliquesPct: 0, receita: 0, status: 'Rascunho' },
+]
+
+export const ETAPAS_FLUXO: Record<string, EtapaFluxo[]> = {
+  carrinho: [
+    { quando: 'após 1 hora', assunto: 'Esqueceu algo no carrinho?', corpo: 'Lembrete simples com os itens e o frete já calculado', cupom: '', aberturaPct: 52.1, receita: 2180 },
+    { quando: 'após 24 horas', assunto: 'Seu carrinho expira em breve', corpo: 'Prova social com avaliações do Judge.me do mesmo perfume', cupom: 'VOLTA10', aberturaPct: 47.3, receita: 2410 },
+    { quando: 'após 72 horas', assunto: 'Última chance · 10% de desconto', corpo: 'Urgência e escassez do decant fracionado', cupom: 'VOLTA10', aberturaPct: 41.8, receita: 1020 },
+  ],
+  poscompra: [
+    { quando: 'na confirmação de entrega', assunto: 'Chegou! Como usar seu decant', corpo: 'Cuidados com o frasco, conservação e camadas da fragrância', cupom: '', aberturaPct: 68.2, receita: 0 },
+    { quando: 'após 3 dias', assunto: 'Combina com o que você levou', corpo: 'Sugestão de fragrância complementar na mesma família olfativa', cupom: '', aberturaPct: 54.8, receita: 3240 },
+  ],
+  avaliacao: [
+    { quando: '7 dias após a entrega', assunto: 'O que achou da fragrância?', corpo: 'Convite do Judge.me pedindo foto do frasco e do lacre', cupom: '', aberturaPct: 58.4, receita: 0 },
+    { quando: 'após 12 dias', assunto: 'Avalie e ganhe até 20% de desconto', corpo: 'Reforço explicando que foto rende 15% e vídeo rende 20%', cupom: 'JM · automático', aberturaPct: 51.2, receita: 1980 },
+  ],
+  recompra: [
+    { quando: '45 dias sem comprar', assunto: 'Seu decant deve estar acabando', corpo: 'Cálculo de duração pelo volume comprado e uso médio', cupom: '', aberturaPct: 42.1, receita: 1490 },
+    { quando: 'após 60 dias', assunto: 'Repor o mesmo ou provar outro?', corpo: 'Dois caminhos: recompra rápida ou kit descoberta', cupom: '', aberturaPct: 38.6, receita: 1830 },
+    { quando: 'após 90 dias', assunto: 'Sentimos sua falta', corpo: 'Última tentativa antes de marcar o cliente como inativo', cupom: 'VOLTA10', aberturaPct: 37.5, receita: 800 },
+  ],
+  aniversario: [
+    { quando: 'no dia do aniversário', assunto: 'Um presente da Frenesi para você', corpo: 'Cupom pessoal válido por 15 dias, com sugestão pela última compra', cupom: 'ANIVER20', aberturaPct: 66.1, receita: 1640 },
+  ],
+  boasvindas: [
+    { quando: 'no cadastro', assunto: 'Bem-vindo à Frenesi', corpo: 'Apresenta o conceito de decant fracionado e as cinco variantes', cupom: '', aberturaPct: 0, receita: 0 },
+    { quando: 'após 2 dias', assunto: 'Por onde começar', corpo: 'Kit descoberta de 3 ml para experimentar antes de investir', cupom: '', aberturaPct: 0, receita: 0 },
+  ],
+}
+
+export const REGRAS_CASHBACK: RegraCashback[] = [
+  { faixa: 'Primeira compra', pct: 3, validade: '60 dias', minimo: 0, ativa: true },
+  { faixa: 'Recorrente · 2ª à 5ª compra', pct: 5, validade: '90 dias', minimo: 150, ativa: true },
+  { faixa: 'VIP · acima de R$ 3.000 comprados', pct: 8, validade: '120 dias', minimo: 0, ativa: true },
+  { faixa: 'Compra de kit ou combo', pct: 10, validade: '90 dias', minimo: 400, ativa: false },
+]
+
+/** Só gerado e usado — o saldo é derivado por `saldoDe`, nunca digitado. */
+export const SALDOS_CASHBACK: SaldoCashback[] = [
+  { cliente: 'Beatriz Lima', perfil: 'VIP', gerado: 126, usado: 0, expiraEmDias: 84 },
+  { cliente: 'Camila Rocha', perfil: 'VIP', gerado: 84, usado: 0, expiraEmDias: 12 },
+  { cliente: 'Larissa Duarte', perfil: 'VIP', gerado: 65, usado: 65, expiraEmDias: null },
+  { cliente: 'Rafael Andrade', perfil: 'Recorrente', gerado: 41, usado: 0, expiraEmDias: 47 },
+  { cliente: 'Marcos Ferreira', perfil: 'Recorrente', gerado: 22, usado: 0, expiraEmDias: 3 },
+  { cliente: 'Juliana Prado', perfil: 'Recorrente', gerado: 18, usado: 18, expiraEmDias: null },
+]
+
+export const GIFTBACKS: GiftbackEmitido[] = [
+  { codigo: 'GB-2291', cliente: 'Camila Rocha', origem: 'Compra #10482', valor: 40, minimo: 250, emitido: 'hoje 09:14', validade: '30 dias', estado: 'Disponível', sincronizado: true },
+  { codigo: 'GB-2290', cliente: 'Rafael Andrade', origem: 'Compra #10481', valor: 25, minimo: 150, emitido: 'hoje 08:02', validade: '30 dias', estado: 'Disponível', sincronizado: false },
+  { codigo: 'GB-2289', cliente: 'Beatriz Lima', origem: 'Compra #10478', valor: 50, minimo: 300, emitido: '02/08 14:20', validade: '30 dias', estado: 'Resgatado', sincronizado: true },
+  { codigo: 'GB-2288', cliente: 'Larissa Duarte', origem: 'Compra #10476', valor: 80, minimo: 400, emitido: '01/08 16:44', validade: '30 dias', estado: 'Disponível', sincronizado: true },
+  { codigo: 'GB-2287', cliente: 'Eduardo Salles', origem: 'Compra #10412', valor: 20, minimo: 150, emitido: '04/07 10:10', validade: 'venceu', estado: 'Expirado', sincronizado: true },
+]
+
+// ── Promoções ──────────────────────────────────────────────────────────────
+
+export const CUPONS: CupomPromo[] = [
+  { codigo: 'VOLTA10', tipo: '10% de desconto', regra: 'Carrinhos abandonados · mínimo R$ 250', usos: 34, limite: 200, receita: 12480, desconto: 1387, margem: 19.4, status: 'Ativo', validade: 'até 31/08', shopify: 'Ativo', yampi: 'Ativo' },
+  { codigo: 'FRENESI15', tipo: '15% de desconto', regra: 'Primeira compra · todos os canais', usos: 128, limite: 500, receita: 41290, desconto: 7286, margem: 15.1, status: 'Ativo', validade: 'até 30/09', shopify: 'Ativo', yampi: 'Ativo' },
+  { codigo: 'KITVERAO', tipo: 'R$ 40 off', regra: 'Kits de 3 decants · acima de R$ 400', usos: 19, limite: 100, receita: 9640, desconto: 760, margem: 22.8, status: 'Ativo', validade: 'até 15/08', shopify: 'Ativo', yampi: 'Pendente' },
+  { codigo: 'FRETEGRATIS', tipo: 'Frete grátis', regra: 'Sudeste · acima de R$ 350', usos: 76, limite: 0, receita: 28110, desconto: 2110, margem: 11.2, status: 'Revisar', validade: 'sem prazo', shopify: 'Ativo', yampi: 'Divergente' },
+  { codigo: 'ANIVER20', tipo: '20% de desconto', regra: 'Aniversário do cliente · válido por 15 dias', usos: 26, limite: 0, receita: 1640, desconto: 410, margem: 17.9, status: 'Ativo', validade: 'contínuo', shopify: 'Ativo', yampi: 'Ativo' },
+  { codigo: 'BLACK30', tipo: '30% de desconto', regra: 'Campanha encerrada', usos: 214, limite: 250, receita: 52340, desconto: 22432, margem: 4.6, status: 'Encerrado', validade: 'expirou 30/11', shopify: 'Encerrado', yampi: 'Encerrado' },
+]
+
+/**
+ * Vitrine publicada: preço praticado, giro e tempo parado por variante.
+ * O rodízio de ofertas sorteia daqui — esgotado sai sozinho porque a base
+ * (PERFUMES_BASE) é a mesma fonte do estoque.
+ */
+export const VITRINE: ItemVitrine[] = [
+  { baseId: 'bac', variante: 5, preco: 79.9, vendas30: 62, diasParado: 0 },
+  { baseId: 'bac', variante: 10, preco: 139.9, vendas30: 38, diasParado: 0 },
+  { baseId: 'sau', variante: 5, preco: 54.9, vendas30: 71, diasParado: 0 },
+  { baseId: 'sau', variante: 15, preco: 148.9, vendas30: 24, diasParado: 2 },
+  { baseId: 'ave', variante: 10, preco: 164.9, vendas30: 9, diasParado: 11 },
+  { baseId: 'ave', variante: 3, preco: 42.9, vendas30: 4, diasParado: 19 },
+  { baseId: 'erb', variante: 5, preco: 86.9, vendas30: 3, diasParado: 26 },
+  { baseId: 'erb', variante: 15, preco: 194.9, vendas30: 1, diasParado: 41 },
+  { baseId: 'del', variante: 5, preco: 62.9, vendas30: 11, diasParado: 6 },
+  { baseId: 'del', variante: 8, preco: 92.9, vendas30: 2, diasParado: 33 },
+  { baseId: 'blu', variante: 3, preco: 38.9, vendas30: 5, diasParado: 22 },
+  { baseId: 'blu', variante: 10, preco: 118.9, vendas30: 7, diasParado: 14 },
+  { baseId: 'gg', variante: 5, preco: 58.9, vendas30: 1, diasParado: 47 },
+  { baseId: 'gg', variante: 10, preco: 104.9, vendas30: 0, diasParado: 58 },
+  { baseId: 'oud', variante: 5, preco: 94.9, vendas30: 28, diasParado: 1 },
+  { baseId: 'erb', variante: 10, preco: 154.9, vendas30: 6, diasParado: 17 },
+]
+
+export const RODIZIO_HISTORICO = [
+  { quando: '01/08 09:00', itens: 10, receita: 6480, conversao: '4,2%', destaque: 'Good Girl 10 ml saiu de 58 dias parado' },
+  { quando: '30/07 09:00', itens: 10, receita: 5120, conversao: '3,6%', destaque: 'Erba Pura 15 ml vendeu 2 unidades' },
+  { quando: '28/07 09:00', itens: 8, receita: 4390, conversao: '3,1%', destaque: 'Bleu de Chanel 3 ml zerou o encalhe' },
+]
+
+export interface AvaliacaoCupom {
+  codigo: string
+  cliente: string
+  email: string
+  produto: string
+  estrelas: number
+  midia: 'Foto' | 'Vídeo'
+  /** % de desconto — foto rende 15, vídeo 20, 4 estrelas 10. */
+  valorPct: number
+  emitido: string
+  validade: string
+  yampi: 'Criado' | 'Pendente' | 'Erro'
+  usado: boolean
+}
+
+export const AVALIACOES_CUPONS: AvaliacaoCupom[] = [
+  { codigo: 'JM-FOTO-4821', cliente: 'Camila Rocha', email: 'camila.rocha@email.com', produto: 'Baccarat Rouge 540 · 5 ml', estrelas: 5, midia: 'Foto', valorPct: 15, emitido: 'hoje 07:40', validade: '90 dias', yampi: 'Criado', usado: false },
+  { codigo: 'JM-VIDEO-4820', cliente: 'Rafael Andrade', email: 'rafael.andrade@email.com', produto: 'Oud Wood · 5 ml', estrelas: 5, midia: 'Vídeo', valorPct: 20, emitido: 'hoje 06:55', validade: '90 dias', yampi: 'Criado', usado: false },
+  { codigo: 'JM-FOTO-4819', cliente: 'Beatriz Lima', email: 'bia.lima@email.com', produto: 'Delina · 10 ml', estrelas: 4, midia: 'Foto', valorPct: 10, emitido: 'ontem 19:12', validade: '90 dias', yampi: 'Criado', usado: true },
+  { codigo: 'JM-VIDEO-4818', cliente: 'Larissa Duarte', email: 'larissa.d@email.com', produto: 'Sauvage Elixir · 15 ml', estrelas: 5, midia: 'Vídeo', valorPct: 20, emitido: 'ontem 15:38', validade: '90 dias', yampi: 'Pendente', usado: false },
+  { codigo: 'JM-FOTO-4817', cliente: 'Marcos Ferreira', email: 'marcos.f@email.com', produto: 'Aventus · 10 ml', estrelas: 5, midia: 'Foto', valorPct: 15, emitido: '02/08 11:20', validade: '90 dias', yampi: 'Erro', usado: false },
+  { codigo: 'JM-FOTO-4816', cliente: 'Ana Clara Mota', email: 'ana.mota@email.com', produto: 'Erba Pura · 5 ml', estrelas: 4, midia: 'Foto', valorPct: 10, emitido: '01/08 09:05', validade: '90 dias', yampi: 'Criado', usado: true },
+]
+
+// ── Atendimento ────────────────────────────────────────────────────────────
+
+export const ATENDIMENTO: TicketAtendimento[] = [
+  { id: 'AT-882', cliente: 'Beatriz Lima', pedido: '#10478', canal: 'WhatsApp', assunto: 'Pedido sem movimentação há 4 dias', abertura: 'hoje 09:20', esperaMin: 160, prioridade: 'Alta', responsavel: 'Bianca A.', origem: 'Rastreamento' },
+  { id: 'AT-881', cliente: 'Juliana Prado', pedido: '#10480', canal: 'E-mail', assunto: 'Entrega não efetuada · destinatário ausente', abertura: 'hoje 08:05', esperaMin: 245, prioridade: 'Alta', responsavel: 'Bianca A.', origem: 'Rastreamento' },
+  { id: 'AT-880', cliente: 'Caio Bastos', pedido: '#10460', canal: 'Portal', assunto: 'Contesta recusa da devolução DEV-1037', abertura: 'ontem 21:10', esperaMin: 900, prioridade: 'Alta', responsavel: 'Não atribuída', origem: 'Devoluções' },
+  { id: 'AT-879', cliente: 'Tiago Nunes', pedido: '#10479', canal: 'WhatsApp', assunto: 'Quer trocar forma de pagamento', abertura: 'ontem 17:44', esperaMin: 1080, prioridade: 'Média', responsavel: 'Marina F.', origem: 'Pedidos' },
+  { id: 'AT-878', cliente: 'Camila Rocha', pedido: '#10482', canal: 'Instagram', assunto: 'Pergunta sobre prazo de envio', abertura: 'ontem 14:02', esperaMin: 1440, prioridade: 'Baixa', responsavel: 'Bianca A.', origem: 'Pré-venda' },
+  { id: 'AT-877', cliente: 'Larissa Duarte', pedido: '#10476', canal: 'E-mail', assunto: 'Elogio · pediu indicação de fragrância', abertura: '01/08 10:15', esperaMin: null, prioridade: 'Baixa', responsavel: 'Bianca A.', origem: 'CRM' },
+]
+
+export const ATENDIMENTO_RESPONDIDAS_HOJE = { qtd: 9, tempoMedio: '1h 12min' }
+export const ATENDIMENTO_RESOLVIDAS_IA = { qtd: 4, hint: 'Consultas de prazo e rastreio' }
+
+// ── Relatórios ─────────────────────────────────────────────────────────────
+
+export const RELATORIOS_LISTA: { titulo: string; descricao: string; area: string; atencao: boolean }[] = [
+  { titulo: 'Vendas por canal', descricao: 'Shopify, Yampi e WhatsApp com ticket e margem', area: 'Comercial', atencao: false },
+  { titulo: 'Curva ABC de produtos', descricao: 'Quais perfumes sustentam o faturamento', area: 'Comercial', atencao: false },
+  { titulo: 'Coorte de recompra', descricao: 'Quantos clientes voltam por mês de entrada', area: 'CRM', atencao: false },
+  { titulo: 'Margem por variante', descricao: 'Rentabilidade de 3, 5, 8, 10 e 15 ml', area: 'Financeiro', atencao: false },
+  { titulo: 'Giro e cobertura de estoque', descricao: 'Dias de cobertura por perfume base', area: 'Estoque', atencao: true },
+  { titulo: 'Devoluções por motivo', descricao: 'O que mais volta e por quê', area: 'Pós-venda', atencao: false },
+  { titulo: 'Desempenho de cupons', descricao: 'Receita e margem por código', area: 'Promoções', atencao: false },
+  { titulo: 'Prazo de entrega por transportadora', descricao: 'Prometido contra realizado', area: 'Logística', atencao: true },
+]
+
+export const CANAIS_JULHO = [
+  { canal: 'Shopify', pedidos: 286, receita: 118240, margem: 23.1 },
+  { canal: 'Yampi · checkout', pedidos: 142, receita: 58960, margem: 22.4 },
+  { canal: 'WhatsApp', pedidos: 44, receita: 18140, margem: 27.8 },
+  { canal: 'Instagram', pedidos: 10, receita: 3090, margem: 19.6 },
+]
+
+/** Participação de cada perfume na receita — o acumulado é derivado na tela. */
+export const CURVA_ABC = [
+  { produto: 'Sauvage Elixir', partPct: 24.1 },
+  { produto: 'Baccarat Rouge 540', partPct: 21.6 },
+  { produto: 'Oud Wood', partPct: 14.8 },
+  { produto: 'Delina', partPct: 11.2 },
+  { produto: 'Aventus', partPct: 9.4 },
+  { produto: 'Erba Pura', partPct: 7.3 },
+  { produto: 'Bleu de Chanel', partPct: 6.9 },
+  { produto: 'Good Girl', partPct: 4.7 },
+]
+
+// ── Meu Assessor IA ────────────────────────────────────────────────────────
+
+export interface RegraIa {
+  acao: string
+  modulo: string
+  limite: string
+  permitida: boolean
+  /** Quando permitida, exige confirmação humana antes de executar. */
+  aprovacao: boolean
+  motivo: string
+}
+
+export const IA_REGRAS: RegraIa[] = [
+  { acao: 'Consultar estoque, preço e pedidos', modulo: 'Leitura', limite: 'sem limite', permitida: true, aprovacao: false, motivo: 'Só leitura · não altera nenhum dado' },
+  { acao: 'Registrar lançamento financeiro', modulo: 'Financeiro', limite: 'até R$ 1.000,00', permitida: true, aprovacao: true, motivo: 'Acima do limite exige confirmação no WhatsApp' },
+  { acao: 'Dar baixa de entrega na Shopify', modulo: 'Pedidos', limite: 'sem limite', permitida: true, aprovacao: false, motivo: 'Só quando a Yampi confirma a entrega' },
+  { acao: 'Criar ordem de produção', modulo: 'Produção', limite: 'até 20 unidades', permitida: true, aprovacao: true, motivo: 'Consome volume de base · sempre confirma' },
+  { acao: 'Aplicar desconto no rodízio', modulo: 'Promoções', limite: 'até o piso de margem', permitida: true, aprovacao: true, motivo: 'Nunca abaixo do piso, mesmo com aprovação' },
+  { acao: 'Aprovar ou recusar devolução', modulo: 'Devoluções', limite: '—', permitida: false, aprovacao: true, motivo: 'Depende de avaliação das fotos · decisão humana' },
+  { acao: 'Criar cupom novo', modulo: 'Promoções', limite: '—', permitida: false, aprovacao: true, motivo: 'Só usa códigos já ativos nas duas plataformas' },
+  { acao: 'Alterar preço de venda', modulo: 'Precificação', limite: '—', permitida: false, aprovacao: true, motivo: 'Preço é decisão de margem · fora do escopo da IA' },
+  { acao: 'Alterar permissões de usuário', modulo: 'Configurações', limite: '—', permitida: false, aprovacao: true, motivo: 'Risco de escalada de acesso' },
+]
+
+export interface AutorizadoIa {
+  nome: string
+  numero: string
+  perfil: string
+  desde: string
+  escopo: string
+  comandos: number
+  ultimo: string
+  ativo: boolean
+  iniciais: string
+}
+
+export const IA_AUTORIZADOS: AutorizadoIa[] = [
+  { nome: 'João Marcelo', numero: '+55 11 9•••• 4821', perfil: 'Administrador', desde: 'há 3 meses', escopo: 'Todas as ações permitidas nas regras', comandos: 84, ultimo: 'hoje 09:42', ativo: true, iniciais: 'JM' },
+  { nome: 'Marina Ferraz', numero: '+55 11 9•••• 7710', perfil: 'Operação', desde: 'há 2 meses', escopo: 'Estoque, produção e pedidos', comandos: 31, ultimo: 'hoje 08:15', ativo: true, iniciais: 'MF' },
+  { nome: 'Pedro Anselmo', numero: '+55 11 9•••• 2204', perfil: 'Operação', desde: 'há 1 mês', escopo: 'Consulta de estoque apenas', comandos: 12, ultimo: 'ontem 17:40', ativo: true, iniciais: 'PA' },
+  { nome: 'Rita Camargo', numero: '+55 11 9•••• 5583', perfil: 'Financeiro', desde: 'há 5 meses', escopo: 'Revogado em 28/07', comandos: 0, ultimo: '27/07 14:10', ativo: false, iniciais: 'RC' },
+]
+
+export interface ComandoIa {
+  quando: string
+  canal: string
+  autor: string
+  comando: string
+  interpretacao: string
+  resultado: string
+  estado: 'Executado' | 'Recusado' | 'Aguardando'
+}
+
+export const IA_COMANDOS: ComandoIa[] = [
+  { quando: 'hoje 09:42', canal: 'WhatsApp · áudio', autor: 'João Marcelo', comando: 'Lança a despesa da transportadora, 1.240 reais, saiu da conta Inter hoje', interpretacao: 'Lançamento de saída · Logística · Inter PJ', resultado: 'Criado após confirmação', estado: 'Executado' },
+  { quando: 'hoje 09:41', canal: 'WhatsApp · áudio', autor: 'João Marcelo', comando: 'Confirma se o Baccarat base tem volume pra semana', interpretacao: 'Consulta de estoque · Baccarat Rouge 540', resultado: 'Respondido no WhatsApp', estado: 'Executado' },
+  { quando: 'hoje 08:55', canal: 'ERP', autor: 'Marina Ferraz', comando: 'Criar cupom de 10% para os carrinhos de ontem', interpretacao: 'Criação de cupom novo', resultado: 'Bloqueado por regra · usar VOLTA10 existente', estado: 'Recusado' },
+  { quando: 'hoje 08:20', canal: 'WhatsApp · texto', autor: 'Marina Ferraz', comando: 'Dá baixa nos pedidos que a Yampi já entregou', interpretacao: 'Baixa de entrega na Shopify · 3 pedidos', resultado: 'Executado sem confirmação', estado: 'Executado' },
+  { quando: 'hoje 07:58', canal: 'WhatsApp · áudio', autor: 'João Marcelo', comando: 'Paga aquela conta de ontem', interpretacao: 'Não identificou qual lançamento', resultado: 'Pediu esclarecimento ao usuário', estado: 'Aguardando' },
+  { quando: 'ontem 17:40', canal: 'WhatsApp · texto', autor: 'Pedro Anselmo', comando: 'Quanto tem de Oud Wood', interpretacao: 'Consulta de estoque · Oud Wood', resultado: 'Respondido: esgotado', estado: 'Executado' },
+  { quando: 'ontem 15:22', canal: 'WhatsApp · áudio', autor: 'Número desconhecido', comando: 'Mensagem de número não autorizado', interpretacao: 'Remetente não verificado', resultado: 'Ignorado e registrado', estado: 'Recusado' },
+]
+
+export interface PublicoIa {
+  id: string
+  nome: string
+  contatos: number
+  descricao: string
+}
+
+export const IA_PUBLICOS: PublicoIa[] = [
+  { id: 'todos', nome: 'Base completa', contatos: 4820, descricao: 'Todos os contatos com opt-in' },
+  { id: 'amadeirados', nome: 'Compraram amadeirados', contatos: 1284, descricao: 'Afinidade olfativa pelo histórico' },
+  { id: 'vip', nome: 'VIP', contatos: 186, descricao: 'Acima de R$ 3.000 comprados' },
+  { id: 'inativos', nome: 'Sem comprar há 90 dias', contatos: 742, descricao: 'Última compra antes de maio' },
+  { id: 'carrinho', nome: 'Abandonaram carrinho', contatos: 311, descricao: 'Últimos 30 dias, sem conversão' },
+  { id: 'aniversariantes', nome: 'Aniversariantes do mês', contatos: 96, descricao: 'Data de nascimento cadastrada' },
+]
+
+export interface TipoCampanhaIa {
+  id: 'lancamento' | 'ofertas' | 'reativacao' | 'data' | 'vip'
+  nome: string
+  descricao: string
+  publicoPadrao: string
+  prompt: string
+}
+
+export const IA_CAMPANHAS: TipoCampanhaIa[] = [
+  { id: 'lancamento', nome: 'Lançamento', descricao: 'Perfume novo no catálogo', publicoPadrao: 'amadeirados', prompt: 'Lançamento do Layton, chegou esta semana nas cinco variantes. Tom de novidade e exclusividade, sem desconto. Falar do perfil olfativo e sugerir começar pelo 5 ml.' },
+  { id: 'ofertas', nome: 'Coleção Ofertas', descricao: 'Rodízio de encalhados', publicoPadrao: 'amadeirados', prompt: 'Campanha para os produtos encalhados que entraram na coleção Ofertas desta semana. Tom sóbrio, sem parecer liquidação. Priorizar quem já comprou amadeirados.' },
+  { id: 'reativacao', nome: 'Reativação', descricao: 'Clientes parados há 90 dias', publicoPadrao: 'inativos', prompt: 'Trazer de volta quem não compra há mais de 90 dias. Lembrar dos mais vendidos, oferecer cupom de retorno e reforçar que o decant dura pouco.' },
+  { id: 'data', nome: 'Data comemorativa', descricao: 'Dia dos Pais, Natal, Black Friday', publicoPadrao: 'todos', prompt: 'Campanha de Dia dos Pais. Presentear com perfume sem errar o gosto: sugerir kit de amadeirados e a opção de 3 ml para experimentar antes.' },
+  { id: 'vip', nome: 'Exclusiva VIP', descricao: 'Base de maior valor', publicoPadrao: 'vip', prompt: 'Pré-venda exclusiva para clientes VIP, 48 horas antes do lançamento público. Tom de acesso antecipado, sem desconto agressivo.' },
+]
