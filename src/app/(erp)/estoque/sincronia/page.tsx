@@ -1,5 +1,5 @@
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
-import { BotaoOuro, FaixaAlerta, Rotulo, Valor } from '@/components/erp/primitivos'
+import { FaixaAlerta, Rotulo, Valor } from '@/components/erp/primitivos'
 import { BORDA, COR, FUNDO_CHIP, type Tom } from '@/components/erp/tokens'
 import { carregarSincronia } from '@/data/consultas'
 import { shopifyConfigurada, ultimaSincronizacao } from '@/data/shopify'
@@ -73,7 +73,15 @@ export default async function SincroniaShopify() {
         <FaixaAlerta
           tom="erro"
           texto={`${sync.excesso} unidades continuam vendáveis na Shopify sem volume que as sustente. Aplicar a sincronia corrige as ${foraDeSincronia} variantes de uma vez, incluindo ${sync.repor} com decremento manual desatualizado.`}
-          acao={<BotaoOuro>Aplicar na Shopify</BotaoOuro>}
+          acao={
+            <span
+              className="font-sans"
+              style={{ fontSize: 10.5, lineHeight: 1.4, color: 'var(--color-terciario)', maxWidth: 240, textWrap: 'pretty' }}
+            >
+              A escrita de volta na Shopify ainda não foi integrada — os valores acima são a
+              recomendação do ERP, para aplicar manualmente por enquanto.
+            </span>
+          }
         />
       )}
 
