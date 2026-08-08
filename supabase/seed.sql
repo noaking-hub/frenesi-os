@@ -129,6 +129,37 @@ insert into pedidos (
   ('#10486', '44444444-4444-4444-8444-444444444444', 'shopify', 289.90, 24.90,  0.00, 'pago',       'enviado',
    '2026-08-02 09:15-03', null, 'Rio de Janeiro · RJ', '22071-020', 'Rua Bulhões de Carvalho, 145 · Copacabana', '0,38 kg', '18 × 12 × 9 cm', 'frenet', 'LGG55120904');
 
+-- ── Movimentações de estoque ───────────────────────────────────────────────
+-- Nas saídas, `liquido_ml` é o que entrou no frasco e `volume_ml` o que saiu do
+-- estoque: a diferença é a perda técnica, derivada e nunca lançada à parte.
+-- Nos ajustes, `ref` diz a origem — `LT-` encerramento de lote, `INV-`
+-- divergência de contagem.
+
+insert into movimentacoes (base_id, tipo, ocorrida_em, volume_ml, liquido_ml, ref, descricao, responsavel, saldo_ml) values
+  ('bac', 'saida',     '2026-08-03 09:12-03', -123.60, 120.00, 'OP-2214', 'Ordem de produção OP-2214 · 24 un de 5 ml',            'Pedro A.',     640),
+  ('sau', 'saida',     '2026-08-03 08:20-03', -278.10, 270.00, 'OP-2212', 'Ordem de produção OP-2212 · 18 un de 15 ml',           'Marina F.',   1180),
+  ('erb', 'entrada',   '2026-08-02 17:44-03',  500.00, null,   'NF-4482', 'Compra de perfume base · nota 4482',                   'João Marcelo', 520),
+  ('del', 'saida',     '2026-08-02 11:05-03', -123.60, 120.00, 'OP-2211', 'Ordem de produção OP-2211 · 15 un de 8 ml',            'Pedro A.',      90),
+  ('oud', 'ajuste',    '2026-08-01 16:30-03',  -10.00, null,   'LT-079',  'Frasco declarado vazio · perda real apurada no lote',  'João Marcelo',   0),
+  ('gg',  'devolucao', '2026-08-01 10:22-03',    5.00, null,   'DEV-1038','Decant lacrado devolvido por erro de expedição',       'Marina F.',    340),
+  ('erb', 'saida',     '2026-07-31 15:48-03', -123.60, 120.00, 'OP-2210', 'Ordem de produção OP-2210 · 40 un de 3 ml',            'Marina F.',     20),
+  ('ave', 'ajuste',    '2026-07-31 09:10-03',  -12.00, null,   'INV-0726','Inventário · divergência encontrada na contagem',      'Pedro A.',     410);
+
+-- ── Inventário de agosto, ainda aberto ─────────────────────────────────────
+-- Good Girl não foi contada: `contado_ml` nulo é diferente de contar zero.
+
+insert into inventarios (id, competencia) values ('INV-0808', '2026-08-01');
+
+insert into inventario_contagens (inventario_id, base_id, sistema_ml, contado_ml, responsavel, contado_em) values
+  ('INV-0808', 'bac',  640,  640, 'Pedro A.',  '2026-08-08 07:40-03'),
+  ('INV-0808', 'sau', 1180, 1174, 'Pedro A.',  '2026-08-08 07:52-03'),
+  ('INV-0808', 'erb',  520,  520, 'Marina F.', '2026-08-08 08:05-03'),
+  ('INV-0808', 'blu',  760,  768, 'Marina F.', '2026-08-08 08:18-03'),
+  ('INV-0808', 'ave',  410,  398, 'Pedro A.',  '2026-08-08 08:30-03'),
+  ('INV-0808', 'del',   90,   90, 'Marina F.', '2026-08-08 08:41-03'),
+  ('INV-0808', 'gg',   340, null, null,        null),
+  ('INV-0808', 'oud',    0,    0, 'Pedro A.',  '2026-08-08 08:52-03');
+
 insert into pedido_itens (pedido_id, base_id, descricao, variante, preco) values
   ('#10482', 'bac', 'Baccarat Rouge 540', 10, 289.00),
   ('#10482', 'del', 'Delina',              5, 100.00),

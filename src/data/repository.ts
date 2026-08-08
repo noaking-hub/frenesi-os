@@ -2,11 +2,14 @@ import 'server-only'
 
 import { PARAMETROS_PADRAO } from '@/domain'
 import type {
+  ContagemInventario,
   Lote,
+  Movimentacao,
   ParametrosPrecificacao,
   Pedido,
   PerfumeBase,
   ProdutoDerivado,
+  TipoMovimentacao,
   VarianteMl,
 } from '@/domain'
 
@@ -25,6 +28,8 @@ export interface Repositorio {
   lotes(): Promise<Lote[]>
   pedidos(): Promise<Pedido[]>
   precoPraticado(): Promise<Record<string, Partial<Record<VarianteMl, number>>>>
+  movimentacoes(): Promise<Movimentacao[]>
+  inventario(): Promise<ContagemInventario[]>
 }
 
 const repositorioFixtures: Repositorio = {
@@ -48,6 +53,12 @@ const repositorioFixtures: Repositorio = {
   },
   async precoPraticado() {
     return fixtures.PRECO_PRATICADO
+  },
+  async movimentacoes() {
+    return fixtures.MOVIMENTACOES
+  },
+  async inventario() {
+    return fixtures.INVENTARIO
   },
 }
 
@@ -207,6 +218,64 @@ const repositorioSupabase: Repositorio = {
     }
     return mapa
   },
+
+  async movimentacoes() {
+    const { data, error } = await supabaseServer()
+      .from('movimentacoes')
+      .select(
+        'id, base_id, tipo, ocorrida_em, volume_ml, liquido_ml, ref, descricao, ' +
+          'responsavel, saldo_ml, perfumes_base(nome)',
+      )
+      .order('ocorrida_em', { ascending: false })
+      .limit(200)
+    if (error) throw error
+    const linhas = (data ?? []) as unknown as LinhaMovimentacao[]
+    return linhas.map(
+      (m): Movimentacao => ({
+        id: m.id,
+        baseId: m.base_id,
+        perfume: m.perfumes_base?.nome ?? m.base_id,
+        tipo: m.tipo,
+        data: m.ocorrida_em,
+        volumeMl: Number(m.volume_ml),
+        liquidoMl: m.liquido_ml === null ? null : Number(m.liquido_ml),
+        ref: m.ref ?? '',
+        motivo: m.descricao,
+        responsavel: m.responsavel ?? '—',
+        saldoMl: Number(m.saldo_ml ?? 0),
+      }),
+    )
+  },
+
+  async inventario() {
+    // A contagem em andamento é a que ainda não foi fechada.
+    const { data: aberto, error: erroAberto } = await supabaseServer()
+      .from('inventarios')
+      .select('id')
+      .is('fechado_em', null)
+      .order('competencia', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (erroAberto) throw erroAberto
+    if (!aberto) return []
+
+    const { data, error } = await supabaseServer()
+      .from('inventario_contagens')
+      .select('base_id, sistema_ml, contado_ml, responsavel, contado_em, perfumes_base(nome)')
+      .eq('inventario_id', aberto.id)
+    if (error) throw error
+    const linhas = (data ?? []) as unknown as LinhaInventarioDb[]
+    return linhas.map(
+      (i): ContagemInventario => ({
+        baseId: i.base_id,
+        perfume: i.perfumes_base?.nome ?? i.base_id,
+        sistemaMl: Number(i.sistema_ml),
+        contadoMl: i.contado_ml === null ? null : Number(i.contado_ml),
+        responsavel: i.responsavel,
+        quando: i.contado_em,
+      }),
+    )
+  },
 }
 
 /**
@@ -248,6 +317,29 @@ interface LinhaPedido {
   rastreio: string | null
   clientes: { nome: string; email: string; cpf: string | null; telefone: string } | null
   pedido_itens: { descricao: string; variante: number | null; preco: number | string }[]
+}
+
+interface LinhaMovimentacao {
+  id: string
+  base_id: string
+  tipo: TipoMovimentacao
+  ocorrida_em: string
+  volume_ml: number | string
+  liquido_ml: number | string | null
+  ref: string | null
+  descricao: string
+  responsavel: string | null
+  saldo_ml: number | string | null
+  perfumes_base: { nome: string } | null
+}
+
+interface LinhaInventarioDb {
+  base_id: string
+  sistema_ml: number | string
+  contado_ml: number | string | null
+  responsavel: string | null
+  contado_em: string | null
+  perfumes_base: { nome: string } | null
 }
 
 function capitalizaCanal(canal: string): Pedido['canal'] {

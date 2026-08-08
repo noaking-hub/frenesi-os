@@ -8,7 +8,9 @@
  */
 
 import type {
+  ContagemInventario,
   Lote,
+  Movimentacao,
   Pedido,
   PerfumeBase,
   ProdutoDerivado,
@@ -267,6 +269,69 @@ export const PEDIDOS: Pedido[] = [
       { perfume: 'Good Girl', marca: 'Carolina Herrera', variante: 15, preco: 171.0 },
     ],
   },
+]
+
+/**
+ * Extrato de movimentações de estoque.
+ *
+ * Nas saídas, `liquidoMl` é o que entrou no frasco e `volumeMl` é o que saiu do
+ * estoque — a diferença é a perda técnica, derivada, nunca lançada à parte.
+ * Nos ajustes, `ref` diz a origem: `LT-` é encerramento de lote, `INV-` é
+ * divergência de contagem.
+ */
+export const MOVIMENTACOES: Movimentacao[] = [
+  {
+    id: 'MV-4412', baseId: 'bac', perfume: 'Baccarat Rouge 540', tipo: 'saida',
+    data: '03/08 09:12', volumeMl: -123.6, liquidoMl: 120, ref: 'OP-2214',
+    motivo: 'Ordem de produção OP-2214 · 24 un de 5 ml', responsavel: 'Pedro A.', saldoMl: 640,
+  },
+  {
+    id: 'MV-4411', baseId: 'sau', perfume: 'Sauvage Elixir', tipo: 'saida',
+    data: '03/08 08:20', volumeMl: -278.1, liquidoMl: 270, ref: 'OP-2212',
+    motivo: 'Ordem de produção OP-2212 · 18 un de 15 ml', responsavel: 'Marina F.', saldoMl: 1180,
+  },
+  {
+    id: 'MV-4410', baseId: 'erb', perfume: 'Erba Pura', tipo: 'entrada',
+    data: '02/08 17:44', volumeMl: 500, liquidoMl: null, ref: 'NF-4482',
+    motivo: 'Compra de perfume base · nota 4482', responsavel: 'João Marcelo', saldoMl: 520,
+  },
+  {
+    id: 'MV-4409', baseId: 'del', perfume: 'Delina', tipo: 'saida',
+    data: '02/08 11:05', volumeMl: -123.6, liquidoMl: 120, ref: 'OP-2211',
+    motivo: 'Ordem de produção OP-2211 · 15 un de 8 ml', responsavel: 'Pedro A.', saldoMl: 90,
+  },
+  {
+    id: 'MV-4408', baseId: 'oud', perfume: 'Oud Wood', tipo: 'ajuste',
+    data: '01/08 16:30', volumeMl: -10, liquidoMl: null, ref: 'LT-079',
+    motivo: 'Frasco declarado vazio · perda real apurada no lote', responsavel: 'João Marcelo', saldoMl: 0,
+  },
+  {
+    id: 'MV-4407', baseId: 'gg', perfume: 'Good Girl', tipo: 'devolucao',
+    data: '01/08 10:22', volumeMl: 5, liquidoMl: null, ref: 'DEV-1038',
+    motivo: 'Decant lacrado devolvido por erro de expedição', responsavel: 'Marina F.', saldoMl: 340,
+  },
+  {
+    id: 'MV-4406', baseId: 'erb', perfume: 'Erba Pura', tipo: 'saida',
+    data: '31/07 15:48', volumeMl: -123.6, liquidoMl: 120, ref: 'OP-2210',
+    motivo: 'Ordem de produção OP-2210 · 40 un de 3 ml', responsavel: 'Marina F.', saldoMl: 20,
+  },
+  {
+    id: 'MV-4405', baseId: 'ave', perfume: 'Aventus', tipo: 'ajuste',
+    data: '31/07 09:10', volumeMl: -12, liquidoMl: null, ref: 'INV-0726',
+    motivo: 'Inventário · divergência encontrada na contagem', responsavel: 'Pedro A.', saldoMl: 410,
+  },
+]
+
+/** Contagem física de agosto, ainda aberta. */
+export const INVENTARIO: ContagemInventario[] = [
+  { baseId: 'bac', perfume: 'Baccarat Rouge 540', sistemaMl: 640, contadoMl: 640, responsavel: 'Pedro A.', quando: 'hoje 07:40' },
+  { baseId: 'sau', perfume: 'Sauvage Elixir', sistemaMl: 1180, contadoMl: 1174, responsavel: 'Pedro A.', quando: 'hoje 07:52' },
+  { baseId: 'erb', perfume: 'Erba Pura', sistemaMl: 520, contadoMl: 520, responsavel: 'Marina F.', quando: 'hoje 08:05' },
+  { baseId: 'blu', perfume: 'Bleu de Chanel', sistemaMl: 760, contadoMl: 768, responsavel: 'Marina F.', quando: 'hoje 08:18' },
+  { baseId: 'ave', perfume: 'Aventus', sistemaMl: 410, contadoMl: 398, responsavel: 'Pedro A.', quando: 'hoje 08:30' },
+  { baseId: 'del', perfume: 'Delina', sistemaMl: 90, contadoMl: 90, responsavel: 'Marina F.', quando: 'hoje 08:41' },
+  { baseId: 'gg', perfume: 'Good Girl', sistemaMl: 340, contadoMl: null, responsavel: null, quando: null },
+  { baseId: 'oud', perfume: 'Oud Wood', sistemaMl: 0, contadoMl: 0, responsavel: 'Pedro A.', quando: 'hoje 08:52' },
 ]
 
 /** Mês fechado que alimenta o resumo financeiro do dashboard e o DRE. */

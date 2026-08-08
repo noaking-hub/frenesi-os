@@ -38,11 +38,17 @@ NEXT_PUBLIC_SUPABASE_URL=https://<projeto>.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=<service role>
 ```
 
-e aplique o schema:
+O projeto **FRENESI OS** (`sa-east-1`) já está provisionado com as migrations
+e o seed aplicados. A chave `service_role` sai em Supabase → Project Settings →
+API; ela nunca pode ser prefixada com `NEXT_PUBLIC_`, que a exporia no bundle do
+navegador. A chave anon/publishable não serve: as policies liberam leitura
+apenas para `authenticated`, então ela devolveria listas vazias.
+
+Para recriar o banco do zero em outro projeto:
 
 ```bash
-supabase db push          # supabase/migrations
-psql "$DATABASE_URL" -f supabase/seed.sql   # opcional, dados de demonstração
+supabase db push                             # supabase/migrations
+psql "$DATABASE_URL" -f supabase/seed.sql    # dados de demonstração
 ```
 
 O `src/data/repository.ts` detecta as variáveis e troca a origem sozinho —
@@ -55,8 +61,11 @@ nenhuma tela muda.
 | `/` | Dashboard |
 | `/pedidos` | Todos os pedidos + drawer com a ficha completa |
 | `/estoque` | Perfumes base · quando o estoque acaba |
+| `/estoque/derivados` | Produtos derivados · decants prontos por variante |
+| `/estoque/movimentacoes` | Movimentações de estoque |
 | `/estoque/lotes` | Lotes e perda real |
 | `/estoque/sincronia` | Sincronia Shopify |
+| `/estoque/inventario` | Inventário físico |
 | `/produtos/precificacao` | Precificação e composição do preço |
 | `/devolucoes` | **Portal público do cliente**, 6 passos, mobile |
 
@@ -104,9 +113,23 @@ e o sistema diz isso em três lugares.
 → `src/domain/lotes.ts`, view `lote_apuracao`
 
 **Uma ação, um lançamento.** Encerrar um lote *gera* a movimentação de estoque
-(mesma data, mesma quantidade, `ref` = id do lote). Não existem dois registros
-para o mesmo fato.
-→ função `encerrar_lote()` na migration
+(mesma data, mesma quantidade, `ref` = id do lote). Confirmar o inventário
+*gera* um ajuste por divergência, com `ref` = id do inventário. Não existem dois
+registros para o mesmo fato — e é pela `ref` que a tela de Movimentações
+distingue encerramento de lote de divergência de contagem, sem precisar de um
+campo à parte que pudesse discordar dela.
+→ `encerrar_lote()` e `fechar_inventario()` nas migrations, `origemDoAjuste`
+em `src/domain/movimentacoes.ts`
+
+**Perda técnica também aparece lançamento a lançamento.** Numa saída de
+produção, `volume_ml` é o que saiu do estoque e `liquido_ml` o que entrou no
+frasco; a perda é a diferença. É a mesma grandeza que os lotes apuram no fim.
+→ `perdaTecnica` em `src/domain/movimentacoes.ts`
+
+**Não contado não é contado zero.** No inventário, uma base sem contagem tem
+`contado_ml` nulo e não entra nas divergências nem na diferença líquida —
+tratá-la como zero inventaria uma perda que ninguém observou.
+→ `apurarInventario`, constraint `contagem_tem_autor`
 
 **Invariante verificável.** A soma dos saldos teóricos dos lotes abertos deve
 igualar o volume total em estoque. O rodapé da tela de Lotes confere isso a cada
