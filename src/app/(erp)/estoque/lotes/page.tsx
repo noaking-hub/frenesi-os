@@ -1,3 +1,4 @@
+import { EstadoVazio } from '@/components/erp/primitivos'
 import { carregarLotes } from '@/data/consultas'
 import { repositorio } from '@/data/repository'
 
@@ -10,6 +11,16 @@ export default async function LotesEPerdaReal() {
     repo.parametros(),
     carregarLotes(),
   ])
+
+  // Sem lote registrado não há perda a apurar — melhor dizer do que quebrar.
+  if (lotes.length === 0) {
+    return (
+      <EstadoVazio
+        titulo="Nenhum lote registrado"
+        instrucao="Registre a compra de um frasco de perfume base para acompanhar a perda real."
+      />
+    )
+  }
 
   return (
     <LotesCliente

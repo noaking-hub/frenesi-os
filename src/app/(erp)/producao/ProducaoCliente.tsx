@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
-import { BotaoOuro, Ponto, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
+import { BotaoOuro, EstadoVazio, Ponto, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
 import { CelulaDupla, Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR, type Tom } from '@/components/erp/tokens'
 import {
@@ -267,6 +267,34 @@ function ModalNovaOrdem({
   const [qtdTexto, setQtdTexto] = useState('12')
 
   const base = bases.find((b) => b.id === baseId) ?? bases[0]
+
+  // Sem perfume base cadastrado não há o que produzir.
+  if (!base) {
+    return (
+      <div
+        onClick={aoFechar}
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 70,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 40,
+          background: 'rgba(5,5,4,.66)',
+          backdropFilter: 'blur(4px)',
+        }}
+      >
+        <div role="dialog" aria-label="Nova ordem de produção" onClick={(e) => e.stopPropagation()}>
+          <EstadoVazio
+            titulo="Nenhum perfume base cadastrado"
+            instrucao="Cadastre um perfume base com volume em estoque para abrir ordens."
+          />
+        </div>
+      </div>
+    )
+  }
+
   const quantidade = Math.max(0, Math.floor(parseNum(qtdTexto)))
   const sim = simularOrdem(base, variante, quantidade, parametros)
   const podeConfirmar = quantidade > 0 && !sim.insuficiente

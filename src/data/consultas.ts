@@ -79,18 +79,6 @@ export async function carregarSincronia(): Promise<ResumoSync> {
   return resumoSync(bases.map((b) => sincronizarBase(b, derivados, publicados)))
 }
 
-export async function carregarPrecificacao(baseId: string, varianteSel: number) {
-  const repo = repositorio()
-  const [bases, parametros, precos] = await Promise.all([
-    repo.perfumesBase(),
-    repo.parametros(),
-    repo.precoPraticado(),
-  ])
-  const base = bases.find((b) => b.id === baseId) ?? bases[0]
-
-  return { bases, base, parametros, precos, varianteSel }
-}
-
 export async function carregarPedidos() {
   const pedidos = await repositorio().pedidos()
   return pedidos.map((p) => ({ pedido: p, devolucao: statusDoPedido(p) }))

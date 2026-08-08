@@ -39,16 +39,23 @@ SUPABASE_SERVICE_ROLE_KEY=<service role>
 ```
 
 O projeto **FRENESI OS** (`sa-east-1`) já está provisionado com as migrations
-e o seed aplicados. A chave `service_role` sai em Supabase → Project Settings →
-API; ela nunca pode ser prefixada com `NEXT_PUBLIC_`, que a exporia no bundle do
-navegador. A chave anon/publishable não serve: as policies liberam leitura
-apenas para `authenticated`, então ela devolveria listas vazias.
+aplicadas. O seed de demonstração foi **removido do banco vivo** — as tabelas
+estão vazias, prontas para os dados reais; só `parametros_precificacao`
+permanece, por ser configuração do negócio. A chave `service_role` sai em
+Supabase → Project Settings → API; ela nunca pode ser prefixada com
+`NEXT_PUBLIC_`, que a exporia no bundle do navegador. A chave anon/publishable
+não serve: as policies liberam leitura apenas para `authenticated`, então ela
+devolveria listas vazias.
 
-Para recriar o banco do zero em outro projeto:
+Com o banco vazio, as telas degradam com honestidade: KPIs derivados zeram e
+Precificação, Lotes e a ordem de produção mostram um estado vazio que diz o
+que cadastrar — nada quebra e nada finge ter dado.
+
+Para recriar o banco do zero em outro projeto (o seed é opcional, só demo):
 
 ```bash
 supabase db push                             # supabase/migrations
-psql "$DATABASE_URL" -f supabase/seed.sql    # dados de demonstração
+psql "$DATABASE_URL" -f supabase/seed.sql    # opcional: dados de demonstração
 ```
 
 O `src/data/repository.ts` detecta as variáveis e troca a origem sozinho —
