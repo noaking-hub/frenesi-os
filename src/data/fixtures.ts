@@ -822,6 +822,164 @@ export const PLANO_CONTAS: Record<string, string> = {
 export const NOTAS_EMITIDAS = 128
 export const PEDIDOS_SEM_NOTA = 3
 
+// ── Configurações ──────────────────────────────────────────────────────────
+
+export type NivelPermissao = 'total' | 'leitura' | 'nenhum'
+
+export interface PerfilAcesso {
+  nome: string
+  descricao: string
+  pessoas: number
+}
+
+export const PERFIS: PerfilAcesso[] = [
+  { nome: 'Administrador', descricao: 'Acesso total, inclusive financeiro e permissões', pessoas: 1 },
+  { nome: 'Financeiro', descricao: 'Lançamentos, conciliação e DRE · custos e pedidos apenas em leitura', pessoas: 1 },
+  { nome: 'Operação', descricao: 'Pedidos, estoque, produção e devoluções · CRM em leitura, sem acesso a custos', pessoas: 2 },
+  { nome: 'Atendimento', descricao: 'CRM e campanhas · pedidos e devoluções apenas em leitura', pessoas: 1 },
+]
+
+export interface UsuarioErp {
+  nome: string
+  email: string
+  perfil: string
+  ultimoAcesso: string
+  status: 'Ativo' | 'Convite pendente'
+  duasEtapas: boolean
+  assessorIa: boolean
+  iniciais: string
+}
+
+export const USUARIOS: UsuarioErp[] = [
+  { nome: 'João Marcelo', email: 'joao@frenesiperfumes.com.br', perfil: 'Administrador', ultimoAcesso: 'hoje 09:42', status: 'Ativo', duasEtapas: true, assessorIa: true, iniciais: 'JM' },
+  { nome: 'Marina Ferraz', email: 'marina@frenesiperfumes.com.br', perfil: 'Operação', ultimoAcesso: 'hoje 08:15', status: 'Ativo', duasEtapas: true, assessorIa: false, iniciais: 'MF' },
+  { nome: 'Rita Camargo', email: 'rita@contabilidade.com.br', perfil: 'Financeiro', ultimoAcesso: 'ontem 18:04', status: 'Ativo', duasEtapas: false, assessorIa: false, iniciais: 'RC' },
+  { nome: 'Pedro Anselmo', email: 'pedro@frenesiperfumes.com.br', perfil: 'Operação', ultimoAcesso: '31/07 17:22', status: 'Ativo', duasEtapas: false, assessorIa: false, iniciais: 'PA' },
+  { nome: 'Bianca Alves', email: 'bianca@frenesiperfumes.com.br', perfil: 'Atendimento', ultimoAcesso: '12/07 10:38', status: 'Convite pendente', duasEtapas: false, assessorIa: false, iniciais: 'BA' },
+]
+
+/** Matriz área × perfil, na mesma ordem de PERFIS. */
+export const PERMISSOES: { area: string; niveis: NivelPermissao[] }[] = [
+  { area: 'Pedidos e envios', niveis: ['total', 'leitura', 'total', 'leitura'] },
+  { area: 'Estoque e produção', niveis: ['total', 'nenhum', 'total', 'nenhum'] },
+  { area: 'Custos e precificação', niveis: ['total', 'leitura', 'nenhum', 'nenhum'] },
+  { area: 'Financeiro e conciliação', niveis: ['total', 'total', 'nenhum', 'nenhum'] },
+  { area: 'Devoluções', niveis: ['total', 'leitura', 'total', 'leitura'] },
+  { area: 'CRM e campanhas', niveis: ['total', 'nenhum', 'leitura', 'total'] },
+  { area: 'Configurações e usuários', niveis: ['total', 'nenhum', 'nenhum', 'nenhum'] },
+]
+
+export interface Integracao {
+  sigla: string
+  nome: string
+  papel: string
+  estado: 'Conectada' | 'Via Yampi' | 'Domínio pendente'
+  detalhe: string
+  desde: string
+  ping: string
+}
+
+export const INTEGRACOES: Integracao[] = [
+  { sigla: 'SH', nome: 'Shopify', papel: 'Loja e catálogo', estado: 'Conectada', detalhe: 'Pedidos, produtos, coleção Ofertas e baixa de entrega', desde: 'há 8 meses', ping: 'há 2 min' },
+  { sigla: 'YP', nome: 'Yampi', papel: 'Checkout e frete', estado: 'Conectada', detalhe: 'Cupons, cálculo de frete e rastreio de Melhor Envio e Frenet', desde: 'há 8 meses', ping: 'há 6 min' },
+  { sigla: 'ME', nome: 'Melhor Envio', papel: 'Transportadoras', estado: 'Via Yampi', detalhe: 'Correios e Jadlog · leitura de rastreio pelo intermediário', desde: 'há 7 meses', ping: 'há 6 min' },
+  { sigla: 'FR', nome: 'Frenet', papel: 'Transportadoras', estado: 'Via Yampi', detalhe: 'Loggi e Azul Cargo · leitura de rastreio pelo intermediário', desde: 'há 5 meses', ping: 'há 12 min' },
+  { sigla: 'JM', nome: 'Judge.me', papel: 'Avaliações', estado: 'Conectada', detalhe: 'Importa cupons de avaliação e recria na Yampi', desde: 'há 4 meses', ping: 'há 40 min' },
+  { sigla: 'KL', nome: 'Klaviyo', papel: 'E-mail marketing', estado: 'Domínio pendente', detalhe: 'Falta autenticar o domínio de envio · risco de cair em spam', desde: 'há 12 dias', ping: 'há 1 h' },
+  { sigla: 'SE', nome: 'Amazon SES', papel: 'E-mail transacional', estado: 'Conectada', detalhe: 'Confirmação de pedido, rastreio e código reverso', desde: 'há 6 meses', ping: 'há 4 min' },
+  { sigla: 'WA', nome: 'WhatsApp Business', papel: 'Atendimento e IA', estado: 'Conectada', detalhe: 'Canal do Assessor IA e recuperação de carrinho', desde: 'há 3 meses', ping: 'há 8 min' },
+]
+
+/**
+ * Um gatilho, um remetente. Quando dois serviços disparam o mesmo e-mail, o
+ * cliente recebe a mensagem duplicada e as métricas se dividem — a coluna
+ * `conflito` registra a sobreposição.
+ */
+export const RESPONSAVEIS_EMAIL: { gatilho: string; dono: string; conflito: string }[] = [
+  { gatilho: 'Confirmação de pedido', dono: 'Amazon SES', conflito: '' },
+  { gatilho: 'Pedido enviado · rastreio', dono: 'Amazon SES', conflito: 'Yampi também dispara este e-mail' },
+  { gatilho: 'Pedido entregue', dono: 'Amazon SES', conflito: '' },
+  { gatilho: 'Carrinho abandonado', dono: 'Klaviyo', conflito: 'Yampi tem automação nativa ligada' },
+  { gatilho: 'Convite para avaliar', dono: 'Judge.me', conflito: '' },
+  { gatilho: 'Cupom de avaliação', dono: 'Judge.me', conflito: '' },
+  { gatilho: 'Campanhas e newsletter', dono: 'Klaviyo', conflito: '' },
+  { gatilho: 'Código reverso de devolução', dono: 'Amazon SES', conflito: '' },
+  { gatilho: 'Aniversário e reativação', dono: 'Klaviyo', conflito: '' },
+]
+
+export interface RegraNotificacao {
+  evento: string
+  condicao: string
+  canais: string
+  modulo: string
+  nivel: 'Crítico' | 'Atenção' | 'Informativo'
+  ativa: boolean
+  disparosHoje: number
+}
+
+export const NOTIFICACOES: RegraNotificacao[] = [
+  { evento: 'Perfume base esgotado', condicao: 'Volume chega a zero', canais: 'ERP · WhatsApp', modulo: 'Estoque', nivel: 'Crítico', ativa: true, disparosHoje: 1 },
+  { evento: 'Cobertura abaixo de 20 dias', condicao: 'Volume ÷ consumo diário < 20', canais: 'ERP', modulo: 'Estoque', nivel: 'Atenção', ativa: true, disparosHoje: 2 },
+  { evento: 'Pedido pago sem envio há 48h', condicao: 'Pagamento aprovado e sem etiqueta', canais: 'ERP · e-mail', modulo: 'Pedidos', nivel: 'Crítico', ativa: true, disparosHoje: 4 },
+  { evento: 'Entrega sem movimentação', condicao: 'Rastreio parado há 3 dias', canais: 'ERP', modulo: 'Logística', nivel: 'Atenção', ativa: true, disparosHoje: 2 },
+  { evento: 'Cupom fora de sincronia', condicao: 'Existe na Shopify e não na Yampi', canais: 'ERP · WhatsApp', modulo: 'Promoções', nivel: 'Crítico', ativa: true, disparosHoje: 2 },
+  { evento: 'Devolução aberta no portal', condicao: 'Nova solicitação do cliente', canais: 'ERP · e-mail', modulo: 'Devoluções', nivel: 'Informativo', ativa: true, disparosHoje: 1 },
+  { evento: 'Conta a pagar vencendo', condicao: 'Vence em 2 dias', canais: 'ERP · e-mail', modulo: 'Financeiro', nivel: 'Atenção', ativa: true, disparosHoje: 3 },
+  { evento: 'Margem abaixo do piso', condicao: 'Preço praticado fura o piso', canais: 'ERP', modulo: 'Precificação', nivel: 'Atenção', ativa: true, disparosHoje: 1 },
+  { evento: 'Concorrente baixou preço', condicao: 'Menor preço do mercado caiu 5%', canais: 'ERP', modulo: 'Concorrentes', nivel: 'Informativo', ativa: false, disparosHoje: 0 },
+  { evento: 'Meta diária de vendas', condicao: 'Resumo às 20h', canais: 'WhatsApp', modulo: 'Dashboard', nivel: 'Informativo', ativa: false, disparosHoje: 0 },
+]
+
+export interface RegistroAuditoria {
+  quando: string
+  autor: string
+  modulo: string
+  acao: string
+  /** Vazio quando a ação criou algo, sem valor anterior. */
+  antes: string
+  depois: string
+  /** Preço, permissão ou estoque — o que merece revisão periódica. */
+  sensivel: boolean
+}
+
+export const LOGS_AUDITORIA: RegistroAuditoria[] = [
+  { quando: '09:42', autor: 'Assessor IA', modulo: 'Financeiro', acao: 'Lançamento de despesa criado após aprovação', antes: '', depois: 'Frete transportadora · R$ 1.240,00', sensivel: false },
+  { quando: '09:14', autor: 'Sistema', modulo: 'Promoções', acao: 'Giftback emitido na compra #10482', antes: '', depois: 'GB-2291 · R$ 40,00', sensivel: false },
+  { quando: '08:52', autor: 'Pedro A.', modulo: 'Estoque', acao: 'Contagem de inventário registrada', antes: '410 ml', depois: '398 ml', sensivel: true },
+  { quando: '08:30', autor: 'Marina F.', modulo: 'Pedidos', acao: 'Pedido marcado como entregue na Shopify', antes: 'Em trânsito', depois: 'Entregue', sensivel: false },
+  { quando: '08:05', autor: 'João Marcelo', modulo: 'Precificação', acao: 'Margem alvo alterada', antes: '22%', depois: '25%', sensivel: true },
+  { quando: '07:58', autor: 'Assessor IA', modulo: 'Financeiro', acao: 'Lançamento recusado por categoria não identificada', antes: '', depois: '', sensivel: false },
+  { quando: '07:40', autor: 'Sistema', modulo: 'Avaliações', acao: 'Cupom do Judge.me importado e criado na Yampi', antes: '', depois: 'JM-FOTO-4821', sensivel: false },
+  { quando: 'ontem 18:20', autor: 'João Marcelo', modulo: 'Usuários', acao: 'Perfil de acesso alterado', antes: 'Atendimento', depois: 'Operação', sensivel: true },
+]
+
+/** Dados fiscais fictícios. A validade do certificado alimenta o alerta. */
+export const EMPRESA = {
+  identificacao: [
+    { label: 'Razão social', valor: 'FRENESI Perfumes Fracionados LTDA' },
+    { label: 'Nome fantasia', valor: 'FRENESI' },
+    { label: 'CNPJ', valor: '64.983.651/0001-73' },
+    { label: 'Inscrição estadual', valor: '141.882.664.110' },
+  ],
+  endereco: [
+    { label: 'Logradouro', valor: 'Rua Harmonia, 1.208 · galpão 4' },
+    { label: 'Bairro e cidade', valor: 'Vila Madalena · São Paulo · SP' },
+    { label: 'CEP', valor: '05435-001' },
+    { label: 'Origem do frete', valor: 'Mesmo endereço · usado na cotação da Yampi' },
+  ],
+  tributacao: [
+    { label: 'Regime', valor: 'Simples Nacional' },
+    { label: 'Anexo e faixa', valor: 'Anexo I · faixa 3' },
+    { label: 'CNAE principal', valor: '4772-5/00 · comércio de cosméticos e perfumaria' },
+  ],
+  certificado: {
+    tipo: 'A1 · e-CNPJ',
+    validade: '2026-10-04',
+    responsavel: 'João Marcelo',
+    uso: 'Emissão de nota e integração contábil',
+  },
+}
+
 export const CARRINHOS_PRIORIDADE_ALTA = 6
 export const COMANDOS_IA_AGUARDANDO = 2
 export const PEDIDOS_A_SEPARAR = 17

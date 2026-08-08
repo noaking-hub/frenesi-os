@@ -1,7 +1,15 @@
 import 'server-only'
 
 import { PARAMETROS_PADRAO } from '@/domain'
-import type { EnvioContabil, SolicitacaoErp } from './fixtures'
+import type {
+  EnvioContabil,
+  Integracao,
+  PerfilAcesso,
+  RegistroAuditoria,
+  RegraNotificacao,
+  SolicitacaoErp,
+  UsuarioErp,
+} from './fixtures'
 import type {
   CategoriaFinanceira,
   ContaBancaria,
@@ -52,6 +60,11 @@ export interface Repositorio {
   concorrentesFontes(): Promise<FonteConcorrente[]>
   mercado(): Promise<Record<string, Partial<Record<VarianteMl, number[]>>>>
   kits(): Promise<Kit[]>
+  usuarios(): Promise<UsuarioErp[]>
+  perfis(): Promise<PerfilAcesso[]>
+  integracoes(): Promise<Integracao[]>
+  notificacoes(): Promise<RegraNotificacao[]>
+  auditoria(): Promise<RegistroAuditoria[]>
 }
 
 const repositorioFixtures: Repositorio = {
@@ -117,6 +130,21 @@ const repositorioFixtures: Repositorio = {
   },
   async kits() {
     return fixtures.KITS
+  },
+  async usuarios() {
+    return fixtures.USUARIOS
+  },
+  async perfis() {
+    return fixtures.PERFIS
+  },
+  async integracoes() {
+    return fixtures.INTEGRACOES
+  },
+  async notificacoes() {
+    return fixtures.NOTIFICACOES
+  },
+  async auditoria() {
+    return fixtures.LOGS_AUDITORIA
   },
 }
 
@@ -354,6 +382,11 @@ const repositorioSupabase: Repositorio = {
   concorrentesFontes: repositorioFixtures.concorrentesFontes,
   mercado: repositorioFixtures.mercado,
   kits: repositorioFixtures.kits,
+  usuarios: repositorioFixtures.usuarios,
+  perfis: repositorioFixtures.perfis,
+  integracoes: repositorioFixtures.integracoes,
+  notificacoes: repositorioFixtures.notificacoes,
+  auditoria: repositorioFixtures.auditoria,
 }
 
 /**

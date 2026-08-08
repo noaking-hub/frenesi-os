@@ -80,6 +80,13 @@ nenhuma tela muda.
 | `/produtos/precificacao` | Precificação e composição do preço |
 | `/produtos/concorrentes` | Concorrentes · posicionamento com piso de margem |
 | `/produtos/kits` | Kits e combos · disponibilidade derivada das bases |
+| `/configuracoes` | Visão geral · cada cartão resume o estado real da tela |
+| `/configuracoes/precificacao` | Parâmetros de precificação · editáveis, com resumo derivado |
+| `/configuracoes/usuarios` | Usuários, perfis e matriz de permissões |
+| `/configuracoes/empresa` | Dados da empresa · certificado com validade derivada |
+| `/configuracoes/integracoes` | Integrações e donos de e-mail · um gatilho, um remetente |
+| `/configuracoes/notificacoes` | Regras de notificação com switch por regra |
+| `/configuracoes/logs` | Logs e auditoria · diff antes → depois, filtro por autor |
 | `/devolucoes` | **Portal público do cliente**, 6 passos, mobile |
 
 As demais telas do handoff estão na navegação e caem numa página que declara o
@@ -204,6 +211,23 @@ de preço de propósito.
 estoque das bases que o compõem. Oud Wood zerado bloqueia o Kit Amadeirados no
 mesmo instante em que o Catálogo o marca esgotado — uma fonte, dois efeitos.
 → `avaliarKit` em `src/domain/mercado.ts`
+
+**Configurações fecham o ciclo dos parâmetros.** A tela de Parâmetros edita o
+mesmo objeto que alimenta preço ideal, piso, DRE e concorrentes — e o campo
+"Perda técnica" confronta o valor declarado com a perda real medida nos lotes
+encerrados, pela mesma média da tela de Lotes. Se taxas + margem alvo passam de
+100%, o resumo acusa que não sobra nada para o produto e a tela trava o
+raciocínio antes do erro chegar ao preço.
+→ `src/app/(erp)/configuracoes/precificacao/`, `sobraParaProduto` em
+`src/domain/precificacao.ts`
+
+**Um gatilho de e-mail, um remetente.** Quando dois serviços disparam o mesmo
+e-mail (Yampi e Amazon SES no rastreio, Yampi e Klaviyo no carrinho abandonado),
+o cliente recebe a mensagem duplicada e as métricas se dividem. A tela de
+Integrações deriva os conflitos da tabela de responsáveis e o status do
+remetente herda o estado da integração — a Klaviyo com domínio pendente aparece
+âmbar na lista de donos também.
+→ `src/app/(erp)/configuracoes/integracoes/`
 
 **Vocabulário do usuário, não do sistema.** "Estoque acaba em 12 dias", não
 "ruptura". E o critério interno de aceitação (tolerância de 10% abaixo do volume

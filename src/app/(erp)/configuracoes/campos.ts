@@ -1,0 +1,49 @@
+import type { ParametrosPrecificacao } from '@/domain'
+
+/**
+ * Os 10 parâmetros editáveis de precificação, agrupados por seção.
+ *
+ * Esta lista é a fonte tanto do formulário quanto da contagem no hub de
+ * Configurações — adicionar um campo aqui atualiza os dois.
+ */
+
+export type SecaoParametro = 'Taxas variáveis' | 'Custos fixos por pedido' | 'Produção'
+
+export const SECOES_PARAMETROS: SecaoParametro[] = [
+  'Taxas variáveis',
+  'Custos fixos por pedido',
+  'Produção',
+]
+
+export interface CampoParametro {
+  chave: keyof ParametrosPrecificacao
+  label: string
+  unidade: '%' | 'R$'
+  hint: string
+  secao: SecaoParametro
+}
+
+export const CAMPOS_PARAMETROS: CampoParametro[] = [
+  { chave: 'intermediadorPct', label: 'Intermediador de pagamento', unidade: '%', hint: 'Cielo · cartão parcelado médio', secao: 'Taxas variáveis' },
+  { chave: 'checkoutPct', label: 'Checkout externo · Yampi', unidade: '%', hint: 'Cobrado sobre o valor total', secao: 'Taxas variáveis' },
+  { chave: 'impostoPct', label: 'Imposto', unidade: '%', hint: 'Simples Nacional · faixa atual', secao: 'Taxas variáveis' },
+  { chave: 'adsPct', label: 'Marketing e ADS', unidade: '%', hint: 'Meta de custo de aquisição', secao: 'Taxas variáveis' },
+  { chave: 'intermediadorFixo', label: 'Tarifa fixa por transação', unidade: 'R$', hint: 'Cobrada por pedido aprovado', secao: 'Custos fixos por pedido' },
+  { chave: 'antifraude', label: 'Antifraude', unidade: 'R$', hint: 'Análise por transação', secao: 'Custos fixos por pedido' },
+  { chave: 'insumos', label: 'Embalagem e insumos', unidade: 'R$', hint: 'Frasco, válvula, etiqueta e caixa', secao: 'Custos fixos por pedido' },
+  { chave: 'freteSubsidio', label: 'Frete subsidiado', unidade: 'R$', hint: 'Média do que a loja absorve', secao: 'Custos fixos por pedido' },
+  { chave: 'perdaPct', label: 'Perda técnica no fracionamento', unidade: '%', hint: 'Sobre o volume envasado', secao: 'Produção' },
+  { chave: 'margemAlvo', label: 'Margem líquida alvo', unidade: '%', hint: 'Base do preço ideal sugerido', secao: 'Produção' },
+]
+
+/** Dias até o certificado A1 vencer. Alimenta o alerta da tela Empresa e o hub. */
+export function diasParaVencer(validadeIso: string, hoje: Date = new Date()): number {
+  const validade = new Date(`${validadeIso}T00:00:00`)
+  return Math.ceil((validade.getTime() - hoje.getTime()) / 86_400_000)
+}
+
+/** '2026-10-04' → '04/10/2026'. */
+export function dataBr(iso: string): string {
+  const [ano, mes, dia] = iso.split('-')
+  return `${dia}/${mes}/${ano}`
+}
