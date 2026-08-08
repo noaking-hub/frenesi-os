@@ -107,18 +107,20 @@ export function ImportarShopify({ configurada, ultima }: Props) {
             style={{ margin: 0, paddingLeft: 18, fontSize: 11.5, lineHeight: 1.7, color: 'rgba(242,237,227,.7)' }}
           >
             <li>
-              Na Shopify: Configurações → Apps e canais de venda → Desenvolver apps → Criar app
-              (ex.: &ldquo;FRENESI ERP&rdquo;).
+              Crie um app para a loja (Configurações → Apps e canais de venda → Desenvolver apps)
+              com os escopos <code>read_products</code> e <code>read_inventory</code>, e lance a
+              versão instalada na loja.
             </li>
             <li>
-              Em Configuration → Admin API scopes, marque <code>read_products</code> e{' '}
-              <code>read_inventory</code>, instale o app e copie o Admin API access token
-              (começa com <code>shpat_</code>).
+              <strong>App no dev dashboard novo:</strong> copie o &ldquo;ID do cliente&rdquo; e a
+              &ldquo;Chave secreta&rdquo; (<code>shpss_…</code>) para{' '}
+              <code>SHOPIFY_CLIENT_ID</code> e <code>SHOPIFY_CLIENT_SECRET</code> — o ERP troca
+              por um token de acesso sozinho. <strong>App legado:</strong> copie o Admin API
+              access token (<code>shpat_…</code>) para <code>SHOPIFY_ADMIN_TOKEN</code>.
             </li>
             <li>
-              No <code>.env.local</code> do projeto, adicione{' '}
-              <code>SHOPIFY_LOJA=sua-loja.myshopify.com</code> e{' '}
-              <code>SHOPIFY_ADMIN_TOKEN=shpat_…</code> e reinicie o servidor.
+              Adicione também <code>SHOPIFY_LOJA=sua-loja.myshopify.com</code> no{' '}
+              <code>.env.local</code> e reinicie o servidor.
             </li>
           </ol>
         </div>

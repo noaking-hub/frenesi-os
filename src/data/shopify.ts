@@ -19,10 +19,92 @@ import { supabaseConfigurado, supabaseServer } from './supabase'
  *  - sincronizacoes: uma linha por execução, com os ignorados e o motivo.
  */
 
-const VERSAO_API = '2025-07'
+const VERSAO_API = '2026-07'
+
+/** Normaliza o domínio: aceita colado com https://, barra final ou espaços. */
+function lojaNormalizada(valor: string): string {
+  return valor
+    .trim()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '')
+}
+
+function limpa(valor: string | undefined): string {
+  return (valor ?? '').trim().replace(/^["']|["']$/g, '')
+}
+
+/**
+ * Dois modos de credencial, conforme onde o app foi criado:
+ *  - app legado (admin da loja → Desenvolver apps): Admin API access token
+ *    fixo, `shpat_…`, em SHOPIFY_ADMIN_TOKEN;
+ *  - app do dev dashboard novo (2025+): "ID do cliente" + "Chave secreta"
+ *    (`shpss_…`) em SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET — o ERP troca
+ *    por um token de acesso via OAuth client credentials e renova sozinho.
+ * Chave secreta colada em SHOPIFY_ADMIN_TOKEN por engano é aceita como secreta.
+ */
+function credenciais() {
+  const loja = lojaNormalizada(process.env.SHOPIFY_LOJA ?? '')
+  const bruto = limpa(process.env.SHOPIFY_ADMIN_TOKEN)
+  const clientId = limpa(process.env.SHOPIFY_CLIENT_ID)
+  let secret = limpa(process.env.SHOPIFY_CLIENT_SECRET)
+  if (!secret && bruto.startsWith('shpss_')) secret = bruto
+  const tokenFixo = bruto.startsWith('shpat_') ? bruto : ''
+  return { loja, tokenFixo, clientId, secret }
+}
 
 export function shopifyConfigurada(): boolean {
-  return Boolean(process.env.SHOPIFY_LOJA && process.env.SHOPIFY_ADMIN_TOKEN)
+  const { loja, tokenFixo, secret } = credenciais()
+  return Boolean(loja && (tokenFixo || secret))
+}
+
+// Token trocado por client credentials, com validade — renovado 2 min antes.
+const cacheToken = new Map<string, { token: string; expiraEm: number }>()
+
+async function tokenDeAcesso(loja: string): Promise<string> {
+  const { tokenFixo, clientId, secret } = credenciais()
+  if (tokenFixo) return tokenFixo
+  if (!secret) {
+    throw new Error(
+      'Configure no .env.local: SHOPIFY_ADMIN_TOKEN (shpat_…, app legado) OU ' +
+        'SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET (app do dev dashboard).',
+    )
+  }
+  if (!clientId) {
+    throw new Error(
+      'Encontrei a chave secreta (shpss_…), mas falta o SHOPIFY_CLIENT_ID — é o "ID do cliente" ' +
+        'que aparece na mesma tela de credenciais do app no dev dashboard.',
+    )
+  }
+
+  const chave = `${loja}|${clientId}`
+  const emCache = cacheToken.get(chave)
+  if (emCache && Date.now() < emCache.expiraEm - 120_000) return emCache.token
+
+  const resposta = await fetch(`https://${loja}/admin/oauth/access_token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      client_id: clientId,
+      client_secret: secret,
+      grant_type: 'client_credentials',
+    }),
+    cache: 'no-store',
+  })
+  if (!resposta.ok) {
+    const detalhe = await resposta.text().catch(() => '')
+    throw new Error(
+      `A troca de credenciais com a Shopify falhou (${resposta.status}). Confira o ID do cliente ` +
+        `e a chave secreta, e se o app está instalado na loja ${loja} — no dev dashboard, o app ` +
+        'precisa de uma versão lançada e instalada na loja para gerar token.' +
+        (detalhe ? ` Resposta: ${detalhe.slice(0, 160)}` : ''),
+    )
+  }
+  const corpo = (await resposta.json()) as { access_token: string; expires_in?: number }
+  cacheToken.set(chave, {
+    token: corpo.access_token,
+    expiraEm: Date.now() + (corpo.expires_in ?? 86_400) * 1000,
+  })
+  return corpo.access_token
 }
 
 interface RespostaGraphql {
@@ -71,29 +153,12 @@ const CONSULTA_PRODUTOS = /* GraphQL */ `
 `
 
 /** Lê o catálogo inteiro da loja, paginando de 100 em 100. */
-/** Normaliza o domínio: aceita colado com https://, barra final ou espaços. */
-function lojaNormalizada(valor: string): string {
-  return valor
-    .trim()
-    .replace(/^https?:\/\//, '')
-    .replace(/\/.*$/, '')
-}
-
 export async function lerCatalogoShopify(): Promise<ProdutoShopify[]> {
-  const loja = lojaNormalizada(process.env.SHOPIFY_LOJA ?? '')
-  const token = (process.env.SHOPIFY_ADMIN_TOKEN ?? '').trim().replace(/^["']|["']$/g, '')
-  if (!loja || !token) {
-    throw new Error('SHOPIFY_LOJA e SHOPIFY_ADMIN_TOKEN precisam estar no .env.local')
+  const { loja } = credenciais()
+  if (!loja) {
+    throw new Error('SHOPIFY_LOJA precisa estar no .env.local (ex.: sua-loja.myshopify.com)')
   }
-  // O único valor que funciona aqui é o Admin API access token, gerado ao
-  // INSTALAR o app. O "API key" e o "API secret key" da mesma tela não servem.
-  if (!token.startsWith('shpat_')) {
-    throw new Error(
-      'O valor em SHOPIFY_ADMIN_TOKEN não parece um Admin API access token — ele começa com shpat_. ' +
-        'Na tela de credenciais do app, o "API key" e o "API secret key" não servem: ' +
-        'clique em "Instalar app" e copie o Admin API access token revelado após a instalação.',
-    )
-  }
+  const token = await tokenDeAcesso(loja)
 
   const produtos: ProdutoShopify[] = []
   let cursor: string | null = null
@@ -112,8 +177,8 @@ export async function lerCatalogoShopify(): Promise<ProdutoShopify[]> {
     if (resposta.status === 401) {
       throw new Error(
         `A Shopify não reconheceu o token para ${loja} (401). Ou o token não é desta loja, ` +
-          'ou o app foi desinstalado, ou o token foi rotacionado. Gere de novo em ' +
-          'Desenvolver apps → seu app → API credentials → Instalar app.',
+          'ou o app foi desinstalado, ou a credencial foi rotacionada — gere de novo na tela ' +
+          'de credenciais do app e atualize o .env.local.',
       )
     }
     if (resposta.status === 403) {

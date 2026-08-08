@@ -67,10 +67,15 @@ A loja é a fonte do **catálogo**: nome, marca, variantes, preço e quantidade
 publicada. Custo por ml, volume em estoque e consumo continuam sendo do ERP —
 a importação nunca os inventa nem sobrescreve.
 
-1. Na Shopify: Configurações → Apps e canais de venda → Desenvolver apps →
-   Criar app, com os escopos `read_products` e `read_inventory`.
-2. Copie o Admin API access token (`shpat_…`) para o `.env.local`
-   (`SHOPIFY_LOJA` e `SHOPIFY_ADMIN_TOKEN`) e reinicie.
+1. Crie um app para a loja (Configurações → Apps e canais de venda →
+   Desenvolver apps) com os escopos `read_products` e `read_inventory`, e
+   lance a versão instalada na loja.
+2. Credenciais no `.env.local`, conforme o tipo de app:
+   - **dev dashboard novo (2025+)**: `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET`
+     (`shpss_…`) — o ERP troca por um token de acesso via OAuth client
+     credentials e renova sozinho;
+   - **app legado**: `SHOPIFY_ADMIN_TOKEN` (`shpat_…`, revelado ao instalar).
+   Em ambos, `SHOPIFY_LOJA=sua-loja.myshopify.com`. Reinicie o servidor.
 3. Em **Estoque → Sincronia Shopify**, use "Importar catálogo agora".
 
 O que a importação faz (`src/data/shopify.ts`, mapeamento puro e testado em
