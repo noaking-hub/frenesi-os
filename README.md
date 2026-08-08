@@ -69,6 +69,7 @@ nenhuma tela muda.
 | `/estoque/lotes` | Lotes e perda real |
 | `/estoque/sincronia` | Sincronia Shopify |
 | `/estoque/inventario` | Inventário físico |
+| `/producao` | Produção · ordens e simulação de impacto |
 | `/produtos/precificacao` | Precificação e composição do preço |
 | `/devolucoes` | **Portal público do cliente**, 6 passos, mobile |
 
@@ -158,6 +159,12 @@ coisa que "fora do prazo". Portal e ERP leem a mesma `statusDevolucao`.
 gateways mas não reporta a entrega, então o pedido fica aberto lá. Capturar a
 entrega confirmada e dar baixa é a razão de existir da integração.
 → `aguardaBaixaShopify` em `src/domain/entregas.ts`
+
+**Produção mostra o impacto antes de confirmar.** A ordem consome
+`quantidade × variante × (1 + perdaPct/100)` — envasar 24 decants de 5 ml tira
+123,6 ml do estoque, não 120. Se o volume não sustenta a quantidade, a
+confirmação trava e a mensagem diz o máximo possível já com a perda embutida.
+→ `simularOrdem` em `src/domain/producao.ts`
 
 **Triagem de devolução: 10% é o limite, mas não decide sozinho.** Aceita-se até
 10% abaixo do volume fracionado. Abaixo disso o decant foi usado — e isso só

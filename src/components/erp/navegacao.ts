@@ -56,7 +56,7 @@ export const NAV: GrupoNav[] = [
       { id: 'inventario', label: 'Inventário', href: '/estoque/inventario', pronta: true },
     ],
   },
-  { id: 'producao', label: 'Produção', href: '/producao' },
+  { id: 'producao', label: 'Produção', href: '/producao', pronta: true },
   {
     id: 'financeiro',
     label: 'Financeiro',

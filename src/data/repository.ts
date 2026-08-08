@@ -6,6 +6,7 @@ import type {
   ContagemInventario,
   Envio,
   Ocorrencia,
+  OrdemProducao,
   Lote,
   Movimentacao,
   ParametrosPrecificacao,
@@ -36,6 +37,7 @@ export interface Repositorio {
   envios(): Promise<Envio[]>
   ocorrencias(): Promise<Ocorrencia[]>
   solicitacoes(): Promise<SolicitacaoErp[]>
+  ordens(): Promise<OrdemProducao[]>
 }
 
 const repositorioFixtures: Repositorio = {
@@ -74,6 +76,9 @@ const repositorioFixtures: Repositorio = {
   },
   async solicitacoes() {
     return fixtures.SOLICITACOES
+  },
+  async ordens() {
+    return fixtures.ORDENS
   },
 }
 
@@ -299,6 +304,7 @@ const repositorioSupabase: Repositorio = {
   envios: repositorioFixtures.envios,
   ocorrencias: repositorioFixtures.ocorrencias,
   solicitacoes: repositorioFixtures.solicitacoes,
+  ordens: repositorioFixtures.ordens,
 }
 
 /**
