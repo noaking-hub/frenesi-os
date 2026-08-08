@@ -1,9 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useTransition } from 'react'
 
 import { CardKpi, type Kpi } from '@/components/erp/Kpi'
-import { BotaoOuro, BotaoSecundario, FaixaAlerta, TituloSecao } from '@/components/erp/primitivos'
+import { BotaoSecundario, FaixaAlerta, TituloSecao } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
 import {
   PARAMETROS_PADRAO,
@@ -18,6 +18,8 @@ import type { ParametrosPrecificacao } from '@/domain'
 
 import { CAMPOS_PARAMETROS, SECOES_PARAMETROS, type CampoParametro } from '../campos'
 
+import { salvarParametros } from './actions'
+
 interface Props {
   parametros: ParametrosPrecificacao
   /** Perda real média dos lotes encerrados, para confrontar com o parâmetro. */
@@ -28,6 +30,27 @@ export function ParametrosCliente({ parametros, perdaRealMedia }: Props) {
   const [valores, setValores] = useState<ParametrosPrecificacao>(parametros)
   // Texto cru durante a digitação; o número só entra no cálculo no blur.
   const [textos, setTextos] = useState<Partial<Record<keyof ParametrosPrecificacao, string>>>({})
+  const [erro, setErro] = useState<string | null>(null)
+  const [salvo, setSalvo] = useState(false)
+  const [pendente, iniciarTransicao] = useTransition()
+
+  // O que está na tela ainda não está no banco. Sem isto o botão não tem como
+  // dizer se há algo por salvar — e foi assim que ele passou por inerte.
+  const alterado = (Object.keys(valores) as (keyof ParametrosPrecificacao)[]).some(
+    (k) => valores[k] !== parametros[k],
+  )
+
+  const salvar = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      setSalvo(false)
+      const r = await salvarParametros(valores)
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      setSalvo(true)
+    })
 
   const taxas = taxasPct(valores)
   const fixos = custosFixos(valores)
@@ -43,12 +66,14 @@ export function ParametrosCliente({ parametros, perdaRealMedia }: Props) {
       return resto
     })
     if (texto === undefined || texto.trim() === '') return
+    setSalvo(false)
     setValores((v) => ({ ...v, [chave]: parseNum(texto) }))
   }
 
   const restaurar = () => {
     setValores(PARAMETROS_PADRAO)
     setTextos({})
+    setSalvo(false)
   }
 
   const valorExibido = (c: CampoParametro): string => {
@@ -194,17 +219,51 @@ export function ParametrosCliente({ parametros, perdaRealMedia }: Props) {
       ))}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <span
-          className="font-sans"
-          style={{ flex: 1, fontSize: 11, lineHeight: 1.5, color: 'rgba(242,237,227,.42)', textWrap: 'pretty' }}
-        >
-          Estes parâmetros alimentam o preço ideal em Produtos → Precificação e o comparativo com
-          concorrentes.
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 0 }}>
+          <span
+            className="font-sans"
+            style={{ fontSize: 11, lineHeight: 1.5, color: 'rgba(242,237,227,.42)', textWrap: 'pretty' }}
+          >
+            Estes parâmetros alimentam o preço ideal em Produtos → Precificação e o comparativo com
+            concorrentes. Salvar grava uma nova vigência — a anterior fica no histórico, para o
+            preço de ontem continuar explicável.
+          </span>
+          {erro && (
+            <span
+              className="font-sans"
+              style={{ fontSize: 11.5, lineHeight: 1.5, color: COR.erro, textWrap: 'pretty' }}
+            >
+              {erro}
+            </span>
+          )}
+          {salvo && !alterado && (
+            <span className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.5, color: COR.ok }}>
+              Parâmetros salvos · nova vigência criada.
+            </span>
+          )}
         </span>
         <BotaoSecundario altura={36} onClick={restaurar}>
           Restaurar padrões
         </BotaoSecundario>
-        <BotaoOuro altura={36}>Salvar parâmetros</BotaoOuro>
+        <button
+          type="button"
+          onClick={salvar}
+          disabled={pendente || !alterado || sobra <= 0}
+          className="botao-ouro font-sans hover:brightness-[1.07]"
+          style={{
+            height: 36,
+            padding: '0 18px',
+            fontWeight: 700,
+            fontSize: 11.5,
+            lineHeight: 1,
+            borderRadius: 9,
+            whiteSpace: 'nowrap',
+            cursor: pendente ? 'wait' : !alterado || sobra <= 0 ? 'not-allowed' : 'pointer',
+            opacity: pendente || !alterado || sobra <= 0 ? 0.5 : 1,
+          }}
+        >
+          {pendente ? 'Salvando…' : alterado ? 'Salvar parâmetros' : 'Nada a salvar'}
+        </button>
       </div>
     </div>
   )

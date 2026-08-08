@@ -1,12 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useTransition } from 'react'
 
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
+import { Modal } from '@/components/erp/Modal'
 import {
   Badge,
   Barra,
   BotaoOuro,
+  BotaoSecundario,
   FaixaAlerta,
   Rotulo,
   TituloSecao,
@@ -14,18 +16,27 @@ import {
 } from '@/components/erp/primitivos'
 import { CelulaDupla, Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR, type Tom } from '@/components/erp/tokens'
-import { apurarLote, brl, pad2, pct, plural, volume } from '@/domain'
-import type { Lote, ParametrosPrecificacao, PerdaReal } from '@/domain'
+import { apurarLote, brl, pad2, pct, plural, previaEncerramento, volume } from '@/domain'
+import type { Lote, ParametrosPrecificacao, PerdaReal, PerfumeBase } from '@/domain'
+
+import { ajustarPerdaParametro, encerrarLote } from './actions'
 
 interface Props {
   lotes: Lote[]
+  bases: PerfumeBase[]
   parametros: ParametrosPrecificacao
   perda: PerdaReal
   conciliacao: { saldoLotesMl: number; estoqueMl: number; divergenciaMl: number; confere: boolean }
 }
 
-export function LotesCliente({ lotes, parametros, perda, conciliacao }: Props) {
+export function LotesCliente({ lotes, bases, parametros, perda, conciliacao }: Props) {
   const [selecionado, setSelecionado] = useState(lotes[0]?.id ?? '')
+  const [encerrando, setEncerrando] = useState<Lote | null>(null)
+
+  const abrirEncerramento = (l: Lote) => {
+    setSelecionado(l.id)
+    setEncerrando(l)
+  }
 
   const apuracoes = lotes.map((l) => apurarLote(l, parametros))
   const loteSel = lotes.find((l) => l.id === selecionado) ?? lotes[0]
@@ -153,16 +164,34 @@ export function LotesCliente({ lotes, parametros, perda, conciliacao }: Props) {
             {l.encerradoEm ? 'Encerrado' : 'Em uso'}
           </Badge>
           {!l.encerradoEm && (
+            // Linha clicável já é um <button>, e button dentro de button é
+            // HTML inválido: o navegador desaninha, a hidratação quebra e a
+            // página inteira perde os handlers. Daí o span com role.
             <span
-              className="font-sans"
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                // Sem isto o clique também dispararia a seleção da linha.
+                e.stopPropagation()
+                abrirEncerramento(l)
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return
+                e.preventDefault()
+                e.stopPropagation()
+                abrirEncerramento(l)
+              }}
+              className="font-sans hover:bg-[rgba(239,209,140,.12)]"
               style={{
                 fontWeight: 600,
                 fontSize: 9.5,
                 color: 'var(--color-ouro)',
                 border: '1px solid rgba(239,209,140,.26)',
+                background: 'transparent',
                 borderRadius: 6,
                 padding: '5px 7px',
                 whiteSpace: 'nowrap',
+                cursor: 'pointer',
               }}
             >
               Declarar vazio
@@ -197,26 +226,7 @@ export function LotesCliente({ lotes, parametros, perda, conciliacao }: Props) {
         <FaixaAlerta
           tom="erro"
           texto={`A perda real média dos lotes encerrados é ${pct(perda.mediaPct)}, acima do parâmetro de ${pct(parametros.perdaPct)}. Isso significa que todo preço calculado está com o custo subestimado.`}
-          acao={
-            <button
-              type="button"
-              className="font-sans hover:bg-[rgba(239,209,140,.16)]"
-              style={{
-                height: 32,
-                padding: '0 14px',
-                border: '1px solid rgba(239,209,140,.3)',
-                background: 'rgba(239,209,140,.07)',
-                color: 'var(--color-ouro)',
-                fontWeight: 600,
-                fontSize: 11,
-                borderRadius: 8,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {`Ajustar parâmetro para ${pct(perda.mediaPct)}`}
-            </button>
-          }
+          acao={<AjustarParametro perdaPct={perda.mediaPct} />}
         />
       )}
 
@@ -249,8 +259,12 @@ export function LotesCliente({ lotes, parametros, perda, conciliacao }: Props) {
               }}
             >
               <TituloSecao tamanho={14.5}>Lotes de perfume base</TituloSecao>
-              <div style={{ flex: 1 }} />
-              <BotaoOuro altura={30}>+ Registrar entrada</BotaoOuro>
+              <span
+                className="font-sans"
+                style={{ fontSize: 10.5, lineHeight: 1.4, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+              >
+                Um lote é um frasco comprado. Clique para ver a apuração.
+              </span>
             </div>
           }
           rodape={
@@ -420,10 +434,212 @@ export function LotesCliente({ lotes, parametros, perda, conciliacao }: Props) {
           </span>
 
           {apSel.aberto && (
-            <BotaoOuro altura={36}>Declarar frasco vazio</BotaoOuro>
+            <BotaoOuro altura={36} onClick={() => setEncerrando(loteSel)}>
+              Declarar frasco vazio
+            </BotaoOuro>
           )}
         </section>
       </div>
+
+      {encerrando && (
+        <ConfirmarEncerramento
+          lote={encerrando}
+          base={bases.find((b) => b.id === encerrando.baseId)}
+          parametros={parametros}
+          aoFechar={() => setEncerrando(null)}
+        />
+      )}
     </div>
+  )
+}
+
+/** O alerta propõe o número medido; o botão grava a nova vigência. */
+function AjustarParametro({ perdaPct }: { perdaPct: number }) {
+  const [erro, setErro] = useState<string | null>(null)
+  const [pendente, iniciarTransicao] = useTransition()
+
+  return (
+    <span style={{ display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'flex-end' }}>
+      <button
+        type="button"
+        disabled={pendente}
+        onClick={() =>
+          iniciarTransicao(async () => {
+            setErro(null)
+            const r = await ajustarPerdaParametro(perdaPct)
+            if (!r.ok) setErro(r.erro)
+          })
+        }
+        className="font-sans hover:bg-[rgba(239,209,140,.16)]"
+        style={{
+          height: 32,
+          padding: '0 14px',
+          border: '1px solid rgba(239,209,140,.3)',
+          background: 'rgba(239,209,140,.07)',
+          color: 'var(--color-ouro)',
+          fontWeight: 600,
+          fontSize: 11,
+          borderRadius: 8,
+          cursor: pendente ? 'wait' : 'pointer',
+          opacity: pendente ? 0.6 : 1,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {pendente ? 'Ajustando…' : `Ajustar parâmetro para ${pct(perdaPct)}`}
+      </button>
+      {erro && (
+        <span className="font-sans" style={{ fontSize: 10.5, color: COR.erro, textAlign: 'right' }}>
+          {erro}
+        </span>
+      )}
+    </span>
+  )
+}
+
+/**
+ * Encerrar é irreversível e mexe em três lugares: fecha o lote, tira ml do
+ * estoque e muda o custo de todo preço calculado. A confirmação mostra os
+ * três antes, com os números — não é um "tem certeza?".
+ */
+function ConfirmarEncerramento({
+  lote,
+  base,
+  parametros,
+  aoFechar,
+}: {
+  lote: Lote
+  base: PerfumeBase | undefined
+  parametros: ParametrosPrecificacao
+  aoFechar: () => void
+}) {
+  const [erro, setErro] = useState<string | null>(null)
+  const [pendente, iniciarTransicao] = useTransition()
+  const pv = previaEncerramento(lote, base, parametros)
+
+  const confirmar = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      const r = await encerrarLote(lote.id)
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      aoFechar()
+    })
+
+  const linhas = [
+    { label: 'Volume comprado', valor: volume(pv.compradoMl), tom: 'var(--color-corrente)' },
+    { label: 'Envasado, pelo extrato de saídas', valor: volume(pv.envasadoMl), tom: 'var(--color-corrente)' },
+    {
+      label: 'Perda real a lançar',
+      valor: `${volume(pv.perdaMl)} · ${pct(pv.perdaPct)}`,
+      tom: pv.acimaDoParametro ? COR.erro : COR.ok,
+    },
+    {
+      label: 'Custo da perda',
+      valor: base && base.custoPorMl > 0 ? brl(pv.custo) : 'base sem custo por ml',
+      tom: base && base.custoPorMl > 0 ? COR.erro : 'var(--color-terciario)',
+    },
+    {
+      label: 'Volume da base depois da baixa',
+      valor: volume(pv.saldoBaseMl),
+      tom: 'var(--color-corrente)',
+    },
+  ]
+
+  return (
+    <Modal titulo={`Declarar o lote ${lote.id} vazio`} largura={520} aoFechar={aoFechar}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <Rotulo>{`Encerrar o lote ${lote.id}`}</Rotulo>
+        <TituloSecao tamanho={15}>{lote.perfume}</TituloSecao>
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 1,
+          background: 'rgba(255,255,255,.05)',
+          borderRadius: 10,
+          overflow: 'hidden',
+        }}
+      >
+        {linhas.map((r) => (
+          <span
+            key={r.label}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              padding: '11px 13px',
+              background: 'var(--color-painel)',
+            }}
+          >
+            <span
+              className="font-sans"
+              style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--color-secundario)' }}
+            >
+              {r.label}
+            </span>
+            <Valor tamanho={12.5} tom={r.tom}>
+              {r.valor}
+            </Valor>
+          </span>
+        ))}
+      </div>
+
+      {pv.impedimento ? (
+        <span
+          className="font-sans"
+          style={{ fontSize: 11.5, lineHeight: 1.5, color: COR.erro, textWrap: 'pretty' }}
+        >
+          {pv.impedimento}
+        </span>
+      ) : (
+        <span
+          className="font-sans"
+          style={{ fontSize: 10.5, lineHeight: 1.55, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+        >
+          {`Isto não tem volta: o lote fecha, os ${volume(pv.perdaMl)} saem do estoque com uma movimentação de ajuste e a perda medida passa a contar na média. `}
+          {pv.acimaDoParametro
+            ? `Como ${pct(pv.perdaPct)} está acima do parâmetro de ${pct(parametros.perdaPct)}, a tela vai propor corrigir o parâmetro — e todo preço calculado sobe junto.`
+            : `Está dentro do parâmetro de ${pct(parametros.perdaPct)} em uso.`}
+        </span>
+      )}
+
+      {erro && (
+        <span
+          className="font-sans"
+          style={{ fontSize: 11.5, lineHeight: 1.5, color: COR.erro, textWrap: 'pretty' }}
+        >
+          {erro}
+        </span>
+      )}
+
+      <div style={{ display: 'flex', gap: 9, justifyContent: 'flex-end' }}>
+        <BotaoSecundario altura={36} onClick={aoFechar}>
+          Cancelar
+        </BotaoSecundario>
+        <button
+          type="button"
+          onClick={confirmar}
+          disabled={pendente || pv.impedimento !== null}
+          className="botao-ouro font-sans hover:brightness-[1.07]"
+          style={{
+            height: 36,
+            padding: '0 18px',
+            fontWeight: 700,
+            fontSize: 11.5,
+            lineHeight: 1,
+            borderRadius: 9,
+            cursor: pendente ? 'wait' : pv.impedimento ? 'not-allowed' : 'pointer',
+            opacity: pendente || pv.impedimento ? 0.5 : 1,
+          }}
+        >
+          {pendente ? 'Encerrando…' : 'Confirmar frasco vazio'}
+        </button>
+      </div>
+    </Modal>
   )
 }

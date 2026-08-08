@@ -48,6 +48,60 @@ export function apurarLote(lote: Lote, p: ParametrosPrecificacao): ApuracaoLote 
   }
 }
 
+export interface PreviaEncerramento {
+  compradoMl: number
+  envasadoMl: number
+  /** O que sobra no papel e vai virar perda real ao declarar o vazio. */
+  perdaMl: number
+  perdaPct: number
+  /** Perda em reais, ao custo médio da base. */
+  custo: number
+  acimaDoParametro: boolean
+  /** Volume da base depois da baixa. */
+  saldoBaseMl: number
+  /**
+   * Motivo pelo qual encerrar não é possível agora. `null` quando pode.
+   * Espelha as exceções de `encerrar_lote()` para o operador ver antes.
+   */
+  impedimento: string | null
+}
+
+/**
+ * O que acontece se o operador declarar este frasco vazio agora.
+ *
+ * Existe para a confirmação não ser um "tem certeza?" vazio: encerrar é
+ * irreversível, muda o estoque e muda o custo de todo preço calculado.
+ */
+export function previaEncerramento(
+  lote: Lote,
+  base: PerfumeBase | undefined,
+  p: ParametrosPrecificacao,
+): PreviaEncerramento {
+  const ap = apurarLote(lote, p)
+  const perdaMl = ap.diferencaMl
+  const perdaPct = lote.volumeMl === 0 ? 0 : (perdaMl / lote.volumeMl) * 100
+  const volumeBase = base?.volumeMl ?? 0
+
+  const impedimento = !ap.aberto
+    ? `Lote já encerrado em ${lote.encerradoEm}.`
+    : perdaMl < 0
+      ? `O extrato já soma ${ap.consumidoMl} ml envasados, mais que os ${lote.volumeMl} ml comprados. Corrija as saídas antes de encerrar.`
+      : perdaMl > volumeBase
+        ? `A perda apurada (${perdaMl} ml) é maior que o volume em estoque da base (${volumeBase} ml). Há movimentação lançada fora do fluxo de lotes — acerte pelo Inventário antes de encerrar.`
+        : null
+
+  return {
+    compradoMl: ap.compradoMl,
+    envasadoMl: ap.consumidoMl,
+    perdaMl,
+    perdaPct,
+    custo: perdaMl * (base?.custoPorMl ?? 0),
+    acimaDoParametro: perdaPct > p.perdaPct,
+    saldoBaseMl: volumeBase - perdaMl,
+    impedimento,
+  }
+}
+
 export interface PerdaReal {
   /** Média ponderada pelo volume comprado dos lotes encerrados, em %. */
   mediaPct: number

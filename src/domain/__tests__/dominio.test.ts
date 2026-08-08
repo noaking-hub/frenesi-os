@@ -15,6 +15,7 @@ import {
   frascoDe,
   margemDe,
   pisoMargem,
+  previaEncerramento,
   sincronizarVariante,
   statusDevolucao,
   unidadesPossiveis,
@@ -231,6 +232,68 @@ describe('lotes e perda real', () => {
     const c = conciliarLotesAbertos([aberto, encerrado], bases, PARAMETROS_PADRAO)
     expect(c.saldoLotesMl).toBe(780)
     expect(c.confere).toBe(true)
+  })
+})
+
+describe('encerramento de lote', () => {
+  const base: PerfumeBase = {
+    id: 'bac',
+    nome: 'Baccarat Rouge 540',
+    marca: 'Maison Francis',
+    custoPorMl: 3.1,
+    volumeMl: 90,
+    consumoDiarioMl: 51,
+  }
+
+  const lote: Lote = {
+    id: 'LT-100',
+    baseId: 'bac',
+    perfume: 'Baccarat Rouge 540',
+    fornecedor: 'Importadora Aurum',
+    volumeMl: 500,
+    entrada: '02/05/2026',
+    encerradoEm: null,
+    saidas: [
+      { data: '12/05', ref: 'OP-2088', unidades: 20, variante: 5 },
+      { data: '24/05', ref: 'OP-2101', unidades: 31, variante: 10 },
+    ],
+  }
+
+  it('transforma o saldo teórico em perda, com custo ao preço da base', () => {
+    const pv = previaEncerramento(lote, base, PARAMETROS_PADRAO)
+    expect(pv.envasadoMl).toBe(410)
+    expect(pv.perdaMl).toBe(90)
+    expect(pv.perdaPct).toBeCloseTo(18, 5)
+    expect(pv.custo).toBeCloseTo(90 * 3.1, 5)
+    expect(pv.acimaDoParametro).toBe(true)
+    expect(pv.saldoBaseMl).toBe(0)
+    expect(pv.impedimento).toBeNull()
+  })
+
+  it('impede encerrar quando a perda não cabe no volume em estoque', () => {
+    const pv = previaEncerramento(lote, { ...base, volumeMl: 40 }, PARAMETROS_PADRAO)
+    expect(pv.impedimento).toContain('Inventário')
+  })
+
+  it('impede encerrar quando o extrato envasou mais que o comprado', () => {
+    const furado: Lote = {
+      ...lote,
+      saidas: [{ data: '12/05', ref: 'OP-2088', unidades: 40, variante: 15 }],
+    }
+    const pv = previaEncerramento(furado, { ...base, volumeMl: 900 }, PARAMETROS_PADRAO)
+    expect(pv.perdaMl).toBe(-100)
+    expect(pv.impedimento).toContain('Corrija as saídas')
+  })
+
+  it('não deixa encerrar duas vezes', () => {
+    const pv = previaEncerramento({ ...lote, encerradoEm: '28/07/2026' }, base, PARAMETROS_PADRAO)
+    expect(pv.impedimento).toContain('já encerrado')
+  })
+
+  it('base sem custo cadastrado apura perda em ml, mas não inventa reais', () => {
+    const pv = previaEncerramento(lote, { ...base, custoPorMl: 0 }, PARAMETROS_PADRAO)
+    expect(pv.perdaMl).toBe(90)
+    expect(pv.custo).toBe(0)
   })
 })
 

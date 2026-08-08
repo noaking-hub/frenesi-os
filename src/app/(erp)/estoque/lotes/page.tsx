@@ -27,6 +27,7 @@ export default async function LotesEPerdaReal() {
       ) : (
         <LotesCliente
           lotes={lotes}
+          bases={bases}
           parametros={parametros}
           perda={perda}
           conciliacao={conciliacao}
