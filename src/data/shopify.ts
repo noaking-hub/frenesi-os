@@ -284,7 +284,7 @@ export async function importarCatalogoShopify(): Promise<ResultadoImportacao> {
   // reservadas, gênero) são preservados linha a linha.
   const { data: existentes, error: erroExistentes } = await sb
     .from('perfumes_base')
-    .select('id, custo_por_ml, volume_ml, consumo_diario_ml, genero, ativo')
+    .select('id, custo_por_ml, volume_ml, consumo_diario_ml, genero, genero_manual, ativo')
   if (erroExistentes) throw erroExistentes
   const basePorId = new Map((existentes ?? []).map((e) => [e.id as string, e]))
 
@@ -296,9 +296,10 @@ export async function importarCatalogoShopify(): Promise<ResultadoImportacao> {
       id: b.id,
       nome: b.nome,
       marca: b.marca,
-      // A loja é a fonte quando diz o gênero; quando não diz, o que já
-      // estava no ERP permanece — a importação não apaga informação.
-      genero: b.genero ?? atual?.genero ?? null,
+      // Gênero corrigido à mão no ERP é soberano; fora isso, a loja é a
+      // fonte quando diz, e o que já estava permanece quando ela não diz.
+      genero: atual?.genero_manual ? atual.genero : (b.genero ?? atual?.genero ?? null),
+      genero_manual: atual?.genero_manual ?? false,
       custo_por_ml: atual ? atual.custo_por_ml : 0,
       volume_ml: atual ? atual.volume_ml : 0,
       consumo_diario_ml: atual ? atual.consumo_diario_ml : 0,

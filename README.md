@@ -87,8 +87,17 @@ O que a importação faz (`src/data/shopify.ts`, mapeamento puro e testado em
 - perfume novo entra com custo e volume **zero**, e o Dashboard e o Catálogo
   passam a acusar "sem custo cadastrado" até o cadastro ser completado —
   número inventado, nunca;
-- rodar de novo é seguro: atualiza nome, marca, preço e publicado, sem tocar
-  em custo, volume, envasadas ou reservadas.
+- gênero é derivado do título/tipo/tags da loja (`detectarGenero`), porque a
+  Shopify não tem esse campo — e correção feita à mão no ERP não é
+  sobrescrita (`genero_manual`);
+- rodar de novo é seguro: atualiza nome, marca, imagem, preço e publicado,
+  sem tocar em custo, volume, envasadas ou reservadas.
+
+**Editar o catálogo** (`/produtos`, clicando na linha): o ERP edita o que é
+dele — gênero, custo por ml, consumo diário e ativo/inativo. Nome, marca e
+imagem ficam em leitura, porque pertencem à Shopify e voltariam na próxima
+importação. Volume também não se edita ali: muda por compra, produção ou
+inventário, cada uma com seu lançamento na trilha.
 
 ## Rotas
 
@@ -112,7 +121,7 @@ O que a importação faz (`src/data/shopify.ts`, mapeamento puro e testado em
 | `/financeiro/dre` | DRE com subtotais derivados |
 | `/financeiro/categorias` | Categorias · para onde vai o dinheiro |
 | `/financeiro/contabil` | Integração contábil · fechamento e arquivos |
-| `/produtos` | Catálogo · status derivado de estoque e margem |
+| `/produtos` | Catálogo · busca, filtros e edição do perfume base |
 | `/produtos/precificacao` | Precificação e composição do preço |
 | `/produtos/concorrentes` | Concorrentes · posicionamento com piso de margem |
 | `/produtos/kits` | Kits e combos · disponibilidade derivada das bases |

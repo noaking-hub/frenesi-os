@@ -56,6 +56,8 @@ import { supabaseConfigurado, supabaseServer } from './supabase'
 export interface Repositorio {
   parametros(): Promise<ParametrosPrecificacao>
   perfumesBase(): Promise<PerfumeBase[]>
+  /** Inclui inativos — só o Catálogo precisa, para poder reativar. */
+  perfumesBaseTodos(): Promise<PerfumeBase[]>
   produtosDerivados(): Promise<ProdutoDerivado[]>
   shopifyPublicado(): Promise<Record<string, number>>
   lotes(): Promise<Lote[]>
@@ -102,6 +104,9 @@ const repositorioFixtures: Repositorio = {
     return PARAMETROS_PADRAO
   },
   async perfumesBase() {
+    return fixtures.PERFUMES_BASE
+  },
+  async perfumesBaseTodos() {
     return fixtures.PERFUMES_BASE
   },
   async produtosDerivados() {
@@ -245,6 +250,48 @@ async function tudoDe<T>(
   return linhas
 }
 
+const CAMPOS_BASE =
+  'id, nome, marca, genero, genero_manual, custo_por_ml, volume_ml, ' +
+  'consumo_diario_ml, imagem_url, ativo'
+
+/** Forma da linha de `perfumes_base`, conferida contra `supabase/migrations`. */
+interface LinhaPerfumeBase {
+  id: string
+  nome: string
+  marca: string
+  genero: string | null
+  genero_manual: boolean | null
+  custo_por_ml: number | string
+  volume_ml: number | string
+  consumo_diario_ml: number | string
+  imagem_url: string | null
+  ativo: boolean | null
+}
+
+async function lerPerfumesBase({ apenasAtivos }: { apenasAtivos: boolean }) {
+  const data = await tudoDe<LinhaPerfumeBase>('perfumes_base', (de, ate) => {
+    const consulta = supabaseServer().from('perfumes_base').select(CAMPOS_BASE)
+    return (apenasAtivos ? consulta.eq('ativo', true) : consulta)
+      .order('nome')
+      .range(de, ate) as unknown as PromiseLike<{
+      data: LinhaPerfumeBase[] | null
+      error: unknown
+    }>
+  })
+  return data.map((b): PerfumeBase => ({
+    id: b.id,
+    nome: b.nome,
+    marca: b.marca,
+    genero: (b.genero as PerfumeBase['genero']) ?? undefined,
+    generoManual: b.genero_manual ?? false,
+    custoPorMl: Number(b.custo_por_ml),
+    volumeMl: Number(b.volume_ml),
+    consumoDiarioMl: Number(b.consumo_diario_ml),
+    imagemUrl: b.imagem_url ?? undefined,
+    ativo: b.ativo ?? true,
+  }))
+}
+
 const repositorioSupabase: Repositorio = {
   async parametros() {
     const { data, error } = await supabaseServer()
@@ -270,24 +317,11 @@ const repositorioSupabase: Repositorio = {
   },
 
   async perfumesBase() {
-    const data = await tudoDe('perfumes_base', (de, ate) =>
-      supabaseServer()
-        .from('perfumes_base')
-        .select('id, nome, marca, genero, custo_por_ml, volume_ml, consumo_diario_ml, imagem_url')
-        .eq('ativo', true)
-        .order('id')
-        .range(de, ate),
-    )
-    return data.map((b) => ({
-      id: b.id,
-      nome: b.nome,
-      marca: b.marca,
-      genero: b.genero ?? undefined,
-      custoPorMl: Number(b.custo_por_ml),
-      volumeMl: Number(b.volume_ml),
-      consumoDiarioMl: Number(b.consumo_diario_ml),
-      imagemUrl: b.imagem_url ?? undefined,
-    }))
+    return lerPerfumesBase({ apenasAtivos: true })
+  },
+
+  async perfumesBaseTodos() {
+    return lerPerfumesBase({ apenasAtivos: false })
   },
 
   async produtosDerivados() {

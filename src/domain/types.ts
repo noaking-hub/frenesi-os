@@ -41,6 +41,10 @@ export interface PerfumeBase {
   consumoDiarioMl: number
   /** Foto do produto na Shopify, importada com o catálogo. */
   imagemUrl?: string
+  /** Perfume desativado sai das telas de operação, mas não é apagado. */
+  ativo?: boolean
+  /** Gênero definido à mão no ERP — a importação não sobrescreve. */
+  generoManual?: boolean
 }
 
 /** Decants já envasados de uma base numa variante. */
