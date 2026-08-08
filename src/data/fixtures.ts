@@ -10,6 +10,8 @@
 import { aferirItem } from '@/domain'
 import type {
   CategoriaFinanceira,
+  FonteConcorrente,
+  Kit,
   ContaBancaria,
   ContagemInventario,
   EstadoLacre,
@@ -30,14 +32,14 @@ import type {
 } from '@/domain'
 
 export const PERFUMES_BASE: PerfumeBase[] = [
-  { id: 'bac', nome: 'Baccarat Rouge 540', marca: 'Maison Francis', custoPorMl: 3.1, volumeMl: 640, consumoDiarioMl: 51 },
-  { id: 'blu', nome: 'Bleu de Chanel', marca: 'Chanel', custoPorMl: 2.9, volumeMl: 760, consumoDiarioMl: 14 },
-  { id: 'sau', nome: 'Sauvage Elixir', marca: 'Dior', custoPorMl: 2.6, volumeMl: 1180, consumoDiarioMl: 30 },
-  { id: 'erb', nome: 'Erba Pura', marca: 'Xerjoff', custoPorMl: 3.95, volumeMl: 520, consumoDiarioMl: 25 },
-  { id: 'ave', nome: 'Aventus', marca: 'Creed', custoPorMl: 4.15, volumeMl: 410, consumoDiarioMl: 11 },
-  { id: 'del', nome: 'Delina', marca: 'Parfums de Marly', custoPorMl: 3.8, volumeMl: 90, consumoDiarioMl: 22 },
-  { id: 'oud', nome: 'Oud Wood', marca: 'Tom Ford', custoPorMl: 4.4, volumeMl: 0, consumoDiarioMl: 6 },
-  { id: 'gg', nome: 'Good Girl', marca: 'Carolina Herrera', custoPorMl: 2.45, volumeMl: 340, consumoDiarioMl: 3 },
+  { id: 'bac', nome: 'Baccarat Rouge 540', marca: 'Maison Francis', genero: 'Unissex', custoPorMl: 3.1, volumeMl: 640, consumoDiarioMl: 51 },
+  { id: 'blu', nome: 'Bleu de Chanel', marca: 'Chanel', genero: 'Masculino', custoPorMl: 2.9, volumeMl: 760, consumoDiarioMl: 14 },
+  { id: 'sau', nome: 'Sauvage Elixir', marca: 'Dior', genero: 'Masculino', custoPorMl: 2.6, volumeMl: 1180, consumoDiarioMl: 30 },
+  { id: 'erb', nome: 'Erba Pura', marca: 'Xerjoff', genero: 'Unissex', custoPorMl: 3.95, volumeMl: 520, consumoDiarioMl: 25 },
+  { id: 'ave', nome: 'Aventus', marca: 'Creed', genero: 'Masculino', custoPorMl: 4.15, volumeMl: 410, consumoDiarioMl: 11 },
+  { id: 'del', nome: 'Delina', marca: 'Parfums de Marly', genero: 'Feminino', custoPorMl: 3.8, volumeMl: 90, consumoDiarioMl: 22 },
+  { id: 'oud', nome: 'Oud Wood', marca: 'Tom Ford', genero: 'Masculino', custoPorMl: 4.4, volumeMl: 0, consumoDiarioMl: 6 },
+  { id: 'gg', nome: 'Good Girl', marca: 'Carolina Herrera', genero: 'Feminino', custoPorMl: 2.45, volumeMl: 340, consumoDiarioMl: 3 },
 ]
 
 export const PRODUTOS_DERIVADOS: ProdutoDerivado[] = [
@@ -78,6 +80,85 @@ export const PRECO_PRATICADO: Record<string, Partial<Record<VarianteMl, number>>
   blu: { 5: 74.9, 10: 118.9 },
   gg: { 5: 58.9, 10: 104.9 },
 }
+
+/** Fontes de coleta de preço dos concorrentes. */
+export const CONCORRENTES_FONTES: FonteConcorrente[] = [
+  { nome: 'Decants do Bruno', dominio: 'decantsdobruno.com.br', status: 'Lida', quando: 'hoje 06:12', itensLidos: 148 },
+  { nome: 'Essência Rara', dominio: 'essenciararaperfumes.com', status: 'Lida', quando: 'hoje 06:14', itensLidos: 212 },
+  { nome: 'Frações Nobres', dominio: 'fracoesnobres.com.br', status: 'Parcial', quando: 'hoje 06:18', itensLidos: 63 },
+  { nome: 'Perfume Lab', dominio: 'perfumelab.store', status: 'Bloqueada', quando: 'ontem 22:40', itensLidos: 0 },
+]
+
+/** Preços coletados dos concorrentes, por base e variante (5 e 10 ml). */
+export const MERCADO: Record<string, Partial<Record<VarianteMl, number[]>>> = {
+  bac: { 5: [69.9, 74.9, 72.0], 10: [124.9, 132.0, 128.9] },
+  oud: { 5: [84.9, 89.9, 87.5], 10: [158.0, 164.9, 159.9] },
+  del: { 5: [74.9, 79.9, 76.0], 10: [136.0, 142.9, 139.0] },
+  sau: { 5: [56.9, 59.9, 58.0], 10: [102.9, 109.0, 105.0] },
+  erb: { 5: [78.9, 82.0, 80.5], 10: [144.0, 149.9, 146.0] },
+  ave: { 5: [82.9, 86.0, 84.0], 10: [152.9, 158.0, 154.9] },
+  blu: { 5: [69.9, 72.9, 71.0], 10: [112.9, 119.0, 115.9] },
+  gg: { 5: [54.9, 57.9, 56.0], 10: [98.9, 103.0, 100.9] },
+}
+
+/**
+ * Kits. A disponibilidade NÃO é um campo: deriva do estoque das bases que
+ * compõem cada kit (ver `avaliarKit`). Itens sem base (estojo) não bloqueiam.
+ */
+export const KITS: Kit[] = [
+  {
+    id: 'kit-amadeirados', nome: 'Kit descoberta · Amadeirados', tag: 'Entrada',
+    itens: [
+      { baseId: 'bac', label: 'Baccarat Rouge 540 3 ml' },
+      { baseId: 'ave', label: 'Aventus 3 ml' },
+      { baseId: 'oud', label: 'Oud Wood 3 ml' },
+    ],
+    preco: 118.9, custoProdutos: 41.2, vendas30: 42,
+  },
+  {
+    id: 'kit-femininos', nome: 'Kit descoberta · Femininos', tag: 'Entrada',
+    itens: [
+      { baseId: 'del', label: 'Delina 3 ml' },
+      { baseId: 'gg', label: 'Good Girl 3 ml' },
+      { baseId: 'erb', label: 'Erba Pura 3 ml' },
+    ],
+    preco: 112.9, custoProdutos: 38.6, vendas30: 31,
+  },
+  {
+    id: 'dupla-assinatura', nome: 'Dupla assinatura', tag: 'Presente',
+    itens: [
+      { baseId: 'sau', label: 'Sauvage Elixir 10 ml' },
+      { baseId: 'blu', label: 'Bleu de Chanel 10 ml' },
+    ],
+    preco: 214.9, custoProdutos: 68.4, vendas30: 18,
+  },
+  {
+    id: 'kit-presente', nome: 'Kit presente · estojo', tag: 'Presente',
+    itens: [
+      { baseId: 'bac', label: 'Baccarat Rouge 540 10 ml' },
+      { baseId: 'del', label: 'Delina 10 ml' },
+      { baseId: null, label: 'Estojo rígido' },
+    ],
+    preco: 289.9, custoProdutos: 104.3, vendas30: 12,
+  },
+  {
+    id: 'trio-verao', nome: 'Trio verão', tag: 'Sazonal',
+    itens: [
+      { baseId: 'erb', label: 'Erba Pura 5 ml' },
+      { baseId: 'sau', label: 'Sauvage Elixir 5 ml' },
+      { baseId: 'ave', label: 'Aventus 5 ml' },
+    ],
+    preco: 168.9, custoProdutos: 58.9, vendas30: 9,
+  },
+  {
+    id: 'combo-repor', nome: 'Combo repor · 15 ml', tag: 'Recompra',
+    itens: [
+      { baseId: null, label: 'Qualquer base 15 ml' },
+      { baseId: null, label: 'Refil 5 ml' },
+    ],
+    preco: 232.9, custoProdutos: 79.1, vendas30: 6,
+  },
+]
 
 const saida = (data: string, ref: string, unidades: number, variante: VarianteMl) => ({
   data,

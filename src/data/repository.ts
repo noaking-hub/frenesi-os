@@ -5,6 +5,8 @@ import type { EnvioContabil, SolicitacaoErp } from './fixtures'
 import type {
   CategoriaFinanceira,
   ContaBancaria,
+  FonteConcorrente,
+  Kit,
   ContagemInventario,
   Envio,
   Lancamento,
@@ -47,6 +49,9 @@ export interface Repositorio {
   repasses(): Promise<Repasse[]>
   categorias(): Promise<CategoriaFinanceira[]>
   enviosContabeis(): Promise<EnvioContabil[]>
+  concorrentesFontes(): Promise<FonteConcorrente[]>
+  mercado(): Promise<Record<string, Partial<Record<VarianteMl, number[]>>>>
+  kits(): Promise<Kit[]>
 }
 
 const repositorioFixtures: Repositorio = {
@@ -104,6 +109,15 @@ const repositorioFixtures: Repositorio = {
   async enviosContabeis() {
     return fixtures.ENVIOS_CONTABEIS
   },
+  async concorrentesFontes() {
+    return fixtures.CONCORRENTES_FONTES
+  },
+  async mercado() {
+    return fixtures.MERCADO
+  },
+  async kits() {
+    return fixtures.KITS
+  },
 }
 
 const repositorioSupabase: Repositorio = {
@@ -133,13 +147,14 @@ const repositorioSupabase: Repositorio = {
   async perfumesBase() {
     const { data, error } = await supabaseServer()
       .from('perfumes_base')
-      .select('id, nome, marca, custo_por_ml, volume_ml, consumo_diario_ml')
+      .select('id, nome, marca, genero, custo_por_ml, volume_ml, consumo_diario_ml')
       .eq('ativo', true)
     if (error) throw error
     return (data ?? []).map((b) => ({
       id: b.id,
       nome: b.nome,
       marca: b.marca,
+      genero: b.genero ?? undefined,
       custoPorMl: Number(b.custo_por_ml),
       volumeMl: Number(b.volume_ml),
       consumoDiarioMl: Number(b.consumo_diario_ml),
@@ -336,6 +351,9 @@ const repositorioSupabase: Repositorio = {
   repasses: repositorioFixtures.repasses,
   categorias: repositorioFixtures.categorias,
   enviosContabeis: repositorioFixtures.enviosContabeis,
+  concorrentesFontes: repositorioFixtures.concorrentesFontes,
+  mercado: repositorioFixtures.mercado,
+  kits: repositorioFixtures.kits,
 }
 
 /**

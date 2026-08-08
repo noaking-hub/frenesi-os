@@ -76,7 +76,10 @@ nenhuma tela muda.
 | `/financeiro/dre` | DRE com subtotais derivados |
 | `/financeiro/categorias` | Categorias · para onde vai o dinheiro |
 | `/financeiro/contabil` | Integração contábil · fechamento e arquivos |
+| `/produtos` | Catálogo · status derivado de estoque e margem |
 | `/produtos/precificacao` | Precificação e composição do preço |
+| `/produtos/concorrentes` | Concorrentes · posicionamento com piso de margem |
+| `/produtos/kits` | Kits e combos · disponibilidade derivada das bases |
 | `/devolucoes` | **Portal público do cliente**, 6 passos, mobile |
 
 As demais telas do handoff estão na navegação e caem numa página que declara o
@@ -190,6 +193,17 @@ conciliado, sem taxa é confirmado, não caiu é pendente, caiu outra coisa é
 divergente com a diferença exata. Um repasse a menos e outro a mais não se
 anulam — cada direção é somada separada.
 → `conciliarRepasse` em `src/domain/financeiro.ts`
+
+**Competir tem piso.** A recomendação contra concorrente mira dez centavos
+abaixo do menor preço, mas nunca fura o piso de margem — quando acompanhar o
+mercado não cobre o mínimo, a recomendação é manter o ideal e perder a guerra
+de preço de propósito.
+→ `analisarMercado` em `src/domain/mercado.ts`
+
+**Kit bloqueia sozinho.** A disponibilidade de um kit não é um campo: deriva do
+estoque das bases que o compõem. Oud Wood zerado bloqueia o Kit Amadeirados no
+mesmo instante em que o Catálogo o marca esgotado — uma fonte, dois efeitos.
+→ `avaliarKit` em `src/domain/mercado.ts`
 
 **Vocabulário do usuário, não do sistema.** "Estoque acaba em 12 dias", não
 "ruptura". E o critério interno de aceitação (tolerância de 10% abaixo do volume

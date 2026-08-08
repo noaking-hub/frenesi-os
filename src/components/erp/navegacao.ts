@@ -38,10 +38,10 @@ export const NAV: GrupoNav[] = [
     id: 'produtos',
     label: 'Produtos',
     telas: [
-      { id: 'catalogo', label: 'Catálogo', href: '/produtos' },
+      { id: 'catalogo', label: 'Catálogo', href: '/produtos', pronta: true },
       { id: 'precificacao', label: 'Precificação', href: '/produtos/precificacao', pronta: true },
-      { id: 'concorrentes', label: 'Concorrentes', href: '/produtos/concorrentes' },
-      { id: 'kits', label: 'Kits e combos', href: '/produtos/kits' },
+      { id: 'concorrentes', label: 'Concorrentes', href: '/produtos/concorrentes', pronta: true },
+      { id: 'kits', label: 'Kits e combos', href: '/produtos/kits', pronta: true },
     ],
   },
   {

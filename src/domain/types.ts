@@ -32,6 +32,7 @@ export interface PerfumeBase {
   id: string
   nome: string
   marca: string
+  genero?: 'Masculino' | 'Feminino' | 'Unissex'
   /** Custo de aquisição do perfume base, por ml. */
   custoPorMl: number
   /** Volume disponível em estoque, em ml. Fonte autoritativa. */
