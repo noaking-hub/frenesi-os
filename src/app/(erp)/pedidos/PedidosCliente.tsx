@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react'
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
 import { Badge, Ponto, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
 import { CelulaDupla, Tabela, type Coluna } from '@/components/erp/Tabela'
+import { Gaveta } from '@/components/erp/Modal'
 import { COR, type Tom } from '@/components/erp/tokens'
 import { brl, descreveVariante, pad2, plural } from '@/domain'
 import type { Pedido, StatusDevolucao, StatusEnvio, StatusPagamento } from '@/domain'
@@ -270,35 +271,7 @@ function FichaPedido({ pedido, aoFechar }: { pedido: Pedido; aoFechar: () => voi
   const subtotal = pedido.itens.reduce((a, i) => a + i.preco, 0)
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 40,
-        display: 'flex',
-        justifyContent: 'flex-end',
-        background: 'rgba(0,0,0,.55)',
-      }}
-      onClick={aoFechar}
-    >
-      <aside
-        role="dialog"
-        aria-label={`Ficha do pedido ${pedido.id}`}
-        onClick={(e) => e.stopPropagation()}
-        className="animate-[fr-in_.22s_ease_both]"
-        style={{
-          width: 420,
-          height: '100vh',
-          overflowY: 'auto',
-          background: 'linear-gradient(180deg,#141315,#0E0D0F)',
-          borderLeft: '1px solid var(--color-borda-ouro)',
-          boxShadow: 'var(--shadow-modal)',
-          padding: '22px 24px 32px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 18,
-        }}
-      >
+    <Gaveta titulo={`Ficha do pedido ${pedido.id}`} aoFechar={aoFechar}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: 1 }}>
             <Rotulo>{`${pedido.canal} · ${pedido.data}`}</Rotulo>
@@ -384,8 +357,7 @@ function FichaPedido({ pedido, aoFechar }: { pedido: Pedido; aoFechar: () => voi
           )}
           <Linha rotulo="Total do pedido" valor={brl(pedido.valor)} mono />
         </Bloco>
-      </aside>
-    </div>
+    </Gaveta>
   )
 }
 

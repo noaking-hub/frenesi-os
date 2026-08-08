@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from 'react'
 
 import { BotaoOuro, BotaoSecundario, Losango, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
+import { Modal } from '@/components/erp/Modal'
 import { COR } from '@/components/erp/tokens'
 import { brl, custoMedioPonderado, num, parseNum, volume } from '@/domain'
 import type { PerfumeBase } from '@/domain'
@@ -122,38 +123,7 @@ export function CompraFrasco({ bases }: { bases: PerfumeBase[] }) {
       </section>
 
       {aberto && (
-        <div
-          onClick={() => setAberto(false)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 70,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 40,
-            background: 'rgba(5,5,4,.66)',
-            backdropFilter: 'blur(4px)',
-          }}
-        >
-          <div
-            role="dialog"
-            aria-label="Registrar compra de frasco"
-            onClick={(e) => e.stopPropagation()}
-            className="animate-[fr-in_.22s_ease_both]"
-            style={{
-              width: 620,
-              maxHeight: '100%',
-              overflowY: 'auto',
-              background: 'linear-gradient(170deg,#17161A,#111112)',
-              border: '1px solid rgba(239,209,140,.2)',
-              borderRadius: 16,
-              padding: '20px 22px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 15,
-            }}
-          >
+        <Modal titulo="Registrar compra de frasco" aoFechar={() => setAberto(false)}>
             <TituloSecao tamanho={16}>Registrar compra de frasco</TituloSecao>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
@@ -292,8 +262,7 @@ export function CompraFrasco({ bases }: { bases: PerfumeBase[] }) {
                 {pendente ? 'Registrando…' : `Registrar compra${base ? ` · ${num(volumeMl)} ml` : ''}`}
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </>
   )

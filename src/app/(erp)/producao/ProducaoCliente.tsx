@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
 import { BotaoOuro, EstadoVazio, Ponto, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
 import { CelulaDupla, Tabela, type Coluna } from '@/components/erp/Tabela'
+import { Modal } from '@/components/erp/Modal'
 import { COR, type Tom } from '@/components/erp/tokens'
 import {
   VARIANTES,
@@ -271,27 +272,12 @@ function ModalNovaOrdem({
   // Sem perfume base cadastrado não há o que produzir.
   if (!base) {
     return (
-      <div
-        onClick={aoFechar}
-        style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 70,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: 40,
-          background: 'rgba(5,5,4,.66)',
-          backdropFilter: 'blur(4px)',
-        }}
-      >
-        <div role="dialog" aria-label="Nova ordem de produção" onClick={(e) => e.stopPropagation()}>
-          <EstadoVazio
-            titulo="Nenhum perfume base cadastrado"
-            instrucao="Cadastre um perfume base com volume em estoque para abrir ordens."
-          />
-        </div>
-      </div>
+      <Modal titulo="Nova ordem de produção" aoFechar={aoFechar}>
+        <EstadoVazio
+          titulo="Nenhum perfume base cadastrado"
+          instrucao="Cadastre um perfume base com volume em estoque para abrir ordens."
+        />
+      </Modal>
     )
   }
 
@@ -317,35 +303,7 @@ function ModalNovaOrdem({
   ]
 
   return (
-    <div
-      onClick={aoFechar}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 70,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 40,
-        background: 'rgba(5,5,4,.66)',
-        backdropFilter: 'blur(4px)',
-      }}
-    >
-      <div
-        role="dialog"
-        aria-label="Nova ordem de produção"
-        onClick={(e) => e.stopPropagation()}
-        className="animate-[fr-in_.22s_ease_both]"
-        style={{
-          width: 660,
-          maxHeight: '100%',
-          overflowY: 'auto',
-          background: 'linear-gradient(180deg,#151317,#0D0D0E)',
-          border: '1px solid rgba(239,209,140,.18)',
-          borderRadius: 18,
-          boxShadow: 'var(--shadow-modal)',
-        }}
-      >
+    <Modal titulo="Nova ordem de produção" largura={660} padding={0} aoFechar={aoFechar}>
         <div
           style={{
             display: 'flex',
@@ -602,7 +560,6 @@ function ModalNovaOrdem({
             Confirmar produção
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

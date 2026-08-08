@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react'
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
 import { BotaoOuro, Ponto, Rotulo, Switch, TituloSecao, Valor } from '@/components/erp/primitivos'
 import { CelulaDupla, Tabela, type Coluna } from '@/components/erp/Tabela'
+import { Modal } from '@/components/erp/Modal'
 import { COR, type Tom } from '@/components/erp/tokens'
 import {
   ROTULO_RASTREIO,
@@ -502,38 +503,7 @@ function ModalRastreio({
   const podeBaixar = aguardaBaixaShopify(envio)
 
   return (
-    <div
-      onClick={aoFechar}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 40,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'rgba(0,0,0,.6)',
-        padding: 40,
-      }}
-    >
-      <section
-        role="dialog"
-        aria-label={`Rastreio do pedido ${envio.pedidoId}`}
-        onClick={(e) => e.stopPropagation()}
-        className="animate-[fr-in_.22s_ease_both]"
-        style={{
-          width: 620,
-          maxHeight: '82vh',
-          overflowY: 'auto',
-          background: 'linear-gradient(170deg,#16151A,#101011)',
-          border: '1px solid var(--color-borda-ouro)',
-          borderRadius: 'var(--radius-modal)',
-          boxShadow: 'var(--shadow-modal)',
-          padding: '22px 24px 24px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 16,
-        }}
-      >
+    <Modal titulo={`Rastreio do pedido ${envio.pedidoId}`} padding="22px 24px 24px" aoFechar={aoFechar}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
             <Rotulo>{`Rastreio · ${envio.transportadora} · Yampi / ${envio.gateway}`}</Rotulo>
@@ -659,7 +629,6 @@ function ModalRastreio({
           </span>
           {podeBaixar && <BotaoOuro onClick={aoBaixar}>Marcar entregue na Shopify</BotaoOuro>}
         </div>
-      </section>
-    </div>
+    </Modal>
   )
 }
