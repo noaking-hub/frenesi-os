@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 
-import { Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
+import { FaixaAlerta, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
 import { Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR, type Tom } from '@/components/erp/tokens'
 import {
@@ -179,6 +179,12 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
       }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+        {custoPorMl === 0 && (
+          <FaixaAlerta
+            tom="erro"
+            texto={`${base.nome} está sem custo por ml cadastrado — os preços abaixo cobrem só taxas e custos fixos, não o perfume. Informe o custo real para o cálculo valer.`}
+          />
+        )}
         <section
           style={{
             background: 'linear-gradient(170deg,#141315,#101011)',

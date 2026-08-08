@@ -61,6 +61,30 @@ psql "$DATABASE_URL" -f supabase/seed.sql    # opcional: dados de demonstração
 O `src/data/repository.ts` detecta as variáveis e troca a origem sozinho —
 nenhuma tela muda.
 
+## Integração Shopify
+
+A loja é a fonte do **catálogo**: nome, marca, variantes, preço e quantidade
+publicada. Custo por ml, volume em estoque e consumo continuam sendo do ERP —
+a importação nunca os inventa nem sobrescreve.
+
+1. Na Shopify: Configurações → Apps e canais de venda → Desenvolver apps →
+   Criar app, com os escopos `read_products` e `read_inventory`.
+2. Copie o Admin API access token (`shpat_…`) para o `.env.local`
+   (`SHOPIFY_LOJA` e `SHOPIFY_ADMIN_TOKEN`) e reinicie.
+3. Em **Estoque → Sincronia Shopify**, use "Importar catálogo agora".
+
+O que a importação faz (`src/data/shopify.ts`, mapeamento puro e testado em
+`src/domain/shopify.ts`):
+
+- variante vira variante do ERP só se o título tiver um tamanho fracionável
+  (3, 5, 8, 10 ou 15 ml) — kits, estojos e "50 ml" são **ignorados com o
+  motivo dito** na tela e gravado em `sincronizacoes`;
+- perfume novo entra com custo e volume **zero**, e o Dashboard e o Catálogo
+  passam a acusar "sem custo cadastrado" até o cadastro ser completado —
+  número inventado, nunca;
+- rodar de novo é seguro: atualiza nome, marca, preço e publicado, sem tocar
+  em custo, volume, envasadas ou reservadas.
+
 ## Rotas
 
 | Rota | Tela |

@@ -2,8 +2,11 @@ import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
 import { BotaoOuro, FaixaAlerta, Rotulo, Valor } from '@/components/erp/primitivos'
 import { BORDA, COR, FUNDO_CHIP, type Tom } from '@/components/erp/tokens'
 import { carregarSincronia } from '@/data/consultas'
+import { shopifyConfigurada, ultimaSincronizacao } from '@/data/shopify'
 import { TETO_SHOPIFY, pad2, plural, volume } from '@/domain'
 import type { AcaoSync, BaseSync } from '@/domain'
+
+import { ImportarShopify } from './ImportarShopify'
 
 const TOM_ACAO: Record<AcaoSync, Tom> = {
   esgotar: 'erro',
@@ -13,7 +16,7 @@ const TOM_ACAO: Record<AcaoSync, Tom> = {
 }
 
 export default async function SincroniaShopify() {
-  const sync = await carregarSincronia()
+  const [sync, ultima] = await Promise.all([carregarSincronia(), ultimaSincronizacao('shopify')])
   const foraDeSincronia = sync.esgotar + sync.reduzir + sync.repor
 
   const kpis: Kpi[] = [
@@ -62,6 +65,8 @@ export default async function SincroniaShopify() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <ImportarShopify configurada={shopifyConfigurada()} ultima={ultima} />
+
       <FaixaKpis kpis={kpis} />
 
       {sync.excesso > 0 && (

@@ -40,6 +40,8 @@ function classificar(
   margemMedia: number | null,
   p: ParametrosPrecificacao,
 ): { status: string; tom: Tom } {
+  // Sem custo, toda margem calculada é mentira — este estado vem primeiro.
+  if (base.custoPorMl === 0) return { status: 'Sem custo', tom: 'erro' }
   if (cobertura.criticidade === 'zero') return { status: 'Esgotado', tom: 'erro' }
   if (cobertura.criticidade === 'urgente' || cobertura.criticidade === 'atencao')
     return { status: 'Crítico', tom: 'atencao' }

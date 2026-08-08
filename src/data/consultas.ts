@@ -176,6 +176,17 @@ export async function carregarDashboard() {
       origem: 'banco',
     },
     {
+      // A importação da Shopify não inventa custo: perfume novo entra com 0
+      // e fica acusado aqui até o cadastro ser completado.
+      contagem: bases.filter((b) => b.custoPorMl === 0).length,
+      titulo: 'Perfumes sem custo cadastrado',
+      hint: 'Importados da Shopify · preço e margem saem errados até informar o custo por ml',
+      etiqueta: 'Cadastro',
+      tom: 'atencao',
+      href: '/produtos',
+      origem: 'banco',
+    },
+    {
       contagem: sync.esgotar + sync.reduzir + sync.repor,
       titulo: 'Variantes fora de sincronia na Shopify',
       hint: `${sync.excesso} unidades vendáveis sem volume que as sustente`,
