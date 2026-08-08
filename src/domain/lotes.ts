@@ -117,3 +117,25 @@ export function conciliarLotesAbertos(
     confere: Math.abs(divergenciaMl) < 0.05,
   }
 }
+
+/**
+ * Custo por ml depois de uma compra. A primeira compra define (custo ÷
+ * volume); reposição faz a média ponderada entre o volume que já existia,
+ * ao custo atual, e o que entrou. Base importada da Shopify com custo 0 é
+ * tratada como primeira compra — o histórico desconhecido não contamina a
+ * média. Espelha `registrar_compra()` da migration.
+ */
+export function custoMedioPonderado(
+  volumeAtualMl: number,
+  custoAtualPorMl: number,
+  volumeCompradoMl: number,
+  custoTotalCompra: number,
+): number {
+  if (volumeCompradoMl <= 0) return custoAtualPorMl
+  if (volumeAtualMl <= 0 || custoAtualPorMl <= 0) {
+    return custoTotalCompra / volumeCompradoMl
+  }
+  return (
+    (volumeAtualMl * custoAtualPorMl + custoTotalCompra) / (volumeAtualMl + volumeCompradoMl)
+  )
+}

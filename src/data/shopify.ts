@@ -117,6 +117,7 @@ interface RespostaGraphql {
         vendor: string
         handle: string
         status: 'ACTIVE' | 'DRAFT' | 'ARCHIVED'
+        featuredMedia: { preview: { image: { url: string } | null } | null } | null
         variants: {
           nodes: { id: string; title: string; price: string; inventoryQuantity: number | null }[]
         }
@@ -139,6 +140,13 @@ const CONSULTA_PRODUTOS = /* GraphQL */ `
         vendor
         handle
         status
+        featuredMedia {
+          preview {
+            image {
+              url
+            }
+          }
+        }
         variants(first: 100) {
           nodes {
             id
@@ -215,6 +223,7 @@ export async function lerCatalogoShopify(): Promise<ProdutoShopify[]> {
         fornecedor: p.vendor,
         handle: p.handle,
         status: p.status,
+        imagemUrl: p.featuredMedia?.preview?.image?.url ?? null,
         variantes: p.variants.nodes.map((v) => ({
           id: v.id,
           titulo: v.title,
@@ -269,6 +278,7 @@ export async function importarCatalogoShopify(): Promise<ResultadoImportacao> {
         consumo_diario_ml: 0,
         shopify_product_id: b.shopifyProductId,
         shopify_handle: b.id,
+        imagem_url: b.imagemUrl,
       })),
     )
     if (error) throw error
@@ -281,6 +291,7 @@ export async function importarCatalogoShopify(): Promise<ResultadoImportacao> {
         marca: b.marca,
         shopify_product_id: b.shopifyProductId,
         shopify_handle: b.id,
+        imagem_url: b.imagemUrl,
       })
       .eq('id', b.id)
     if (error) throw error

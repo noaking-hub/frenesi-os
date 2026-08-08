@@ -96,21 +96,39 @@ export default async function Catalogo() {
       chave: 'foto',
       titulo: '',
       largura: '46px',
-      render: () => (
-        // Fotos do catálogo pendentes do cliente — o slot diz o que vai ali.
-        <span
-          aria-hidden
-          style={{
-            width: 34,
-            height: 44,
-            borderRadius: 5,
-            background:
-              'repeating-linear-gradient(135deg,rgba(239,209,140,.14) 0 3px,rgba(239,209,140,.05) 3px 6px)',
-            border: '1px solid var(--color-borda)',
-            display: 'block',
-          }}
-        />
-      ),
+      render: (l) =>
+        l.base.imagemUrl ? (
+          // Foto importada da Shopify junto com o catálogo.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={l.base.imagemUrl}
+            alt=""
+            loading="lazy"
+            style={{
+              width: 34,
+              height: 44,
+              borderRadius: 5,
+              objectFit: 'cover',
+              border: '1px solid var(--color-borda)',
+              display: 'block',
+              background: '#131214',
+            }}
+          />
+        ) : (
+          // Sem foto na loja — o slot diz o que vai ali.
+          <span
+            aria-hidden
+            style={{
+              width: 34,
+              height: 44,
+              borderRadius: 5,
+              background:
+                'repeating-linear-gradient(135deg,rgba(239,209,140,.14) 0 3px,rgba(239,209,140,.05) 3px 6px)',
+              border: '1px solid var(--color-borda)',
+              display: 'block',
+            }}
+          />
+        ),
     },
     {
       chave: 'perfume',

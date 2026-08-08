@@ -9,6 +9,7 @@ const produto = (p: Partial<ProdutoShopify>): ProdutoShopify => ({
   fornecedor: 'Maison Francis',
   handle: 'baccarat-rouge-540',
   status: 'ACTIVE',
+  imagemUrl: 'https://cdn.shopify.com/s/files/bac.jpg',
   variantes: [
     { id: 'gid://shopify/ProductVariant/11', titulo: '5 ml', preco: 79.9, estoque: 12 },
   ],

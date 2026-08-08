@@ -39,6 +39,8 @@ export interface PerfumeBase {
   volumeMl: number
   /** Consumo médio diário em ml, derivado do histórico de produção. */
   consumoDiarioMl: number
+  /** Foto do produto na Shopify, importada com o catálogo. */
+  imagemUrl?: string
 }
 
 /** Decants já envasados de uma base numa variante. */

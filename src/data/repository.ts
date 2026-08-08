@@ -250,7 +250,7 @@ const repositorioSupabase: Repositorio = {
   async perfumesBase() {
     const { data, error } = await supabaseServer()
       .from('perfumes_base')
-      .select('id, nome, marca, genero, custo_por_ml, volume_ml, consumo_diario_ml')
+      .select('id, nome, marca, genero, custo_por_ml, volume_ml, consumo_diario_ml, imagem_url')
       .eq('ativo', true)
     if (error) throw error
     return (data ?? []).map((b) => ({
@@ -261,6 +261,7 @@ const repositorioSupabase: Repositorio = {
       custoPorMl: Number(b.custo_por_ml),
       volumeMl: Number(b.volume_ml),
       consumoDiarioMl: Number(b.consumo_diario_ml),
+      imagemUrl: b.imagem_url ?? undefined,
     }))
   },
 

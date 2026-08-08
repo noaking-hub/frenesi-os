@@ -4,6 +4,7 @@ import {
   PARAMETROS_PADRAO,
   PRAZO_DEVOLUCAO_DIAS,
   TETO_SHOPIFY,
+  custoMedioPonderado,
   apurarLote,
   apurarPerdaReal,
   arredondaPreco,
@@ -268,5 +269,27 @@ describe('devoluções', () => {
     expect(fotosCompletas('m3', { nivel: true, lacre: false })).toBe(true)
     // a foto do nível continua obrigatória em qualquer motivo
     expect(fotosCompletas('m3', { nivel: false, lacre: true })).toBe(false)
+  })
+})
+
+describe('custo médio ponderado na compra', () => {
+  it('primeira compra define o custo por ml', () => {
+    expect(custoMedioPonderado(0, 0, 500, 1550)).toBeCloseTo(3.1, 10)
+  })
+
+  it('base importada com custo 0 é tratada como primeira compra', () => {
+    // Volume existe (publicado veio da loja) mas o custo é desconhecido:
+    // a média NÃO pode diluir com um custo 0 que nunca foi real.
+    expect(custoMedioPonderado(200, 0, 500, 1550)).toBeCloseTo(3.1, 10)
+  })
+
+  it('reposição pondera pelo volume existente ao custo atual', () => {
+    // 300 ml a 3,00 + 500 ml comprados por 1.750 (3,50/ml)
+    // → (300×3 + 1750) / 800 = 3,3125
+    expect(custoMedioPonderado(300, 3, 500, 1750)).toBeCloseTo(3.3125, 10)
+  })
+
+  it('compra de volume zero não altera nada', () => {
+    expect(custoMedioPonderado(300, 3, 0, 999)).toBe(3)
   })
 })

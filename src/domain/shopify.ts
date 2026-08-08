@@ -26,6 +26,7 @@ export interface ProdutoShopify {
   fornecedor: string
   handle: string
   status: 'ACTIVE' | 'DRAFT' | 'ARCHIVED'
+  imagemUrl: string | null
   variantes: VarianteShopify[]
 }
 
@@ -35,6 +36,7 @@ export interface BaseImportada {
   nome: string
   marca: string
   shopifyProductId: string
+  imagemUrl: string | null
 }
 
 export interface VarianteImportada {
@@ -131,6 +133,7 @@ export function mapearCatalogo(produtos: ProdutoShopify[]): CatalogoMapeado {
       nome: p.titulo,
       marca: p.fornecedor.trim() || '—',
       shopifyProductId: p.id,
+      imagemUrl: p.imagemUrl,
     })
     variantes.push(...validas)
   }
