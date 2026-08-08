@@ -9,10 +9,13 @@
 
 import { aferirItem } from '@/domain'
 import type {
+  CategoriaFinanceira,
+  ContaBancaria,
   ContagemInventario,
   EstadoLacre,
   Envio,
   ItemAferido,
+  Lancamento,
   Lote,
   Movimentacao,
   Ocorrencia,
@@ -20,6 +23,7 @@ import type {
   Pedido,
   PerfumeBase,
   ProdutoDerivado,
+  Repasse,
   StatusSolicitacao,
   TipoSolicitacao,
   VarianteMl,
@@ -623,13 +627,119 @@ export const AGOSTO = {
   },
 }
 
-/** Contas a pagar e vencidas — a contagem alimenta as pendências do dashboard. */
-export const CONTAS_ABERTAS = [
-  { descricao: 'Simples Nacional · competência 07', valor: 4820.0, status: 'Vencido' as const },
-  { descricao: 'Importadora Aurum · lote LT-098', valor: 3960.0, status: 'A pagar' as const },
-  { descricao: 'Meta Ads · agosto', valor: 2480.0, status: 'A pagar' as const },
-  { descricao: 'Nicho Distribuidora · frascaria', valor: 1140.0, status: 'A pagar' as const },
+/** Lançamentos de agosto. As pendências do dashboard derivam daqui. */
+export const LANCAMENTOS: Lancamento[] = [
+  { id: 'LC-118', data: '05/08', descricao: 'Frete transportadora · agosto', categoria: 'Logística', conta: 'Inter PJ', tipo: 'saida', valor: 1240.0, status: 'A pagar', recorrente: false, origem: 'Assessor IA' },
+  { id: 'LC-117', data: '05/08', descricao: 'Embalagens e frascos · lote 240', categoria: 'Insumos e embalagem', conta: 'Inter PJ', tipo: 'saida', valor: 2180.0, status: 'A pagar', recorrente: false, origem: 'Manual' },
+  { id: 'LC-116', data: '05/08', descricao: 'Meta Ads · agosto', categoria: 'Marketing e ADS', conta: 'Nubank PJ', tipo: 'saida', valor: 760.0, status: 'A pagar', recorrente: true, origem: 'Recorrente' },
+  { id: 'LC-115', data: '04/08', descricao: 'Repasse Shopify · lote 03/08', categoria: 'Vendas', conta: 'Inter PJ', tipo: 'entrada', valor: 8432.1, status: 'Previsto', recorrente: false, origem: 'Conciliação' },
+  { id: 'LC-114', data: '03/08', descricao: 'Repasse Yampi · lote 02/08', categoria: 'Vendas', conta: 'Inter PJ', tipo: 'entrada', valor: 5218.4, status: 'Recebido', recorrente: false, origem: 'Conciliação' },
+  { id: 'LC-113', data: '03/08', descricao: 'Compra de perfume base · Oud Wood 500 ml', categoria: 'Matéria-prima', conta: 'Inter PJ', tipo: 'saida', valor: 2200.0, status: 'Pago', recorrente: false, origem: 'Estoque' },
+  { id: 'LC-112', data: '02/08', descricao: 'Assinatura Judge.me', categoria: 'Ferramentas', conta: 'Nubank PJ', tipo: 'saida', valor: 149.0, status: 'Pago', recorrente: true, origem: 'Recorrente' },
+  { id: 'LC-111', data: '02/08', descricao: 'Pró-labore', categoria: 'Pessoal', conta: 'Inter PJ', tipo: 'saida', valor: 6000.0, status: 'Pago', recorrente: true, origem: 'Recorrente' },
+  { id: 'LC-110', data: '01/08', descricao: 'Repasse Shopify · lote 31/07', categoria: 'Vendas', conta: 'Inter PJ', tipo: 'entrada', valor: 11940.8, status: 'Recebido', recorrente: false, origem: 'Conciliação' },
+  { id: 'LC-109', data: '01/08', descricao: 'Contabilidade', categoria: 'Serviços', conta: 'Nubank PJ', tipo: 'saida', valor: 890.0, status: 'Pago', recorrente: true, origem: 'Recorrente' },
+  { id: 'LC-108', data: '01/08', descricao: 'Simples Nacional · competência julho', categoria: 'Impostos', conta: 'Inter PJ', tipo: 'saida', valor: 4310.0, status: 'Vencido', recorrente: false, origem: 'Manual' },
 ]
+
+export const CONTAS: ContaBancaria[] = [
+  { id: 'inter', nome: 'Inter PJ', tipo: 'Conta corrente', banco: 'Banco Inter · 077', saldo: 38420, entradasMes: 16240, saidasMes: 12980, uso: 'Operacional · repasses e fornecedores', principal: true },
+  { id: 'nubank', nome: 'Nubank PJ', tipo: 'Conta corrente', banco: 'Nu Pagamentos · 260', saldo: 18960, entradasMes: 5340, saidasMes: 4111, uso: 'Ferramentas, ADS e assinaturas', principal: false },
+  { id: 'reserva', nome: 'Reserva', tipo: 'Caixa de rendimento', banco: 'Inter · CDB liquidez diária', saldo: 5100, entradasMes: 0, saidasMes: 0, uso: 'Colchão de 1 mês de custo fixo', principal: false },
+]
+
+/**
+ * Repasses a conciliar. Só os fatos: esperado, taxa, o que caiu. O status é
+ * derivado por `conciliarRepasse` — nunca vem marcado daqui.
+ */
+export const REPASSES: Repasse[] = [
+  { pedidoId: '#10482', origem: 'Shopify · Cartão 1x', esperado: 389.0, taxaPct: 4.33, recebido: 372.15, pagamentoConfirmado: true },
+  { pedidoId: '#10480', origem: 'Shopify · Cartão 3x', esperado: 612.5, taxaPct: 4.33, recebido: 561.4, pagamentoConfirmado: true },
+  { pedidoId: '#10479', origem: 'Pix · Inter', esperado: 298.0, taxaPct: 0, recebido: null, pagamentoConfirmado: false },
+  { pedidoId: '#10478', origem: 'Yampi · Cartão 2x', esperado: 476.0, taxaPct: 4.32, recebido: 455.42, pagamentoConfirmado: true },
+  { pedidoId: '#10477', origem: 'Yampi · Pix', esperado: 352.0, taxaPct: 0, recebido: 352.0, pagamentoConfirmado: true },
+  { pedidoId: '#10476', origem: 'Shopify · Cartão 6x', esperado: 824.9, taxaPct: 4.33, recebido: null, pagamentoConfirmado: true },
+  { pedidoId: '#10475', origem: 'WhatsApp · Pix', esperado: 189.0, taxaPct: 0, recebido: 189.0, pagamentoConfirmado: true },
+  { pedidoId: '#10474', origem: 'Shopify · Cartão 1x', esperado: 458.0, taxaPct: 4.33, recebido: 486.2, pagamentoConfirmado: true },
+]
+
+/** Custos e despesas de julho, classificados. Participações derivam do total. */
+export const CATEGORIAS: CategoriaFinanceira[] = [
+  { nome: 'Matéria-prima', natureza: 'Custo variável', valorMes: 58240, lancamentos: 6 },
+  { nome: 'Marketing e ADS', natureza: 'Despesa', valorMes: 21936, lancamentos: 12 },
+  { nome: 'Pessoal', natureza: 'Despesa fixa', valorMes: 12000, lancamentos: 2 },
+  { nome: 'Impostos', natureza: 'Custo variável', valorMes: 10968, lancamentos: 1 },
+  { nome: 'Insumos e embalagem', natureza: 'Custo variável', valorMes: 9640, lancamentos: 4 },
+  { nome: 'Logística', natureza: 'Custo variável', valorMes: 8940, lancamentos: 9 },
+  { nome: 'Taxas de pagamento', natureza: 'Custo variável', valorMes: 11557, lancamentos: 31 },
+  { nome: 'Ferramentas', natureza: 'Despesa fixa', valorMes: 2250, lancamentos: 5 },
+  { nome: 'Serviços', natureza: 'Despesa fixa', valorMes: 890, lancamentos: 1 },
+  { nome: 'Ocupação e diversos', natureza: 'Despesa', valorMes: 5193, lancamentos: 7 },
+]
+
+/**
+ * Linhas primitivas do DRE de julho. Os subtotais (receita líquida, margem de
+ * contribuição, resultado) NUNCA aparecem aqui — `montarDre` os deriva.
+ */
+export const DRE_JULHO = {
+  receitaBruta: {
+    linha: 'Receita bruta',
+    valor: 198430,
+    nota: '482 pedidos faturados · ticket médio R$ 412',
+  },
+  deducoes: [
+    { linha: 'Descontos e cupons', valor: 11806, nota: '12,9% da receita promocional' },
+    { linha: 'Devoluções', valor: 3820, nota: '6 solicitações · 3 reembolsadas' },
+  ],
+  custos: [
+    { linha: 'Impostos', valor: 10968, nota: 'Simples Nacional · 6%' },
+    { linha: 'Taxas de pagamento e checkout', valor: 11557, nota: 'Intermediador 4,33% + Yampi 1,99%' },
+    { linha: 'Custo dos produtos vendidos', valor: 58240, nota: 'Perfume base + perda técnica' },
+    { linha: 'Embalagens e insumos', valor: 9640, nota: 'Frasco, válvula, etiqueta e caixa' },
+    { linha: 'Frete subsidiado', valor: 8940, nota: 'Média de R$ 27,10 por pedido' },
+  ],
+  despesas: [
+    { linha: 'Marketing e ADS', valor: 21936, nota: '12% da receita · CAC R$ 45,50' },
+    { linha: 'Pessoal e pró-labore', valor: 12000, nota: '2 pessoas' },
+    { linha: 'Ferramentas e serviços', valor: 3140, nota: 'Shopify, Yampi, Judge.me, contabilidade' },
+    { linha: 'Outras despesas', valor: 5193, nota: 'Ocupação e diversos' },
+  ],
+}
+
+export interface EnvioContabil {
+  quando: string
+  arquivo: string
+  conteudo: string
+  registros: number
+  tamanho: string
+  estado: 'Aceito' | 'Processando' | 'Recusado'
+  nota: string
+}
+
+export const ENVIOS_CONTABEIS: EnvioContabil[] = [
+  { quando: 'ontem 23:10', arquivo: 'frenesi-202608-nfe.zip', conteudo: 'XML das notas de agosto', registros: 128, tamanho: '2,4 MB', estado: 'Aceito', nota: '' },
+  { quando: 'ontem 23:10', arquivo: 'frenesi-202608-razao.csv', conteudo: 'Razão analítico por categoria', registros: 214, tamanho: '186 KB', estado: 'Aceito', nota: '' },
+  { quando: '02/08 23:10', arquivo: 'frenesi-202607-fechamento.zip', conteudo: 'Fechamento de julho', registros: 486, tamanho: '5,1 MB', estado: 'Aceito', nota: '' },
+  { quando: '01/08 23:10', arquivo: 'frenesi-202607-devolucoes.csv', conteudo: 'Notas de devolução de julho', registros: 12, tamanho: '14 KB', estado: 'Recusado', nota: 'Duas devoluções sem NF de entrada · reenviar após emitir' },
+  { quando: 'hoje 08:00', arquivo: 'frenesi-202608-conciliacao.csv', conteudo: 'Extrato conciliado do Inter', registros: 96, tamanho: '78 KB', estado: 'Processando', nota: '' },
+]
+
+/** Conta contábil de cada categoria, amarrada para o arquivo do escritório. */
+export const PLANO_CONTAS: Record<string, string> = {
+  'Matéria-prima': '1.1.03.001 · estoque de perfume base',
+  'Marketing e ADS': '3.1.03.002 · marketing e publicidade',
+  Pessoal: '3.1.01.001 · remuneração e pró-labore',
+  Impostos: '3.1.04.001 · tributos sobre venda',
+  'Insumos e embalagem': '1.1.03.002 · materiais de embalagem',
+  Logística: '3.1.02.004 · fretes e carretos',
+  'Taxas de pagamento': '3.1.02.001 · despesas financeiras',
+  Ferramentas: '3.1.03.005 · softwares e assinaturas',
+  Serviços: '3.1.03.008 · serviços de terceiros',
+  'Ocupação e diversos': '3.1.01.004 · ocupação e despesas gerais',
+}
+
+export const NOTAS_EMITIDAS = 128
+export const PEDIDOS_SEM_NOTA = 3
 
 export const CARRINHOS_PRIORIDADE_ALTA = 6
 export const COMANDOS_IA_AGUARDANDO = 2

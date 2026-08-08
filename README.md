@@ -70,6 +70,12 @@ nenhuma tela muda.
 | `/estoque/sincronia` | Sincronia Shopify |
 | `/estoque/inventario` | Inventário físico |
 | `/producao` | Produção · ordens e simulação de impacto |
+| `/financeiro` | Conciliação de repasses |
+| `/financeiro/lancamentos` | Lançamentos · a pagar, vencidos e previstos |
+| `/financeiro/contas` | Contas da operação |
+| `/financeiro/dre` | DRE com subtotais derivados |
+| `/financeiro/categorias` | Categorias · para onde vai o dinheiro |
+| `/financeiro/contabil` | Integração contábil · fechamento e arquivos |
 | `/produtos/precificacao` | Precificação e composição do preço |
 | `/devolucoes` | **Portal público do cliente**, 6 passos, mobile |
 
@@ -172,6 +178,18 @@ recusa quando o motivo é arrependimento; em frasco danificado ou erro de envio
 a perda é esperada. O reverso sai sempre na mesma plataforma que emitiu a
 etiqueta de ida.
 → `aferirItem` e `triarDevolucao` em `src/domain/devolucoes.ts`
+
+**Subtotal do DRE não se digita.** Receita líquida, margem de contribuição e
+resultado saem da soma das linhas primitivas — `montarDre` os deriva, e o ponto
+de equilíbrio vem da estrutura fixa dividida pela margem de contribuição.
+→ `montarDre` e `pontoEquilibrio` em `src/domain/financeiro.ts`
+
+**O status da conciliação sai dos números.** `conciliarRepasse` compara o que
+caiu na conta com o esperado menos a taxa do intermediador: bateu com taxa é
+conciliado, sem taxa é confirmado, não caiu é pendente, caiu outra coisa é
+divergente com a diferença exata. Um repasse a menos e outro a mais não se
+anulam — cada direção é somada separada.
+→ `conciliarRepasse` em `src/domain/financeiro.ts`
 
 **Vocabulário do usuário, não do sistema.** "Estoque acaba em 12 dias", não
 "ruptura". E o critério interno de aceitação (tolerância de 10% abaixo do volume

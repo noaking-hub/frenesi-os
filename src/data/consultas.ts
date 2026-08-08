@@ -3,6 +3,8 @@ import 'server-only'
 import {
   aguardaBaixaShopify,
   apurarLote,
+  lancamentoPendente,
+  resumirLancamentos,
   apurarPerdaReal,
   calcularPreco,
   coberturaDe,
@@ -140,11 +142,14 @@ export async function carregarDashboard() {
   const esgotadas = bases.filter((b) => b.volumeMl === 0)
   const emRisco = estoque.criticos + estoque.esgotados
 
-  const { CONTAS_ABERTAS, PEDIDOS_A_SEPARAR, CARRINHOS_PRIORIDADE_ALTA, COMANDOS_IA_AGUARDANDO } =
+  const { PEDIDOS_A_SEPARAR, CARRINHOS_PRIORIDADE_ALTA, COMANDOS_IA_AGUARDANDO } =
     await import('./fixtures')
 
-  const contasVencidas = CONTAS_ABERTAS.filter((c) => c.status === 'Vencido')
-  const totalContas = CONTAS_ABERTAS.reduce((a, c) => a + c.valor, 0)
+  // As contas a pagar do dashboard são os MESMOS lançamentos da tela de
+  // Lançamentos — derivados, nunca uma lista paralela.
+  const lancamentos = await repo.lancamentos()
+  const fin = resumirLancamentos(lancamentos)
+  const pendentesFin = lancamentos.filter(lancamentoPendente)
 
   const pendencias: Pendencia[] = [
     {
@@ -209,11 +214,11 @@ export async function carregarDashboard() {
       href: '/pedidos/ocorrencias',
     },
     {
-      contagem: CONTAS_ABERTAS.length,
+      contagem: pendentesFin.length,
       titulo: 'Contas a pagar e vencidas',
-      hint: `${brlSimples(totalContas)} · ${contasVencidas.length} vencida`,
+      hint: `${brlSimples(fin.aPagar + fin.vencido)} · ${fin.vencidoQtd} vencida`,
       etiqueta: 'Financeiro',
-      tom: 'erro',
+      tom: fin.vencidoQtd ? 'erro' : 'atencao',
       href: '/financeiro/lancamentos',
     },
     {

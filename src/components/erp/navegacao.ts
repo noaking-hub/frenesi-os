@@ -61,12 +61,12 @@ export const NAV: GrupoNav[] = [
     id: 'financeiro',
     label: 'Financeiro',
     telas: [
-      { id: 'lancamentos', label: 'Lançamentos', href: '/financeiro/lancamentos' },
-      { id: 'contas', label: 'Contas', href: '/financeiro/contas' },
-      { id: 'conciliacao', label: 'Conciliação', href: '/financeiro' },
-      { id: 'dre', label: 'DRE', href: '/financeiro/dre' },
-      { id: 'categorias', label: 'Categorias', href: '/financeiro/categorias' },
-      { id: 'contabil', label: 'Integração contábil', href: '/financeiro/contabil' },
+      { id: 'lancamentos', label: 'Lançamentos', href: '/financeiro/lancamentos', pronta: true },
+      { id: 'contas', label: 'Contas', href: '/financeiro/contas', pronta: true },
+      { id: 'conciliacao', label: 'Conciliação', href: '/financeiro', pronta: true },
+      { id: 'dre', label: 'DRE', href: '/financeiro/dre', pronta: true },
+      { id: 'categorias', label: 'Categorias', href: '/financeiro/categorias', pronta: true },
+      { id: 'contabil', label: 'Integração contábil', href: '/financeiro/contabil', pronta: true },
     ],
   },
   {

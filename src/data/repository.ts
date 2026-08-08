@@ -1,12 +1,16 @@
 import 'server-only'
 
 import { PARAMETROS_PADRAO } from '@/domain'
-import type { SolicitacaoErp } from './fixtures'
+import type { EnvioContabil, SolicitacaoErp } from './fixtures'
 import type {
+  CategoriaFinanceira,
+  ContaBancaria,
   ContagemInventario,
   Envio,
+  Lancamento,
   Ocorrencia,
   OrdemProducao,
+  Repasse,
   Lote,
   Movimentacao,
   ParametrosPrecificacao,
@@ -38,6 +42,11 @@ export interface Repositorio {
   ocorrencias(): Promise<Ocorrencia[]>
   solicitacoes(): Promise<SolicitacaoErp[]>
   ordens(): Promise<OrdemProducao[]>
+  lancamentos(): Promise<Lancamento[]>
+  contas(): Promise<ContaBancaria[]>
+  repasses(): Promise<Repasse[]>
+  categorias(): Promise<CategoriaFinanceira[]>
+  enviosContabeis(): Promise<EnvioContabil[]>
 }
 
 const repositorioFixtures: Repositorio = {
@@ -79,6 +88,21 @@ const repositorioFixtures: Repositorio = {
   },
   async ordens() {
     return fixtures.ORDENS
+  },
+  async lancamentos() {
+    return fixtures.LANCAMENTOS
+  },
+  async contas() {
+    return fixtures.CONTAS
+  },
+  async repasses() {
+    return fixtures.REPASSES
+  },
+  async categorias() {
+    return fixtures.CATEGORIAS
+  },
+  async enviosContabeis() {
+    return fixtures.ENVIOS_CONTABEIS
   },
 }
 
@@ -305,6 +329,13 @@ const repositorioSupabase: Repositorio = {
   ocorrencias: repositorioFixtures.ocorrencias,
   solicitacoes: repositorioFixtures.solicitacoes,
   ordens: repositorioFixtures.ordens,
+  // O financeiro ainda não tem tabelas próprias no Supabase; cai nos fixtures
+  // até a migration existir, sem fingir consulta.
+  lancamentos: repositorioFixtures.lancamentos,
+  contas: repositorioFixtures.contas,
+  repasses: repositorioFixtures.repasses,
+  categorias: repositorioFixtures.categorias,
+  enviosContabeis: repositorioFixtures.enviosContabeis,
 }
 
 /**
