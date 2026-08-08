@@ -29,9 +29,9 @@ export const NAV: GrupoNav[] = [
     label: 'Pedidos',
     telas: [
       { id: 'pedidos', label: 'Todos os pedidos', href: '/pedidos', pronta: true },
-      { id: 'envios', label: 'Rastreamento e entregas', href: '/pedidos/envios' },
-      { id: 'devolucoes', label: 'Devoluções', href: '/pedidos/devolucoes' },
-      { id: 'ocorrencias', label: 'Ocorrências de entrega', href: '/pedidos/ocorrencias' },
+      { id: 'envios', label: 'Rastreamento e entregas', href: '/pedidos/envios', pronta: true },
+      { id: 'devolucoes', label: 'Devoluções', href: '/pedidos/devolucoes', pronta: true },
+      { id: 'ocorrencias', label: 'Ocorrências de entrega', href: '/pedidos/ocorrencias', pronta: true },
     ],
   },
   {

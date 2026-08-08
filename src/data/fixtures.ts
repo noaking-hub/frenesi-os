@@ -7,13 +7,20 @@
  * tela é derivada destes registros pelas funções de `src/domain`.
  */
 
+import { aferirItem } from '@/domain'
 import type {
   ContagemInventario,
+  EstadoLacre,
+  Envio,
+  ItemAferido,
   Lote,
   Movimentacao,
+  Ocorrencia,
   Pedido,
   PerfumeBase,
   ProdutoDerivado,
+  StatusSolicitacao,
+  TipoSolicitacao,
   VarianteMl,
 } from '@/domain'
 
@@ -332,6 +339,235 @@ export const INVENTARIO: ContagemInventario[] = [
   { baseId: 'del', perfume: 'Delina', sistemaMl: 90, contadoMl: 90, responsavel: 'Marina F.', quando: 'hoje 08:41' },
   { baseId: 'gg', perfume: 'Good Girl', sistemaMl: 340, contadoMl: null, responsavel: null, quando: null },
   { baseId: 'oud', perfume: 'Oud Wood', sistemaMl: 0, contadoMl: 0, responsavel: 'Pedro A.', quando: 'hoje 08:52' },
+]
+
+/**
+ * Rastreamento por pedido.
+ *
+ * A Yampi recebe o rastreio dos gateways mas não reporta a entrega para a
+ * Shopify — por isso `shopify` pode ficar em `aguardando-baixa` mesmo com o
+ * objeto já entregue. É essa lacuna que a integração fecha.
+ */
+export const ENVIOS: Envio[] = [
+  {
+    pedidoId: '#10476', cliente: 'Larissa Duarte', destino: 'Goiânia · GO',
+    transportadora: 'Jadlog · .Package', gateway: 'Melhor Envio', rastreio: 'JD4471120',
+    status: 'entregue', shopify: 'aguardando-baixa',
+    ultimoEvento: 'Objeto entregue ao destinatário', eventoQuando: 'hoje 11:24',
+    eventos: [
+      { quando: 'hoje 11:24', descricao: 'Objeto entregue ao destinatário', local: 'Goiânia · GO', severidade: 'ok' },
+      { quando: 'hoje 07:50', descricao: 'Objeto saiu para entrega', local: 'Jadlog Goiânia · GO', severidade: 'info' },
+      { quando: '02/08 21:15', descricao: 'Objeto em trânsito', local: 'Jadlog Campinas · SP', severidade: 'info' },
+      { quando: '01/08 18:30', descricao: 'Objeto postado', local: 'Jadlog São Paulo · SP', severidade: 'info' },
+    ],
+  },
+  {
+    pedidoId: '#10480', cliente: 'Juliana Prado', destino: 'Belo Horizonte · MG',
+    transportadora: 'Correios · SEDEX', gateway: 'Melhor Envio', rastreio: 'OS9981204BR',
+    status: 'entrega-nao-efetuada', shopify: 'em-transito',
+    ultimoEvento: 'Destinatário ausente · 2ª tentativa amanhã', eventoQuando: 'hoje 10:38',
+    eventos: [
+      { quando: 'hoje 10:38', descricao: 'Tentativa de entrega não efetuada · destinatário ausente', local: 'Belo Horizonte · MG', severidade: 'erro' },
+      { quando: 'hoje 08:05', descricao: 'Objeto saiu para entrega', local: 'CDD Savassi · MG', severidade: 'info' },
+      { quando: '02/08 22:10', descricao: 'Objeto postado', local: 'Agência Vila Madalena · SP', severidade: 'info' },
+    ],
+  },
+  {
+    pedidoId: '#10478', cliente: 'Beatriz Lima', destino: 'Rio de Janeiro · RJ',
+    transportadora: 'Loggi · Econômico', gateway: 'Frenet', rastreio: 'LGG88214077',
+    status: 'sem-movimentacao', shopify: 'em-transito',
+    ultimoEvento: 'Sem leitura há 4 dias · prazo estourado', eventoQuando: '30/07 09:12',
+    eventos: [
+      { quando: '30/07 09:12', descricao: 'Objeto em trânsito', local: 'Loggi Rio de Janeiro · RJ', severidade: 'info' },
+      { quando: '29/07 20:44', descricao: 'Objeto postado', local: 'Loggi São Paulo · SP', severidade: 'info' },
+      { quando: '—', descricao: 'Nenhuma leitura desde então · abrir ocorrência na Yampi', local: 'Yampi · Frenet', severidade: 'erro' },
+    ],
+  },
+  {
+    pedidoId: '#10481', cliente: 'Rafael Andrade', destino: 'Campinas · SP',
+    transportadora: 'Correios · PAC', gateway: 'Melhor Envio', rastreio: 'OS1234567BR',
+    status: 'em-transito', shopify: 'em-transito',
+    ultimoEvento: 'Objeto em trânsito para BRC Campinas', eventoQuando: 'hoje 06:14',
+    eventos: [
+      { quando: 'hoje 06:14', descricao: 'Objeto em trânsito para unidade de distribuição', local: 'CTE São Paulo · SP', severidade: 'info' },
+      { quando: 'ontem 19:02', descricao: 'Objeto postado', local: 'Agência Vila Madalena · SP', severidade: 'info' },
+      { quando: 'ontem 17:41', descricao: 'Etiqueta gerada manualmente · rastreio enviado à Yampi', local: 'FRENESI · expedição', severidade: 'neutro' },
+    ],
+  },
+  {
+    pedidoId: '#10474', cliente: 'Ana Clara Mota', destino: 'São Paulo · SP',
+    transportadora: 'Azul Cargo · Amanhã', gateway: 'Frenet', rastreio: 'AZ7710455',
+    status: 'entregue', shopify: 'entregue',
+    ultimoEvento: 'Objeto entregue · baixa registrada na Shopify', eventoQuando: '31/07 14:02',
+    eventos: [
+      { quando: '31/07 14:06', descricao: 'Pedido marcado como entregue na Shopify', local: 'FRENESI ERP · baixa automática', severidade: 'ok' },
+      { quando: '31/07 14:04', descricao: 'Evento de entrega lido na Yampi', local: 'FRENESI ERP · integração', severidade: 'ok' },
+      { quando: '31/07 14:02', descricao: 'Objeto entregue ao destinatário', local: 'São Paulo · SP', severidade: 'ok' },
+      { quando: '31/07 08:20', descricao: 'Objeto saiu para entrega', local: 'Azul Cargo Congonhas · SP', severidade: 'info' },
+    ],
+  },
+  {
+    pedidoId: '#10482', cliente: 'Camila Rocha', destino: 'São Paulo · SP',
+    transportadora: 'Correios · SEDEX', gateway: 'Melhor Envio', rastreio: '',
+    status: 'aguardando-postagem', shopify: 'aguardando-envio',
+    ultimoEvento: 'Etiqueta ainda não gerada na plataforma', eventoQuando: 'há 2 dias',
+    eventos: [],
+  },
+  {
+    pedidoId: '#10477', cliente: 'Marcos Ferreira', destino: 'Santos · SP',
+    transportadora: 'Jadlog · .Package', gateway: 'Melhor Envio', rastreio: '',
+    status: 'aguardando-postagem', shopify: 'aguardando-envio',
+    ultimoEvento: 'Etiqueta ainda não gerada na plataforma', eventoQuando: 'há 2 dias',
+    eventos: [],
+  },
+  {
+    pedidoId: '#10475', cliente: 'Eduardo Salles', destino: 'Porto Alegre · RS',
+    transportadora: 'Correios · PAC', gateway: 'Melhor Envio', rastreio: '',
+    status: 'pagamento-pendente', shopify: 'aguardando-pagamento',
+    ultimoEvento: 'Pedido não liberado para envio', eventoQuando: 'há 2 dias',
+    eventos: [],
+  },
+]
+
+/** Ocorrências abertas automaticamente pelo rastreio. */
+export const OCORRENCIAS: Ocorrencia[] = [
+  {
+    id: 'OE-318', pedidoId: '#10478', cliente: 'Beatriz Lima', destino: 'Rio de Janeiro · RJ',
+    transportadora: 'Loggi · Econômico', gateway: 'Frenet', rastreio: 'LGG88214077',
+    tipo: 'sem-movimentacao', dias: 4, prazo: -3, abertura: '02/08 09:20',
+    estado: 'aberta', acao: 'Abrir reclamação na Yampi', valor: 513.6,
+  },
+  {
+    id: 'OE-317', pedidoId: '#10480', cliente: 'Juliana Prado', destino: 'Belo Horizonte · MG',
+    transportadora: 'Correios · SEDEX', gateway: 'Melhor Envio', rastreio: 'OS9981204BR',
+    tipo: 'entrega-nao-efetuada', dias: 1, prazo: 0, abertura: 'hoje 10:38',
+    estado: 'aguardando-cliente', acao: 'Confirmar endereço e reagendar', valor: 612.5,
+  },
+  {
+    id: 'OE-316', pedidoId: '#10465', cliente: 'Vitor Hugo Rezende', destino: 'Londrina · PR',
+    transportadora: 'Loggi · Econômico', gateway: 'Frenet', rastreio: 'LGG55120904',
+    tipo: 'extravio', dias: 11, prazo: -8, abertura: '28/07 15:02',
+    estado: 'em-indenizacao', acao: 'Reenviar pedido e pedir ressarcimento', valor: 352.0,
+  },
+  {
+    id: 'OE-315', pedidoId: '#10471', cliente: 'Bruno Sampaio', destino: 'Recife · PE',
+    transportadora: 'Azul Cargo · Amanhã', gateway: 'Frenet', rastreio: 'AZ4471120',
+    tipo: 'avaria', dias: 6, prazo: 0, abertura: '30/07 09:05',
+    estado: 'resolvida', acao: 'Reenvio postado · devolução DEV-1039', valor: 289.0,
+  },
+  {
+    id: 'OE-314', pedidoId: '#10459', cliente: 'Helena Braga', destino: 'Manaus · AM',
+    transportadora: 'Correios · PAC', gateway: 'Melhor Envio', rastreio: 'OS7712004BR',
+    tipo: 'atraso', dias: 9, prazo: -5, abertura: '27/07 11:44',
+    estado: 'aberta', acao: 'Cobrar prazo no gateway', valor: 198.0,
+  },
+  {
+    id: 'OE-313', pedidoId: '#10452', cliente: 'Diego Matos', destino: 'Belém · PA',
+    transportadora: 'Jadlog · .Package', gateway: 'Melhor Envio', rastreio: 'JD3390017',
+    tipo: 'endereco-insuficiente', dias: 3, prazo: -1, abertura: '31/07 16:20',
+    estado: 'aguardando-cliente', acao: 'Cliente precisa completar o endereço', valor: 245.0,
+  },
+]
+
+export interface SolicitacaoErp {
+  id: string
+  pedidoId: string
+  cliente: string
+  destino: string
+  identificacao: string
+  email: string
+  telefone: string
+  abertura: string
+  tipo: TipoSolicitacao
+  motivo: string
+  comentario: string
+  valor: number
+  prazo: string
+  prazoOk: boolean
+  status: StatusSolicitacao
+  gateway: 'Frenet' | 'Melhor Envio'
+  etiquetaIda: string
+  reverso: string
+  lacre: EstadoLacre
+  fotos: string[]
+  itens: ItemAferido[]
+}
+
+/**
+ * Devoluções vindas do portal.
+ *
+ * `itens` já vem aferido: o volume medido na conferência contra o que foi
+ * fracionado. A decisão de aceitar sai daí — ver `triarDevolucao`.
+ */
+export const SOLICITACOES: SolicitacaoErp[] = [
+  {
+    id: 'DEV-1042', pedidoId: '#10480', cliente: 'Juliana Prado', destino: 'Belo Horizonte · MG',
+    identificacao: 'CPF 041.***.***-22', email: 'ju.prado@email.com', telefone: '31 98003-1177',
+    abertura: 'hoje 08:12', tipo: 'Defeito', motivo: 'Produto avariado no transporte',
+    comentario:
+      'A caixa chegou amassada e um dos frascos estava trincado, vazou dentro do estojo. Tenho fotos do frasco e da embalagem.',
+    valor: 612.5, prazo: '28 dias restantes · defeito (30 dias)', prazoOk: true,
+    status: 'Nova', gateway: 'Melhor Envio', etiquetaIda: 'OS9981204BR', reverso: '',
+    lacre: 'rompido-no-transporte',
+    fotos: ['Volume no frasco', 'Lacre / recrave', 'Frasco trincado', 'Estojo com vazamento'],
+    itens: [
+      aferirItem('Baccarat Rouge 540', 5, 4.9, 'Frasco trincado'),
+      aferirItem('Delina', 5, 1.2, 'Vazou no transporte'),
+      aferirItem('Aventus', 5, 4.8, 'Frasco trincado'),
+    ],
+  },
+  {
+    id: 'DEV-1041', pedidoId: '#10474', cliente: 'Ana Clara Mota', destino: 'São Paulo · SP',
+    identificacao: 'E-mail verificado', email: 'ana.mota@email.com', telefone: '11 97001-5540',
+    abertura: 'ontem 17:40', tipo: 'Arrependimento', motivo: 'Desistência da compra',
+    comentario: 'Comprei por impulso e não abri o lacre. Gostaria de devolver os dois itens.',
+    valor: 168.8, prazo: '5 dias restantes · CDC (7 dias)', prazoOk: false,
+    status: 'Em análise', gateway: 'Frenet', etiquetaIda: 'AZ7710455', reverso: '',
+    lacre: 'intacto',
+    fotos: ['Volume no frasco', 'Lacre / recrave'],
+    itens: [
+      aferirItem('Erba Pura', 5, 5, 'Lacre intacto'),
+      aferirItem('Sauvage Elixir', 8, 7.6, 'Lacre intacto'),
+    ],
+  },
+  {
+    id: 'DEV-1040', pedidoId: '#10465', cliente: 'Vitor Hugo Rezende', destino: 'Londrina · PR',
+    identificacao: 'CPF 118.***.***-40', email: 'vitor.rezende@email.com', telefone: '43 99820-6611',
+    abertura: '02/08 14:10', tipo: 'Arrependimento', motivo: 'Não gostei da fragrância',
+    comentario: 'Não é o que eu esperava. Usei só uma borrifada para testar.',
+    valor: 352.0, prazo: '2 dias restantes · CDC (7 dias)', prazoOk: false,
+    // Ainda em análise: a triagem reprova o volume, então a decisão está de pé.
+    // Aprovar antes da conferência contradiria a própria aferição.
+    status: 'Em análise', gateway: 'Frenet', etiquetaIda: 'LGG55120904', reverso: '',
+    lacre: 'violado',
+    fotos: ['Volume no frasco', 'Lacre / recrave'],
+    itens: [
+      // 3,9 de 5 ml = 78%, abaixo do mínimo de 4,5 → arrependimento bloqueado.
+      aferirItem('Oud Wood', 5, 3.9, 'Lacre rompido pelo cliente'),
+    ],
+  },
+  {
+    id: 'DEV-1039', pedidoId: '#10471', cliente: 'Bruno Sampaio', destino: 'Recife · PE',
+    identificacao: 'E-mail verificado', email: 'bruno.sampaio@email.com', telefone: '81 98120-4477',
+    abertura: '30/07 09:40', tipo: 'Defeito', motivo: 'Frasco chegou vazando',
+    comentario: 'Chegou com a tampa solta e metade do conteúdo tinha vazado na caixa.',
+    valor: 289.0, prazo: 'dentro do prazo · defeito (30 dias)', prazoOk: true,
+    status: 'Em trânsito reverso', gateway: 'Frenet', etiquetaIda: 'AZ4471120', reverso: 'RV4471120BR',
+    lacre: 'rompido-no-transporte',
+    fotos: ['Volume no frasco', 'Tampa solta', 'Caixa com vazamento'],
+    itens: [aferirItem('Bleu de Chanel', 10, 4.2, 'Vazou no transporte')],
+  },
+  {
+    id: 'DEV-1038', pedidoId: '#10452', cliente: 'Diego Matos', destino: 'Belém · PA',
+    identificacao: 'CPF 330.***.***-17', email: 'diego.matos@email.com', telefone: '91 98221-3390',
+    abertura: '28/07 11:05', tipo: 'Erro de envio', motivo: 'Recebi produto diferente do pedido',
+    comentario: 'Pedi Good Girl 5 ml e veio outro perfume.',
+    valor: 245.0, prazo: 'resolvido', prazoOk: true,
+    status: 'Concluída', gateway: 'Melhor Envio', etiquetaIda: 'JD3390017', reverso: 'RV7710455BR',
+    lacre: 'intacto',
+    fotos: ['Volume no frasco', 'Lacre / recrave'],
+    itens: [aferirItem('Good Girl', 5, 5, 'Lacre intacto · perfume trocado')],
+  },
 ]
 
 /** Mês fechado que alimenta o resumo financeiro do dashboard e o DRE. */

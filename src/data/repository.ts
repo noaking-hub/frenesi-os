@@ -1,8 +1,11 @@
 import 'server-only'
 
 import { PARAMETROS_PADRAO } from '@/domain'
+import type { SolicitacaoErp } from './fixtures'
 import type {
   ContagemInventario,
+  Envio,
+  Ocorrencia,
   Lote,
   Movimentacao,
   ParametrosPrecificacao,
@@ -30,6 +33,9 @@ export interface Repositorio {
   precoPraticado(): Promise<Record<string, Partial<Record<VarianteMl, number>>>>
   movimentacoes(): Promise<Movimentacao[]>
   inventario(): Promise<ContagemInventario[]>
+  envios(): Promise<Envio[]>
+  ocorrencias(): Promise<Ocorrencia[]>
+  solicitacoes(): Promise<SolicitacaoErp[]>
 }
 
 const repositorioFixtures: Repositorio = {
@@ -59,6 +65,15 @@ const repositorioFixtures: Repositorio = {
   },
   async inventario() {
     return fixtures.INVENTARIO
+  },
+  async envios() {
+    return fixtures.ENVIOS
+  },
+  async ocorrencias() {
+    return fixtures.OCORRENCIAS
+  },
+  async solicitacoes() {
+    return fixtures.SOLICITACOES
   },
 }
 
@@ -276,6 +291,14 @@ const repositorioSupabase: Repositorio = {
       }),
     )
   },
+
+  // Rastreamento, ocorrências e a triagem de devolução ainda não têm tabelas
+  // próprias — o schema cobre `devolucoes`, mas não o extrato de eventos nem a
+  // aferição de volume. Até lá estas três leem os fixtures, mesmo com o
+  // Supabase configurado, em vez de fingir uma consulta que não existe.
+  envios: repositorioFixtures.envios,
+  ocorrencias: repositorioFixtures.ocorrencias,
+  solicitacoes: repositorioFixtures.solicitacoes,
 }
 
 /**

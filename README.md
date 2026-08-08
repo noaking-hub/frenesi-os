@@ -60,6 +60,9 @@ nenhuma tela muda.
 |---|---|
 | `/` | Dashboard |
 | `/pedidos` | Todos os pedidos + drawer com a ficha completa |
+| `/pedidos/envios` | Rastreamento e entregas · baixa na Shopify |
+| `/pedidos/devolucoes` | Devoluções · triagem, reverso e resolução |
+| `/pedidos/ocorrencias` | Ocorrências de entrega |
 | `/estoque` | Perfumes base · quando o estoque acaba |
 | `/estoque/derivados` | Produtos derivados · decants prontos por variante |
 | `/estoque/movimentacoes` | Movimentações de estoque |
@@ -150,6 +153,18 @@ aceita uma.
 **Prazo de devolução: 7 dias corridos da marcação de entrega.** Antes da entrega
 o relógio não começa — o pedido fica "aguardando entrega", que não é a mesma
 coisa que "fora do prazo". Portal e ERP leem a mesma `statusDevolucao`.
+
+**A entrega não chega sozinha na Shopify.** A Yampi recebe o rastreio dos
+gateways mas não reporta a entrega, então o pedido fica aberto lá. Capturar a
+entrega confirmada e dar baixa é a razão de existir da integração.
+→ `aguardaBaixaShopify` em `src/domain/entregas.ts`
+
+**Triagem de devolução: 10% é o limite, mas não decide sozinho.** Aceita-se até
+10% abaixo do volume fracionado. Abaixo disso o decant foi usado — e isso só
+recusa quando o motivo é arrependimento; em frasco danificado ou erro de envio
+a perda é esperada. O reverso sai sempre na mesma plataforma que emitiu a
+etiqueta de ida.
+→ `aferirItem` e `triarDevolucao` em `src/domain/devolucoes.ts`
 
 **Vocabulário do usuário, não do sistema.** "Estoque acaba em 12 dias", não
 "ruptura". E o critério interno de aceitação (tolerância de 10% abaixo do volume

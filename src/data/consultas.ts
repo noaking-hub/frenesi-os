@@ -1,11 +1,13 @@
 import 'server-only'
 
 import {
+  aguardaBaixaShopify,
   apurarLote,
   apurarPerdaReal,
   calcularPreco,
   coberturaDe,
   conciliarLotesAbertos,
+  resumirOcorrencias,
   resumoSync,
   sincronizarBase,
   statusDoPedido,
@@ -118,12 +120,21 @@ export interface Pendencia {
 
 export async function carregarDashboard() {
   const repo = repositorio()
-  const [estoque, lotes, sync, parametros] = await Promise.all([
+  const [estoque, lotes, sync, parametros, solicitacoes, ocorrencias, envios] = await Promise.all([
     carregarEstoque(),
     carregarLotes(),
     carregarSincronia(),
     repo.parametros(),
+    repo.solicitacoes(),
+    repo.ocorrencias(),
+    repo.envios(),
   ])
+
+  const devAguardando = solicitacoes.filter(
+    (d) => d.status === 'Nova' || d.status === 'Em análise' || d.status === 'Aguardando fotos',
+  )
+  const resumoOe = resumirOcorrencias(ocorrencias)
+  const filaBaixa = envios.filter(aguardaBaixaShopify)
 
   const bases = await repo.perfumesBase()
   const esgotadas = bases.filter((b) => b.volumeMl === 0)
@@ -169,6 +180,33 @@ export async function carregarDashboard() {
       etiqueta: 'Estoque',
       tom: sync.esgotar ? 'erro' : 'atencao',
       href: '/estoque/sincronia',
+    },
+    {
+      contagem: devAguardando.length,
+      titulo: 'Devoluções aguardando análise',
+      hint: devAguardando.length
+        ? `${brlSimples(devAguardando.reduce((a, d) => a + d.valor, 0))} em solicitações do portal`
+        : 'Nenhuma solicitação parada',
+      etiqueta: 'Devoluções',
+      tom: 'ouro',
+      href: '/pedidos/devolucoes',
+    },
+    {
+      contagem: filaBaixa.length,
+      titulo: 'Entregas sem baixa na Shopify',
+      // A Yampi confirma a entrega mas não avisa a Shopify — o pedido fica aberto lá.
+      hint: 'Confirmadas na Yampi e ainda abertas na Shopify',
+      etiqueta: 'Entregas',
+      tom: 'info',
+      href: '/pedidos/envios',
+    },
+    {
+      contagem: resumoOe.abertas,
+      titulo: 'Ocorrências de entrega abertas',
+      hint: `${brlSimples(resumoOe.valorParado)} parados · ${resumoOe.atrasadas} além do prazo`,
+      etiqueta: 'Transporte',
+      tom: 'erro',
+      href: '/pedidos/ocorrencias',
     },
     {
       contagem: CONTAS_ABERTAS.length,
