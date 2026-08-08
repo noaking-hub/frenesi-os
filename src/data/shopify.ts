@@ -71,11 +71,28 @@ const CONSULTA_PRODUTOS = /* GraphQL */ `
 `
 
 /** Lê o catálogo inteiro da loja, paginando de 100 em 100. */
+/** Normaliza o domínio: aceita colado com https://, barra final ou espaços. */
+function lojaNormalizada(valor: string): string {
+  return valor
+    .trim()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '')
+}
+
 export async function lerCatalogoShopify(): Promise<ProdutoShopify[]> {
-  const loja = process.env.SHOPIFY_LOJA
-  const token = process.env.SHOPIFY_ADMIN_TOKEN
+  const loja = lojaNormalizada(process.env.SHOPIFY_LOJA ?? '')
+  const token = (process.env.SHOPIFY_ADMIN_TOKEN ?? '').trim().replace(/^["']|["']$/g, '')
   if (!loja || !token) {
     throw new Error('SHOPIFY_LOJA e SHOPIFY_ADMIN_TOKEN precisam estar no .env.local')
+  }
+  // O único valor que funciona aqui é o Admin API access token, gerado ao
+  // INSTALAR o app. O "API key" e o "API secret key" da mesma tela não servem.
+  if (!token.startsWith('shpat_')) {
+    throw new Error(
+      'O valor em SHOPIFY_ADMIN_TOKEN não parece um Admin API access token — ele começa com shpat_. ' +
+        'Na tela de credenciais do app, o "API key" e o "API secret key" não servem: ' +
+        'clique em "Instalar app" e copie o Admin API access token revelado após a instalação.',
+    )
   }
 
   const produtos: ProdutoShopify[] = []
@@ -92,18 +109,38 @@ export async function lerCatalogoShopify(): Promise<ProdutoShopify[]> {
       cache: 'no-store',
     })
 
-    if (resposta.status === 401 || resposta.status === 403) {
+    if (resposta.status === 401) {
       throw new Error(
-        'A Shopify recusou o token. Confira o SHOPIFY_ADMIN_TOKEN e os escopos read_products e read_inventory.',
+        `A Shopify não reconheceu o token para ${loja} (401). Ou o token não é desta loja, ` +
+          'ou o app foi desinstalado, ou o token foi rotacionado. Gere de novo em ' +
+          'Desenvolver apps → seu app → API credentials → Instalar app.',
+      )
+    }
+    if (resposta.status === 403) {
+      throw new Error(
+        'A Shopify reconheceu o token mas negou o acesso (403). Confira se o app foi instalado ' +
+          'com os escopos read_products e read_inventory marcados — se acabou de marcar, é preciso ' +
+          'instalar de novo para o token ganhar os escopos.',
       )
     }
     if (!resposta.ok) {
-      throw new Error(`Shopify respondeu ${resposta.status} ao ler o catálogo.`)
+      const detalhe = await resposta.text().catch(() => '')
+      throw new Error(
+        `Shopify respondeu ${resposta.status} ao ler o catálogo${detalhe ? ` — ${detalhe.slice(0, 160)}` : ''}.`,
+      )
     }
 
     const corpo = (await resposta.json()) as RespostaGraphql
     if (corpo.errors?.length) {
-      throw new Error(`Shopify: ${corpo.errors[0].message}`)
+      const msg = corpo.errors[0].message
+      // Escopo faltando chega como erro GraphQL, não como HTTP 403.
+      if (/access denied|not approved|unauthorized/i.test(msg)) {
+        throw new Error(
+          `A Shopify negou o campo consultado: "${msg}". Marque os escopos read_products e ` +
+            'read_inventory no app e reinstale para o token ganhar as permissões.',
+        )
+      }
+      throw new Error(`Shopify: ${msg}`)
     }
     const pageInfo = corpo.data?.products.pageInfo
     for (const p of corpo.data?.products.nodes ?? []) {
