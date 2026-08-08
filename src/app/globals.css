@@ -1,0 +1,214 @@
+@import 'tailwindcss';
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Design tokens · FRENESI
+   Valores finais do handoff. Nenhum componente inventa cor fora daqui.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@theme {
+  /* ── ERP · tema escuro ─────────────────────────────────────────────────── */
+  --color-app: #080807;
+  --color-sidebar-top: #0e0d0c;
+  --color-sidebar-bottom: #0a0a09;
+  --color-mesa: #101011;
+  --color-card-top: #17161a;
+  --color-card-bottom: #111112;
+  --color-card-alt-top: #141315;
+  --color-card-alt-bottom: #101011;
+  --color-card-gold-top: #16141a;
+  --color-card-gold-bottom: #100f11;
+  --color-painel: #131215;
+
+  --color-tinta: #f6f1e7;
+  --color-corrente: #f2ede3;
+  --color-secundario: rgba(242, 237, 227, 0.6);
+  --color-terciario: rgba(242, 237, 227, 0.42);
+  --color-apagado: rgba(242, 237, 227, 0.3);
+
+  --color-ouro: #efd18c;
+  --color-ouro-escuro: #c9a868;
+  --color-ouro-fundo: #9d7e43;
+  --color-ouro-claro: #fff0ce;
+  --color-sobre-ouro: #12100d;
+
+  --color-ok: #5c9e70;
+  --color-ok-claro: #7fc095;
+  --color-atencao: #d98c3f;
+  --color-erro: #c25a50;
+  --color-erro-claro: #d2726a;
+  --color-info: #6c8cb0;
+  --color-info-claro: #8fa9c4;
+
+  --color-borda: rgba(255, 255, 255, 0.07);
+  --color-borda-sutil: rgba(255, 255, 255, 0.04);
+  --color-borda-ouro: rgba(239, 209, 140, 0.16);
+  --color-linha-hover: rgba(239, 209, 140, 0.04);
+  --color-cabecalho: rgba(255, 255, 255, 0.028);
+
+  /* ── Portal · tema claro ───────────────────────────────────────────────── */
+  --color-portal-fundo: #ede6da;
+  --color-portal-coluna: #faf6ee;
+  --color-portal-card: #fffdf9;
+  --color-portal-header: #1a1714;
+  --color-portal-tinta: #241f18;
+  --color-portal-secundario: rgba(36, 31, 24, 0.62);
+  --color-portal-terciario: rgba(36, 31, 24, 0.5);
+  --color-portal-ouro: #b08d4b;
+  --color-portal-link: #8a6a2f;
+  --color-portal-link-hover: #6e5324;
+  --color-portal-ok: #3f7a52;
+  --color-portal-erro: #a83a30;
+  --color-portal-borda: rgba(36, 31, 24, 0.12);
+
+  /* ── Tipografia ────────────────────────────────────────────────────────── */
+  /* As três famílias vêm de next/font (ver src/app/layout.tsx). */
+  --font-display: var(--font-cormorant), Georgia, serif;
+  --font-sans: var(--font-manrope), system-ui, sans-serif;
+  /* Todo número — valores, volumes, percentuais, códigos, datas curtas. */
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+
+  /* ── Raio ──────────────────────────────────────────────────────────────── */
+  --radius-chip: 5px;
+  --radius-campo: 9px;
+  --radius-card: 14px;
+  --radius-modal: 17px;
+  --radius-pill: 20px;
+
+  /* ── Sombra ────────────────────────────────────────────────────────────── */
+  --shadow-ouro: 0 2px 14px rgba(239, 209, 140, 0.16);
+  --shadow-modal: 0 30px 80px rgba(0, 0, 0, 0.6);
+  --shadow-coluna: 0 0 60px rgba(36, 31, 24, 0.1);
+
+  /* ── Animações ─────────────────────────────────────────────────────────── */
+  --animate-fr-in: fr-in 0.22s ease both;
+  --animate-fr-entra: fr-in 0.32s ease both;
+  --animate-fr-pulse: fr-pulse 2.4s ease-in-out infinite;
+  --animate-fr-shimmer: fr-shimmer 1.5s linear infinite;
+  --animate-pt-in: pt-in 0.26s ease both;
+}
+
+@keyframes fr-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fr-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes fr-shimmer {
+  0% {
+    background-position: -320px 0;
+  }
+  100% {
+    background-position: 320px 0;
+  }
+}
+
+/* Portal — entrada um pouco mais longa e com deslocamento maior. */
+@keyframes pt-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Transições de borda e cor em .16s, como no handoff. */
+  button,
+  a,
+  input,
+  select,
+  textarea {
+    font-family: inherit;
+    transition:
+      border-color 0.16s,
+      background-color 0.16s,
+      color 0.16s;
+  }
+}
+
+@utility superficie-erp {
+  background:
+    radial-gradient(1200px 500px at 78% -10%, rgba(239, 209, 140, 0.055), transparent 70%),
+    var(--color-app);
+  color: var(--color-corrente);
+}
+
+@utility card-erp {
+  background: linear-gradient(170deg, var(--color-card-top), var(--color-card-bottom));
+  border: 1px solid var(--color-borda);
+  border-radius: var(--radius-card);
+}
+
+@utility card-ouro {
+  background: linear-gradient(
+    170deg,
+    var(--color-card-gold-top),
+    var(--color-card-gold-bottom)
+  );
+  border: 1px solid var(--color-borda-ouro);
+}
+
+@utility botao-ouro {
+  background: linear-gradient(135deg, var(--color-ouro), var(--color-ouro-escuro));
+  color: var(--color-sobre-ouro);
+  border: 0;
+}
+
+/* Barra de rolagem dourada do ERP. */
+.erp ::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+.erp ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.erp ::-webkit-scrollbar-thumb {
+  background: rgba(239, 209, 140, 0.16);
+  border-radius: 8px;
+}
+.erp ::-webkit-scrollbar-thumb:hover {
+  background: rgba(239, 209, 140, 0.3);
+}
+
+.portal ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.portal ::-webkit-scrollbar-thumb {
+  background: rgba(36, 31, 24, 0.18);
+  border-radius: 4px;
+}
+.portal input::placeholder,
+.portal textarea::placeholder {
+  color: rgba(36, 31, 24, 0.34);
+}

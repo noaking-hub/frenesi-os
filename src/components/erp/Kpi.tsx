@@ -1,0 +1,70 @@
+import { Rotulo } from './primitivos'
+import { COR, type Tom } from './tokens'
+
+export interface Kpi {
+  label: string
+  valor: string
+  /**
+   * O hint SEMPRE explica ou qualifica o valor — nunca é decorativo, e nunca
+   * descreve outro evento. É derivado da mesma fonte que o valor.
+   */
+  hint: string
+  tom?: Tom
+}
+
+export function CardKpi({ kpi }: { kpi: Kpi }) {
+  return (
+    <div
+      className="card-erp hover:border-ouro/25"
+      style={{
+        padding: '14px 16px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 7,
+        minWidth: 0,
+      }}
+    >
+      <Rotulo>{kpi.label}</Rotulo>
+      <span
+        className="font-mono"
+        style={{
+          fontWeight: 500,
+          fontSize: 20,
+          lineHeight: 1,
+          color: kpi.tom ? COR[kpi.tom] : 'var(--color-tinta)',
+        }}
+      >
+        {kpi.valor}
+      </span>
+      <span
+        className="font-sans"
+        style={{
+          fontWeight: 400,
+          fontSize: 10,
+          lineHeight: 1.35,
+          color: 'var(--color-terciario)',
+          textWrap: 'pretty',
+        }}
+      >
+        {kpi.hint}
+      </span>
+    </div>
+  )
+}
+
+/** Faixa de 3 a 5 cards no topo da tela. */
+export function FaixaKpis({ kpis }: { kpis: Kpi[] }) {
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: `repeat(${kpis.length}, minmax(0, 1fr))`,
+        gap: 13,
+      }}
+    >
+      {kpis.map((k) => (
+        <CardKpi key={k.label} kpi={k} />
+      ))}
+    </div>
+  )
+}
