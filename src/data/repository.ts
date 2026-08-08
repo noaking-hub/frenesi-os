@@ -223,6 +223,28 @@ const repositorioFixtures: Repositorio = {
   },
 }
 
+/**
+ * O PostgREST devolve no máximo 1.000 linhas por requisição — com 2.000+
+ * variantes, uma leitura sem paginação enxergaria metade do catálogo e as
+ * telas mostrariam dados truncados sem avisar. Este helper pagina até o fim.
+ */
+async function tudoDe<T>(
+  tabela: string,
+  pagina: (de: number, ate: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+): Promise<T[]> {
+  const TAMANHO = 1000
+  const linhas: T[] = []
+  for (let de = 0; ; de += TAMANHO) {
+    const { data, error } = await pagina(de, de + TAMANHO - 1)
+    if (error) throw error
+    const parte = data ?? []
+    linhas.push(...parte)
+    if (parte.length < TAMANHO) break
+    if (de > 100_000) throw new Error(`Paginação de ${tabela} passou de 100 mil linhas`)
+  }
+  return linhas
+}
+
 const repositorioSupabase: Repositorio = {
   async parametros() {
     const { data, error } = await supabaseServer()
@@ -248,12 +270,15 @@ const repositorioSupabase: Repositorio = {
   },
 
   async perfumesBase() {
-    const { data, error } = await supabaseServer()
-      .from('perfumes_base')
-      .select('id, nome, marca, genero, custo_por_ml, volume_ml, consumo_diario_ml, imagem_url')
-      .eq('ativo', true)
-    if (error) throw error
-    return (data ?? []).map((b) => ({
+    const data = await tudoDe('perfumes_base', (de, ate) =>
+      supabaseServer()
+        .from('perfumes_base')
+        .select('id, nome, marca, genero, custo_por_ml, volume_ml, consumo_diario_ml, imagem_url')
+        .eq('ativo', true)
+        .order('id')
+        .range(de, ate),
+    )
+    return data.map((b) => ({
       id: b.id,
       nome: b.nome,
       marca: b.marca,
@@ -266,11 +291,15 @@ const repositorioSupabase: Repositorio = {
   },
 
   async produtosDerivados() {
-    const { data, error } = await supabaseServer()
-      .from('produtos_derivados')
-      .select('base_id, variante, envasadas, reservadas, preco_praticado')
-    if (error) throw error
-    return (data ?? []).map((d) => ({
+    const data = await tudoDe('produtos_derivados', (de, ate) =>
+      supabaseServer()
+        .from('produtos_derivados')
+        .select('base_id, variante, envasadas, reservadas, preco_praticado')
+        .order('base_id')
+        .order('variante')
+        .range(de, ate),
+    )
+    return data.map((d) => ({
       baseId: d.base_id,
       variante: d.variante as VarianteMl,
       envasadas: d.envasadas,
@@ -280,13 +309,15 @@ const repositorioSupabase: Repositorio = {
   },
 
   async shopifyPublicado() {
-    const { data, error } = await supabaseServer()
-      .from('shopify_publicado')
-      .select('base_id, variante, publicado')
-    if (error) throw error
-    return Object.fromEntries(
-      (data ?? []).map((p) => [`${p.base_id}|${p.variante}`, p.publicado]),
+    const data = await tudoDe('shopify_publicado', (de, ate) =>
+      supabaseServer()
+        .from('shopify_publicado')
+        .select('base_id, variante, publicado')
+        .order('base_id')
+        .order('variante')
+        .range(de, ate),
     )
+    return Object.fromEntries(data.map((p) => [`${p.base_id}|${p.variante}`, p.publicado]))
   },
 
   async lotes() {

@@ -70,13 +70,17 @@ export default async function Catalogo() {
         .reduce((a, d: ProdutoDerivado) => a + d.envasadas, 0)
 
       // Margem média das variantes com preço publicado, pela mesma fórmula
-      // da Precificação — nunca um percentual digitado.
-      const margens = VARIANTES.map((v: VarianteMl) => {
-        const preco = precos[base.id]?.[v]
-        if (!preco) return null
-        const c = calcularPreco(base.custoPorMl, v, parametros)
-        return margemDe(preco, c.custoProduto, parametros)
-      }).filter((m): m is number => m !== null)
+      // da Precificação — nunca um percentual digitado. Sem custo cadastrado
+      // não existe margem: mostrar um número aqui seria fantasia.
+      const margens =
+        base.custoPorMl > 0
+          ? VARIANTES.map((v: VarianteMl) => {
+              const preco = precos[base.id]?.[v]
+              if (!preco) return null
+              const c = calcularPreco(base.custoPorMl, v, parametros)
+              return margemDe(preco, c.custoProduto, parametros)
+            }).filter((m): m is number => m !== null)
+          : []
       const margemMedia = margens.length
         ? margens.reduce((a, m) => a + m, 0) / margens.length
         : null
