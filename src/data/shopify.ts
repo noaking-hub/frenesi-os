@@ -133,6 +133,8 @@ interface RespostaGraphql {
         vendor: string
         handle: string
         status: 'ACTIVE' | 'DRAFT' | 'ARCHIVED'
+        productType: string | null
+        tags: string[] | null
         featuredMedia: { preview: { image: { url: string } | null } | null } | null
         variants: {
           nodes: { id: string; title: string; price: string; inventoryQuantity: number | null }[]
@@ -156,6 +158,8 @@ const CONSULTA_PRODUTOS = /* GraphQL */ `
         vendor
         handle
         status
+        productType
+        tags
         featuredMedia {
           preview {
             image {
@@ -240,6 +244,8 @@ export async function lerCatalogoShopify(): Promise<ProdutoShopify[]> {
         handle: p.handle,
         status: p.status,
         imagemUrl: p.featuredMedia?.preview?.image?.url ?? null,
+        tipo: p.productType ?? '',
+        tags: p.tags ?? [],
         variantes: p.variants.nodes.map((v) => ({
           id: v.id,
           titulo: v.title,
@@ -290,7 +296,9 @@ export async function importarCatalogoShopify(): Promise<ResultadoImportacao> {
       id: b.id,
       nome: b.nome,
       marca: b.marca,
-      genero: atual?.genero ?? null,
+      // A loja é a fonte quando diz o gênero; quando não diz, o que já
+      // estava no ERP permanece — a importação não apaga informação.
+      genero: b.genero ?? atual?.genero ?? null,
       custo_por_ml: atual ? atual.custo_por_ml : 0,
       volume_ml: atual ? atual.volume_ml : 0,
       consumo_diario_ml: atual ? atual.consumo_diario_ml : 0,

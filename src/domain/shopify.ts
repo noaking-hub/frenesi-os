@@ -1,5 +1,7 @@
 import { VARIANTES } from './types'
-import type { VarianteMl } from './types'
+import type { PerfumeBase, VarianteMl } from './types'
+
+type Genero = NonNullable<PerfumeBase['genero']>
 
 /**
  * Mapeamento do catálogo da Shopify para o modelo do ERP. Puro: recebe o que
@@ -27,6 +29,9 @@ export interface ProdutoShopify {
   handle: string
   status: 'ACTIVE' | 'DRAFT' | 'ARCHIVED'
   imagemUrl: string | null
+  /** `productType` da Shopify — entra na detecção de gênero. */
+  tipo: string
+  tags: string[]
   variantes: VarianteShopify[]
 }
 
@@ -37,6 +42,8 @@ export interface BaseImportada {
   marca: string
   shopifyProductId: string
   imagemUrl: string | null
+  /** Detectado do título/tipo/tags; `null` quando a loja não diz. */
+  genero: Genero | null
 }
 
 export interface VarianteImportada {
@@ -57,6 +64,29 @@ export interface CatalogoMapeado {
   bases: BaseImportada[]
   variantes: VarianteImportada[]
   ignorados: ItemIgnorado[]
+}
+
+/**
+ * Gênero a partir do texto do produto. A Shopify não tem campo para isso —
+ * a loja escreve no próprio título ("… Masculino Eau de Parfum"), no tipo de
+ * produto ou nas tags. Quando nada indica, devolve `null`: o ERP prefere o
+ * travessão a um palpite.
+ */
+export function detectarGenero(...textos: string[]): Genero | null {
+  const t = textos
+    .join(' ')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+
+  if (/\bunissex\b|\bunisex\b/.test(t)) return 'Unissex'
+  const masculino = /\bmasculin[oa]\b|\bmasc\b|\bpour homme\b|\bfor men\b/.test(t)
+  const feminino = /\bfeminin[oa]\b|\bfem\b|\bpour femme\b|\bfor women\b/.test(t)
+  // Os dois no mesmo produto significam "serve para ambos".
+  if (masculino && feminino) return 'Unissex'
+  if (masculino) return 'Masculino'
+  if (feminino) return 'Feminino'
+  return null
 }
 
 /**
@@ -134,6 +164,7 @@ export function mapearCatalogo(produtos: ProdutoShopify[]): CatalogoMapeado {
       marca: p.fornecedor.trim() || '—',
       shopifyProductId: p.id,
       imagemUrl: p.imagemUrl,
+      genero: detectarGenero(p.titulo, p.tipo, ...p.tags),
     })
     variantes.push(...validas)
   }
