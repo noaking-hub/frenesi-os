@@ -135,8 +135,11 @@ export async function carregarDashboard() {
   const filaBaixa = envios.filter(aguardaBaixaShopify)
 
   const bases = await repo.perfumesBase()
-  const esgotadas = bases.filter((b) => b.volumeMl === 0)
-  const emRisco = estoque.criticos + estoque.esgotados
+  // Volume zero tem dois significados opostos e o Dashboard precisa separá-los:
+  // sem carga é "o ERP não sabe", esgotada é "acabou". Só a segunda é risco.
+  const semCarga = bases.filter((b) => b.volumeMl === 0 && b.custoPorMl === 0)
+  const esgotadas = bases.filter((b) => b.volumeMl === 0 && b.custoPorMl > 0)
+  const emRisco = estoque.criticos + esgotadas.length
 
   const { PEDIDOS_A_SEPARAR, CARRINHOS_PRIORIDADE_ALTA, COMANDOS_IA_AGUARDANDO } =
     await import('./fixtures')
@@ -170,7 +173,7 @@ export async function carregarDashboard() {
       contagem: emRisco,
       titulo: 'Perfumes base em risco',
       hint: esgotadas.length
-        ? `${esgotadas.map((b) => b.nome).join(', ')} esgotado · outros abaixo de 20 dias de cobertura`
+        ? `${esgotadas.slice(0, 3).map((b) => b.nome).join(', ')}${esgotadas.length > 3 ? ` e mais ${esgotadas.length - 3}` : ''} esgotado · outros abaixo de 20 dias de cobertura`
         : 'Abaixo de 20 dias de cobertura',
       etiqueta: 'Bloqueia',
       tom: 'erro',
@@ -178,11 +181,22 @@ export async function carregarDashboard() {
       origem: 'banco',
     },
     {
-      // A importação da Shopify não inventa custo: perfume novo entra com 0
-      // e fica acusado aqui até o cadastro ser completado.
-      contagem: bases.filter((b) => b.custoPorMl === 0).length,
+      // A importação da Shopify traz nome, marca e variantes — nunca volume
+      // nem custo. Enquanto ninguém declarar o que há na prateleira, a base
+      // não entra em preço, produção nem sincronia.
+      contagem: semCarga.length,
+      titulo: 'Perfumes sem carga inicial',
+      hint: 'Vieram da Shopify sem volume nem custo · ficam fora de preço, produção e sincronia',
+      etiqueta: 'Bloqueia',
+      tom: 'erro',
+      href: '/estoque/carga',
+      origem: 'banco',
+    },
+    {
+      // Já tem volume, mas ninguém disse o que custou: a margem sai errada.
+      contagem: bases.filter((b) => b.volumeMl > 0 && b.custoPorMl === 0).length,
       titulo: 'Perfumes sem custo cadastrado',
-      hint: 'Importados da Shopify · preço e margem saem errados até informar o custo por ml',
+      hint: 'Com volume em estoque · preço e margem saem errados até informar o custo por ml',
       etiqueta: 'Cadastro',
       tom: 'atencao',
       href: '/produtos',

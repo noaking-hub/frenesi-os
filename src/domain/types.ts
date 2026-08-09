@@ -101,7 +101,13 @@ export interface ParametrosPrecificacao {
   margemAlvo: number
 }
 
-export type AcaoSync = 'esgotar' | 'reduzir' | 'repor' | 'ok'
+/**
+ * `sem_carga` não é uma ação: é a recusa de agir. Base que nunca recebeu
+ * carga inicial tem volume zero porque o ERP não sabe o que existe, não
+ * porque acabou — e escrever zero na Shopify por causa disso tiraria o
+ * produto do ar.
+ */
+export type AcaoSync = 'esgotar' | 'reduzir' | 'repor' | 'ok' | 'sem_carga'
 
 /**
  * `divergente` é valor recebido diferente do pedido — conciliação a

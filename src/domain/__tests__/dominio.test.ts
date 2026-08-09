@@ -16,6 +16,7 @@ import {
   margemDe,
   pisoMargem,
   previaEncerramento,
+  sincronizarBase,
   sincronizarVariante,
   statusDevolucao,
   unidadesPossiveis,
@@ -105,6 +106,45 @@ describe('estoque em ml, venda em unidades', () => {
     expect(v.acao).toBe('repor')
     expect(v.novoValor).toBe(TETO_SHOPIFY)
     expect(v.detalhe).toContain('decremento manual antigo')
+  })
+
+  it('não confunde base sem carga inicial com base esgotada', () => {
+    // Mesmo volume zero, mesma variante — o que muda é o ERP saber ou não o
+    // que existe no frasco. Gravar zero por não saber tiraria o produto do ar.
+    const semCarga = sincronizarVariante(0, 5, 0, TETO_SHOPIFY, false)
+    expect(semCarga.acao).toBe('sem_carga')
+    expect(semCarga.novoValor).toBe(TETO_SHOPIFY)
+    expect(semCarga.excesso).toBe(0)
+
+    const esgotada = sincronizarVariante(0, 5, 0, TETO_SHOPIFY, true)
+    expect(esgotada.acao).toBe('esgotar')
+    expect(esgotada.novoValor).toBe(0)
+  })
+
+  it('reconhece carga por volume, por custo ou por decant envasado', () => {
+    const semNada: PerfumeBase = {
+      id: 'nova',
+      nome: 'Recém-importada da Shopify',
+      marca: '—',
+      custoPorMl: 0,
+      volumeMl: 0,
+      consumoDiarioMl: 0,
+    }
+    expect(sincronizarBase(semNada, [], {}).variantes.every((v) => v.acao === 'sem_carga')).toBe(
+      true,
+    )
+
+    // Vendeu tudo, mas o custo da compra continua lá: é esgotada de verdade.
+    const vendida = { ...semNada, id: 'vendida', custoPorMl: 3.1 }
+    expect(sincronizarBase(vendida, [], {}).variantes.every((v) => v.acao === 'esgotar')).toBe(true)
+
+    // Sem volume nem custo, mas com decant pronto na bancada.
+    const comProntos = sincronizarBase(
+      { ...semNada, id: 'prontos' },
+      [{ baseId: 'prontos', variante: 5, envasadas: 4, reservadas: 0, precoPraticado: 0 }],
+      {},
+    )
+    expect(comProntos.variantes.find((v) => v.variante === 5)?.acao).not.toBe('sem_carga')
   })
 
   it('nunca sobe acima do teto de 20', () => {

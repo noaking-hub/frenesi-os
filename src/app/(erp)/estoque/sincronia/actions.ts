@@ -61,7 +61,10 @@ export async function aplicarNaShopify(): Promise<RespostaAplicacao> {
 
     for (const b of sync.bases) {
       for (const v of b.variantes) {
-        if (v.acao === 'ok') continue
+        // `sem_carga` é a trava que impede a loja de ir a zero: base que nunca
+        // recebeu carga inicial não tem volume porque ninguém contou, não
+        // porque acabou. Gravar zero aí tiraria o produto do ar.
+        if (v.acao === 'ok' || v.acao === 'sem_carga') continue
         const id = idPorChave.get(`${b.base.id}|${v.variante}`)
         if (!id) {
           pulados++

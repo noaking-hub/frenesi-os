@@ -1,5 +1,5 @@
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
-import { FaixaAlerta, Rotulo, Valor } from '@/components/erp/primitivos'
+import { FaixaAlerta, LinkOuro, Rotulo, Valor } from '@/components/erp/primitivos'
 import { BORDA, COR, FUNDO_CHIP, type Tom } from '@/components/erp/tokens'
 import { carregarSincronia } from '@/data/consultas'
 import { shopifyConfigurada, ultimaSincronizacao } from '@/data/shopify'
@@ -14,6 +14,7 @@ const TOM_ACAO: Record<AcaoSync, Tom> = {
   reduzir: 'atencao',
   repor: 'info',
   ok: 'ok',
+  sem_carga: 'neutro',
 }
 
 export default async function SincroniaShopify() {
@@ -53,6 +54,14 @@ export default async function SincroniaShopify() {
       hint: `${sync.noTeto} no teto de ${TETO_SHOPIFY} · sincronia a cada venda e a cada 15 min`,
       tom: 'ok',
     },
+    {
+      label: 'Sem carga inicial',
+      valor: pad2(sync.semCarga),
+      hint: sync.semCarga
+        ? 'Fora da sincronia: o ERP não sabe o volume, então não mexe na loja'
+        : 'Toda base tem volume ou custo declarado',
+      tom: sync.semCarga ? 'atencao' : 'ok',
+    },
   ]
 
   // O exemplo é lido do estado real. "Reduzir" é o caso que melhor ilustra a
@@ -69,6 +78,14 @@ export default async function SincroniaShopify() {
       <ImportarShopify configurada={shopifyConfigurada()} ultima={ultima} />
 
       <FaixaKpis kpis={kpis} />
+
+      {sync.semCarga > 0 && (
+        <FaixaAlerta
+          tom="atencao"
+          texto={`${sync.semCarga} de ${sync.bases.length} bases nunca receberam carga inicial. Elas ficam FORA da sincronia de propósito: volume zero aí significa “o ERP não sabe”, não “acabou” — e aplicar gravaria zero na loja, tirando esses perfumes do ar. Declare o que está na prateleira para trazê-las para dentro do cálculo.`}
+          acao={<LinkOuro href="/estoque/carga">Fazer a carga inicial</LinkOuro>}
+        />
+      )}
 
       {sync.excesso > 0 && (
         <FaixaAlerta

@@ -174,9 +174,29 @@ interface PedidoYampi {
   promocode: string | null
   /** Número do mesmo pedido na Shopify — a Yampi guarda como venda de marketplace. */
   marketplace_sale_number: string | number | null
+  /**
+   * Autorização do pagamento.
+   *
+   * É ESTE o sinal de "pago", não o status do pedido: o status descreve a
+   * jornada logística (separação, enviado, entregue) e um pedido pode estar a
+   * caminho com o status ainda no passo anterior.
+   */
+  authorized: boolean | number | null
+  has_payment: boolean | number | null
+  shipping_address?: { data?: EnderecoYampi } | EnderecoYampi | null
   status?: { data?: { alias?: string; name?: string } } | null
   customer?: { data?: ClienteYampi } | null
   items?: { data?: ItemYampi[] } | null
+}
+
+interface EnderecoYampi {
+  street?: string | null
+  number?: string | null
+  neighborhood?: string | null
+  city?: string | null
+  state?: string | null
+  zip_code?: string | null
+  complement?: string | null
 }
 
 interface ClienteYampi {
@@ -216,6 +236,14 @@ function numero(valor: number | string | null | undefined): number {
   return Number.isFinite(n) ? n : 0
 }
 
+/** A Yampi ora embrulha a relação em `{ data }`, ora devolve o objeto direto. */
+function enderecoDe(p: PedidoYampi): EnderecoYampi | null {
+  const e = p.shipping_address
+  if (!e) return null
+  if ('data' in e) return (e as { data?: EnderecoYampi }).data ?? null
+  return e as EnderecoYampi
+}
+
 function telefoneDe(c: ClienteYampi): string {
   if (typeof c.phone === 'string') return c.phone
   return c.phone?.formated_number ?? c.phone?.full_number ?? c.whatsapp ?? ''
@@ -230,23 +258,35 @@ function telefoneDe(c: ClienteYampi): string {
 function pagamentoYampi(
   alias: string,
   nome: string,
+  autorizado: boolean,
 ): 'pago' | 'pendente' | 'divergente' | 'cancelado' {
   const t = `${alias} ${nome}`.toLowerCase()
-  // Estorno é divergência: o dinheiro entrou e voltou, e a conciliação precisa
-  // enxergar isso. Cancelamento é venda que nunca aconteceu — não gera
-  // conciliação nem entra na receita.
+
+  // Estorno e cancelamento vêm do status e mandam mais que a autorização: um
+  // pedido estornado FOI autorizado um dia.
   if (/estorn|refund|charge_?back/.test(t)) return 'divergente'
   if (/cancel|expirad|recusad|negad/.test(t)) return 'cancelado'
-  if (/paid|pago|aprovad|separa|enviad|entregue|faturad/.test(t)) return 'pago'
-  return 'pendente'
+
+  // A autorização é o fato do pagamento; o status é a jornada logística.
+  // Derivar "pago" só do status fazia pedido já enviado aparecer como
+  // pendente — o alias da Yampi vem em inglês (`shipped`, `delivered`) e não
+  // casava com a lista de palavras em português.
+  if (autorizado) return 'pago'
+  // Sobrou como rede: um passo posterior à cobrança só existe se ela ocorreu.
+  return /paid|pago|aprovad|approved|authorized|faturad|invoiced|separa|picking|enviad|shipped|entregue|delivered/.test(
+    t,
+  )
+    ? 'pago'
+    : 'pendente'
 }
 
 function envioYampi(alias: string, nome: string, entregue: boolean, rastreio: string | null) {
   if (entregue) return 'entregue'
   const t = `${alias} ${nome}`.toLowerCase()
-  if (/enviad|shipped|transito|transporte/.test(t)) return 'enviado'
+  if (/entregue|delivered/.test(t)) return 'entregue'
+  if (/enviad|shipped|transito|transporte|on_?carriage/.test(t)) return 'enviado'
   if (rastreio) return 'enviado'
-  if (/separa|faturad|picking/.test(t)) return 'aguardando_envio'
+  if (/separa|faturad|invoiced|picking/.test(t)) return 'aguardando_envio'
   return 'nao_iniciado'
 }
 
@@ -279,7 +319,9 @@ export async function lerPedidosYampi(dias: number): Promise<PedidoYampi[]> {
       data?: PedidoYampi[]
       meta?: { pagination?: { current_page: number; total_pages: number } }
     }>('/orders', {
-      include: 'customer,items,status',
+      // `shipping_address` não vem sem pedir: sem ele o pedido chega sem
+      // cidade, CEP nem logradouro, e a ficha fica com três campos vazios.
+      include: 'customer,items,status,shipping_address',
       date: `created_at:${desde}|${ate}`,
       limit: '50',
       page: String(pagina),
@@ -349,7 +391,9 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
   const linhasPedidos = pedidos.map((p) => {
     const alias = p.status?.data?.alias ?? ''
     const nome = p.status?.data?.name ?? ''
+    const autorizado = Boolean(p.authorized) || Boolean(p.has_payment)
     const entregue = Boolean(p.delivered)
+    const endereco = enderecoDe(p)
     const entregueEm = entregue ? dataYampi(p.date_delivery) : null
     if (entregueEm) entregues++
     const email = p.customer?.data?.email?.trim().toLowerCase()
@@ -361,7 +405,7 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
       valor: numero(p.value_total),
       frete: numero(p.value_shipment),
       cashback: 0,
-      pagamento: pagamentoYampi(alias, nome),
+      pagamento: pagamentoYampi(alias, nome, autorizado),
       envio: envioYampi(alias, nome, entregue, p.track_code),
       comprado_em: dataYampi(p.created_at) ?? new Date().toISOString(),
       // Sem esta data o Portal de Devoluções não funciona: o prazo de 7 dias
@@ -369,6 +413,15 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
       entregue_em: entregueEm,
       rastreio: p.track_code,
       gateway: null,
+      destino: endereco
+        ? [endereco.city, endereco.state].filter(Boolean).join(' · ') || null
+        : null,
+      cep: endereco?.zip_code?.replace(/\D/g, '') || null,
+      logradouro: endereco
+        ? [endereco.street, endereco.number, endereco.neighborhood]
+            .filter(Boolean)
+            .join(', ') || null
+        : null,
       // O vínculo com o pedido espelhado na Shopify. É por ele que o rastreio
       // chega até a conta onde o cliente faz login.
       shopify_numero: p.marketplace_sale_number ? String(p.marketplace_sale_number) : null,

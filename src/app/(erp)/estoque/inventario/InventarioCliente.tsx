@@ -179,11 +179,11 @@ export function InventarioCliente({ inv, aberto }: Props) {
     },
   ]
 
-  // `fechar_inventario` recusa contagem incompleta: dizer isso antes vale mais
-  // que deixar o operador descobrir pela exceção.
-  const impedimento = inv.pendentes
-    ? `${plural(inv.pendentes, 'base ainda sem contagem', 'bases ainda sem contagem')}. Conte todas antes de confirmar.`
-    : null
+  // Nada impede mais confirmar com contagem incompleta — o que muda é o que
+  // se está afirmando. Dizer isso antes vale mais que deixar o operador
+  // descobrir depois que as bases não contadas ficaram de fora.
+  const parcial = inv.pendentes > 0
+  const nadaContado = inv.contadas === 0
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -196,6 +196,8 @@ export function InventarioCliente({ inv, aberto }: Props) {
           {inv.divergentes
             ? `Confirmar lança ${plural(inv.divergentes, 'ajuste', 'ajustes')} em Movimentações, com o motivo “Inventário · divergência encontrada”.`
             : 'Nenhuma divergência a ajustar nesta contagem.'}
+          {parcial &&
+            ` ${plural(inv.pendentes, 'base fica de fora por não ter sido contada', 'bases ficam de fora por não terem sido contadas')} — o estoque delas não é tocado.`}
         </span>
         <BotaoSecundario altura={34} onClick={() => exportarFolha(inv, aberto.id)}>
           Exportar folha de contagem
@@ -207,12 +209,12 @@ export function InventarioCliente({ inv, aberto }: Props) {
           Cancelar contagem
         </BotaoSecundario>
         <BotaoAcao
-          rotulo="Confirmar inventário"
+          rotulo={parcial ? `Confirmar as ${inv.contadas} contadas` : 'Confirmar inventário'}
           pendente={pendente}
-          desabilitado={impedimento !== null}
+          desabilitado={nadaContado}
           onClick={() =>
             executar(async () => {
-              const r = await confirmarInventario(aberto.id)
+              const r = await confirmarInventario(aberto.id, parcial)
               if (r.ok) setAviso(`${plural(r.ajustes, 'ajuste lançado', 'ajustes lançados')}.`)
               return r
             })
@@ -221,7 +223,13 @@ export function InventarioCliente({ inv, aberto }: Props) {
         />
       </div>
 
-      <Mensagem erro={erro ?? impedimento} aviso={aviso} />
+      <Mensagem
+        erro={
+          erro ??
+          (nadaContado ? 'Conte ao menos uma base antes de confirmar.' : null)
+        }
+        aviso={aviso}
+      />
 
       <Tabela
         colunas={colunas}

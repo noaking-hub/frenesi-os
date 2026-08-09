@@ -38,6 +38,7 @@ export interface VarianteSync {
  * O cliente controla estoque manualmente lá, sempre preenchendo 20 unidades por
  * variante e decrementando à mão. Isso desvia da realidade nos dois sentidos.
  *
+ *   sem carga inicial                  → não mexer (o ERP não sabe o que existe)
  *   possível = 0                       → esgotar, ainda que haja 20 lá
  *   possível < publicado               → reduzir para possível
  *   publicado < 20 && possível >= 20   → repor ao teto (decremento desatualizado)
@@ -50,13 +51,21 @@ export function sincronizarVariante(
   variante: VarianteMl,
   prontos: number,
   publicado: number,
+  /**
+   * Se a base já recebeu carga inicial ou compra. Sem isso, volume zero não
+   * significa esgotado: significa que ninguém disse ao ERP o que há no frasco.
+   */
+  temCarga = true,
 ): VarianteSync {
   const doVolume = Math.floor(volumeBaseMl / variante)
   const possivel = prontos + doVolume
-  const excesso = Math.max(0, publicado - possivel)
+  // Sem carga não há excesso a declarar: o publicado pode estar certo ou
+  // errado, e contar como sobrevenda inventaria um alarme sem base.
+  const excesso = temCarga ? Math.max(0, publicado - possivel) : 0
 
-  const acao: AcaoSync =
-    possivel === 0
+  const acao: AcaoSync = !temCarga
+    ? 'sem_carga'
+    : possivel === 0
       ? 'esgotar'
       : excesso > 0
         ? 'reduzir'
@@ -64,11 +73,18 @@ export function sincronizarVariante(
           ? 'repor'
           : 'ok'
 
+  // `sem_carga` grava o que já está lá — ou seja, não grava: a sincronia só
+  // escreve o que mudou.
   const novoValor =
-    acao === 'ok' ? publicado : acao === 'repor' ? TETO_SHOPIFY : possivel
+    acao === 'ok' || acao === 'sem_carga'
+      ? publicado
+      : acao === 'repor'
+        ? TETO_SHOPIFY
+        : possivel
 
-  const detalhe =
-    possivel === 0
+  const detalhe = !temCarga
+    ? 'sem carga inicial no ERP — a loja fica como está'
+    : possivel === 0
       ? 'sem volume para fracionar'
       : acao === 'repor'
         ? `volume permite ${possivel} · decremento manual antigo`
@@ -77,13 +93,15 @@ export function sincronizarVariante(
           : `${doVolume} do volume base`
 
   const rotulo =
-    acao === 'esgotar'
-      ? 'Esgotar'
-      : acao === 'reduzir'
-        ? 'Reduzir'
-        : acao === 'repor'
-          ? 'Repor ao teto'
-          : 'Em dia'
+    acao === 'sem_carga'
+      ? 'Sem carga'
+      : acao === 'esgotar'
+        ? 'Esgotar'
+        : acao === 'reduzir'
+          ? 'Reduzir'
+          : acao === 'repor'
+            ? 'Repor ao teto'
+            : 'Em dia'
 
   return {
     variante,
@@ -111,22 +129,30 @@ export function sincronizarBase(
   derivados: ProdutoDerivado[],
   publicados: Record<string, number>,
 ): BaseSync {
+  const meus = derivados.filter((x) => x.baseId === base.id)
+  // Carga é qualquer sinal de que alguém já disse ao ERP o que existe: volume,
+  // custo de compra ou decant envasado. Base recém-importada da Shopify não
+  // tem nenhum dos três — e é dela que o zero enganoso vem.
+  const temCarga =
+    base.volumeMl > 0 || base.custoPorMl > 0 || meus.some((d) => d.envasadas > 0)
+
   const variantes = VARIANTES.map((v) => {
-    const d = derivados.find((x) => x.baseId === base.id && x.variante === v)
+    const d = meus.find((x) => x.variante === v)
     const prontos = d ? d.envasadas - d.reservadas : 0
     const chave = `${base.id}|${v}`
     const publicado = publicados[chave] ?? TETO_SHOPIFY
-    return sincronizarVariante(base.volumeMl, v, prontos, publicado)
+    return sincronizarVariante(base.volumeMl, v, prontos, publicado, temCarga)
   })
 
-  const pendentes = variantes.filter((v) => v.acao !== 'ok').length
+  const pendentes = variantes.filter((v) => v.acao !== 'ok' && v.acao !== 'sem_carga').length
 
   return {
     base,
     variantes,
     pendentes,
-    resumo:
-      pendentes === 0
+    resumo: !temCarga
+      ? 'Sem carga inicial — fora da sincronia'
+      : pendentes === 0
         ? 'Todas as variantes em dia'
         : `${pendentes} ${pendentes === 1 ? 'variante fora' : 'variantes fora'} de sincronia`,
   }
@@ -142,6 +168,8 @@ export interface ResumoSync {
   total: number
   /** Unidades sobrevendíveis: pedidos que não seriam atendidos. */
   excesso: number
+  /** Bases fora da sincronia por nunca terem recebido carga inicial. */
+  semCarga: number
 }
 
 export function resumoSync(bases: BaseSync[]): ResumoSync {
@@ -155,6 +183,7 @@ export function resumoSync(bases: BaseSync[]): ResumoSync {
     noTeto: todas.filter((v) => v.acao === 'ok' && v.publicado >= TETO_SHOPIFY).length,
     total: todas.length,
     excesso: todas.reduce((a, v) => a + v.excesso, 0),
+    semCarga: bases.filter((b) => b.variantes.every((v) => v.acao === 'sem_carga')).length,
   }
 }
 

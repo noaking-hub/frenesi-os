@@ -67,9 +67,15 @@ export async function registrarContagem(
 /**
  * Confirma a contagem: gera um ajuste de estoque por divergência, cada um com
  * seu lançamento em Movimentações.
+ *
+ * `parcial` existe porque contar centenas de bases numa sentada não acontece.
+ * Sem ele, quem contasse metade não fechava nada e o ajuste da metade contada
+ * — que é real — ficava preso. As bases não contadas saem da apuração em vez
+ * de entrarem como zero: ausência de contagem não é frasco vazio.
  */
 export async function confirmarInventario(
   inventarioId: string,
+  parcial = false,
 ): Promise<Resposta<{ ajustes: number }>> {
   const bloqueio = exigeSupabase('confirmar inventários')
   if (bloqueio) return bloqueio
@@ -77,6 +83,7 @@ export async function confirmarInventario(
   const { data, error } = await supabaseServer().rpc('fechar_inventario', {
     p_inventario_id: inventarioId,
     p_operador: OPERADOR,
+    p_parcial: parcial,
   })
   if (error) {
     console.error('[inventario] fechar_inventario falhou:', error)
