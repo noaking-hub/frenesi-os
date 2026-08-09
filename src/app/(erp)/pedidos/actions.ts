@@ -2,12 +2,15 @@
 
 import { revalidatePath } from 'next/cache'
 
+import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
+
 import {
   derivarConsumoDiario,
   escoposDoToken,
   esquecerToken,
   importarPedidosShopify,
   mensagemDe,
+  sincronizarEnviosShopify,
 } from '@/data/shopify'
 import type { ResultadoPedidos } from '@/data/shopify'
 import {
@@ -137,6 +140,70 @@ export async function importarDaYampi(dias = 90): Promise<RespostaImportYampi> {
     }
   } catch (e) {
     console.error('[yampi] importação falhou:', e)
+    return { ok: false, erro: mensagemDe(e) }
+  }
+}
+
+export type RespostaEnvios =
+  | { ok: true; enviados: number; entregues: number; ignorados: { pedido: string; motivo: string }[] }
+  | { ok: false; erro: string }
+
+/**
+ * Leva o rastreio da Yampi até a conta do cliente na Shopify.
+ *
+ * É o buraco da operação hoje: a Yampi posta a etiqueta e sabe do rastreio,
+ * mas não devolve o envio para a Shopify. O cliente entra na conta, vê
+ * "confirmado" e abre chamado perguntando onde está o pedido — com a
+ * encomenda já a caminho há dias.
+ *
+ * Criar o fulfillment marca o pedido como enviado, dispara o e-mail de
+ * confirmação com o código e faz o rastreio aparecer no histórico da conta.
+ */
+export async function sincronizarEnvios(): Promise<RespostaEnvios> {
+  if (!supabaseConfigurado()) {
+    return { ok: false, erro: 'O Supabase precisa estar configurado.' }
+  }
+  try {
+    const sb = supabaseServer()
+
+    // Só o que já saiu e ainda não foi espelhado. Repetir criaria um segundo
+    // e-mail de envio para o mesmo pedido.
+    const { data, error } = await sb
+      .from('pedidos')
+      .select('id, shopify_numero, rastreio, entregue_em')
+      .not('shopify_numero', 'is', null)
+      .not('rastreio', 'is', null)
+      .is('enviado_shopify_em', null)
+      .limit(200)
+    if (error) throw error
+
+    const envios = (data ?? []).map((p) => ({
+      pedidoId: p.id as string,
+      shopifyNumero: p.shopify_numero as string,
+      rastreio: p.rastreio as string | null,
+      transportadora: null,
+      entregue: Boolean(p.entregue_em),
+    }))
+
+    const r = await sincronizarEnviosShopify(envios)
+
+    // Marca só os que a Shopify aceitou: gravar os recusados esconderia o
+    // pedido da próxima rodada e ele nunca mais seria tentado.
+    const recusados = new Set(r.ignorados.map((i) => i.pedido))
+    const gravados = envios.filter((e) => !recusados.has(e.pedidoId)).map((e) => e.pedidoId)
+    if (gravados.length) {
+      const agora = new Date().toISOString()
+      const { error: erroMarca } = await sb
+        .from('pedidos')
+        .update({ enviado_shopify_em: agora })
+        .in('id', gravados)
+      if (erroMarca) throw erroMarca
+    }
+
+    revalidatePath('/', 'layout')
+    return { ok: true, ...r }
+  } catch (e) {
+    console.error('[shopify] sincronia de envios falhou:', e)
     return { ok: false, erro: mensagemDe(e) }
   }
 }

@@ -5,7 +5,13 @@ import { useState, useTransition } from 'react'
 import { COR } from '@/components/erp/tokens'
 import { plural } from '@/domain'
 
-import { conferirYampi, diagnosticarShopify, importarDaYampi, importarPedidos } from './actions'
+import {
+  conferirYampi,
+  diagnosticarShopify,
+  importarDaYampi,
+  importarPedidos,
+  sincronizarEnvios,
+} from './actions'
 
 /**
  * Traz as vendas da loja e recalcula o consumo diário a partir delas.
@@ -92,6 +98,36 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
         setAviso(
           `${plural(itensSemVariante, 'item não casou', 'itens não casaram')} com nenhuma variante pelo SKU. ` +
             'Reimporte o catálogo da Shopify primeiro: é ele que grava o SKU de cada variante, e sem isso não há por onde ligar.',
+        )
+      }
+    })
+
+  const sincronizar = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      setResumo(null)
+      setAviso(null)
+      setDiagnostico(null)
+      const r = await sincronizarEnvios()
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      setResumo(
+        r.enviados === 0 && r.ignorados.length === 0
+          ? 'Nenhum pedido novo para espelhar: todos os que têm rastreio já estão marcados como enviados na Shopify.'
+          : `${plural(r.enviados, 'pedido marcado como enviado', 'pedidos marcados como enviados')} na Shopify, com e-mail de rastreio para o cliente` +
+            (r.entregues ? ` · ${plural(r.entregues, 'entrega confirmada', 'entregas confirmadas')}` : '') +
+            '.',
+      )
+      if (r.ignorados.length) {
+        setAviso(
+          `${plural(r.ignorados.length, 'pedido não foi espelhado', 'pedidos não foram espelhados')}: ` +
+            r.ignorados
+              .slice(0, 3)
+              .map((i) => `${i.pedido} (${i.motivo})`)
+              .join('; ') +
+            (r.ignorados.length > 3 ? `; e mais ${r.ignorados.length - 3}.` : '.'),
         )
       }
     })
@@ -238,6 +274,30 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
         }}
       >
         {pendente ? 'Importando…' : 'Importar da Yampi'}
+      </button>
+
+      <button
+        type="button"
+        onClick={sincronizar}
+        disabled={pendente}
+        title="Cria o fulfillment na Shopify com o rastreio da Yampi e avisa o cliente"
+        className="font-sans hover:border-ouro/40 hover:text-ouro"
+        style={{
+          height: 36,
+          padding: '0 14px',
+          flex: 'none',
+          border: '1px solid rgba(239,209,140,.3)',
+          background: 'rgba(239,209,140,.07)',
+          color: 'var(--color-ouro)',
+          fontWeight: 600,
+          fontSize: 11,
+          lineHeight: 1,
+          borderRadius: 9,
+          whiteSpace: 'nowrap',
+          cursor: pendente ? 'wait' : 'pointer',
+        }}
+      >
+        Espelhar envios na Shopify
       </button>
 
       <button

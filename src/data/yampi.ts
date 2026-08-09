@@ -172,6 +172,8 @@ interface PedidoYampi {
   track_code: string | null
   shipment_service: string | null
   promocode: string | null
+  /** Número do mesmo pedido na Shopify — a Yampi guarda como venda de marketplace. */
+  marketplace_sale_number: string | number | null
   status?: { data?: { alias?: string; name?: string } } | null
   customer?: { data?: ClienteYampi } | null
   items?: { data?: ItemYampi[] } | null
@@ -360,6 +362,9 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
       entregue_em: entregueEm,
       rastreio: p.track_code,
       gateway: null,
+      // O vínculo com o pedido espelhado na Shopify. É por ele que o rastreio
+      // chega até a conta onde o cliente faz login.
+      shopify_numero: p.marketplace_sale_number ? String(p.marketplace_sale_number) : null,
     }
   })
 

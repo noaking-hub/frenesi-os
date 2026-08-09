@@ -1105,3 +1105,183 @@ export async function derivarConsumoDiario(dias = 30): Promise<{ bases: number }
 
   return { bases: mlPorBase.size }
 }
+
+// ── Envio: levar o rastreio da Yampi até a conta do cliente na Shopify ─────
+
+const CONSULTA_PEDIDO_ENVIO = /* GraphQL */ `
+  query ($busca: String!) {
+    orders(first: 1, query: $busca) {
+      nodes {
+        id
+        name
+        displayFulfillmentStatus
+        fulfillmentOrders(first: 10) {
+          nodes {
+            id
+            status
+          }
+        }
+      }
+    }
+  }
+`
+
+const MUTACAO_ENVIO = /* GraphQL */ `
+  mutation ($fulfillment: FulfillmentV2Input!) {
+    fulfillmentCreateV2(fulfillment: $fulfillment) {
+      fulfillment {
+        id
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`
+
+const MUTACAO_ENTREGA = /* GraphQL */ `
+  mutation ($fulfillmentEvent: FulfillmentEventInput!) {
+    fulfillmentEventCreate(fulfillmentEvent: $fulfillmentEvent) {
+      fulfillmentEvent {
+        id
+        status
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`
+
+export interface EnvioParaShopify {
+  pedidoId: string
+  shopifyNumero: string
+  rastreio: string | null
+  transportadora: string | null
+  entregue: boolean
+}
+
+export interface ResultadoEnvios {
+  enviados: number
+  entregues: number
+  ignorados: { pedido: string; motivo: string }[]
+}
+
+/**
+ * Cria o fulfillment na Shopify com o rastreio que veio da Yampi.
+ *
+ * Existe porque a Yampi não devolve o envio para a Shopify: o cliente entra
+ * na conta dele, vê "confirmado" e abre um chamado perguntando onde está o
+ * pedido, mesmo com a etiqueta postada há dias. Criar o fulfillment marca o
+ * pedido como enviado, dispara o e-mail de confirmação de envio com o código,
+ * e faz o rastreio aparecer no histórico da conta.
+ *
+ * `notifyCustomer` é o ponto todo: sem ele o status muda mas ninguém avisa.
+ */
+export async function sincronizarEnviosShopify(
+  envios: EnvioParaShopify[],
+): Promise<ResultadoEnvios> {
+  const { loja } = credenciais()
+  if (!loja) throw new Error('SHOPIFY_LOJA precisa estar no .env.local')
+  if (envios.length === 0) return { enviados: 0, entregues: 0, ignorados: [] }
+  const token = await tokenDeAcesso(loja)
+
+  const ignorados: ResultadoEnvios['ignorados'] = []
+  let enviados = 0
+  let entregues = 0
+
+  for (const e of envios) {
+    const busca = `name:${e.shopifyNumero}`
+    const dados = await chamarShopify<{
+      orders: {
+        nodes: {
+          id: string
+          name: string
+          displayFulfillmentStatus: string
+          fulfillmentOrders: { nodes: { id: string; status: string }[] }
+        }[]
+      }
+    }>(
+      loja,
+      token,
+      CONSULTA_PEDIDO_ENVIO,
+      { busca },
+      'localizar o pedido na loja',
+      'read_orders e read_merchant_managed_fulfillment_orders',
+    )
+
+    const pedido = dados.orders.nodes[0]
+    if (!pedido) {
+      ignorados.push({
+        pedido: e.pedidoId,
+        motivo: `nenhum pedido ${e.shopifyNumero} na Shopify — o número da Yampi pode não ser o da loja`,
+      })
+      continue
+    }
+
+    // Fulfillment order já fechado significa envio criado por outro caminho:
+    // repetir geraria um segundo e-mail de envio para o mesmo pedido.
+    const abertos = pedido.fulfillmentOrders.nodes.filter((f) => f.status === 'OPEN' || f.status === 'IN_PROGRESS')
+    if (abertos.length === 0) {
+      ignorados.push({ pedido: e.pedidoId, motivo: 'já estava enviado na Shopify' })
+      continue
+    }
+
+    const r = await chamarShopify<{
+      fulfillmentCreateV2: {
+        fulfillment: { id: string } | null
+        userErrors: { message: string }[]
+      }
+    }>(
+      loja,
+      token,
+      MUTACAO_ENVIO,
+      {
+        fulfillment: {
+          lineItemsByFulfillmentOrder: abertos.map((f) => ({ fulfillmentOrderId: f.id })),
+          trackingInfo: e.rastreio
+            ? { number: e.rastreio, company: e.transportadora ?? undefined }
+            : undefined,
+          // Sem isto o status muda e o cliente não fica sabendo — que é
+          // exatamente o problema que esta sincronia existe para resolver.
+          notifyCustomer: true,
+        },
+      },
+      'marcar o pedido como enviado',
+      'write_merchant_managed_fulfillment_orders',
+    )
+
+    const erros = r.fulfillmentCreateV2?.userErrors ?? []
+    if (erros.length || !r.fulfillmentCreateV2?.fulfillment) {
+      ignorados.push({
+        pedido: e.pedidoId,
+        motivo: erros.map((x) => x.message).join('; ') || 'a Shopify não criou o envio',
+      })
+      continue
+    }
+    enviados++
+
+    if (e.entregue) {
+      const rd = await chamarShopify<{
+        fulfillmentEventCreate: { userErrors: { message: string }[] }
+      }>(
+        loja,
+        token,
+        MUTACAO_ENTREGA,
+        {
+          fulfillmentEvent: {
+            fulfillmentId: r.fulfillmentCreateV2.fulfillment.id,
+            status: 'DELIVERED',
+          },
+        },
+        'marcar a entrega',
+        'write_merchant_managed_fulfillment_orders',
+      )
+      if ((rd.fulfillmentEventCreate?.userErrors ?? []).length === 0) entregues++
+    }
+  }
+
+  return { enviados, entregues, ignorados }
+}
