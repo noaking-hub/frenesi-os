@@ -29,7 +29,6 @@ const EM_DEMONSTRACAO: { prefixo: string; falta: string }[] = [
   { prefixo: '/produtos/concorrentes', falta: 'a coleta de preços dos concorrentes' },
   { prefixo: '/produtos/kits', falta: 'a tabela de kits' },
   { prefixo: '/configuracoes/usuarios', falta: 'a tabela de usuários e perfis' },
-  { prefixo: '/configuracoes/empresa', falta: 'a tabela de dados da empresa' },
   { prefixo: '/configuracoes/integracoes', falta: 'o registro de integrações' },
   { prefixo: '/configuracoes/notificacoes', falta: 'a tabela de regras de notificação' },
   { prefixo: '/configuracoes/logs', falta: 'a trilha de auditoria' },
