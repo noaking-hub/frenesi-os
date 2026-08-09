@@ -31,6 +31,7 @@ export async function registrarCompra(dados: {
     p_volume_ml: dados.volumeMl,
     p_custo_total: dados.custoTotal,
     p_fornecedor: dados.fornecedor.trim(),
+    p_operador: OPERADOR,
   })
   if (error) {
     console.error('[compras] registrar_compra falhou:', error)

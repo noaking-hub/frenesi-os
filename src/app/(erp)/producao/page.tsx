@@ -1,14 +1,16 @@
+import { carregarLotes } from '@/data/consultas'
 import { repositorio } from '@/data/repository'
 
 import { ProducaoCliente } from './ProducaoCliente'
 
 export default async function Producao() {
   const repo = repositorio()
-  const [ordens, bases, parametros, movimentacoes] = await Promise.all([
+  const [ordens, bases, parametros, movimentacoes, { perda }] = await Promise.all([
     repo.ordens(),
     repo.perfumesBase(),
     repo.parametros(),
     repo.movimentacoes(),
+    carregarLotes(),
   ])
 
   // Custo do volume baixado em produção: cada saída ao custo por ml da base.
@@ -26,6 +28,7 @@ export default async function Producao() {
       bases={bases}
       parametros={parametros}
       movimentacoes={movimentacoes}
+      perda={perda}
       custoProduzido={custoProduzido}
     />
   )

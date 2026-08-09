@@ -1,10 +1,18 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useState, useTransition } from 'react'
 
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
-import { BotaoOuro, EstadoVazio, Ponto, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
+import {
+  BotaoOuro,
+  BotaoSecundario,
+  EstadoVazio,
+  Ponto,
+  Rotulo,
+  TituloSecao,
+  Valor,
+} from '@/components/erp/primitivos'
 import { CelulaDupla, Tabela, type Coluna } from '@/components/erp/Tabela'
 import { Modal } from '@/components/erp/Modal'
 import { COR, type Tom } from '@/components/erp/tokens'
@@ -26,10 +34,13 @@ import type {
   Movimentacao,
   OrdemProducao,
   ParametrosPrecificacao,
+  PerdaReal,
   PerfumeBase,
   StatusOrdem,
   VarianteMl,
 } from '@/domain'
+
+import { abrirOrdem, concluirEnvase } from './actions'
 
 const TOM_STATUS: Record<StatusOrdem, Tom> = {
   'Em envase': 'info',
@@ -43,12 +54,22 @@ interface Props {
   bases: PerfumeBase[]
   parametros: ParametrosPrecificacao
   movimentacoes: Movimentacao[]
+  /** Perda real dos lotes encerrados — a mesma de Estoque → Lotes. */
+  perda: PerdaReal
   /** Custo do volume baixado em produção no mês, derivado das movimentações. */
   custoProduzido: number
 }
 
-export function ProducaoCliente({ ordens, bases, parametros, movimentacoes, custoProduzido }: Props) {
+export function ProducaoCliente({
+  ordens,
+  bases,
+  parametros,
+  movimentacoes,
+  perda,
+  custoProduzido,
+}: Props) {
   const [modalAberto, setModalAberto] = useState(false)
+  const [envasando, setEnvasando] = useState<OrdemProducao | null>(null)
 
   const r = resumirOrdens(ordens)
   const movs = resumirMovimentacoes(movimentacoes)
@@ -75,11 +96,14 @@ export function ProducaoCliente({ ordens, bases, parametros, movimentacoes, cust
       tom: 'ouro',
     },
     {
-      // A mesma perda de Movimentações — uma grandeza, um cálculo.
-      label: 'Perda técnica no mês',
-      valor: pct(movs.perdaPct),
-      hint: `${volume(movs.perdaMl)} sobre ${volume(movs.envasadoMl)} envasados · parâmetro ${pct(parametros.perdaPct)}`,
-      tom: movs.perdaPct <= parametros.perdaPct ? 'ok' : 'atencao',
+      // Produção baixa só o envasado: a perda não é medida aqui. Este KPI lê a
+      // MESMA conta de Lotes — uma grandeza, um cálculo.
+      label: 'Perda real medida',
+      valor: pct(perda.mediaPct),
+      hint: perda.lotesEncerrados
+        ? `${plural(perda.lotesEncerrados, 'lote encerrado', 'lotes encerrados')} · parâmetro ${pct(parametros.perdaPct)}`
+        : 'Nenhum frasco declarado vazio ainda',
+      tom: perda.lotesEncerrados === 0 ? 'neutro' : perda.mediaPct <= parametros.perdaPct ? 'ok' : 'atencao',
     },
     {
       label: 'Custo produzido no mês',
@@ -173,7 +197,7 @@ export function ProducaoCliente({ ordens, bases, parametros, movimentacoes, cust
             <Ponto tom={TOM_STATUS[o.status]} />
             {o.status}
           </span>
-          {o.status === 'Bloqueada' && (
+          {o.status === 'Bloqueada' ? (
             <Link
               href="/estoque"
               className="font-sans hover:bg-[rgba(194,90,80,.12)]"
@@ -191,6 +215,28 @@ export function ProducaoCliente({ ordens, bases, parametros, movimentacoes, cust
             >
               Ver estoque
             </Link>
+          ) : (
+            o.status !== 'Concluída' && (
+              <button
+                type="button"
+                onClick={() => setEnvasando(o)}
+                className="font-sans hover:bg-[rgba(239,209,140,.12)]"
+                style={{
+                  height: 24,
+                  padding: '0 8px',
+                  border: '1px solid rgba(239,209,140,.28)',
+                  background: 'transparent',
+                  color: 'var(--color-ouro)',
+                  fontWeight: 600,
+                  fontSize: 9.5,
+                  borderRadius: 6,
+                  whiteSpace: 'nowrap',
+                  cursor: 'pointer',
+                }}
+              >
+                Concluir envase
+              </button>
+            )
           )}
         </span>
       ),
@@ -246,7 +292,176 @@ export function ProducaoCliente({ ordens, bases, parametros, movimentacoes, cust
           aoFechar={() => setModalAberto(false)}
         />
       )}
+
+      {envasando && (
+        <ModalConcluirEnvase
+          ordem={envasando}
+          base={bases.find((b) => b.id === envasando.baseId)}
+          aoFechar={() => setEnvasando(null)}
+        />
+      )}
     </div>
+  )
+}
+
+/**
+ * Conclusão do envase: o único ponto da tela que move estoque.
+ *
+ * Pergunta quantas unidades saíram de fato, porque o planejado e o envasado
+ * divergem — quebra frasco, falta insumo. Baixar o planejado quando saíram
+ * menos poria no estoque um decant que não existe.
+ */
+function ModalConcluirEnvase({
+  ordem,
+  base,
+  aoFechar,
+}: {
+  ordem: OrdemProducao
+  base: PerfumeBase | undefined
+  aoFechar: () => void
+}) {
+  const [texto, setTexto] = useState(String(ordem.quantidade))
+  const [erro, setErro] = useState<string | null>(null)
+  const [pendente, iniciarTransicao] = useTransition()
+
+  const envasadas = Math.max(0, Math.floor(parseNum(texto)))
+  const liquidoMl = envasadas * ordem.variante
+  const volumeBase = base?.volumeMl ?? 0
+  const sobra = volumeBase - liquidoMl
+
+  const impedimento =
+    envasadas === 0
+      ? 'Informe quantas unidades foram envasadas.'
+      : envasadas > ordem.quantidade
+        ? `A ordem planejou ${ordem.quantidade} un. Para envasar mais, abra outra ordem.`
+        : liquidoMl > volumeBase
+          ? `${volume(volumeBase)} em estoque não envasam ${envasadas} un de ${ordem.variante} ml (${volume(liquidoMl)}).`
+          : null
+
+  const confirmar = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      const r = await concluirEnvase(ordem.id, envasadas)
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      aoFechar()
+    })
+
+  const linhas = [
+    { label: 'Planejado na ordem', valor: `${ordem.quantidade} un de ${ordem.variante} ml`, tom: 'var(--color-corrente)' },
+    { label: 'Sai do estoque', valor: volume(liquidoMl), tom: COR.ouro },
+    { label: 'Volume da base depois', valor: volume(Math.max(0, sobra)), tom: sobra < 0 ? COR.erro : 'var(--color-corrente)' },
+    { label: 'Decants vendáveis criados', valor: `${envasadas} un`, tom: COR.ok },
+  ]
+
+  return (
+    <Modal titulo={`Concluir o envase da ordem ${ordem.id}`} largura={520} aoFechar={aoFechar}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <Rotulo>{`Concluir envase · ${ordem.id}`}</Rotulo>
+        <TituloSecao tamanho={15}>{ordem.perfume}</TituloSecao>
+      </div>
+
+      <label style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+        <Rotulo>Unidades efetivamente envasadas</Rotulo>
+        <input
+          value={texto}
+          onChange={(e) => setTexto(e.target.value.replace(/\D/g, ''))}
+          inputMode="numeric"
+          autoFocus
+          className="font-mono focus:border-ouro/45"
+          style={{
+            height: 40,
+            padding: '0 13px',
+            border: '1px solid rgba(239,209,140,.4)',
+            background: 'rgba(255,255,255,.03)',
+            borderRadius: 9,
+            color: 'var(--color-corrente)',
+            fontWeight: 500,
+            fontSize: 15,
+            outline: 0,
+          }}
+        />
+      </label>
+
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 1,
+          background: 'rgba(255,255,255,.05)',
+          borderRadius: 10,
+          overflow: 'hidden',
+        }}
+      >
+        {linhas.map((l) => (
+          <span
+            key={l.label}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              padding: '11px 13px',
+              background: 'var(--color-painel)',
+            }}
+          >
+            <span
+              className="font-sans"
+              style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--color-secundario)' }}
+            >
+              {l.label}
+            </span>
+            <Valor tamanho={12.5} tom={l.tom}>
+              {l.valor}
+            </Valor>
+          </span>
+        ))}
+      </div>
+
+      <span
+        className="font-sans"
+        style={{ fontSize: 10.5, lineHeight: 1.55, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+      >
+        Sai do estoque o volume envasado, não o envasado mais a perda estimada: a perda ainda não
+        foi medida. Ela aparece inteira quando este frasco for declarado vazio, em Estoque → Lotes.
+        O consumo é rateado nos lotes abertos, do mais antigo para o mais novo.
+      </span>
+
+      {(impedimento || erro) && (
+        <span
+          className="font-sans"
+          style={{ fontSize: 11.5, lineHeight: 1.5, color: COR.erro, textWrap: 'pretty' }}
+        >
+          {erro ?? impedimento}
+        </span>
+      )}
+
+      <div style={{ display: 'flex', gap: 9, justifyContent: 'flex-end' }}>
+        <BotaoSecundario altura={36} onClick={aoFechar}>
+          Cancelar
+        </BotaoSecundario>
+        <button
+          type="button"
+          onClick={confirmar}
+          disabled={pendente || impedimento !== null}
+          className="botao-ouro font-sans hover:brightness-[1.07]"
+          style={{
+            height: 36,
+            padding: '0 18px',
+            fontWeight: 700,
+            fontSize: 11.5,
+            lineHeight: 1,
+            borderRadius: 9,
+            cursor: pendente ? 'wait' : impedimento ? 'not-allowed' : 'pointer',
+            opacity: pendente || impedimento ? 0.5 : 1,
+          }}
+        >
+          {pendente ? 'Baixando…' : 'Confirmar envase'}
+        </button>
+      </div>
+    </Modal>
   )
 }
 
@@ -266,6 +481,9 @@ function ModalNovaOrdem({
   const [baseId, setBaseId] = useState(bases[0]?.id ?? '')
   const [variante, setVariante] = useState<VarianteMl>(5)
   const [qtdTexto, setQtdTexto] = useState('12')
+  const [motivo, setMotivo] = useState('')
+  const [erro, setErro] = useState<string | null>(null)
+  const [pendente, iniciarTransicao] = useTransition()
 
   const base = bases.find((b) => b.id === baseId) ?? bases[0]
 
@@ -283,7 +501,18 @@ function ModalNovaOrdem({
 
   const quantidade = Math.max(0, Math.floor(parseNum(qtdTexto)))
   const sim = simularOrdem(base, variante, quantidade, parametros)
-  const podeConfirmar = quantidade > 0 && !sim.insuficiente
+  const podeConfirmar = quantidade > 0 && !sim.insuficiente && !pendente
+
+  const abrir = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      const r = await abrirOrdem({ baseId: base.id, variante, quantidade, motivo })
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      aoFechar()
+    })
 
   const tomImpacto: Tom = sim.insuficiente ? 'erro' : 'ok'
 
@@ -470,6 +699,31 @@ function ModalNovaOrdem({
             </label>
           </div>
 
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <span
+              className="font-sans"
+              style={{ fontWeight: 600, fontSize: 10.5, color: 'var(--color-secundario)' }}
+            >
+              Motivo da ordem
+            </span>
+            <input
+              value={motivo}
+              onChange={(e) => setMotivo(e.target.value)}
+              placeholder="Reposição, pedidos da semana, kit descoberta…"
+              className="font-sans focus:border-ouro/45"
+              style={{
+                height: 38,
+                padding: '0 11px',
+                border: '1px solid rgba(255,255,255,.1)',
+                background: '#151417',
+                color: 'var(--color-corrente)',
+                fontSize: 12.5,
+                borderRadius: 8,
+                outline: 0,
+              }}
+            />
+          </label>
+
           <div
             style={{
               display: 'flex',
@@ -516,8 +770,12 @@ function ModalNovaOrdem({
             borderTop: '1px solid rgba(255,255,255,.06)',
           }}
         >
-          <span className="font-sans" style={{ flex: 1, fontSize: 11, lineHeight: 1.4, color: 'var(--color-terciario)' }}>
-            A baixa de volume é registrada em Movimentações.
+          <span
+            className="font-sans"
+            style={{ flex: 1, fontSize: 11, lineHeight: 1.4, color: erro ? COR.erro : 'var(--color-terciario)', textWrap: 'pretty' }}
+          >
+            {erro ??
+              'Abrir a ordem não move estoque. A baixa acontece ao concluir o envase, e vai para Movimentações.'}
           </span>
           <button
             type="button"
@@ -539,7 +797,7 @@ function ModalNovaOrdem({
           </button>
           <button
             type="button"
-            onClick={podeConfirmar ? aoFechar : undefined}
+            onClick={podeConfirmar ? abrir : undefined}
             disabled={!podeConfirmar}
             className="font-sans"
             style={{
@@ -553,11 +811,11 @@ function ModalNovaOrdem({
               fontWeight: 700,
               fontSize: 12,
               borderRadius: 9,
-              cursor: podeConfirmar ? 'pointer' : 'not-allowed',
+              cursor: pendente ? 'wait' : podeConfirmar ? 'pointer' : 'not-allowed',
               boxShadow: podeConfirmar ? 'var(--shadow-ouro)' : 'none',
             }}
           >
-            Confirmar produção
+            {pendente ? 'Abrindo…' : 'Abrir ordem'}
           </button>
         </div>
     </Modal>

@@ -57,11 +57,11 @@ export interface SimulacaoOrdem {
   base: PerfumeBase
   variante: VarianteMl
   quantidade: number
-  /** Volume líquido que vai para os frascos. */
+  /** Volume líquido que vai para os frascos — e que sai do estoque. */
   liquidoMl: number
-  /** Volume que sai do estoque: líquido + perda técnica estimada. */
+  /** Líquido mais a perda estimada. Serve de folga, não é baixa. */
   consumoMl: number
-  /** O que sobra na base depois de confirmar. Negativo = não dá. */
+  /** O que sobra na base depois de confirmar. */
   restanteMl: number
   insuficiente: boolean
   /** Quantas unidades o volume atual permite, nesta variante e com esta perda. */
@@ -72,9 +72,15 @@ export interface SimulacaoOrdem {
 /**
  * Simula o impacto de uma ordem antes de confirmar.
  *
- * O consumo embute a perda técnica do parâmetro — envasar 24 decants de 5 ml
- * com 3% de perda tira 123,6 ml do estoque, não 120. Se o restante fica
- * negativo, a confirmação é bloqueada e a mensagem diz o máximo possível.
+ * O que sai do estoque é o LÍQUIDO envasado. A perda técnica do parâmetro é
+ * estimativa de preço, não movimentação: ninguém a mediu ainda. A perda real
+ * aparece inteira quando o frasco é declarado vazio — comprado menos
+ * envasado. Se a estimativa saísse do estoque aqui, o encerramento mediria
+ * só o resíduo do palpite.
+ *
+ * Ela entra na folga: envasar 24 decants de 5 ml exige 123,6 ml disponíveis
+ * com 3% de perda, mesmo baixando 120. É prudência, e por isso `maximo` conta
+ * a perda.
  */
 export function simularOrdem(
   base: PerfumeBase,
@@ -85,16 +91,17 @@ export function simularOrdem(
   const fator = 1 + p.perdaPct / 100
   const liquidoMl = quantidade * variante
   const consumoMl = volumeConsumido(quantidade, variante, p.perdaPct)
-  const restanteMl = Math.round((base.volumeMl - consumoMl) * 10) / 10
-  const insuficiente = restanteMl < 0
+  const restanteMl = Math.round((base.volumeMl - liquidoMl) * 10) / 10
+  // Falta folga para a perda, não só para o líquido.
+  const insuficiente = base.volumeMl < consumoMl
   const maximoUnidades = Math.floor(base.volumeMl / (variante * fator))
 
   const mensagem = insuficiente
     ? quantidade > 0
-      ? `${base.nome} tem ${fmt(base.volumeMl)} ml — dá para no máximo ${maximoUnidades} ${maximoUnidades === 1 ? 'unidade' : 'unidades'} de ${variante} ml com a perda de ${fmt(p.perdaPct)}%.`
+      ? `${base.nome} tem ${fmt(base.volumeMl)} ml — dá para no máximo ${maximoUnidades} ${maximoUnidades === 1 ? 'unidade' : 'unidades'} de ${variante} ml, guardando a folga de ${fmt(p.perdaPct)}% para a perda.`
       : 'Informe a quantidade a produzir.'
     : quantidade > 0
-      ? `Confirmar baixa ${fmt(consumoMl)} ml do estoque (${fmt(liquidoMl)} ml envasados + ${fmt(p.perdaPct)}% de perda) e deixa ${base.nome} com ${fmt(restanteMl)} ml.`
+      ? `Confirmar baixa ${fmt(liquidoMl)} ml envasados e deixa ${base.nome} com ${fmt(restanteMl)} ml. A perda real deste frasco só é medida quando ele for declarado vazio.`
       : 'Informe a quantidade a produzir.'
 
   return {

@@ -41,6 +41,7 @@ import type {
   PerfumeBase,
   ProdutoDerivado,
   SaldoCashback,
+  StatusOrdem,
   TicketAtendimento,
   TipoMovimentacao,
   VarianteMl,
@@ -464,13 +465,15 @@ const repositorioSupabase: Repositorio = {
         baseId: m.base_id,
         perfume: m.perfumes_base?.nome ?? m.base_id,
         tipo: m.tipo,
-        data: m.ocorrida_em,
+        // Vem `timestamptz` cru do Postgres; a coluna tem 104px e a tabela
+        // não quebra linha — sem formatar, a data invade a coluna do tipo.
+        data: dataCurta(m.ocorrida_em),
         volumeMl: Number(m.volume_ml),
         liquidoMl: m.liquido_ml === null ? null : Number(m.liquido_ml),
         ref: m.ref ?? '',
         motivo: m.descricao,
         responsavel: m.responsavel ?? '—',
-        saldoMl: Number(m.saldo_ml ?? 0),
+        saldoMl: m.saldo_ml === null ? null : Number(m.saldo_ml),
       }),
     )
   },
@@ -512,7 +515,37 @@ const repositorioSupabase: Repositorio = {
   envios: repositorioFixtures.envios,
   ocorrencias: repositorioFixtures.ocorrencias,
   solicitacoes: repositorioFixtures.solicitacoes,
-  ordens: repositorioFixtures.ordens,
+
+  async ordens() {
+    const { data, error } = await supabaseServer()
+      .from('ordens_producao')
+      .select(
+        'id, base_id, variante, quantidade, liquido_ml, status, responsavel, motivo, ' +
+          'aberta_em, concluida_em, envasadas, perfumes_base(nome, marca)',
+      )
+      .order('aberta_em', { ascending: false })
+      .limit(200)
+    if (error) throw error
+    const linhas = (data ?? []) as unknown as LinhaOrdem[]
+    return linhas.map((o): OrdemProducao => {
+      const concluida = o.status === 'concluida'
+      return {
+        id: o.id,
+        baseId: o.base_id,
+        perfume: o.perfumes_base?.nome ?? o.base_id,
+        marca: o.perfumes_base?.marca ?? '',
+        variante: o.variante as VarianteMl,
+        quantidade: o.quantidade,
+        // O que a ordem envasa. A perda técnica não entra: ela é estimativa de
+        // preço, não movimentação — quem mede é o encerramento do lote.
+        volumeMl: Number(o.liquido_ml),
+        status: STATUS_ORDEM[o.status],
+        responsavel: o.responsavel,
+        prazo: dataCurta(concluida ? (o.concluida_em ?? o.aberta_em) : o.aberta_em),
+        motivo: o.motivo,
+      }
+    })
+  },
   // O financeiro ainda não tem tabelas próprias no Supabase; cai nos fixtures
   // até a migration existir, sem fingir consulta.
   lancamentos: repositorioFixtures.lancamentos,
@@ -550,6 +583,36 @@ const repositorioSupabase: Repositorio = {
  * Formas das linhas com embed, espelhando `supabase/migrations`.
  * Substituíveis pelos tipos gerados (`supabase gen types typescript`).
  */
+interface LinhaOrdem {
+  id: string
+  base_id: string
+  variante: number
+  quantidade: number
+  liquido_ml: number | string
+  status: 'em_envase' | 'aguardando_conferencia' | 'bloqueada' | 'concluida'
+  responsavel: string
+  motivo: string
+  aberta_em: string
+  concluida_em: string | null
+  envasadas: number | null
+  perfumes_base: { nome: string; marca: string } | null
+}
+
+/** `2026-08-09T14:22:00Z` → `09/08 14:22`, que é como as telas mostram. */
+function dataCurta(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const p2 = (n: number) => String(n).padStart(2, '0')
+  return `${p2(d.getDate())}/${p2(d.getMonth() + 1)} ${p2(d.getHours())}:${p2(d.getMinutes())}`
+}
+
+const STATUS_ORDEM: Record<LinhaOrdem['status'], StatusOrdem> = {
+  em_envase: 'Em envase',
+  aguardando_conferencia: 'Aguardando conferência',
+  bloqueada: 'Bloqueada',
+  concluida: 'Concluída',
+}
+
 interface LinhaLote {
   id: string
   base_id: string

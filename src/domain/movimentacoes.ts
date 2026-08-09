@@ -20,7 +20,8 @@ export interface Movimentacao {
   motivo: string
   responsavel: string
   /** Saldo da base logo após a movimentação. */
-  saldoMl: number
+  /** Saldo da base logo após o lançamento. `null` quando não foi congelado. */
+  saldoMl: number | null
 }
 
 /**

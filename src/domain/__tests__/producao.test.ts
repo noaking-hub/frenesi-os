@@ -13,17 +13,19 @@ const base = (volumeMl: number): PerfumeBase => ({
 })
 
 describe('simulação de ordem de produção', () => {
-  it('embute a perda técnica no consumo', () => {
+  it('baixa o líquido envasado, e não a perda estimada', () => {
     const s = simularOrdem(base(640), 5, 24, PARAMETROS_PADRAO)
     expect(s.liquidoMl).toBe(120)
-    // 24 × 5 × 1,03
+    // A perda estimada existe como folga (24 × 5 × 1,03)…
     expect(s.consumoMl).toBeCloseTo(123.6, 5)
-    expect(s.restanteMl).toBeCloseTo(516.4, 5)
+    // …mas quem sai do estoque é o líquido: a perda real só é medida quando o
+    // frasco for declarado vazio.
+    expect(s.restanteMl).toBeCloseTo(520, 5)
     expect(s.insuficiente).toBe(false)
   })
 
-  it('bloqueia quando o volume não sustenta a quantidade', () => {
-    // Delina tem 90 ml: 15 un de 8 ml pedem 123,6 ml.
+  it('bloqueia quando o volume não cobre o líquido mais a folga da perda', () => {
+    // Delina tem 90 ml: 15 un de 8 ml envasam 120 ml e pedem 123,6 de folga.
     const s = simularOrdem({ ...base(90), nome: 'Delina' }, 8, 15, PARAMETROS_PADRAO)
     expect(s.insuficiente).toBe(true)
     expect(s.restanteMl).toBeLessThan(0)

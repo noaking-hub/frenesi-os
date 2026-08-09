@@ -1,7 +1,8 @@
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
-import { BotaoOuro, TituloSecao, Valor } from '@/components/erp/primitivos'
+import { TituloSecao, Valor } from '@/components/erp/primitivos'
 import { Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR, type Tom } from '@/components/erp/tokens'
+import { carregarLotes } from '@/data/consultas'
 import { repositorio } from '@/data/repository'
 import { origemDoAjuste, pct, plural, resumirMovimentacoes, volume } from '@/domain'
 import type { Movimentacao, TipoMovimentacao } from '@/domain'
@@ -22,7 +23,11 @@ const TOM: Record<TipoMovimentacao, Tom> = {
 
 export default async function Movimentacoes() {
   const repo = repositorio()
-  const [movs, parametros] = await Promise.all([repo.movimentacoes(), repo.parametros()])
+  const [movs, parametros, { perda }] = await Promise.all([
+    repo.movimentacoes(),
+    repo.parametros(),
+    carregarLotes(),
+  ])
   const r = resumirMovimentacoes(movs)
 
   const kpis: Kpi[] = [
@@ -40,15 +45,19 @@ export default async function Movimentacoes() {
     {
       label: 'Consumo em produção',
       valor: volume(r.saidasMl),
-      // O hint decompõe o próprio valor: envasado + perda = consumido.
-      hint: `${volume(r.envasadoMl)} envasados + ${volume(r.perdaMl)} de perda técnica`,
+      hint: 'Volume envasado nas ordens concluídas',
       tom: 'atencao',
     },
     {
-      label: 'Perda técnica',
-      valor: volume(r.perdaMl),
-      hint: `${pct(r.perdaPct)} do envasado · parâmetro ${pct(parametros.perdaPct)}`,
-      tom: r.perdaPct <= parametros.perdaPct ? 'ok' : 'erro',
+      // A perda não sai daqui: produção baixa só o envasado. Quem a mede é o
+      // encerramento do lote — e este KPI lê a MESMA conta da tela de Lotes,
+      // em vez de uma segunda versão da mesma grandeza.
+      label: 'Perda real medida',
+      valor: pct(perda.mediaPct),
+      hint: perda.lotesEncerrados
+        ? `${plural(perda.lotesEncerrados, 'lote encerrado', 'lotes encerrados')} · parâmetro ${pct(parametros.perdaPct)}`
+        : 'Nenhum lote encerrado ainda · só o frasco vazio mede a perda',
+      tom: perda.lotesEncerrados === 0 ? 'neutro' : perda.mediaPct <= parametros.perdaPct ? 'ok' : 'erro',
     },
     {
       label: 'Ajustes de estoque',
@@ -132,12 +141,15 @@ export default async function Movimentacoes() {
               style={{ fontSize: 11, lineHeight: 1.4, color: 'var(--color-secundario)', textWrap: 'pretty' }}
             >
               {m.motivo}
-              {/* Saída informa o líquido envasado; a perda é a diferença. */}
-              {m.tipo === 'saida' && m.liquidoMl !== null && (
-                <span style={{ color: 'var(--color-terciario)' }}>
-                  {` · ${volume(m.liquidoMl)} envasados`}
-                </span>
-              )}
+              {/* Só vale dizer quando difere do volume: produção baixa o
+                  envasado, então repetir o mesmo número seria ruído. */}
+              {m.tipo === 'saida' &&
+                m.liquidoMl !== null &&
+                m.liquidoMl !== Math.abs(m.volumeMl) && (
+                  <span style={{ color: 'var(--color-terciario)' }}>
+                    {` · ${volume(m.liquidoMl)} envasados`}
+                  </span>
+                )}
             </span>
             <span
               className="font-mono"
@@ -172,7 +184,7 @@ export default async function Movimentacoes() {
       alinhamento: 'right',
       render: (m) => (
         <Valor tamanho={11.5} peso={400} tom="var(--color-secundario)">
-          {volume(m.saldoMl)}
+          {m.saldoMl === null ? '—' : volume(m.saldoMl)}
         </Valor>
       ),
     },
@@ -205,8 +217,16 @@ export default async function Movimentacoes() {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <TituloSecao tamanho={16}>Histórico de movimentações</TituloSecao>
-        <div style={{ flex: 1 }} />
-        <BotaoOuro altura={34}>+ Nova movimentação</BotaoOuro>
+        {/* Não existe movimentação avulsa: cada linha aqui é o rastro de uma
+            ação feita em outra tela. Um botão de lançar à mão quebraria o
+            "uma ação, um lançamento" que sustenta a apuração. */}
+        <span
+          className="font-sans"
+          style={{ fontSize: 10.5, lineHeight: 1.4, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+        >
+          Toda linha nasce de uma ação: compra e encerramento em Lotes, envase em Produção,
+          divergência em Inventário.
+        </span>
       </div>
 
       <Tabela
