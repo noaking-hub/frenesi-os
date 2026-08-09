@@ -5,7 +5,7 @@ import { useState, useTransition } from 'react'
 import { COR } from '@/components/erp/tokens'
 import { plural } from '@/domain'
 
-import { diagnosticarShopify, importarPedidos } from './actions'
+import { conferirYampi, diagnosticarShopify, importarPedidos } from './actions'
 
 /**
  * Traz as vendas da loja e recalcula o consumo diário a partir delas.
@@ -21,6 +21,24 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
   const [aviso, setAviso] = useState<string | null>(null)
   const [diagnostico, setDiagnostico] = useState<string | null>(null)
   const [pendente, iniciarTransicao] = useTransition()
+
+  const conferirYampiAgora = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      setResumo(null)
+      setAviso(null)
+      const r = await conferirYampi()
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      setDiagnostico(
+        `Yampi "${r.alias}" conectada · ${r.pedidos} pedidos. ` +
+          `Campos do pedido: ${r.camposDoPedido.join(', ') || '—'}. ` +
+          `Cliente: ${r.camposDoCliente.join(', ') || '—'}. ` +
+          `Item: ${r.camposDoItem.join(', ') || '—'}.`,
+      )
+    })
 
   const diagnosticar = () =>
     iniciarTransicao(async () => {
@@ -162,6 +180,29 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
           </span>
         )}
       </span>
+
+      <button
+        type="button"
+        onClick={conferirYampiAgora}
+        disabled={pendente}
+        className="font-sans hover:border-ouro/40 hover:text-ouro"
+        style={{
+          height: 36,
+          padding: '0 14px',
+          flex: 'none',
+          border: '1px solid rgba(255,255,255,.11)',
+          background: 'transparent',
+          color: 'var(--color-secundario)',
+          fontWeight: 600,
+          fontSize: 11,
+          lineHeight: 1,
+          borderRadius: 9,
+          whiteSpace: 'nowrap',
+          cursor: pendente ? 'wait' : 'pointer',
+        }}
+      >
+        Conferir Yampi
+      </button>
 
       <button
         type="button"

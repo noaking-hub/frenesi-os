@@ -10,6 +10,8 @@ import {
   mensagemDe,
 } from '@/data/shopify'
 import type { ResultadoPedidos } from '@/data/shopify'
+import { diagnosticarYampi, yampiConfigurada } from '@/data/yampi'
+import type { DiagnosticoYampi } from '@/data/yampi'
 
 export type RespostaPedidos =
   | { ok: true; resultado: ResultadoPedidos & { basesComConsumo: number } }
@@ -70,6 +72,31 @@ export async function diagnosticarShopify(): Promise<RespostaDiagnostico> {
     }
   } catch (e) {
     console.error('[shopify] diagnóstico falhou:', e)
+    return { ok: false, erro: mensagemDe(e) }
+  }
+}
+
+export type RespostaYampi = ({ ok: true } & DiagnosticoYampi) | { ok: false; erro: string }
+
+/**
+ * Confere as credenciais da Yampi e relata o formato de um pedido real.
+ *
+ * O que trava uma importação é nome de campo divergente, não conexão. Ver a
+ * resposta da SUA loja vale mais que a documentação, que descreve o caso
+ * geral — e é isso que permite mapear sem chutar.
+ */
+export async function conferirYampi(): Promise<RespostaYampi> {
+  if (!yampiConfigurada()) {
+    return {
+      ok: false,
+      erro:
+        'Faltam as credenciais da Yampi no .env.local: YAMPI_ALIAS, YAMPI_USER_TOKEN e YAMPI_SECRET_KEY.',
+    }
+  }
+  try {
+    return { ok: true, ...(await diagnosticarYampi()) }
+  } catch (e) {
+    console.error('[yampi] diagnóstico falhou:', e)
     return { ok: false, erro: mensagemDe(e) }
   }
 }
