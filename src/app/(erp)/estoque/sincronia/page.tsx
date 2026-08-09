@@ -6,6 +6,7 @@ import { shopifyConfigurada, ultimaSincronizacao } from '@/data/shopify'
 import { TETO_SHOPIFY, pad2, plural, volume } from '@/domain'
 import type { AcaoSync, BaseSync } from '@/domain'
 
+import { AplicarShopify } from './AplicarShopify'
 import { ImportarShopify } from './ImportarShopify'
 
 const TOM_ACAO: Record<AcaoSync, Tom> = {
@@ -72,17 +73,15 @@ export default async function SincroniaShopify() {
       {sync.excesso > 0 && (
         <FaixaAlerta
           tom="erro"
-          texto={`${sync.excesso} unidades continuam vendáveis na Shopify sem volume que as sustente. Aplicar a sincronia corrige as ${foraDeSincronia} variantes de uma vez, incluindo ${sync.repor} com decremento manual desatualizado.`}
-          acao={
-            <span
-              className="font-sans"
-              style={{ fontSize: 10.5, lineHeight: 1.4, color: 'var(--color-terciario)', maxWidth: 240, textWrap: 'pretty' }}
-            >
-              A escrita de volta na Shopify ainda não foi integrada — os valores acima são a
-              recomendação do ERP, para aplicar manualmente por enquanto.
-            </span>
-          }
+          texto={`${sync.excesso} unidades continuam vendáveis na Shopify sem volume que as sustente. Aplicar corrige as ${foraDeSincronia} variantes de uma vez, incluindo ${sync.repor} com decremento manual desatualizado.`}
+          acao={<AplicarShopify foraDeSincronia={foraDeSincronia} />}
         />
+      )}
+
+      {sync.excesso === 0 && foraDeSincronia > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <AplicarShopify foraDeSincronia={foraDeSincronia} />
+        </div>
       )}
 
       <div

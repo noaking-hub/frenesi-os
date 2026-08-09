@@ -407,3 +407,208 @@ export async function ultimaSincronizacao(
     ignorados: data.ignorados,
   }
 }
+
+// ── Escrita: publicar na Shopify o estoque que o ERP calculou ──────────────
+
+const CONSULTA_LOCAL = /* GraphQL */ `
+  query {
+    locations(first: 1, query: "active:true") {
+      nodes {
+        id
+        name
+      }
+    }
+  }
+`
+
+/**
+ * `inventoryItem` é o que a Shopify movimenta — a variante é só a face
+ * vendável dele. Sem esse id não há como gravar quantidade.
+ */
+const CONSULTA_ITENS = /* GraphQL */ `
+  query ($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on ProductVariant {
+        id
+        inventoryItem {
+          id
+          tracked
+        }
+      }
+    }
+  }
+`
+
+const MUTACAO_ESTOQUE = /* GraphQL */ `
+  mutation ($input: InventorySetQuantitiesInput!) {
+    inventorySetQuantities(input: $input) {
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`
+
+interface NoVariante {
+  id: string
+  inventoryItem: { id: string; tracked: boolean } | null
+}
+
+/** Uma chamada GraphQL autenticada, com as mensagens de erro que importam. */
+async function chamarShopify<T>(
+  loja: string,
+  token: string,
+  query: string,
+  variables: Record<string, unknown>,
+  oQueFazia: string,
+): Promise<T> {
+  const resposta = await fetch(`https://${loja}/admin/api/${VERSAO_API}/graphql.json`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': token },
+    body: JSON.stringify({ query, variables }),
+    cache: 'no-store',
+  })
+
+  if (resposta.status === 401) {
+    throw new Error(
+      `A Shopify não reconheceu o token para ${loja} (401) ao ${oQueFazia}. Gere a credencial de novo e atualize o .env.local.`,
+    )
+  }
+  if (resposta.status === 403) {
+    throw new Error(
+      `A Shopify negou o acesso (403) ao ${oQueFazia}. Marque os escopos write_inventory e read_locations no app e REINSTALE — escopo novo só vale em token novo.`,
+    )
+  }
+  if (!resposta.ok) {
+    const detalhe = await resposta.text().catch(() => '')
+    throw new Error(
+      `Shopify respondeu ${resposta.status} ao ${oQueFazia}${detalhe ? ` — ${detalhe.slice(0, 160)}` : ''}.`,
+    )
+  }
+
+  const corpo = (await resposta.json()) as { data?: T; errors?: { message: string }[] }
+  if (corpo.errors?.length) {
+    const msg = corpo.errors[0].message
+    if (/access denied|not approved|unauthorized|scope/i.test(msg)) {
+      throw new Error(
+        `A Shopify negou a operação: "${msg}". Falta o escopo write_inventory (e read_locations) no app — marque e reinstale.`,
+      )
+    }
+    throw new Error(`Shopify: ${msg}`)
+  }
+  if (!corpo.data) throw new Error(`Shopify não devolveu dados ao ${oQueFazia}.`)
+  return corpo.data
+}
+
+export interface ResultadoAplicacao {
+  aplicadas: number
+  /** Variantes que o ERP quis mexer mas a Shopify não deixou, com o motivo. */
+  ignoradas: { variante: string; motivo: string }[]
+  local: string
+}
+
+/**
+ * Publica na Shopify o estoque que o ERP calculou.
+ *
+ * Só escreve o que está fora de sincronia: mandar de volta o valor que já
+ * está lá gastaria chamada e sujaria o histórico da loja sem mudar nada.
+ *
+ * O que vai é `possivel` — decants prontos mais o que o volume ainda permite
+ * fracionar —, limitado pelo teto. É o único número que o ERP sabe sustentar;
+ * qualquer coisa acima disso é venda que a produção não atende.
+ */
+export async function aplicarEstoqueShopify(
+  alvos: { shopifyVariantId: string; rotulo: string; novoValor: number }[],
+): Promise<ResultadoAplicacao> {
+  const { loja } = credenciais()
+  if (!loja) {
+    throw new Error('SHOPIFY_LOJA precisa estar no .env.local (ex.: sua-loja.myshopify.com)')
+  }
+  if (alvos.length === 0) {
+    return { aplicadas: 0, ignoradas: [], local: '' }
+  }
+  const token = await tokenDeAcesso(loja)
+
+  const dadosLocal = await chamarShopify<{ locations: { nodes: { id: string; name: string }[] } }>(
+    loja,
+    token,
+    CONSULTA_LOCAL,
+    {},
+    'ler o local de estoque',
+  )
+  const local = dadosLocal.locations.nodes[0]
+  if (!local) {
+    throw new Error('A loja não tem nenhum local de estoque ativo — crie um na Shopify.')
+  }
+
+  const ignoradas: ResultadoAplicacao['ignoradas'] = []
+  const quantidades: { inventoryItemId: string; locationId: string; quantity: number }[] = []
+
+  // `nodes(ids:)` aceita lotes; 100 por vez mantém o custo da query baixo.
+  for (const parte of emLotes(alvos, 100)) {
+    const dados = await chamarShopify<{ nodes: (NoVariante | null)[] }>(
+      loja,
+      token,
+      CONSULTA_ITENS,
+      { ids: parte.map((a) => a.shopifyVariantId) },
+      'ler os itens de estoque',
+    )
+
+    dados.nodes.forEach((no, i) => {
+      const alvo = parte[i]
+      if (!no?.inventoryItem) {
+        ignoradas.push({
+          variante: alvo.rotulo,
+          motivo: 'variante não existe mais na loja — reimporte o catálogo',
+        })
+        return
+      }
+      if (!no.inventoryItem.tracked) {
+        // Sem rastreio a Shopify vende infinito e ignora qualquer quantidade.
+        ignoradas.push({
+          variante: alvo.rotulo,
+          motivo: 'produto sem controle de estoque na Shopify — ative "rastrear quantidade"',
+        })
+        return
+      }
+      quantidades.push({
+        inventoryItemId: no.inventoryItem.id,
+        locationId: local.id,
+        quantity: alvo.novoValor,
+      })
+    })
+  }
+
+  // 250 por mutação é o limite prático da API.
+  for (const parte of emLotes(quantidades, 250)) {
+    const r = await chamarShopify<{
+      inventorySetQuantities: { userErrors: { field: string[]; message: string }[] }
+    }>(
+      loja,
+      token,
+      MUTACAO_ESTOQUE,
+      {
+        input: {
+          name: 'available',
+          reason: 'correction',
+          // O ERP é a fonte da verdade aqui; comparar com o valor anterior só
+          // faria a escrita falhar quando uma venda entrasse no meio.
+          ignoreCompareQuantity: true,
+          quantities: parte,
+        },
+      },
+      'gravar o estoque',
+    )
+    // A mutação pode responder 200 e recusar tudo em userErrors — engolir isso
+    // faria a tela dizer "aplicado" para uma gravação que não aconteceu.
+    const erros = r.inventorySetQuantities?.userErrors ?? []
+    if (erros.length) {
+      throw new Error(
+        `A Shopify recusou a gravação: ${erros.map((e) => e.message).join('; ').slice(0, 300)}`,
+      )
+    }
+  }
+
+  return { aplicadas: quantidades.length, ignoradas, local: local.name }
+}
