@@ -414,7 +414,9 @@ const repositorioSupabase: Repositorio = {
         email: cliente?.email ?? '',
         cpf: (cliente?.cpf ?? '').replace(/\D/g, ''),
         telefone: cliente?.telefone ?? '',
-        data: p.comprado_em,
+        // Mesmo motivo de Movimentações: timestamptz cru estoura a coluna e
+        // aparece truncado como "2026-08-09T04".
+        data: dataCurta(p.comprado_em),
         canal: capitalizaCanal(p.canal),
         valor: Number(p.valor),
         frete: Number(p.frete),

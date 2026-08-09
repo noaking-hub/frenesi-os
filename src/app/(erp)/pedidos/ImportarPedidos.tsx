@@ -50,11 +50,22 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
         setErro(r.erro)
         return
       }
-      const { pedidos, itens, clientes, itensSemVariante, desde, basesComConsumo, semDadosDeCliente } =
-        r.resultado
+      const {
+        pedidos,
+        itens,
+        clientes,
+        itensSemVariante,
+        desde,
+        basesComConsumo,
+        semDadosDeCliente,
+        casadosPorNome,
+      } = r.resultado
       setResumo(
         `${plural(pedidos, 'pedido', 'pedidos')} desde ${desde} · ${plural(itens, 'item', 'itens')} · ` +
-          `${plural(clientes, 'cliente', 'clientes')} · consumo diário recalculado em ${plural(basesComConsumo, 'base', 'bases')}.`,
+          `${plural(clientes, 'cliente', 'clientes')} · consumo diário recalculado em ${plural(basesComConsumo, 'base', 'bases')}.` +
+          (casadosPorNome
+            ? ` ${plural(casadosPorNome, 'item casou', 'itens casaram')} pelo nome do perfume — o id da variante mudou na loja desde a venda.`
+            : ''),
       )
       const avisos: string[] = []
       if (semDadosDeCliente) {

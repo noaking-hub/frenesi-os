@@ -117,7 +117,11 @@ export function PedidosCliente({ itens }: { itens: Item[] }) {
       render: (i) => (
         <CelulaDupla
           principal={i.pedido.cliente}
-          secundaria={`${plural(i.pedido.itens.length, 'item', 'itens')} · ${i.pedido.destino}`}
+          // Sem destino (loja sem dados protegidos de cliente) o separador
+          // ficaria solto no fim da linha.
+          secundaria={[plural(i.pedido.itens.length, 'item', 'itens'), i.pedido.destino]
+            .filter(Boolean)
+            .join(' · ')}
         />
       ),
     },

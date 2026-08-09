@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { mapearCatalogo } from '@/domain'
+import { mapearCatalogo, parseVarianteMl } from '@/domain'
 import type { CatalogoMapeado, ProdutoShopify } from '@/domain'
 
 import { supabaseConfigurado, supabaseServer } from './supabase'
@@ -668,6 +668,16 @@ export async function aplicarEstoqueShopify(
 
 // ── Pedidos ────────────────────────────────────────────────────────────────
 
+/** Compara nomes ignorando acento, caixa e espaço repetido. */
+function normalizarNome(nome: string): string {
+  return nome
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 const CONSULTA_PEDIDOS = /* GraphQL */ `
   query ($cursor: String, $filtro: String) {
     orders(first: 50, after: $cursor, sortKey: CREATED_AT, reverse: true, query: $filtro) {
@@ -714,6 +724,7 @@ const CONSULTA_PEDIDOS = /* GraphQL */ `
             }
             variant {
               id
+              title
             }
           }
         }
@@ -775,7 +786,7 @@ interface PedidoShopify {
       title: string
       quantity: number
       originalUnitPriceSet: { shopMoney: { amount: string } }
-      variant: { id: string } | null
+      variant: { id: string; title: string } | null
     }[]
   }
   fulfillments: { trackingInfo: { number: string | null; company: string | null }[] }[]
@@ -809,6 +820,8 @@ export interface ResultadoPedidos {
   desde: string
   /** A loja não liberou os dados protegidos: vieram valores, não pessoas. */
   semDadosDeCliente: boolean
+  /** Itens recuperados pelo nome porque o id da variante mudou na loja. */
+  casadosPorNome: number
 }
 
 /**
@@ -911,6 +924,20 @@ export async function importarPedidosShopify(dias = 60): Promise<ResultadoPedido
       ]),
   )
 
+  // Segundo caminho de casamento: nome do produto → base.
+  //
+  // O id da variante muda quando o produto é editado ou recriado na loja, e
+  // pedidos antigos guardam o id antigo para sempre. Sem esta volta, uma
+  // reorganização do catálogo apagaria meses de histórico de venda — os itens
+  // continuariam no pedido, mas sem base, sem consumo e sem baixa de estoque.
+  const { data: basesPorNome, error: erroBases } = await sb
+    .from('perfumes_base')
+    .select('id, nome')
+  if (erroBases) throw erroBases
+  const porNome = new Map(
+    (basesPorNome ?? []).map((b) => [normalizarNome(b.nome as string), b.id as string]),
+  )
+
   // Cliente é identificado por e-mail: é o que a Shopify garante e o que o
   // portal de devolução usa para o cliente se encontrar.
   const clientes = new Map<string, { nome: string; email: string; telefone: string | null; cidade: string | null; uf: string | null }>()
@@ -975,10 +1002,21 @@ export async function importarPedidosShopify(dias = 60): Promise<ResultadoPedido
   if (erroLimpa) throw erroLimpa
 
   let itensSemVariante = 0
+  let casadosPorNome = 0
   const linhasItens = pedidos.flatMap((p) =>
     p.lineItems.nodes.map((i) => {
-      const casado = i.variant ? porVariante.get(i.variant.id) : undefined
+      let casado = i.variant ? porVariante.get(i.variant.id) : undefined
+
+      if (!casado && i.variant) {
+        const baseId = porNome.get(normalizarNome(i.title))
+        const ml = parseVarianteMl(i.variant.title)
+        if (baseId && ml) {
+          casado = { baseId, variante: ml }
+          casadosPorNome++
+        }
+      }
       if (!casado) itensSemVariante++
+
       return {
         pedido_id: p.name,
         base_id: casado?.baseId ?? null,
@@ -986,6 +1024,8 @@ export async function importarPedidosShopify(dias = 60): Promise<ResultadoPedido
         variante: casado?.variante ?? null,
         quantidade: i.quantity,
         preco: Number(i.originalUnitPriceSet.shopMoney.amount),
+        shopify_variant_id: i.variant?.id ?? null,
+        variante_titulo: i.variant?.title ?? null,
       }
     }),
   )
@@ -1001,7 +1041,7 @@ export async function importarPedidosShopify(dias = 60): Promise<ResultadoPedido
     perfumes: clientes.size,
     variantes: linhasItens.length,
     ignorados: itensSemVariante,
-    detalhes: { desde, dias },
+    detalhes: { desde, dias, casadosPorNome },
   })
   if (erroLog) throw erroLog
 
@@ -1012,6 +1052,7 @@ export async function importarPedidosShopify(dias = 60): Promise<ResultadoPedido
     itensSemVariante,
     desde,
     semDadosDeCliente,
+    casadosPorNome,
   }
 }
 
