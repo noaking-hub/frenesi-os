@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useTransition } from 'react'
 
 import { Modal } from '@/components/erp/Modal'
 import { Badge, BotaoSecundario, FaixaAlerta, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
@@ -20,6 +20,8 @@ import {
   volume,
 } from '@/domain'
 import type { ParametrosPrecificacao, PerfumeBase, VarianteMl } from '@/domain'
+
+import { publicarPrecos } from './actions'
 
 interface Props {
   bases: PerfumeBase[]
@@ -389,6 +391,8 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
           selecionadoDe={(l) => l.variante === varianteSel}
           bandeiraDe={(l) => (l.variante === varianteSel ? 'ouro' : null)}
         />
+
+        <PublicarPrecos base={base} linhas={linhas} simulando={simulando} />
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -878,5 +882,130 @@ function SeletorPerfume({
         )}
       </div>
     </Modal>
+  )
+}
+
+/**
+ * Publica o preço sugerido na Shopify.
+ *
+ * O caminho é indireto de propósito: a Shopify é dona do catálogo e a Yampi
+ * espelha o dela. Escrever nas duas criaria duas verdades de preço, e a
+ * próxima sincronia desfaria uma.
+ *
+ * Só sai o que MUDA. Reenviar o preço que já está lá gastaria chamada e
+ * sujaria o histórico da loja sem mexer na vitrine.
+ */
+function PublicarPrecos({
+  base,
+  linhas,
+  simulando,
+}: {
+  base: PerfumeBase
+  linhas: Linha[]
+  simulando: boolean
+}) {
+  const [erro, setErro] = useState<string | null>(null)
+  const [resumo, setResumo] = useState<string | null>(null)
+  const [recusadas, setRecusadas] = useState<{ variante: string; motivo: string }[]>([])
+  const [pendente, iniciarTransicao] = useTransition()
+
+  const mudam = linhas.filter((l) => l.sugerido > 0 && l.praticado !== l.sugerido)
+
+  const publicar = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      setResumo(null)
+      setRecusadas([])
+      const r = await publicarPrecos(
+        mudam.map((l) => ({ baseId: base.id, variante: l.variante, preco: l.sugerido })),
+      )
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      setRecusadas(r.ignoradas)
+      setResumo(
+        `${plural(r.aplicadas, 'preço publicado', 'preços publicados')} na Shopify` +
+          (r.ignoradas.length ? ` · ${plural(r.ignoradas.length, 'recusado', 'recusados')}` : '') +
+          '. A Yampi pega o novo preço na próxima sincronia do catálogo — confira lá antes de anunciar.',
+      )
+    })
+
+  const travado = pendente || simulando || mudam.length === 0
+
+  return (
+    <section
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 16,
+        padding: '15px 17px',
+        borderRadius: 13,
+        background: 'rgba(239,209,140,.045)',
+        border: '1px solid var(--color-borda-ouro)',
+      }}
+    >
+      <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+        <TituloSecao tamanho={14}>Levar estes preços para a loja</TituloSecao>
+        <span
+          className="font-sans"
+          style={{ fontSize: 11, lineHeight: 1.55, color: 'rgba(242,237,227,.68)', textWrap: 'pretty' }}
+        >
+          {simulando
+            ? 'Você está simulando com um custo diferente do cadastrado. Publicar sairia de um número que não está no catálogo — ajuste o custo da base antes.'
+            : mudam.length === 0
+              ? 'Todas as variantes desta base já estão publicadas no preço sugerido.'
+              : `${plural(mudam.length, 'variante muda', 'variantes mudam')} de preço: ${mudam
+                  .map((l) => `${l.variante} ml ${l.praticado === null ? '' : `${brl(l.praticado)} → `}${brl(l.sugerido)}`)
+                  .join(' · ')}.`}
+        </span>
+        <span
+          className="font-sans"
+          style={{ fontSize: 10, lineHeight: 1.45, color: 'rgba(242,237,227,.34)', textWrap: 'pretty' }}
+        >
+          O preço vai para a Shopify, que é a dona do catálogo. A Yampi espelha o catálogo dela —
+          por isso o ERP não escreve nas duas: duas verdades de preço se desfazem na sincronia
+          seguinte.
+        </span>
+        {(erro || resumo) && (
+          <span
+            className="font-sans"
+            style={{ fontSize: 11, lineHeight: 1.5, color: erro ? COR.erro : COR.ok, textWrap: 'pretty' }}
+          >
+            {erro ?? resumo}
+          </span>
+        )}
+        {recusadas.map((r) => (
+          <span
+            key={r.variante}
+            className="font-sans"
+            style={{ fontSize: 10, lineHeight: 1.45, color: COR.atencao, textWrap: 'pretty' }}
+          >
+            {`${r.variante}: ${r.motivo}`}
+          </span>
+        ))}
+      </span>
+
+      <button
+        type="button"
+        onClick={publicar}
+        disabled={travado}
+        className="botao-ouro font-sans hover:brightness-[1.07]"
+        style={{
+          height: 38,
+          padding: '0 18px',
+          fontWeight: 700,
+          fontSize: 11.5,
+          lineHeight: 1,
+          borderRadius: 9,
+          whiteSpace: 'nowrap',
+          flex: 'none',
+          cursor: pendente ? 'wait' : travado ? 'not-allowed' : 'pointer',
+          opacity: travado ? 0.45 : 1,
+        }}
+      >
+        {pendente ? 'Publicando…' : `Publicar na Shopify${mudam.length ? ` · ${mudam.length}` : ''}`}
+      </button>
+    </section>
   )
 }

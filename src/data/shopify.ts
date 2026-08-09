@@ -675,6 +675,94 @@ export async function aplicarEstoqueShopify(
   return { aplicadas: quantidades.length, ignoradas, local: local.name }
 }
 
+const MUTACAO_PRECO = /* GraphQL */ `
+  mutation ($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+    productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`
+
+export interface AlvoPreco {
+  shopifyProductId: string
+  shopifyVariantId: string
+  rotulo: string
+  preco: number
+}
+
+export interface ResultadoPrecos {
+  aplicadas: number
+  /** Variantes que o ERP quis mexer mas a loja não deixou, com o motivo. */
+  ignoradas: { variante: string; motivo: string }[]
+}
+
+/**
+ * Publica na Shopify o preço que o ERP calculou.
+ *
+ * A Shopify é a dona do catálogo, e a Yampi espelha o catálogo dela: escrever
+ * aqui é o caminho para o preço chegar ao checkout. Escrever direto na Yampi
+ * criaria duas verdades de preço, e a próxima sincronia desfaria uma delas.
+ *
+ * `productVariantsBulkUpdate` exige o id do PRODUTO, não só o da variante —
+ * por isso os alvos são agrupados por produto antes de sair.
+ */
+export async function aplicarPrecosShopify(alvos: AlvoPreco[]): Promise<ResultadoPrecos> {
+  const { loja } = credenciais()
+  if (!loja) {
+    throw new Error('SHOPIFY_LOJA precisa estar no .env.local (ex.: sua-loja.myshopify.com)')
+  }
+  if (alvos.length === 0) return { aplicadas: 0, ignoradas: [] }
+  const token = await tokenDeAcesso(loja)
+
+  const ignoradas: ResultadoPrecos['ignoradas'] = []
+  const porProduto = new Map<string, AlvoPreco[]>()
+  for (const a of alvos) {
+    if (!a.shopifyProductId || !a.shopifyVariantId) {
+      ignoradas.push({
+        variante: a.rotulo,
+        motivo: 'sem id da Shopify — reimporte o catálogo antes de publicar',
+      })
+      continue
+    }
+    const lista = porProduto.get(a.shopifyProductId)
+    if (lista) lista.push(a)
+    else porProduto.set(a.shopifyProductId, [a])
+  }
+
+  let aplicadas = 0
+  for (const [productId, variantes] of porProduto) {
+    const r = await chamarShopify<{
+      productVariantsBulkUpdate: { userErrors: { field: string[]; message: string }[] }
+    }>(
+      loja,
+      token,
+      MUTACAO_PRECO,
+      {
+        productId,
+        // A Shopify quer o preço como string com ponto decimal.
+        variants: variantes.map((v) => ({ id: v.shopifyVariantId, price: v.preco.toFixed(2) })),
+      },
+      'gravar o preço',
+      'write_products',
+    )
+    // A mutação responde 200 e recusa em userErrors — engolir isso faria a
+    // tela dizer "publicado" para um preço que continua o antigo.
+    const erros = r.productVariantsBulkUpdate?.userErrors ?? []
+    if (erros.length) {
+      for (const v of variantes) {
+        ignoradas.push({ variante: v.rotulo, motivo: erros[0].message.slice(0, 160) })
+      }
+      continue
+    }
+    aplicadas += variantes.length
+  }
+
+  return { aplicadas, ignoradas }
+}
+
 // ── Pedidos ────────────────────────────────────────────────────────────────
 
 /** Compara nomes ignorando acento, caixa e espaço repetido. */
