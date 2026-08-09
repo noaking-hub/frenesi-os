@@ -456,12 +456,22 @@ interface NoVariante {
 }
 
 /** Uma chamada GraphQL autenticada, com as mensagens de erro que importam. */
+/** Erro que a chamada reconhece como falta de permissão, para quem chamou decidir. */
+export class AcessoNegadoShopify extends Error {
+  constructor(mensagem: string) {
+    super(mensagem)
+    this.name = 'AcessoNegadoShopify'
+  }
+}
+
 async function chamarShopify<T>(
   loja: string,
   token: string,
   query: string,
   variables: Record<string, unknown>,
   oQueFazia: string,
+  /** Escopos que ESTA operação exige — a mensagem precisa nomear os certos. */
+  escopos = '',
 ): Promise<T> {
   const resposta = await fetch(`https://${loja}/admin/api/${VERSAO_API}/graphql.json`, {
     method: 'POST',
@@ -476,8 +486,10 @@ async function chamarShopify<T>(
     )
   }
   if (resposta.status === 403) {
-    throw new Error(
-      `A Shopify negou o acesso (403) ao ${oQueFazia}. Marque os escopos write_inventory e read_locations no app e REINSTALE — escopo novo só vale em token novo.`,
+    throw new AcessoNegadoShopify(
+      `A Shopify negou o acesso (403) ao ${oQueFazia}.` +
+        (escopos ? ` Esta operação exige ${escopos}.` : '') +
+        ' Escopo novo só vale em token novo: depois de marcar, atualize a instalação do app na loja e reinicie o servidor do ERP para descartar o token em cache.',
     )
   }
   if (!resposta.ok) {
@@ -490,9 +502,11 @@ async function chamarShopify<T>(
   const corpo = (await resposta.json()) as { data?: T; errors?: { message: string }[] }
   if (corpo.errors?.length) {
     const msg = corpo.errors[0].message
-    if (/access denied|not approved|unauthorized|scope/i.test(msg)) {
-      throw new Error(
-        `A Shopify negou a operação: "${msg}". Falta o escopo write_inventory (e read_locations) no app — marque e reinstale.`,
+    if (/access denied|not approved|unauthorized|scope|protected customer/i.test(msg)) {
+      throw new AcessoNegadoShopify(
+        `A Shopify negou "${oQueFazia}": ${msg}` +
+          (escopos ? ` · esta operação exige ${escopos}.` : '') +
+          ' Escopo novo só vale em token novo: atualize a instalação do app na loja e reinicie o servidor do ERP para descartar o token em cache.',
       )
     }
     throw new Error(`Shopify: ${msg}`)
@@ -536,6 +550,7 @@ export async function aplicarEstoqueShopify(
     CONSULTA_LOCAL,
     {},
     'ler o local de estoque',
+    'read_locations',
   )
   const local = dadosLocal.locations.nodes[0]
   if (!local) {
@@ -553,6 +568,7 @@ export async function aplicarEstoqueShopify(
       CONSULTA_ITENS,
       { ids: parte.map((a) => a.shopifyVariantId) },
       'ler os itens de estoque',
+      'read_inventory',
     )
 
     dados.nodes.forEach((no, i) => {
@@ -599,6 +615,7 @@ export async function aplicarEstoqueShopify(
         },
       },
       'gravar o estoque',
+      'write_inventory',
     )
     // A mutação pode responder 200 e recusar tudo em userErrors — engolir isso
     // faria a tela dizer "aplicado" para uma gravação que não aconteceu.
@@ -675,6 +692,28 @@ const CONSULTA_PEDIDOS = /* GraphQL */ `
   }
 `
 
+/**
+ * A mesma consulta sem NENHUM campo de cliente.
+ *
+ * `customer` e `shippingAddress` são dados protegidos: a Shopify exige
+ * aprovação de "protected customer data" além do escopo read_orders, e nega o
+ * campo `orders` inteiro quando ela falta. Sem esta versão, uma aprovação
+ * pendente impediria até de ver o faturamento — que não é dado de cliente.
+ */
+const CONSULTA_PEDIDOS_SEM_CLIENTE = (() => {
+  const reduzida = CONSULTA_PEDIDOS.replace(
+    /\n\s*customer \{[\s\S]*?\n\s*\}\n\s*shippingAddress \{[\s\S]*?\n\s*\}/,
+    '',
+  )
+  // Se o corte falhar, a consulta "reduzida" seria idêntica à original e o
+  // fallback tentaria de novo exatamente o que a Shopify acabou de negar —
+  // um laço silencioso. Melhor quebrar aqui, no carregamento do módulo.
+  if (/customer|shippingAddress/.test(reduzida)) {
+    throw new Error('A consulta de pedidos sem dados de cliente não removeu os campos protegidos.')
+  }
+  return reduzida
+})()
+
 interface PedidoShopify {
   id: string
   name: string
@@ -732,6 +771,8 @@ export interface ResultadoPedidos {
   /** Itens cuja variante não existe no ERP — não dá para baixar estoque deles. */
   itensSemVariante: number
   desde: string
+  /** A loja não liberou os dados protegidos: vieram valores, não pessoas. */
+  semDadosDeCliente: boolean
 }
 
 /**
@@ -754,21 +795,38 @@ export async function importarPedidosShopify(dias = 60): Promise<ResultadoPedido
   const desde = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
   const filtro = `created_at:>=${desde}`
 
-  const pedidos: PedidoShopify[] = []
-  let cursor: string | null = null
-  for (let pagina = 0; pagina < 40; pagina++) {
-    const dados: {
-      orders: { pageInfo: { hasNextPage: boolean; endCursor: string }; nodes: PedidoShopify[] }
-    } = await chamarShopify(
-      loja,
-      token,
-      CONSULTA_PEDIDOS,
-      { cursor, filtro },
-      'ler os pedidos',
-    )
-    pedidos.push(...dados.orders.nodes)
-    if (!dados.orders.pageInfo.hasNextPage) break
-    cursor = dados.orders.pageInfo.endCursor
+  const buscar = async (consulta: string) => {
+    const encontrados: PedidoShopify[] = []
+    let cursor: string | null = null
+    for (let pagina = 0; pagina < 40; pagina++) {
+      const dados: {
+        orders: { pageInfo: { hasNextPage: boolean; endCursor: string }; nodes: PedidoShopify[] }
+      } = await chamarShopify(
+        loja,
+        token,
+        consulta,
+        { cursor, filtro },
+        'ler os pedidos',
+        'read_orders e, para nome/e-mail/endereço, aprovação de dados protegidos de cliente',
+      )
+      encontrados.push(...dados.orders.nodes)
+      if (!dados.orders.pageInfo.hasNextPage) break
+      cursor = dados.orders.pageInfo.endCursor
+    }
+    return encontrados
+  }
+
+  // Tenta com os dados de cliente; se a loja não tiver aprovação de dados
+  // protegidos, importa o faturamento mesmo assim. Meia importação é melhor
+  // que nenhuma — e a tela diz o que ficou de fora.
+  let pedidos: PedidoShopify[]
+  let semDadosDeCliente = false
+  try {
+    pedidos = await buscar(CONSULTA_PEDIDOS)
+  } catch (e) {
+    if (!(e instanceof AcessoNegadoShopify)) throw e
+    semDadosDeCliente = true
+    pedidos = await buscar(CONSULTA_PEDIDOS_SEM_CLIENTE)
   }
 
   const sb = supabaseServer()
@@ -888,6 +946,7 @@ export async function importarPedidosShopify(dias = 60): Promise<ResultadoPedido
     clientes: clientes.size,
     itensSemVariante,
     desde,
+    semDadosDeCliente,
   }
 }
 

@@ -31,17 +31,26 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
         setErro(r.erro)
         return
       }
-      const { pedidos, itens, clientes, itensSemVariante, desde, basesComConsumo } = r.resultado
+      const { pedidos, itens, clientes, itensSemVariante, desde, basesComConsumo, semDadosDeCliente } =
+        r.resultado
       setResumo(
         `${plural(pedidos, 'pedido', 'pedidos')} desde ${desde} · ${plural(itens, 'item', 'itens')} · ` +
           `${plural(clientes, 'cliente', 'clientes')} · consumo diário recalculado em ${plural(basesComConsumo, 'base', 'bases')}.`,
       )
+      const avisos: string[] = []
+      if (semDadosDeCliente) {
+        avisos.push(
+          'A loja não liberou os dados protegidos de cliente, então vieram valores e itens, mas não nome, e-mail nem endereço. ' +
+            'Para liberar: no app da Shopify, peça acesso a "protected customer data" e reimporte — o CRM depende disso.',
+        )
+      }
       if (itensSemVariante) {
-        setAviso(
+        avisos.push(
           `${plural(itensSemVariante, 'item não casou', 'itens não casaram')} com nenhuma variante do ERP. ` +
             'Eles aparecem no pedido, mas não baixam estoque de ninguém — importe o catálogo antes dos pedidos para casar tudo.',
         )
       }
+      setAviso(avisos.length ? avisos.join(' ') : null)
     })
 
   if (!configurada) {
