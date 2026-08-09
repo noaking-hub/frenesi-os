@@ -113,9 +113,11 @@ export type RespostaImportYampi =
 /**
  * Importa os pedidos da Yampi e, na sequência, deriva o consumo diário.
  *
- * Remove antes o espelho da Shopify: os dois conjuntos descrevem as MESMAS
- * vendas com ids diferentes, e mantê-los somaria o faturamento duas vezes em
- * todo KPI do sistema.
+ * O espelho da Shopify é removido DEPOIS de a importação dar certo — os dois
+ * conjuntos descrevem as mesmas vendas com ids diferentes e somariam o
+ * faturamento duas vezes, mas apagar antes deixaria o ERP sem pedido nenhum
+ * se a carga falhasse no meio. Foi exatamente o que aconteceu na primeira
+ * tentativa.
  */
 export async function importarDaYampi(dias = 90): Promise<RespostaImportYampi> {
   if (!yampiConfigurada()) {
@@ -125,8 +127,8 @@ export async function importarDaYampi(dias = 90): Promise<RespostaImportYampi> {
     }
   }
   try {
-    const { removidos } = await limparPedidosShopify()
     const resultado = await importarPedidosYampi(dias)
+    const { removidos } = await limparPedidosShopify()
     const { bases } = await derivarConsumoDiario(30)
     revalidatePath('/', 'layout')
     return {

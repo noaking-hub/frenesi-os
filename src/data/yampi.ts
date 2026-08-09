@@ -438,6 +438,17 @@ function lotes<T>(itens: T[], tamanho: number): T[][] {
 export async function limparPedidosShopify(): Promise<{ removidos: number }> {
   if (!supabaseConfigurado()) throw new Error('O Supabase precisa estar configurado.')
   const sb = supabaseServer()
+
+  // Nunca apagar o espelho quando não há nada no lugar dele. Uma importação
+  // que voltou vazia — janela errada, loja sem venda no período — deixaria o
+  // ERP sem pedido nenhum e sem aviso.
+  const { count, error: erroConta } = await sb
+    .from('pedidos')
+    .select('id', { count: 'exact', head: true })
+    .eq('canal', 'yampi')
+  if (erroConta) throw erroConta
+  if (!count) return { removidos: 0 }
+
   const { data, error } = await sb.from('pedidos').delete().eq('canal', 'shopify').select('id')
   if (error) throw error
   return { removidos: (data ?? []).length }
