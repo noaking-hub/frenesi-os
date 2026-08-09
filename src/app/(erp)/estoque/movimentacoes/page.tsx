@@ -110,11 +110,12 @@ export default async function Movimentacoes() {
     {
       chave: 'base',
       titulo: 'Perfume base',
-      largura: '168px',
+      largura: 'minmax(0,1fr)',
       render: (m) => (
         <span
           className="font-sans"
           style={{
+            display: 'block',
             fontWeight: 600,
             fontSize: 12,
             lineHeight: 1.3,
@@ -131,7 +132,7 @@ export default async function Movimentacoes() {
     {
       chave: 'motivo',
       titulo: 'Motivo',
-      largura: 'minmax(0,1fr)',
+      largura: 'minmax(0,1.5fr)',
       render: (m) => {
         const origem = origemDoAjuste(m)
         return (
@@ -196,6 +197,7 @@ export default async function Movimentacoes() {
         <span
           className="font-sans"
           style={{
+            display: 'block',
             fontWeight: 500,
             fontSize: 11,
             lineHeight: 1.3,

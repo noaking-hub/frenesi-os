@@ -66,6 +66,8 @@ export interface Repositorio {
   precoPraticado(): Promise<Record<string, Partial<Record<VarianteMl, number>>>>
   movimentacoes(): Promise<Movimentacao[]>
   inventario(): Promise<ContagemInventario[]>
+  /** Contagem em andamento, se houver. `null` quando não há nenhuma aberta. */
+  inventarioAberto(): Promise<{ id: string; competencia: string } | null>
   envios(): Promise<Envio[]>
   ocorrencias(): Promise<Ocorrencia[]>
   solicitacoes(): Promise<SolicitacaoErp[]>
@@ -130,6 +132,9 @@ const repositorioFixtures: Repositorio = {
   },
   async inventario() {
     return fixtures.INVENTARIO
+  },
+  async inventarioAberto() {
+    return { id: 'INV-0726', competencia: '26/07/2026' }
   },
   async envios() {
     return fixtures.ENVIOS
@@ -476,6 +481,18 @@ const repositorioSupabase: Repositorio = {
         saldoMl: m.saldo_ml === null ? null : Number(m.saldo_ml),
       }),
     )
+  },
+
+  async inventarioAberto() {
+    const { data, error } = await supabaseServer()
+      .from('inventarios')
+      .select('id, competencia')
+      .is('fechado_em', null)
+      .order('competencia', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (error) throw error
+    return data ? { id: data.id as string, competencia: data.competencia as string } : null
   },
 
   async inventario() {

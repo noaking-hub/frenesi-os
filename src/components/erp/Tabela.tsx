@@ -103,11 +103,18 @@ export function Tabela<T>({
           textAlign: 'left',
         }
 
+        // `minWidth: 0` deixa a coluna encolher abaixo do conteúdo; `overflow`
+        // impede que ela invada a vizinha quando o texto não couber. Sem o
+        // segundo, um `text-overflow: ellipsis` numa caixa INLINE lá dentro é
+        // ignorado — overflow não se aplica a inline — e o nome longo passa
+        // por cima da coluna seguinte.
         const conteudo = colunas.map((c) => (
           <span
             key={c.chave}
             style={{
+              display: 'block',
               minWidth: 0,
+              overflow: 'hidden',
               textAlign: c.alinhamento ?? 'left',
               justifySelf: c.alinhamento === 'right' ? 'end' : 'stretch',
             }}
