@@ -115,10 +115,11 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
       }
       setResumo(
         r.enviados === 0 && r.ignorados.length === 0
-          ? 'Nenhum pedido novo para espelhar: todos os que têm rastreio já estão marcados como enviados na Shopify.'
-          : `${plural(r.enviados, 'pedido marcado como enviado', 'pedidos marcados como enviados')} na Shopify, com e-mail de rastreio para o cliente` +
+          ? 'Nenhum pedido novo para espelhar: todos os que têm rastreio já estão fechados na Shopify.'
+          : `${plural(r.enviados, 'pedido marcado como enviado', 'pedidos marcados como enviados')} na Shopify, com o rastreio na conta do cliente` +
             (r.entregues ? ` · ${plural(r.entregues, 'entrega confirmada', 'entregas confirmadas')}` : '') +
-            '.',
+            (r.fechados ? ` · ${plural(r.fechados, 'pedido fechado', 'pedidos fechados')} e fora da fila de abertos` : '') +
+            '. Quem avisa o cliente continua sendo a Yampi — a Shopify não manda nada.',
       )
       if (r.ignorados.length) {
         setAviso(
@@ -280,7 +281,7 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
         type="button"
         onClick={sincronizar}
         disabled={pendente}
-        title="Cria o fulfillment na Shopify com o rastreio da Yampi e avisa o cliente"
+        title="Fecha o pedido na Shopify com o rastreio da Yampi. Não envia e-mail: quem avisa é a Yampi"
         className="font-sans hover:border-ouro/40 hover:text-ouro"
         style={{
           height: 36,

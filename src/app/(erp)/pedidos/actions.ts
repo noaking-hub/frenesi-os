@@ -57,6 +57,9 @@ const EXIGIDOS = [
   'write_inventory',
   'read_locations',
   'read_orders',
+  'read_merchant_managed_fulfillment_orders',
+  'write_merchant_managed_fulfillment_orders',
+  'write_orders',
 ]
 
 /**
@@ -145,7 +148,13 @@ export async function importarDaYampi(dias = 90): Promise<RespostaImportYampi> {
 }
 
 export type RespostaEnvios =
-  | { ok: true; enviados: number; entregues: number; ignorados: { pedido: string; motivo: string }[] }
+  | {
+      ok: true
+      enviados: number
+      entregues: number
+      fechados: number
+      ignorados: { pedido: string; motivo: string }[]
+    }
   | { ok: false; erro: string }
 
 /**

@@ -1140,6 +1140,20 @@ const MUTACAO_ENVIO = /* GraphQL */ `
   }
 `
 
+const MUTACAO_FECHAR = /* GraphQL */ `
+  mutation ($id: ID!) {
+    orderClose(input: { id: $id }) {
+      order {
+        id
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`
+
 const MUTACAO_ENTREGA = /* GraphQL */ `
   mutation ($fulfillmentEvent: FulfillmentEventInput!) {
     fulfillmentEventCreate(fulfillmentEvent: $fulfillmentEvent) {
@@ -1166,6 +1180,8 @@ export interface EnvioParaShopify {
 export interface ResultadoEnvios {
   enviados: number
   entregues: number
+  /** Pedidos tirados da fila de "abertos" da loja. */
+  fechados: number
   ignorados: { pedido: string; motivo: string }[]
 }
 
@@ -1185,12 +1201,13 @@ export async function sincronizarEnviosShopify(
 ): Promise<ResultadoEnvios> {
   const { loja } = credenciais()
   if (!loja) throw new Error('SHOPIFY_LOJA precisa estar no .env.local')
-  if (envios.length === 0) return { enviados: 0, entregues: 0, ignorados: [] }
+  if (envios.length === 0) return { enviados: 0, entregues: 0, fechados: 0, ignorados: [] }
   const token = await tokenDeAcesso(loja)
 
   const ignorados: ResultadoEnvios['ignorados'] = []
   let enviados = 0
   let entregues = 0
+  let fechados = 0
 
   for (const e of envios) {
     const busca = `name:${e.shopifyNumero}`
@@ -1244,9 +1261,12 @@ export async function sincronizarEnviosShopify(
           trackingInfo: e.rastreio
             ? { number: e.rastreio, company: e.transportadora ?? undefined }
             : undefined,
-          // Sem isto o status muda e o cliente não fica sabendo — que é
-          // exatamente o problema que esta sincronia existe para resolver.
-          notifyCustomer: true,
+          // NÃO notificar: a Yampi já manda o e-mail de faturamento, envio e
+          // entrega. Ligar isto aqui daria dois avisos do mesmo fato ao mesmo
+          // cliente — o que é pior que não avisar. O objetivo desta sincronia
+          // é a Shopify parar de mostrar o pedido como aberto, e o cliente
+          // encontrar o rastreio quando entrar na conta.
+          notifyCustomer: false,
         },
       },
       'marcar o pedido como enviado',
@@ -1280,8 +1300,39 @@ export async function sincronizarEnviosShopify(
         'write_merchant_managed_fulfillment_orders',
       )
       if ((rd.fulfillmentEventCreate?.userErrors ?? []).length === 0) entregues++
+
+      // Entregue e faturado é pedido terminado: fechar tira da fila de
+      // "abertos" da loja, que é o trabalho manual que sobrava para o fim.
+      // Sem o escopo write_orders a Shopify recusa — e isso não invalida o
+      // envio, então o erro vira aviso em vez de derrubar a rodada.
+      try {
+        const rf = await chamarShopify<{
+          orderClose: { userErrors: { message: string }[] }
+        }>(
+          loja,
+          token,
+          MUTACAO_FECHAR,
+          { id: pedido.id },
+          'fechar o pedido',
+          'write_orders',
+        )
+        const errosFechar = rf.orderClose?.userErrors ?? []
+        if (errosFechar.length) {
+          ignorados.push({
+            pedido: e.pedidoId,
+            motivo: `enviado, mas não fechei na loja: ${errosFechar[0].message}`,
+          })
+        } else {
+          fechados++
+        }
+      } catch (erro) {
+        ignorados.push({
+          pedido: e.pedidoId,
+          motivo: `enviado, mas não fechei na loja: ${erro instanceof Error ? erro.message : String(erro)}`,
+        })
+      }
     }
   }
 
-  return { enviados, entregues, ignorados }
+  return { enviados, entregues, fechados, ignorados }
 }
