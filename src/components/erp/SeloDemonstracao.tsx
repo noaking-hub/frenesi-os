@@ -17,7 +17,7 @@ const EM_DEMONSTRACAO: { prefixo: string; falta: string }[] = [
   { prefixo: '/pedidos/envios', falta: 'a tabela de eventos de rastreamento' },
   { prefixo: '/pedidos/ocorrencias', falta: 'a tabela de ocorrências de entrega' },
   { prefixo: '/pedidos/devolucoes', falta: 'a triagem de devolução ligada ao portal' },
-  { prefixo: '/financeiro', falta: 'as tabelas de lançamentos, contas e repasses' },
+  { prefixo: '/financeiro/contabil', falta: 'a emissão de notas e o plano de contas' },
   { prefixo: '/crm', falta: 'as tabelas de clientes, campanhas e cashback' },
   { prefixo: '/promocoes', falta: 'as tabelas de cupons e da vitrine' },
   { prefixo: '/atendimento', falta: 'a tabela de tickets' },

@@ -3,6 +3,8 @@ import { Barra, BotaoSecundario, TituloSecao, Valor } from '@/components/erp/pri
 import { Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR, type Tom } from '@/components/erp/tokens'
 import { repositorio } from '@/data/repository'
+
+import { NovaCategoria } from '../Widgets'
 import { brl, num, participacaoCategoria, plural, resumirCategorias } from '@/domain'
 import type { CategoriaFinanceira, NaturezaCategoria } from '@/domain'
 
@@ -134,7 +136,7 @@ export default async function Categorias() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <TituloSecao tamanho={16}>Para onde vai o dinheiro · julho</TituloSecao>
         <div style={{ flex: 1 }} />
-        <BotaoSecundario altura={34}>+ Nova categoria</BotaoSecundario>
+        <NovaCategoria />
       </div>
 
       <Tabela colunas={colunas} itens={ordenadas} chaveDe={(c) => c.nome} />

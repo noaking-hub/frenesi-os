@@ -3,6 +3,8 @@ import 'server-only'
 import {
   aguardaBaixaShopify,
   apurarLote,
+  brl,
+  plural,
   lancamentoPendente,
   resumirLancamentos,
   apurarPerdaReal,
@@ -268,4 +270,100 @@ export async function carregarDashboard() {
 
 function brlSimples(n: number): string {
   return `R$ ${n.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/, '.')}`
+}
+
+/**
+ * DRE derivada dos lançamentos e dos pedidos do mês.
+ *
+ * Nada aqui é digitado: receita bruta é a soma dos pedidos pagos, e cada
+ * grupo é a soma dos lançamentos baixados pela natureza da categoria. Um DRE
+ * com números próprios seria uma terceira verdade, divergindo do caixa na
+ * primeira classificação corrigida.
+ */
+export interface LinhaDre {
+  linha: string
+  valor: number
+  nota: string
+}
+
+export interface Dre {
+  competencia: string
+  receitaBruta: LinhaDre
+  deducoes: LinhaDre[]
+  custos: LinhaDre[]
+  despesas: LinhaDre[]
+  /** Sem lançamento nem pedido no mês não há DRE — melhor dizer do que zerar. */
+  vazia: boolean
+}
+
+export async function carregarDre(mesesAtras = 0): Promise<Dre> {
+  const repo = repositorio()
+  const [lancamentos, categorias, pedidos] = await Promise.all([
+    repo.lancamentos(),
+    repo.categorias(),
+    repo.pedidos(),
+  ])
+
+  const agora = new Date()
+  const inicio = new Date(agora.getFullYear(), agora.getMonth() - mesesAtras, 1)
+  const fim = new Date(agora.getFullYear(), agora.getMonth() - mesesAtras + 1, 1)
+  const competencia = inicio.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+
+  // Duas origens, dois formatos: lançamento chega como dd/mm/aaaa (já
+  // formatado para a tela) e pedido chega como ISO. Um parser só evita que o
+  // DRE conte um dos dois e silenciosamente ignore o outro.
+  const noMes = (valor: string) => {
+    const dt = valor.includes('/')
+      ? (() => {
+          const [d, m, a] = valor.split('/')
+          return a ? new Date(Number(a), Number(m) - 1, Number(d)) : null
+        })()
+      : new Date(valor)
+    if (!dt || Number.isNaN(dt.getTime())) return false
+    return dt >= inicio && dt < fim
+  }
+
+  // `data` chega como dd/mm — o mesmo formato das telas —, então o filtro do
+  // mês passa pelo mesmo parser dos lançamentos.
+  const pedidosDoMes = pedidos.filter((p) => p.pagamento === 'pago' && noMes(p.data))
+  const receita = pedidosDoMes.reduce((a, p) => a + p.valor, 0)
+
+  const natureza = new Map(categorias.map((c) => [c.nome, c.natureza]))
+  const doMes = lancamentos.filter((l) => noMes(l.data) && l.tipo === 'saida')
+
+  const somarPor = (filtro: (categoria: string) => boolean): LinhaDre[] => {
+    const grupos = new Map<string, { valor: number; qtd: number }>()
+    for (const l of doMes) {
+      if (!filtro(l.categoria)) continue
+      const g = grupos.get(l.categoria) ?? { valor: 0, qtd: 0 }
+      grupos.set(l.categoria, { valor: g.valor + l.valor, qtd: g.qtd + 1 })
+    }
+    return [...grupos.entries()]
+      .sort((a, b) => b[1].valor - a[1].valor)
+      .map(([linha, g]) => ({
+        linha,
+        valor: g.valor,
+        nota: plural(g.qtd, 'lançamento no mês', 'lançamentos no mês'),
+      }))
+  }
+
+  const DEDUCOES = new Set(['Imposto', 'Taxas de pagamento'])
+
+  return {
+    competencia,
+    receitaBruta: {
+      linha: 'Receita bruta',
+      valor: receita,
+      nota: pedidosDoMes.length
+        ? `${plural(pedidosDoMes.length, 'pedido pago', 'pedidos pagos')} · ticket médio ${brl(receita / pedidosDoMes.length)}`
+        : 'Nenhum pedido pago no mês',
+    },
+    deducoes: somarPor((c) => DEDUCOES.has(c)),
+    custos: somarPor((c) => !DEDUCOES.has(c) && natureza.get(c) === 'Custo variável'),
+    despesas: somarPor((c) => {
+      const n = natureza.get(c)
+      return n === 'Despesa fixa' || n === 'Despesa'
+    }),
+    vazia: pedidosDoMes.length === 0 && doMes.length === 0,
+  }
 }

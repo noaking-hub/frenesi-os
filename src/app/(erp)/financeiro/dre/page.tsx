@@ -1,24 +1,27 @@
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
 import { BotaoSecundario, TituloSecao } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
+import { carregarDre } from '@/data/consultas'
 import { repositorio } from '@/data/repository'
-import { DRE_JULHO } from '@/data/fixtures'
 import { brl, montarDre, num, pct, pontoEquilibrio, resumirCategorias } from '@/domain'
 import type { LinhaDre } from '@/domain'
 
 export default async function Dre() {
-  const categorias = await repositorio().categorias()
+  const [categorias, apuracao] = await Promise.all([repositorio().categorias(), carregarDre()])
 
-  // Receita líquida, margem e resultado são DERIVADOS das linhas primitivas.
+  // Receita líquida, margem e resultado são DERIVADOS das linhas primitivas —
+  // e as próprias linhas vêm dos lançamentos e dos pedidos pagos do mês.
   const dre = montarDre(
-    DRE_JULHO.receitaBruta,
-    DRE_JULHO.deducoes,
-    DRE_JULHO.custos,
-    DRE_JULHO.despesas,
+    apuracao.receitaBruta,
+    apuracao.deducoes,
+    apuracao.custos,
+    apuracao.despesas,
   )
   const cat = resumirCategorias(categorias)
   const equilibrio = pontoEquilibrio(cat.estruturaFixa, dre)
-  const maiorCusto = [...DRE_JULHO.custos].sort((a, b) => b.valor - a.valor)[0]
+  // Mês sem lançamento classificado não tem "maior custo" — e inventar um
+  // zero aqui faria o KPI afirmar algo sobre uma apuração que não existe.
+  const maiorCusto = [...apuracao.custos].sort((a, b) => b.valor - a.valor)[0] ?? null
 
   const kpis: Kpi[] = [
     {
@@ -46,8 +49,13 @@ export default async function Dre() {
     },
     {
       label: 'Maior custo variável',
-      valor: pct((maiorCusto.valor / dre.receitaBruta) * 100),
-      hint: `${maiorCusto.linha} · ${brl(maiorCusto.valor)}`,
+      valor:
+        maiorCusto && dre.receitaBruta > 0
+          ? pct((maiorCusto.valor / dre.receitaBruta) * 100)
+          : '—',
+      hint: maiorCusto
+        ? `${maiorCusto.linha} · ${brl(maiorCusto.valor)}`
+        : 'Nenhum custo classificado no mês',
       tom: 'atencao',
     },
   ]

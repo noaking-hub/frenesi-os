@@ -1,6 +1,8 @@
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
 import { Barra, BotaoSecundario, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
 import { repositorio } from '@/data/repository'
+
+import { NovaConta } from '../Widgets'
 import { brl, num, participacao, plural, resumirLancamentos, saldoConsolidado } from '@/domain'
 
 export default async function Contas() {
@@ -44,7 +46,7 @@ export default async function Contas() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <TituloSecao tamanho={16}>Contas da operação</TituloSecao>
         <div style={{ flex: 1 }} />
-        <BotaoSecundario altura={34}>+ Nova conta</BotaoSecundario>
+        <NovaConta />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 14 }}>

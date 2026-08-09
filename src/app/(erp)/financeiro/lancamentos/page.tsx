@@ -3,6 +3,8 @@ import { Badge, BotaoOuro, FaixaAlerta, TituloSecao, Valor } from '@/components/
 import { CelulaDupla, Tabela, type Coluna } from '@/components/erp/Tabela'
 import type { Tom } from '@/components/erp/tokens'
 import { repositorio } from '@/data/repository'
+
+import { BotaoBaixa, NovoLancamento } from '../Widgets'
 import {
   brl,
   lancamentoPendente,
@@ -22,7 +24,11 @@ const TOM_STATUS: Record<StatusLancamento, Tom> = {
 
 export default async function Lancamentos() {
   const repo = repositorio()
-  const [lancamentos, contas] = await Promise.all([repo.lancamentos(), repo.contas()])
+  const [lancamentos, contas, categorias] = await Promise.all([
+    repo.lancamentos(),
+    repo.contas(),
+    repo.categorias(),
+  ])
 
   const r = resumirLancamentos(lancamentos)
   const saldo = saldoConsolidado(contas)
@@ -179,27 +185,7 @@ export default async function Lancamentos() {
       titulo: 'Ação',
       largura: '104px',
       render: (l) =>
-        lancamentoPendente(l) ? (
-          <button
-            type="button"
-            aria-label={`Dar baixa em ${l.descricao}`}
-            className="font-sans hover:bg-[rgba(239,209,140,.16)]"
-            style={{
-              height: 27,
-              padding: '0 11px',
-              border: '1px solid rgba(239,209,140,.28)',
-              background: 'rgba(239,209,140,.07)',
-              color: 'var(--color-ouro)',
-              fontWeight: 600,
-              fontSize: 10.5,
-              borderRadius: 7,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            Dar baixa
-          </button>
-        ) : null,
+        lancamentoPendente(l) ? <BotaoBaixa id={l.id} descricao={l.descricao} /> : null,
     },
   ]
 
@@ -221,7 +207,7 @@ export default async function Lancamentos() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <TituloSecao tamanho={16}>Lançamentos de agosto</TituloSecao>
         <div style={{ flex: 1 }} />
-        <BotaoOuro altura={34}>+ Novo lançamento</BotaoOuro>
+        <NovoLancamento contas={contas} categorias={categorias} />
       </div>
 
       <Tabela

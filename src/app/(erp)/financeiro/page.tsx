@@ -3,7 +3,8 @@ import { Badge, BotaoOuro, TituloSecao, Valor } from '@/components/erp/primitivo
 import { Tabela, type Coluna } from '@/components/erp/Tabela'
 import type { Tom } from '@/components/erp/tokens'
 import { repositorio } from '@/data/repository'
-import { AGOSTO, JULHO } from '@/data/fixtures'
+
+import { ConciliarRepasse, PreverRepasses } from './Widgets'
 import { brl, conciliarRepasse, pad2, pct, plural } from '@/domain'
 import type { ResultadoConciliacao, StatusConciliacao } from '@/domain'
 
@@ -24,7 +25,16 @@ const ROTULO: Record<StatusConciliacao, string> = {
 }
 
 export default async function Conciliacao() {
-  const repasses = await repositorio().repasses()
+  const [repasses, contas] = await Promise.all([
+    repositorio().repasses(),
+    repositorio().contas(),
+  ])
+
+  // Resultado do mês sai do movimento das contas, que por sua vez sai dos
+  // lançamentos baixados. Sem número paralelo: se o caixa muda, o KPI muda.
+  const entradasMes = contas.reduce((a, c) => a + c.entradasMes, 0)
+  const saidasMes = contas.reduce((a, c) => a + c.saidasMes, 0)
+  const resultadoMes = entradasMes - saidasMes
   // O status de cada repasse é derivado dos números — nunca vem marcado.
   const resultados = repasses.map(conciliarRepasse)
 
@@ -73,9 +83,9 @@ export default async function Conciliacao() {
     },
     {
       label: 'Resultado em agosto',
-      valor: brl(AGOSTO.resultado),
-      hint: `Julho fechou em ${brl(JULHO.resultado)}`,
-      tom: AGOSTO.resultado >= 0 ? 'ok' : 'erro',
+      valor: brl(resultadoMes),
+      hint: `${brl(entradasMes)} de entradas · ${brl(saidasMes)} de saídas, já baixados`,
+      tom: resultadoMes >= 0 ? 'ok' : 'erro',
     },
     {
       label: 'A conciliar',
@@ -173,24 +183,10 @@ export default async function Conciliacao() {
         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Badge tom={TOM_STATUS[r.status]}>{ROTULO[r.status]}</Badge>
           {r.precisaAcao && (
-            <button
-              type="button"
-              aria-label={`Tratar repasse do pedido ${r.repasse.pedidoId}`}
-              className="font-sans hover:bg-[rgba(239,209,140,.1)]"
-              style={{
-                height: 26,
-                padding: '0 9px',
-                border: '1px solid rgba(239,209,140,.22)',
-                background: 'transparent',
-                color: 'var(--color-ouro)',
-                fontWeight: 600,
-                fontSize: 10,
-                borderRadius: 6,
-                cursor: 'pointer',
-              }}
-            >
-              Tratar
-            </button>
+            <ConciliarRepasse
+              pedidoId={r.repasse.pedidoId}
+              esperado={r.liquidoEsperado}
+            />
           )}
         </span>
       ),
@@ -210,7 +206,7 @@ export default async function Conciliacao() {
           O status sai da comparação entre o recebido e o esperado menos a taxa — nada é marcado à mão.
         </span>
         <div style={{ flex: 1 }} />
-        <BotaoOuro altura={34}>+ Novo lançamento</BotaoOuro>
+        <PreverRepasses />
       </div>
 
       <Tabela

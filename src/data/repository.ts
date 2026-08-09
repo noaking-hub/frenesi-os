@@ -563,13 +563,132 @@ const repositorioSupabase: Repositorio = {
       }
     })
   },
-  // O financeiro ainda não tem tabelas próprias no Supabase; cai nos fixtures
-  // até a migration existir, sem fingir consulta.
-  lancamentos: repositorioFixtures.lancamentos,
-  contas: repositorioFixtures.contas,
-  repasses: repositorioFixtures.repasses,
-  categorias: repositorioFixtures.categorias,
-  enviosContabeis: repositorioFixtures.enviosContabeis,
+  async lancamentos() {
+    const { data, error } = await supabaseServer()
+      .from('lancamentos')
+      .select(
+        'id, ocorrido_em, descricao, categoria, conta_id, tipo, valor, baixado_em, ' +
+          'vence_em, recorrente, origem, contas_bancarias(nome)',
+      )
+      .order('ocorrido_em', { ascending: false })
+      .limit(500)
+    if (error) throw error
+    const linhas = (data ?? []) as unknown as LinhaLancamento[]
+    const hoje = new Date().toISOString().slice(0, 10)
+    return linhas.map(
+      (l): Lancamento => ({
+        id: l.id,
+        data: dataBr(l.ocorrido_em),
+        descricao: l.descricao,
+        categoria: l.categoria ?? 'Sem categoria',
+        conta: l.contas_bancarias?.nome ?? '—',
+        tipo: l.tipo,
+        valor: Number(l.valor),
+        // O status não é campo: é a leitura da baixa contra o vencimento. Um
+        // enum gravado envelheceria sozinho à meia-noite do vencimento.
+        status: l.baixado_em
+          ? l.tipo === 'entrada'
+            ? 'Recebido'
+            : 'Pago'
+          : !l.vence_em
+            ? 'Previsto'
+            : l.vence_em < hoje
+              ? 'Vencido'
+              : 'A pagar',
+        recorrente: l.recorrente,
+        origem: l.origem,
+      }),
+    )
+  },
+
+  async contas() {
+    const { data, error } = await supabaseServer()
+      .from('contas_saldo')
+      .select('*')
+      .eq('ativa', true)
+      .order('principal', { ascending: false })
+      .order('nome')
+    if (error) throw error
+    return (data ?? []).map(
+      (c): ContaBancaria => ({
+        id: c.id as string,
+        nome: c.nome as string,
+        tipo: c.tipo as string,
+        banco: c.banco as string,
+        saldo: Number(c.saldo),
+        entradasMes: Number(c.entradas_mes),
+        saidasMes: Number(c.saidas_mes),
+        uso: (c.uso as string) || '—',
+        principal: Boolean(c.principal),
+      }),
+    )
+  },
+
+  async repasses() {
+    const { data, error } = await supabaseServer()
+      .from('repasses')
+      .select('pedido_id, origem, taxa_pct, recebido, pedidos!inner(valor, pagamento)')
+      .limit(500)
+    if (error) throw error
+    const linhas = (data ?? []) as unknown as LinhaRepasse[]
+    return linhas.map(
+      (r): Repasse => ({
+        pedidoId: r.pedido_id,
+        origem: r.origem,
+        esperado: Number(r.pedidos.valor),
+        taxaPct: Number(r.taxa_pct),
+        recebido: r.recebido === null ? null : Number(r.recebido),
+        pagamentoConfirmado: r.pedidos.pagamento === 'pago',
+      }),
+    )
+  },
+
+  async categorias() {
+    const sb = supabaseServer()
+    const [{ data: cats, error: erroCats }, { data: lancs, error: erroLancs }] = await Promise.all([
+      sb.from('categorias_financeiras').select('nome, natureza').eq('ativa', true).order('nome'),
+      sb.from('lancamentos').select('categoria, valor').not('baixado_em', 'is', null),
+    ])
+    if (erroCats) throw erroCats
+    if (erroLancs) throw erroLancs
+
+    // O total da categoria é a soma dos lançamentos, não um campo — assim
+    // classificar um lançamento já muda o relatório, sem passo de apuração.
+    const soma = new Map<string, { valor: number; qtd: number }>()
+    for (const l of lancs ?? []) {
+      const chave = (l.categoria as string | null) ?? ''
+      const atual = soma.get(chave) ?? { valor: 0, qtd: 0 }
+      soma.set(chave, { valor: atual.valor + Number(l.valor), qtd: atual.qtd + 1 })
+    }
+
+    return (cats ?? []).map((c): CategoriaFinanceira => {
+      const s = soma.get(c.nome as string) ?? { valor: 0, qtd: 0 }
+      return {
+        nome: c.nome as string,
+        natureza: c.natureza as CategoriaFinanceira['natureza'],
+        valorMes: s.valor,
+        lancamentos: s.qtd,
+      }
+    })
+  },
+
+  async enviosContabeis() {
+    const { data, error } = await supabaseServer()
+      .from('envios_contabeis')
+      .select('arquivo, conteudo, registros, bytes, estado, nota, enviado_em')
+      .order('enviado_em', { ascending: false })
+      .limit(50)
+    if (error) throw error
+    return (data ?? []).map((e) => ({
+      quando: dataCurta(e.enviado_em as string),
+      arquivo: e.arquivo as string,
+      conteudo: e.conteudo as string,
+      registros: e.registros as number,
+      tamanho: tamanhoLegivel(Number(e.bytes)),
+      estado: e.estado as 'Aceito' | 'Processando' | 'Recusado',
+      nota: e.nota as string,
+    }))
+  },
   concorrentesFontes: repositorioFixtures.concorrentesFontes,
   mercado: repositorioFixtures.mercado,
   kits: repositorioFixtures.kits,
@@ -600,6 +719,29 @@ const repositorioSupabase: Repositorio = {
  * Formas das linhas com embed, espelhando `supabase/migrations`.
  * Substituíveis pelos tipos gerados (`supabase gen types typescript`).
  */
+interface LinhaLancamento {
+  id: string
+  ocorrido_em: string
+  descricao: string
+  categoria: string | null
+  conta_id: string | null
+  tipo: 'entrada' | 'saida'
+  valor: number | string
+  baixado_em: string | null
+  vence_em: string | null
+  recorrente: boolean
+  origem: string
+  contas_bancarias: { nome: string } | null
+}
+
+interface LinhaRepasse {
+  pedido_id: string
+  origem: string
+  taxa_pct: number | string
+  recebido: number | string | null
+  pedidos: { valor: number | string; pagamento: string }
+}
+
 interface LinhaOrdem {
   id: string
   base_id: string
@@ -613,6 +755,25 @@ interface LinhaOrdem {
   concluida_em: string | null
   envasadas: number | null
   perfumes_base: { nome: string; marca: string } | null
+}
+
+/** `2026-08-09` → `09/08/2026`, como as telas de financeiro mostram. */
+function dataBr(iso: string): string {
+  const [a, m, d] = iso.slice(0, 10).split('-')
+  return d ? `${d}/${m}/${a}` : iso
+}
+
+/** Bytes em algo que cabe numa célula: `2,4 MB`. */
+function tamanhoLegivel(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '—'
+  const unidades = ['B', 'KB', 'MB', 'GB']
+  let valor = bytes
+  let i = 0
+  while (valor >= 1024 && i < unidades.length - 1) {
+    valor /= 1024
+    i++
+  }
+  return `${valor.toFixed(valor < 10 && i > 0 ? 1 : 0).replace('.', ',')} ${unidades[i]}`
 }
 
 /** `2026-08-09T14:22:00Z` → `09/08 14:22`, que é como as telas mostram. */
