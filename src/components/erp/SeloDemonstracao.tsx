@@ -30,7 +30,6 @@ const EM_DEMONSTRACAO: { prefixo: string; falta: string }[] = [
   { prefixo: '/produtos/kits', falta: 'a tabela de kits' },
   { prefixo: '/configuracoes/usuarios', falta: 'a tabela de usuários e perfis' },
   { prefixo: '/configuracoes/integracoes', falta: 'o registro de integrações' },
-  { prefixo: '/configuracoes/notificacoes', falta: 'a tabela de regras de notificação' },
   { prefixo: '/configuracoes/logs', falta: 'a trilha de auditoria' },
 ]
 
