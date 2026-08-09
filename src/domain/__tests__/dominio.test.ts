@@ -194,8 +194,8 @@ describe('lotes e perda real', () => {
     entrada: '26/07/2026',
     encerradoEm: null,
     saidas: [
-      { data: '28/07', ref: 'OP-2205', unidades: 20, variante: 5 },
-      { data: '30/07', ref: 'OP-2208', unidades: 12, variante: 10 },
+      { data: '28/07', ref: 'OP-2205', ml: 100, unidades: 20, variante: 5, motivo: null },
+      { data: '30/07', ref: 'OP-2208', ml: 120, unidades: 12, variante: 10, motivo: null },
     ],
   }
 
@@ -208,14 +208,40 @@ describe('lotes e perda real', () => {
     entrada: '02/05/2026',
     encerradoEm: '28/07/2026',
     saidas: [
-      { data: '12/05', ref: 'OP-2088', unidades: 20, variante: 5 },
-      { data: '24/05', ref: 'OP-2101', unidades: 12, variante: 10 },
-      { data: '09/06', ref: 'OP-2140', unidades: 24, variante: 3 },
-      { data: '27/06', ref: 'OP-2166', unidades: 10, variante: 8 },
-      { data: '14/07', ref: 'OP-2190', unidades: 6, variante: 15 },
-      { data: '26/07', ref: 'OP-2204', unidades: 4, variante: 5 },
+      { data: '12/05', ref: 'OP-2088', ml: 100, unidades: 20, variante: 5, motivo: null },
+      { data: '24/05', ref: 'OP-2101', ml: 120, unidades: 12, variante: 10, motivo: null },
+      { data: '09/06', ref: 'OP-2140', ml: 72, unidades: 24, variante: 3, motivo: null },
+      { data: '27/06', ref: 'OP-2166', ml: 80, unidades: 10, variante: 8, motivo: null },
+      { data: '14/07', ref: 'OP-2190', ml: 90, unidades: 6, variante: 15, motivo: null },
+      { data: '26/07', ref: 'OP-2204', ml: 20, unidades: 4, variante: 5, motivo: null },
     ],
   }
+
+  it('não conta como perda o que saiu do lote sem virar decant', () => {
+    // Frasco de 100 ml do qual 7 ml já tinham sido vendidos antes do ERP.
+    // Sem a saída lançada, esses 7 ml virariam perda técnica ao declarar o
+    // vazio — e a perda técnica entra no custo de todo preço calculado.
+    const comVendaAntiga: Lote = {
+      id: 'LT-105',
+      baseId: 'coral',
+      perfume: 'Born in Roma Coral Fantasy',
+      fornecedor: 'Inter Shop',
+      volumeMl: 100,
+      entrada: '09/08/2026',
+      encerradoEm: '10/08/2026',
+      saidas: [
+        { data: '09/08', ref: null, ml: 7, unidades: null, variante: null, motivo: 'Venda anterior ao ERP' },
+        { data: '10/08', ref: 'OP-2301', ml: 90, unidades: 18, variante: 5, motivo: null },
+      ],
+    }
+    const ap = apurarLote(comVendaAntiga, PARAMETROS_PADRAO)
+    expect(ap.consumidoMl).toBe(97)
+    // Só os 3 ml de fundo de frasco são perda; os 7 ml vendidos, não.
+    expect(ap.diferencaMl).toBe(3)
+    expect(ap.perdaPct).toBeCloseTo(3, 6)
+    // A saída sem decant não infla a contagem de unidades.
+    expect(ap.unidades).toBe(18)
+  })
 
   it('deriva consumido e unidades do extrato de saídas', () => {
     const ap = apurarLote(aberto, PARAMETROS_PADRAO)
@@ -294,8 +320,8 @@ describe('encerramento de lote', () => {
     entrada: '02/05/2026',
     encerradoEm: null,
     saidas: [
-      { data: '12/05', ref: 'OP-2088', unidades: 20, variante: 5 },
-      { data: '24/05', ref: 'OP-2101', unidades: 31, variante: 10 },
+      { data: '12/05', ref: 'OP-2088', ml: 100, unidades: 20, variante: 5, motivo: null },
+      { data: '24/05', ref: 'OP-2101', ml: 310, unidades: 31, variante: 10, motivo: null },
     ],
   }
 
@@ -318,7 +344,7 @@ describe('encerramento de lote', () => {
   it('impede encerrar quando o extrato envasou mais que o comprado', () => {
     const furado: Lote = {
       ...lote,
-      saidas: [{ data: '12/05', ref: 'OP-2088', unidades: 40, variante: 15 }],
+      saidas: [{ data: '12/05', ref: 'OP-2088', ml: 600, unidades: 40, variante: 15, motivo: null }],
     }
     const pv = previaEncerramento(furado, { ...base, volumeMl: 900 }, PARAMETROS_PADRAO)
     expect(pv.perdaMl).toBe(-100)

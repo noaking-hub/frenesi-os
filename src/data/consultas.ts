@@ -33,6 +33,7 @@ export async function carregarEstoque(): Promise<{
   volumeTotalMl: number
   comEstoque: number
   esgotados: number
+  semCarga: number
   criticos: number
   valorReposicao: number
 }> {
@@ -45,7 +46,10 @@ export async function carregarEstoque(): Promise<{
     coberturas,
     volumeTotalMl: bases.reduce((a, b) => a + b.volumeMl, 0),
     comEstoque: bases.filter((b) => b.volumeMl > 0).length,
-    esgotados: bases.filter((b) => b.volumeMl === 0).length,
+    // Esgotado é o que acabou: já teve compra, tem custo, e zerou. O que
+    // nunca recebeu carga é outra coisa e tem sua própria contagem.
+    esgotados: coberturas.filter((c) => c.criticidade === 'zero').length,
+    semCarga: coberturas.filter((c) => c.criticidade === 'sem_carga').length,
     criticos: coberturas.filter((c) => c.criticidade === 'atencao' || c.criticidade === 'urgente')
       .length,
     valorReposicao: bases.reduce((a, b) => a + b.volumeMl * b.custoPorMl, 0),

@@ -187,7 +187,13 @@ export function resumoSync(bases: BaseSync[]): ResumoSync {
   }
 }
 
-export type Criticidade = 'zero' | 'urgente' | 'atencao' | 'ok' | 'parado'
+/**
+ * `sem_carga` separa "acabou" de "nunca soubemos". As duas dão volume zero e
+ * pedem coisas opostas: uma pede recompra, a outra pede que alguém abra a
+ * gaveta e diga quanto tem. Tratar as duas como esgotado enche a tela de
+ * "recompra urgente" para perfume que está na prateleira.
+ */
+export type Criticidade = 'sem_carga' | 'zero' | 'urgente' | 'atencao' | 'ok' | 'parado'
 
 export interface CoberturaBase {
   base: PerfumeBase
@@ -203,8 +209,13 @@ export interface CoberturaBase {
 export function coberturaDe(base: PerfumeBase): CoberturaBase {
   const dias = base.consumoDiarioMl ? Math.round(base.volumeMl / base.consumoDiarioMl) : 0
 
-  const criticidade: Criticidade =
-    base.volumeMl === 0
+  // Volume zero E custo zero: nunca houve compra nem carga. O perfume pode
+  // estar na prateleira — o que falta é alguém ter dito isso ao ERP.
+  const semCarga = base.volumeMl === 0 && base.custoPorMl === 0
+
+  const criticidade: Criticidade = semCarga
+    ? 'sem_carga'
+    : base.volumeMl === 0
       ? 'zero'
       : dias < 7
         ? 'urgente'
@@ -215,22 +226,30 @@ export function coberturaDe(base: PerfumeBase): CoberturaBase {
             : 'ok'
 
   const acao =
-    criticidade === 'zero'
-      ? 'Recompra urgente · pedidos pagos parados'
-      : criticidade === 'urgente'
-        ? 'Recomprar esta semana'
-        : criticidade === 'atencao'
-          ? 'Programar produção antes de acabar'
-          : criticidade === 'parado'
-            ? 'Giro baixo · avaliar promoção antes de repor'
-            : 'Sem ação necessária'
+    criticidade === 'sem_carga'
+      ? base.consumoDiarioMl > 0
+        ? 'Vendeu nos últimos 30 dias · declare o volume que está na prateleira'
+        : 'Sem carga inicial · o ERP não sabe se você tem este perfume'
+      : criticidade === 'zero'
+        ? 'Recompra urgente · pedidos pagos parados'
+        : criticidade === 'urgente'
+          ? 'Recomprar esta semana'
+          : criticidade === 'atencao'
+            ? 'Programar produção antes de acabar'
+            : criticidade === 'parado'
+              ? 'Giro baixo · avaliar promoção antes de repor'
+              : 'Sem ação necessária'
 
   return {
     base,
     dias,
     criticidade,
-    cobertura: base.volumeMl === 0 ? 'Esgotado' : `${dias} ${dias === 1 ? 'dia' : 'dias'}`,
+    cobertura: semCarga
+      ? 'Sem carga'
+      : base.volumeMl === 0
+        ? 'Esgotado'
+        : `${dias} ${dias === 1 ? 'dia' : 'dias'}`,
     acao,
-    cta: base.volumeMl === 0 ? 'Recomprar' : 'Produzir',
+    cta: semCarga ? 'Carregar' : base.volumeMl === 0 ? 'Recomprar' : 'Produzir',
   }
 }

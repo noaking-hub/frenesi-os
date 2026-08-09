@@ -172,8 +172,10 @@ export const KITS: Kit[] = [
 const saida = (data: string, ref: string, unidades: number, variante: VarianteMl) => ({
   data,
   ref,
+  ml: unidades * variante,
   unidades,
   variante,
+  motivo: null,
 })
 
 export const LOTES: Lote[] = [

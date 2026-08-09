@@ -29,8 +29,10 @@ export interface ApuracaoLote {
  * comprado e envasado passa a ser a perda real.
  */
 export function apurarLote(lote: Lote, p: ParametrosPrecificacao): ApuracaoLote {
-  const consumidoMl = lote.saidas.reduce((a, s) => a + s.unidades * s.variante, 0)
-  const unidades = lote.saidas.reduce((a, s) => a + s.unidades, 0)
+  // O ml manda: uma saída de 7 ml vendidos antes do ERP não tem decant, e
+  // contá-la como zero faria esses 7 ml reaparecerem como perda técnica.
+  const consumidoMl = lote.saidas.reduce((a, s) => a + s.ml, 0)
+  const unidades = lote.saidas.reduce((a, s) => a + (s.unidades ?? 0), 0)
   const aberto = !lote.encerradoEm
   const diferencaMl = lote.volumeMl - consumidoMl
   const perdaPct = aberto || lote.volumeMl === 0 ? null : (diferencaMl / lote.volumeMl) * 100

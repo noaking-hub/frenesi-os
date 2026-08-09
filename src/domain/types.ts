@@ -61,10 +61,18 @@ export interface ProdutoDerivado {
 /** Uma saída de produção que consumiu volume de um lote. */
 export interface SaidaLote {
   data: string
-  /** Ordem de produção que originou a saída. */
-  ref: string
-  unidades: number
-  variante: VarianteMl
+  /** Ordem de produção que originou a saída; `null` na saída lançada à mão. */
+  ref: string | null
+  /**
+   * Volume que saiu do lote. É a medida autoritativa: nem toda saída é decant
+   * — venda anterior ao ERP, amostra e acidente saem em ml e ponto.
+   */
+  ml: number
+  /** Como saiu, quando saiu em decants. */
+  unidades: number | null
+  variante: VarianteMl | null
+  /** Por que saiu, quando não foi produção. */
+  motivo: string | null
 }
 
 /**

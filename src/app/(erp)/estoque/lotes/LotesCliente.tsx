@@ -16,10 +16,10 @@ import {
 } from '@/components/erp/primitivos'
 import { CelulaDupla, Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR, type Tom } from '@/components/erp/tokens'
-import { apurarLote, brl, pad2, pct, plural, previaEncerramento, volume } from '@/domain'
+import { apurarLote, brl, pad2, parseNum, pct, plural, previaEncerramento, volume } from '@/domain'
 import type { Lote, ParametrosPrecificacao, PerdaReal, PerfumeBase } from '@/domain'
 
-import { ajustarPerdaParametro, encerrarLote } from './actions'
+import { ajustarPerdaParametro, encerrarLote, registrarSaidaLote } from './actions'
 
 interface Props {
   lotes: Lote[]
@@ -32,6 +32,7 @@ interface Props {
 export function LotesCliente({ lotes, bases, parametros, perda, conciliacao }: Props) {
   const [selecionado, setSelecionado] = useState(lotes[0]?.id ?? '')
   const [encerrando, setEncerrando] = useState<Lote | null>(null)
+  const [dandoSaida, setDandoSaida] = useState<Lote | null>(null)
 
   const abrirEncerramento = (l: Lote) => {
     setSelecionado(l.id)
@@ -398,18 +399,20 @@ export function LotesCliente({ lotes, bases, parametros, perda, conciliacao }: P
                       className="font-sans"
                       style={{ fontWeight: 500, fontSize: 11, lineHeight: 1.35, color: 'var(--color-secundario)' }}
                     >
-                      {`${s.unidades} decants de ${s.variante} ml`}
+                      {s.unidades && s.variante
+                        ? `${s.unidades} decants de ${s.variante} ml`
+                        : (s.motivo ?? 'Saída sem ordem de produção')}
                     </span>
                     <span
                       className="font-mono"
                       style={{ fontSize: 9.5, lineHeight: 1.25, color: 'rgba(239,209,140,.45)' }}
                     >
-                      {s.ref}
+                      {s.ref ?? 'lançada à mão'}
                     </span>
                   </span>
                   <span style={{ textAlign: 'right' }}>
                     <Valor tamanho={11} tom="var(--color-secundario)">
-                      {volume(s.unidades * s.variante)}
+                      {volume(s.ml)}
                     </Valor>
                   </span>
                 </span>
@@ -434,12 +437,25 @@ export function LotesCliente({ lotes, bases, parametros, perda, conciliacao }: P
           </span>
 
           {apSel.aberto && (
-            <BotaoOuro altura={36} onClick={() => setEncerrando(loteSel)}>
-              Declarar frasco vazio
-            </BotaoOuro>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+              <BotaoSecundario altura={36} onClick={() => setDandoSaida(loteSel)}>
+                Lançar saída sem produção
+              </BotaoSecundario>
+              <BotaoOuro altura={36} onClick={() => setEncerrando(loteSel)}>
+                Declarar frasco vazio
+              </BotaoOuro>
+            </div>
           )}
         </section>
       </div>
+
+      {dandoSaida && (
+        <LancarSaida
+          lote={dandoSaida}
+          saldoMl={apurarLote(dandoSaida, parametros).diferencaMl}
+          aoFechar={() => setDandoSaida(null)}
+        />
+      )}
 
       {encerrando && (
         <ConfirmarEncerramento
@@ -638,6 +654,188 @@ function ConfirmarEncerramento({
           }}
         >
           {pendente ? 'Encerrando…' : 'Confirmar frasco vazio'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+/** Motivos que já vimos acontecer. O texto vai inteiro para Movimentações. */
+const MOTIVOS = [
+  {
+    id: 'anterior',
+    rotulo: 'Vendi antes de cadastrar',
+    texto: 'Venda anterior ao cadastro no ERP',
+    explica:
+      'O frasco já tinha sido aberto quando entrou no ERP. Sem lançar aqui, esse volume vira perda técnica ao declarar o vazio — e perda técnica encarece todo preço calculado.',
+  },
+  {
+    id: 'amostra',
+    rotulo: 'Amostra ou brinde',
+    texto: 'Amostra ou brinde',
+    explica: 'Saiu do frasco e não gerou receita. Continua sendo saída, não perda de processo.',
+  },
+  {
+    id: 'acidente',
+    rotulo: 'Derramou ou quebrou',
+    texto: 'Perda por acidente',
+    explica:
+      'Perda de verdade, mas de acidente — não de fracionamento. Lançar aqui evita que ela suba a média que define o custo dos preços.',
+  },
+] as const
+
+/**
+ * Saída de lote que não veio de ordem de produção.
+ *
+ * O lote é a unidade que mede a perda real: comprado menos o que saiu. Volume
+ * que sumiu por outro caminho precisa aparecer no extrato, senão reaparece
+ * como perda no encerramento e contamina o parâmetro de perda — que entra no
+ * custo de TODO preço calculado.
+ */
+function LancarSaida({
+  lote,
+  saldoMl,
+  aoFechar,
+}: {
+  lote: Lote
+  saldoMl: number
+  aoFechar: () => void
+}) {
+  const [texto, setTexto] = useState('')
+  const [motivo, setMotivo] = useState<(typeof MOTIVOS)[number]['id']>('anterior')
+  const [erro, setErro] = useState<string | null>(null)
+  const [pendente, iniciarTransicao] = useTransition()
+
+  const ml = parseNum(texto)
+  const escolhido = MOTIVOS.find((m) => m.id === motivo)!
+  const excede = ml > saldoMl
+  const valido = ml > 0 && !excede
+
+  const confirmar = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      const r = await registrarSaidaLote({ loteId: lote.id, volumeMl: ml, motivo: escolhido.texto })
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      aoFechar()
+    })
+
+  return (
+    <Modal titulo={`Lançar saída no lote ${lote.id}`} largura={500} aoFechar={aoFechar}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <Rotulo>{`Saída sem produção · lote ${lote.id}`}</Rotulo>
+        <TituloSecao tamanho={15}>{lote.perfume}</TituloSecao>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+        <Rotulo>Por que saiu</Rotulo>
+        <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {MOTIVOS.map((m) => {
+            const ativo = m.id === motivo
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setMotivo(m.id)}
+                className="hover:border-ouro/40 font-sans"
+                style={{
+                  height: 32,
+                  padding: '0 12px',
+                  border: `1px solid ${ativo ? 'rgba(239,209,140,.45)' : 'rgba(255,255,255,.1)'}`,
+                  background: ativo ? 'rgba(239,209,140,.09)' : 'transparent',
+                  color: ativo ? COR.ouro : 'rgba(242,237,227,.6)',
+                  fontWeight: 600,
+                  fontSize: 10.5,
+                  lineHeight: 1,
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                }}
+              >
+                {m.rotulo}
+              </button>
+            )
+          })}
+        </span>
+        <span
+          className="font-sans"
+          style={{ fontSize: 10, lineHeight: 1.45, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+        >
+          {escolhido.explica}
+        </span>
+      </div>
+
+      <label style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+        <Rotulo>Volume que saiu (ml)</Rotulo>
+        <input
+          value={texto}
+          onChange={(e) => setTexto(e.target.value.replace(/[^0-9.,]/g, ''))}
+          inputMode="decimal"
+          placeholder="ex.: 7"
+          autoFocus
+          className="font-mono focus:border-ouro/45"
+          style={{
+            height: 40,
+            padding: '0 13px',
+            border: '1px solid rgba(239,209,140,.4)',
+            background: 'rgba(255,255,255,.03)',
+            borderRadius: 9,
+            color: 'var(--color-corrente)',
+            fontWeight: 500,
+            fontSize: 15,
+            outline: 0,
+          }}
+        />
+      </label>
+
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          gap: 12,
+          padding: '12px 13px',
+          borderRadius: 10,
+          background: 'rgba(255,255,255,.03)',
+          border: '1px solid rgba(255,255,255,.07)',
+        }}
+      >
+        <span className="font-sans" style={{ fontSize: 11, color: 'var(--color-secundario)' }}>
+          {`Saldo teórico do lote: ${volume(saldoMl)}`}
+        </span>
+        <Valor tamanho={12.5} tom={ml <= 0 ? 'var(--color-apagado)' : excede ? 'erro' : 'ouro'}>
+          {ml <= 0 ? '—' : `fica com ${volume(saldoMl - ml)}`}
+        </Valor>
+      </div>
+
+      {(erro || excede) && (
+        <span className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.5, color: COR.erro, textWrap: 'pretty' }}>
+          {erro ?? `O lote só tem ${volume(saldoMl)} de saldo teórico.`}
+        </span>
+      )}
+
+      <div style={{ display: 'flex', gap: 9, justifyContent: 'flex-end' }}>
+        <BotaoSecundario altura={36} onClick={aoFechar}>
+          Cancelar
+        </BotaoSecundario>
+        <button
+          type="button"
+          onClick={confirmar}
+          disabled={!valido || pendente}
+          className="botao-ouro font-sans hover:brightness-[1.07]"
+          style={{
+            height: 36,
+            padding: '0 18px',
+            fontWeight: 700,
+            fontSize: 11.5,
+            lineHeight: 1,
+            borderRadius: 9,
+            cursor: valido && !pendente ? 'pointer' : 'not-allowed',
+            opacity: valido && !pendente ? 1 : 0.45,
+          }}
+        >
+          {pendente ? 'Lançando…' : 'Lançar saída'}
         </button>
       </div>
     </Modal>

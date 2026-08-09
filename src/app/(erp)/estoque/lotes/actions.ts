@@ -68,6 +68,47 @@ export async function encerrarLote(loteId: string): Promise<RespostaEncerramento
   return { ok: true, perdaMl: Number(data) }
 }
 
+export type RespostaSaida = { ok: true; saldoMl: number } | { ok: false; erro: string }
+
+/**
+ * Baixa ml de um lote fora do fluxo de produção.
+ *
+ * Existe por causa da virada para o ERP: frasco comprado antes, do qual parte
+ * já tinha sido vendida. Sem lançar essa saída, o volume só sumiria ao
+ * declarar o frasco vazio — e seria contado como PERDA TÉCNICA, que entra no
+ * custo de todo preço calculado.
+ */
+export async function registrarSaidaLote(dados: {
+  loteId: string
+  volumeMl: number
+  motivo: string
+  unidades?: number | null
+  variante?: number | null
+}): Promise<RespostaSaida> {
+  if (!supabaseConfigurado()) {
+    return { ok: false, erro: 'O Supabase precisa estar configurado para lançar saídas.' }
+  }
+  if (!dados.loteId) return { ok: false, erro: 'Escolha o lote.' }
+  if (!(dados.volumeMl > 0)) return { ok: false, erro: 'Informe o volume que saiu, em ml.' }
+  if (!dados.motivo.trim()) return { ok: false, erro: 'Informe o motivo da saída.' }
+
+  const { data, error } = await supabaseServer().rpc('registrar_saida_lote', {
+    p_lote_id: dados.loteId,
+    p_ml: dados.volumeMl,
+    p_motivo: dados.motivo.trim(),
+    p_unidades: dados.unidades ?? null,
+    p_variante: dados.variante ?? null,
+    p_operador: OPERADOR,
+  })
+  if (error) {
+    console.error('[lotes] registrar_saida_lote falhou:', error)
+    return { ok: false, erro: error.message || error.details || 'Falha ao lançar a saída.' }
+  }
+
+  revalidatePath('/', 'layout')
+  return { ok: true, saldoMl: Number(data) }
+}
+
 export type RespostaParametro = { ok: true } | { ok: false; erro: string }
 
 /**
