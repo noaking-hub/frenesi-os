@@ -5,7 +5,7 @@ import { useState, useTransition } from 'react'
 import { COR } from '@/components/erp/tokens'
 import { plural } from '@/domain'
 
-import { importarPedidos } from './actions'
+import { diagnosticarShopify, importarPedidos } from './actions'
 
 /**
  * Traz as vendas da loja e recalcula o consumo diário a partir delas.
@@ -19,7 +19,26 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
   const [erro, setErro] = useState<string | null>(null)
   const [resumo, setResumo] = useState<string | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
+  const [diagnostico, setDiagnostico] = useState<string | null>(null)
   const [pendente, iniciarTransicao] = useTransition()
+
+  const diagnosticar = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      setResumo(null)
+      setAviso(null)
+      const r = await diagnosticarShopify()
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      setDiagnostico(
+        `Token de ${r.loja} tem: ${r.escopos.join(', ') || 'nenhum escopo'}.` +
+          (r.faltando.length
+            ? ` Falta ${r.faltando.join(', ')} — lançar a versão no dev dashboard não atualiza a instalação: abra o app na loja e aceite as permissões novas, ou reinstale.`
+            : ' Está tudo que o ERP precisa.'),
+      )
+    })
 
   const importar = () =>
     iniciarTransicao(async () => {
@@ -115,6 +134,14 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
             {erro ?? resumo}
           </span>
         )}
+        {diagnostico && (
+          <span
+            className="font-sans"
+            style={{ fontSize: 10.5, lineHeight: 1.5, color: 'rgba(242,237,227,.75)', textWrap: 'pretty' }}
+          >
+            {diagnostico}
+          </span>
+        )}
         {aviso && (
           <span
             className="font-sans"
@@ -124,6 +151,29 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
           </span>
         )}
       </span>
+
+      <button
+        type="button"
+        onClick={diagnosticar}
+        disabled={pendente}
+        className="font-sans hover:border-ouro/40 hover:text-ouro"
+        style={{
+          height: 36,
+          padding: '0 14px',
+          flex: 'none',
+          border: '1px solid rgba(255,255,255,.11)',
+          background: 'transparent',
+          color: 'var(--color-secundario)',
+          fontWeight: 600,
+          fontSize: 11,
+          lineHeight: 1,
+          borderRadius: 9,
+          whiteSpace: 'nowrap',
+          cursor: pendente ? 'wait' : 'pointer',
+        }}
+      >
+        Conferir permissões
+      </button>
 
       <button
         type="button"

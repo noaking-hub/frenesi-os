@@ -76,6 +76,42 @@ export function shopifyConfigurada(): boolean {
 // Token trocado por client credentials, com validade — renovado 2 min antes.
 const cacheToken = new Map<string, { token: string; expiraEm: number }>()
 
+/**
+ * Descarta o token guardado.
+ *
+ * Escopo novo só entra em token novo, e o token vale ~24 h. Sem isto, marcar
+ * a permissão na Shopify não teria efeito nenhum até alguém reiniciar o
+ * servidor — o que é um passo que ninguém adivinha.
+ */
+export function esquecerToken(): void {
+  cacheToken.clear()
+}
+
+/**
+ * Escopos que a Shopify de fato concedeu a ESTE token.
+ *
+ * É a única fonte que encerra a dúvida entre "o app declara" e "o token tem":
+ * lançar versão no dev dashboard não atualiza sozinho a instalação na loja, e
+ * as duas telas mostram listas diferentes sem avisar.
+ */
+export async function escoposDoToken(): Promise<{ loja: string; escopos: string[] }> {
+  const { loja } = credenciais()
+  if (!loja) throw new Error('SHOPIFY_LOJA precisa estar no .env.local')
+  const token = await tokenDeAcesso(loja)
+
+  const resposta = await fetch(`https://${loja}/admin/oauth/access_scopes.json`, {
+    headers: { 'X-Shopify-Access-Token': token },
+    cache: 'no-store',
+  })
+  if (!resposta.ok) {
+    throw new Error(
+      `Não consegui ler os escopos do token (${resposta.status}). Confira loja e credenciais.`,
+    )
+  }
+  const corpo = (await resposta.json()) as { access_scopes?: { handle: string }[] }
+  return { loja, escopos: (corpo.access_scopes ?? []).map((e) => e.handle).sort() }
+}
+
 async function tokenDeAcesso(loja: string): Promise<string> {
   const { tokenFixo, clientId, secret } = credenciais()
   if (tokenFixo) return tokenFixo
@@ -790,7 +826,7 @@ export async function importarPedidosShopify(dias = 60): Promise<ResultadoPedido
   if (!loja) {
     throw new Error('SHOPIFY_LOJA precisa estar no .env.local (ex.: sua-loja.myshopify.com)')
   }
-  const token = await tokenDeAcesso(loja)
+  let token = await tokenDeAcesso(loja)
 
   const desde = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
   const filtro = `created_at:>=${desde}`
@@ -825,8 +861,37 @@ export async function importarPedidosShopify(dias = 60): Promise<ResultadoPedido
     pedidos = await buscar(CONSULTA_PEDIDOS)
   } catch (e) {
     if (!(e instanceof AcessoNegadoShopify)) throw e
-    semDadosDeCliente = true
-    pedidos = await buscar(CONSULTA_PEDIDOS_SEM_CLIENTE)
+
+    // Escopo novo só entra em token novo, e o token vale ~24 h. Antes de
+    // concluir que falta permissão, joga fora o token guardado e tenta de
+    // novo — senão marcar o escopo na Shopify não teria efeito até alguém
+    // reiniciar o servidor, que é um passo que ninguém adivinha.
+    esquecerToken()
+    token = await tokenDeAcesso(loja)
+    try {
+      pedidos = await buscar(CONSULTA_PEDIDOS)
+    } catch (e2) {
+      if (!(e2 instanceof AcessoNegadoShopify)) throw e2
+      // Ainda negado com token fresco: ou falta read_orders, ou faltam os
+      // dados protegidos de cliente. A consulta sem cliente separa os dois.
+      semDadosDeCliente = true
+      try {
+        pedidos = await buscar(CONSULTA_PEDIDOS_SEM_CLIENTE)
+      } catch (e3) {
+        if (!(e3 instanceof AcessoNegadoShopify)) throw e3
+        // Negado até sem nenhum campo de cliente: é o escopo mesmo. Dizer
+        // QUAIS escopos o token tem encerra o vaivém entre as duas telas.
+        const { escopos } = await escoposDoToken().catch(() => ({ escopos: [] as string[] }))
+        throw new AcessoNegadoShopify(
+          `A Shopify negou ler pedidos mesmo com token recém-emitido. ` +
+            (escopos.length
+              ? `Este token tem: ${escopos.join(', ')}. Falta read_orders. `
+              : 'Não consegui nem listar os escopos do token. ') +
+            'Lançar a versão no dev dashboard NÃO atualiza a instalação na loja: abra o app na ' +
+            'loja e aceite as permissões novas, ou reinstale-o.',
+        )
+      }
+    }
   }
 
   const sb = supabaseServer()

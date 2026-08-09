@@ -2,7 +2,13 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { derivarConsumoDiario, importarPedidosShopify, mensagemDe } from '@/data/shopify'
+import {
+  derivarConsumoDiario,
+  escoposDoToken,
+  esquecerToken,
+  importarPedidosShopify,
+  mensagemDe,
+} from '@/data/shopify'
 import type { ResultadoPedidos } from '@/data/shopify'
 
 export type RespostaPedidos =
@@ -26,6 +32,44 @@ export async function importarPedidos(dias = 60): Promise<RespostaPedidos> {
     return { ok: true, resultado: { ...resultado, basesComConsumo: bases } }
   } catch (e) {
     console.error('[shopify] importação de pedidos falhou:', e)
+    return { ok: false, erro: mensagemDe(e) }
+  }
+}
+
+export type RespostaDiagnostico =
+  | { ok: true; loja: string; escopos: string[]; faltando: string[] }
+  | { ok: false; erro: string }
+
+/** O que cada operação do ERP exige da Shopify. */
+const EXIGIDOS = [
+  'read_products',
+  'read_inventory',
+  'write_inventory',
+  'read_locations',
+  'read_orders',
+]
+
+/**
+ * Pergunta à Shopify quais escopos o token REALMENTE tem.
+ *
+ * É a única fonte que encerra a dúvida entre "o app declara" e "o token tem":
+ * lançar versão no dev dashboard não atualiza sozinho a instalação na loja, e
+ * as duas telas mostram listas diferentes sem avisar.
+ */
+export async function diagnosticarShopify(): Promise<RespostaDiagnostico> {
+  try {
+    // Descarta o token guardado antes de perguntar: diagnosticar com um token
+    // de 20 horas atrás responderia sobre o passado.
+    esquecerToken()
+    const { loja, escopos } = await escoposDoToken()
+    return {
+      ok: true,
+      loja,
+      escopos,
+      faltando: EXIGIDOS.filter((e) => !escopos.includes(e)),
+    }
+  } catch (e) {
+    console.error('[shopify] diagnóstico falhou:', e)
     return { ok: false, erro: mensagemDe(e) }
   }
 }
