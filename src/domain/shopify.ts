@@ -19,6 +19,12 @@ export interface VarianteShopify {
   preco: number
   /** Quantidade publicada; `null` quando a loja não rastreia estoque. */
   estoque: number | null
+  /**
+   * Código do produto na loja. É a ÚNICA chave que sobrevive a edição de
+   * produto e atravessa plataformas — o id da variante muda quando o produto
+   * é recriado, e o nome muda quando alguém corrige um acento.
+   */
+  sku: string | null
 }
 
 export interface ProdutoShopify {
@@ -52,6 +58,7 @@ export interface VarianteImportada {
   preco: number
   publicado: number
   shopifyVariantId: string
+  sku: string | null
 }
 
 export interface ItemIgnorado {
@@ -147,6 +154,7 @@ export function mapearCatalogo(produtos: ProdutoShopify[]): CatalogoMapeado {
         // Estoque negativo existe na Shopify (sobrevenda); o publicado do ERP não.
         publicado: Math.max(0, v.estoque ?? 0),
         shopifyVariantId: v.id,
+        sku: v.sku,
       })
     }
 

@@ -173,7 +173,13 @@ interface RespostaGraphql {
         tags: string[] | null
         featuredMedia: { preview: { image: { url: string } | null } | null } | null
         variants: {
-          nodes: { id: string; title: string; price: string; inventoryQuantity: number | null }[]
+          nodes: {
+            id: string
+            title: string
+            price: string
+            inventoryQuantity: number | null
+            sku: string | null
+          }[]
         }
       }[]
     }
@@ -209,6 +215,7 @@ const CONSULTA_PRODUTOS = /* GraphQL */ `
             title
             price
             inventoryQuantity
+            sku
           }
         }
       }
@@ -287,6 +294,7 @@ export async function lerCatalogoShopify(): Promise<ProdutoShopify[]> {
           titulo: v.title,
           preco: Number(v.price),
           estoque: v.inventoryQuantity,
+          sku: v.sku,
         })),
       })
     }
@@ -367,6 +375,7 @@ export async function importarCatalogoShopify(): Promise<ResultadoImportacao> {
       reservadas: atual?.reservadas ?? 0,
       preco_praticado: v.preco,
       shopify_variant_id: v.shopifyVariantId,
+      sku: v.sku,
     }
   })
   for (const parte of emLotes(linhasDerivados, 500)) {

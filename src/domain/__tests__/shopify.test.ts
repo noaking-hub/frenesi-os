@@ -13,7 +13,7 @@ const produto = (p: Partial<ProdutoShopify>): ProdutoShopify => ({
   tipo: 'Decant',
   tags: [],
   variantes: [
-    { id: 'gid://shopify/ProductVariant/11', titulo: '5 ml', preco: 79.9, estoque: 12 },
+    { id: 'gid://shopify/ProductVariant/11', titulo: '5 ml', preco: 79.9, estoque: 12, sku: null },
   ],
   ...p,
 })
@@ -40,8 +40,8 @@ describe('mapearCatalogo', () => {
     const r = mapearCatalogo([
       produto({
         variantes: [
-          { id: 'v1', titulo: '5 ml', preco: 79.9, estoque: 12 },
-          { id: 'v2', titulo: '10 ml', preco: 139.9, estoque: 8 },
+          { id: 'v1', titulo: '5 ml', preco: 79.9, estoque: 12, sku: null },
+          { id: 'v2', titulo: '10 ml', preco: 139.9, estoque: 8, sku: null },
         ],
       }),
     ])
@@ -62,7 +62,7 @@ describe('mapearCatalogo', () => {
       produto({
         titulo: 'Kit descoberta',
         handle: 'kit-descoberta',
-        variantes: [{ id: 'v1', titulo: 'Padrão', preco: 118.9, estoque: 4 }],
+        variantes: [{ id: 'v1', titulo: 'Padrão', preco: 118.9, estoque: 4, sku: null }],
       }),
     ])
     expect(r.bases).toHaveLength(0)
@@ -75,8 +75,8 @@ describe('mapearCatalogo', () => {
     const r = mapearCatalogo([
       produto({
         variantes: [
-          { id: 'v1', titulo: '5 ml', preco: 79.9, estoque: 12 },
-          { id: 'v2', titulo: '5ml (promo)', preco: 69.9, estoque: 3 },
+          { id: 'v1', titulo: '5 ml', preco: 79.9, estoque: 12, sku: null },
+          { id: 'v2', titulo: '5ml (promo)', preco: 69.9, estoque: 3, sku: null },
         ],
       }),
     ])
@@ -89,8 +89,8 @@ describe('mapearCatalogo', () => {
     const r = mapearCatalogo([
       produto({
         variantes: [
-          { id: 'v1', titulo: '5 ml', preco: 79.9, estoque: -3 },
-          { id: 'v2', titulo: '10 ml', preco: 139.9, estoque: null },
+          { id: 'v1', titulo: '5 ml', preco: 79.9, estoque: -3, sku: null },
+          { id: 'v2', titulo: '10 ml', preco: 139.9, estoque: null, sku: null },
         ],
       }),
     ])
