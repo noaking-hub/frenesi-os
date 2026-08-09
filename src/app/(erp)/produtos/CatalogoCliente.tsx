@@ -9,7 +9,7 @@ import { COR, type Tom } from '@/components/erp/tokens'
 import { brl, pct, plural, volume } from '@/domain'
 import type { PerfumeBase } from '@/domain'
 
-import { salvarPerfumeBase } from './actions'
+import { criarPerfumeBase, salvarPerfumeBase } from './actions'
 
 export interface LinhaCatalogo {
   base: PerfumeBase
@@ -29,6 +29,7 @@ export function CatalogoCliente({ linhas }: { linhas: LinhaCatalogo[] }) {
   const [busca, setBusca] = useState('')
   const [filtro, setFiltro] = useState<Filtro>('Todos')
   const [emEdicao, setEmEdicao] = useState<PerfumeBase | null>(null)
+  const [criando, setCriando] = useState(false)
 
   const termo = busca.trim().toLowerCase()
   const visiveis = useMemo(
@@ -194,7 +195,9 @@ export function CatalogoCliente({ linhas }: { linhas: LinhaCatalogo[] }) {
           Clique numa linha para editar. Status derivado da cobertura e da margem dos preços.
         </span>
         <div style={{ flex: 1 }} />
-        <BotaoOuro altura={34}>+ Novo perfume base</BotaoOuro>
+        <BotaoOuro altura={34} onClick={() => setCriando(true)}>
+          + Novo perfume base
+        </BotaoOuro>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -276,6 +279,7 @@ export function CatalogoCliente({ linhas }: { linhas: LinhaCatalogo[] }) {
       />
 
       {emEdicao && <Editor base={emEdicao} aoFechar={() => setEmEdicao(null)} />}
+      {criando && <Criador aoFechar={() => setCriando(false)} />}
     </div>
   )
 }
@@ -485,6 +489,167 @@ function Editor({ base, aoFechar }: { base: PerfumeBase; aoFechar: () => void })
             {pendente ? 'Salvando…' : 'Salvar alterações'}
           </button>
         </div>
+    </Modal>
+  )
+}
+
+/**
+ * Cadastro de base fora da Shopify — frasco comprado avulso, amostra,
+ * exclusivo que não está na loja.
+ *
+ * Não pergunta volume nem custo de propósito: quem os define é a compra do
+ * frasco, em Estoque → Lotes. Digitar volume aqui criaria estoque sem lote, e
+ * a conciliação apontaria divergência já no primeiro dia.
+ */
+function Criador({ aoFechar }: { aoFechar: () => void }) {
+  const [nome, setNome] = useState('')
+  const [marca, setMarca] = useState('')
+  const [genero, setGenero] = useState<PerfumeBase['genero'] | null>(null)
+  const [erro, setErro] = useState<string | null>(null)
+  const [pendente, iniciarTransicao] = useTransition()
+
+  const campo = {
+    height: 38,
+    padding: '0 12px',
+    border: '1px solid rgba(255,255,255,.11)',
+    background: 'rgba(255,255,255,.03)',
+    borderRadius: 9,
+    color: 'var(--color-corrente)',
+    fontSize: 12.5,
+    lineHeight: 1,
+    outline: 0,
+    width: '100%',
+  } as const
+
+  const salvar = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      const r = await criarPerfumeBase({ nome, marca, genero })
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      aoFechar()
+    })
+
+  return (
+    <Modal titulo="Novo perfume base" largura={520} aoFechar={aoFechar}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <Rotulo>Cadastro manual</Rotulo>
+        <TituloSecao tamanho={15}>Novo perfume base</TituloSecao>
+        <span
+          className="font-sans"
+          style={{ fontSize: 10.5, lineHeight: 1.45, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+        >
+          Para o que não vem da Shopify. Se o perfume já está na loja, prefira reimportar o
+          catálogo — assim ele nasce com imagem e com as variantes ligadas.
+        </span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+          <Rotulo>Nome</Rotulo>
+          <input
+            value={nome}
+            onChange={(e) => setNome(e.target.value)}
+            placeholder="Libre Intense"
+            autoFocus
+            className="font-sans focus:border-ouro/45"
+            style={campo}
+          />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+          <Rotulo>Marca</Rotulo>
+          <input
+            value={marca}
+            onChange={(e) => setMarca(e.target.value)}
+            placeholder="Yves Saint Laurent"
+            className="font-sans focus:border-ouro/45"
+            style={campo}
+          />
+        </label>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+        <Rotulo>Gênero</Rotulo>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {[...GENEROS, null].map((g) => {
+            const escolhido = genero === g
+            return (
+              <button
+                key={g ?? 'nenhum'}
+                type="button"
+                onClick={() => setGenero(g)}
+                className="hover:border-ouro/40 font-sans"
+                style={{
+                  height: 32,
+                  padding: '0 14px',
+                  border: `1px solid ${escolhido ? 'rgba(239,209,140,.45)' : 'rgba(255,255,255,.1)'}`,
+                  background: escolhido ? 'rgba(239,209,140,.09)' : 'transparent',
+                  color: escolhido ? COR.ouro : 'rgba(242,237,227,.65)',
+                  fontWeight: 600,
+                  fontSize: 11.5,
+                  lineHeight: 1,
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                }}
+              >
+                {g ?? 'Não informado'}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <span
+        className="font-sans"
+        style={{
+          fontSize: 10.5,
+          lineHeight: 1.5,
+          color: 'var(--color-terciario)',
+          textWrap: 'pretty',
+          padding: '11px 13px',
+          borderRadius: 10,
+          background: 'rgba(255,255,255,.028)',
+          border: '1px solid var(--color-borda)',
+        }}
+      >
+        Nasce com volume e custo zerados. Os dois entram juntos na primeira compra do frasco, em
+        Estoque → Lotes — é de lá que sai o custo por ml que a Precificação usa.
+      </span>
+
+      {erro && (
+        <span
+          className="font-sans"
+          style={{ fontSize: 11.5, lineHeight: 1.5, color: COR.erro, textWrap: 'pretty' }}
+        >
+          {erro}
+        </span>
+      )}
+
+      <div style={{ display: 'flex', gap: 9, justifyContent: 'flex-end' }}>
+        <BotaoSecundario altura={36} onClick={aoFechar}>
+          Cancelar
+        </BotaoSecundario>
+        <button
+          type="button"
+          onClick={salvar}
+          disabled={pendente || !nome.trim() || !marca.trim()}
+          className="botao-ouro font-sans hover:brightness-[1.07]"
+          style={{
+            height: 36,
+            padding: '0 18px',
+            fontWeight: 700,
+            fontSize: 11.5,
+            lineHeight: 1,
+            borderRadius: 9,
+            cursor: pendente ? 'wait' : 'pointer',
+            opacity: pendente || !nome.trim() || !marca.trim() ? 0.5 : 1,
+          }}
+        >
+          {pendente ? 'Cadastrando…' : 'Cadastrar perfume'}
+        </button>
+      </div>
     </Modal>
   )
 }

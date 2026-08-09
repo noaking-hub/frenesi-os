@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import type { CSSProperties, ReactNode } from 'react'
 
 import { BORDA, COR, FAIXA, FUNDO, type Tom } from './tokens'
@@ -185,6 +186,75 @@ export function FaixaAlerta({
       </span>
       {acao}
     </div>
+  )
+}
+
+/**
+ * Mesma aparência do botão, mas navega. Existe porque um atalho para outra
+ * tela é um link — e um <button> que navega perde abrir em nova aba, copiar
+ * endereço e o estado de visitado.
+ */
+export function LinkOuro({
+  children,
+  href,
+  altura = 32,
+}: {
+  children: ReactNode
+  href: string
+  altura?: number
+}) {
+  return (
+    <Link
+      href={href}
+      className="botao-ouro font-sans hover:brightness-[1.07]"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        height: altura,
+        padding: '0 14px',
+        fontWeight: 700,
+        fontSize: 11,
+        lineHeight: 1,
+        borderRadius: 8,
+        whiteSpace: 'nowrap',
+        boxShadow: 'var(--shadow-ouro)',
+      }}
+    >
+      {children}
+    </Link>
+  )
+}
+
+export function LinkSecundario({
+  children,
+  href,
+  altura = 32,
+}: {
+  children: ReactNode
+  href: string
+  altura?: number
+}) {
+  return (
+    <Link
+      href={href}
+      className="font-sans hover:border-ouro/40 hover:text-ouro"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        height: altura,
+        padding: '0 14px',
+        border: '1px solid rgba(255,255,255,.11)',
+        background: 'transparent',
+        color: 'var(--color-secundario)',
+        fontWeight: 600,
+        fontSize: 11,
+        lineHeight: 1,
+        borderRadius: 8,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {children}
+    </Link>
   )
 }
 

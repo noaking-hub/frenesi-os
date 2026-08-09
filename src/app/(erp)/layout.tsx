@@ -1,3 +1,4 @@
+import { SeloDemonstracao } from '@/components/erp/SeloDemonstracao'
 import { Sidebar } from '@/components/erp/Sidebar'
 import { Topbar } from '@/components/erp/Topbar'
 import { carregarDashboard } from '@/data/consultas'
@@ -21,6 +22,10 @@ export default async function ErpLayout({ children }: { children: React.ReactNod
           className="animate-[fr-in_.32s_ease_both]"
           style={{ flex: 1, padding: '26px 30px 46px' }}
         >
+          {/* Fica no layout, e não em cada tela, porque a lista de módulos
+              ainda em demonstração precisa ter UM dono — espalhada por 25
+              páginas, ela envelheceria em silêncio. */}
+          <SeloDemonstracao sincronizado={origemDados() === 'supabase'} />
           {children}
         </div>
       </main>

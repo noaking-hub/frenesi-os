@@ -1,5 +1,5 @@
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
-import { Barra, BotaoOuro, BotaoSecundario, TituloSecao, Valor } from '@/components/erp/primitivos'
+import { Barra, LinkOuro, LinkSecundario, TituloSecao, Valor } from '@/components/erp/primitivos'
 import { CelulaDupla, Tabela, type Coluna } from '@/components/erp/Tabela'
 import type { Tom } from '@/components/erp/tokens'
 import { carregarEstoque } from '@/data/consultas'
@@ -141,8 +141,15 @@ export default async function PerfumesBase() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <TituloSecao tamanho={16}>Perfumes base · quando o estoque acaba</TituloSecao>
         <div style={{ flex: 1 }} />
-        <BotaoSecundario altura={34}>Movimentar estoque</BotaoSecundario>
-        <BotaoOuro altura={34}>Nova ordem de produção</BotaoOuro>
+        {/* Esta tela é leitura: quem move estoque é a compra, a produção e o
+            inventário. Os atalhos levam até quem executa, em vez de fingir
+            que a ação acontece aqui. */}
+        <LinkSecundario href="/estoque/lotes" altura={34}>
+          Registrar compra de frasco
+        </LinkSecundario>
+        <LinkOuro href="/producao" altura={34}>
+          Nova ordem de produção
+        </LinkOuro>
       </div>
 
       <Tabela

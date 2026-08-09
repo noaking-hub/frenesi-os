@@ -77,7 +77,7 @@ export function detectarGenero(...textos: string[]): Genero | null {
     .join(' ')
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
 
   if (/\bunissex\b|\bunisex\b/.test(t)) return 'Unissex'
   const masculino = /\bmasculin[oa]\b|\bmasc\b|\bpour homme\b|\bfor men\b/.test(t)
