@@ -808,9 +808,10 @@ interface PedidoShopify {
  * conciliação financeira precisa enxergar isso como pendência, não como
  * receita limpa.
  */
-function pagamentoDe(status: string | null): 'pago' | 'pendente' | 'divergente' {
+function pagamentoDe(status: string | null): 'pago' | 'pendente' | 'divergente' | 'cancelado' {
   if (status === 'PAID') return 'pago'
   if (status === 'REFUNDED' || status === 'PARTIALLY_REFUNDED') return 'divergente'
+  if (status === 'VOIDED' || status === 'EXPIRED') return 'cancelado'
   return 'pendente'
 }
 

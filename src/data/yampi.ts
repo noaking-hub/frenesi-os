@@ -227,9 +227,16 @@ function telefoneDe(c: ClienteYampi): string {
  * Estorno vira `divergente` e não `pago`: o dinheiro entrou e voltou, e a
  * conciliação precisa enxergar pendência, não receita limpa.
  */
-function pagamentoYampi(alias: string, nome: string): 'pago' | 'pendente' | 'divergente' {
+function pagamentoYampi(
+  alias: string,
+  nome: string,
+): 'pago' | 'pendente' | 'divergente' | 'cancelado' {
   const t = `${alias} ${nome}`.toLowerCase()
-  if (/estorn|refund|charge_?back|cancel/.test(t)) return 'divergente'
+  // Estorno é divergência: o dinheiro entrou e voltou, e a conciliação precisa
+  // enxergar isso. Cancelamento é venda que nunca aconteceu — não gera
+  // conciliação nem entra na receita.
+  if (/estorn|refund|charge_?back/.test(t)) return 'divergente'
+  if (/cancel|expirad|recusad|negad/.test(t)) return 'cancelado'
   if (/paid|pago|aprovad|separa|enviad|entregue|faturad/.test(t)) return 'pago'
   return 'pendente'
 }

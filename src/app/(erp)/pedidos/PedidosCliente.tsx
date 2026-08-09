@@ -14,6 +14,7 @@ const TOM_PAGAMENTO: Record<StatusPagamento, Tom> = {
   pago: 'ok',
   pendente: 'atencao',
   divergente: 'erro',
+  cancelado: 'neutro',
 }
 
 const TOM_ENVIO: Record<StatusEnvio, Tom> = {
@@ -61,8 +62,13 @@ export function PedidosCliente({ itens }: { itens: Item[] }) {
     (i) => i.pedido.pagamento === 'pago' && i.pedido.envio === 'Aguardando envio',
   ).length
   const divergentes = itens.filter((i) => i.pedido.pagamento === 'divergente').length
-  const receita = itens.reduce((a, i) => a + i.pedido.valor, 0)
-  const ticket = itens.length ? receita / itens.length : 0
+  const cancelados = itens.filter((i) => i.pedido.pagamento === 'cancelado').length
+
+  // Receita é o que foi PAGO. Somar tudo colocaria na conta o carrinho
+  // abandonado no boleto e a venda estornada — dinheiro que não entrou.
+  const pagos = itens.filter((i) => i.pedido.pagamento === 'pago')
+  const receita = pagos.reduce((a, i) => a + i.pedido.valor, 0)
+  const ticket = pagos.length ? receita / pagos.length : 0
   const semBaixa = itens.filter(
     (i) => i.pedido.envio === 'Entregue' && i.devolucao.estado !== 'aguardando-entrega',
   ).length
@@ -71,7 +77,7 @@ export function PedidosCliente({ itens }: { itens: Item[] }) {
     {
       label: 'Pedidos no período',
       valor: pad2(itens.length),
-      hint: `${brl(receita)} em receita bruta`,
+      hint: `${brl(receita)} de ${pad2(pagos.length)} pagos${cancelados ? ` · ${cancelados} cancelados fora da conta` : ''}`,
     },
     {
       label: 'Pagos não enviados',

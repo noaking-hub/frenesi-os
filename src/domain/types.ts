@@ -103,7 +103,12 @@ export interface ParametrosPrecificacao {
 
 export type AcaoSync = 'esgotar' | 'reduzir' | 'repor' | 'ok'
 
-export type StatusPagamento = 'pago' | 'pendente' | 'divergente'
+/**
+ * `divergente` é valor recebido diferente do pedido — conciliação a
+ * investigar. `cancelado` é venda que não aconteceu. Juntar os dois criaria
+ * fila de trabalho onde não há, e somaria à receita dinheiro que não entrou.
+ */
+export type StatusPagamento = 'pago' | 'pendente' | 'divergente' | 'cancelado'
 export type StatusEnvio =
   | 'Não iniciado'
   | 'Aguardando envio'
