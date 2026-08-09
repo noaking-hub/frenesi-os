@@ -9,6 +9,9 @@ import {
   resumirFluxos,
   retornoDe,
   saldoDe,
+  statusCliente,
+  TETO_VIP,
+  iniciaisDe,
 } from '..'
 import type {
   CampanhaMkt,
@@ -172,5 +175,30 @@ describe('fila de atendimento', () => {
     expect(r.pendentes).toBe(2)
     expect(r.semResponsavel).toBe(1)
     expect(r.maisEspera?.id).toBe('a')
+  })
+})
+
+describe('classificação de cliente', () => {
+  it('inatividade vence o valor: VIP que sumiu é problema de retenção', () => {
+    expect(statusCliente(9000, 12, 120)).toBe('Inativo')
+  })
+
+  it('VIP pelo total comprado', () => {
+    expect(statusCliente(TETO_VIP, 4, 10)).toBe('VIP')
+  })
+
+  it('recorrente a partir do segundo pedido', () => {
+    expect(statusCliente(500, 2, 10)).toBe('Recorrente')
+    expect(statusCliente(500, 1, 10)).toBe('Novo')
+  })
+
+  it('cliente sem compra registrada não é dado por inativo', () => {
+    expect(statusCliente(0, 0, null)).toBe('Novo')
+  })
+
+  it('iniciais pegam primeiro e último nome', () => {
+    expect(iniciaisDe('Camila Rocha')).toBe('CR')
+    expect(iniciaisDe('Ana')).toBe('A')
+    expect(iniciaisDe('  ')).toBe('—')
   })
 })

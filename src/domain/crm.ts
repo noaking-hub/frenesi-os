@@ -235,3 +235,52 @@ export function resumirFila(tickets: TicketAtendimento[]): ResumoFila {
       pendentes.slice().sort((a, b) => (b.esperaMin ?? 0) - (a.esperaMin ?? 0))[0] ?? null,
   }
 }
+
+// ── Clientes ───────────────────────────────────────────────────────────────
+
+export type StatusCliente = 'VIP' | 'Recorrente' | 'Novo' | 'Inativo'
+
+export interface ResumoCliente {
+  nome: string
+  cidade: string
+  iniciais: string
+  email: string
+  telefone: string
+  /** Total comprado e nº de pedidos: o ticket médio é derivado (total ÷ pedidos). */
+  total: number
+  pedidos: number
+  ultimaCompra: string
+  status: StatusCliente
+}
+
+/** Dias desde a última compra a partir dos quais o cliente é dado por inativo. */
+export const DIAS_INATIVO = 90
+/** Total comprado que qualifica um cliente como VIP. */
+export const TETO_VIP = 3000
+
+/**
+ * Classifica o cliente pelo que ele fez, não por um rótulo digitado.
+ *
+ * Inatividade vem primeiro de propósito: um VIP que sumiu há quatro meses é
+ * um problema de retenção, e chamá-lo de VIP esconderia exatamente o caso que
+ * a tela existe para mostrar.
+ */
+export function statusCliente(
+  total: number,
+  pedidos: number,
+  diasDesdeUltimaCompra: number | null,
+): StatusCliente {
+  if (diasDesdeUltimaCompra !== null && diasDesdeUltimaCompra > DIAS_INATIVO) return 'Inativo'
+  if (total >= TETO_VIP) return 'VIP'
+  if (pedidos >= 2) return 'Recorrente'
+  return 'Novo'
+}
+
+/** `Camila Rocha` → `CR`. Duas letras no máximo, para caber no avatar. */
+export function iniciaisDe(nome: string): string {
+  const partes = nome.trim().split(/\s+/).filter(Boolean)
+  if (partes.length === 0) return '—'
+  const primeira = partes[0][0] ?? ''
+  const ultima = partes.length > 1 ? (partes[partes.length - 1][0] ?? '') : ''
+  return (primeira + ultima).toUpperCase()
+}

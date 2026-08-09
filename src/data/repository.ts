@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { PARAMETROS_PADRAO } from '@/domain'
+import { PARAMETROS_PADRAO, iniciaisDe, statusCliente } from '@/domain'
 import type {
   AutorizadoIa,
   AvaliacaoCupom,
@@ -697,8 +697,76 @@ const repositorioSupabase: Repositorio = {
   integracoes: repositorioFixtures.integracoes,
   notificacoes: repositorioFixtures.notificacoes,
   auditoria: repositorioFixtures.auditoria,
-  // CRM, promoções, atendimento e Assessor IA também aguardam migrations.
-  clientes: repositorioFixtures.clientes,
+  /**
+   * O cliente do CRM é DERIVADO dos pedidos, não uma tabela paralela.
+   *
+   * Total, número de compras, última compra e status saem do que a pessoa
+   * fez. Uma tabela com esses campos precisaria ser recalculada a cada venda
+   * e divergiria do extrato no primeiro esquecimento.
+   */
+  async clientes() {
+    const sb = supabaseServer()
+    const { data, error } = await sb
+      .from('pedidos')
+      .select('valor, comprado_em, pagamento, clientes(nome, email, telefone)')
+      .not('cliente_id', 'is', null)
+      .limit(2000)
+    if (error) throw error
+
+    const linhas = (data ?? []) as unknown as {
+      valor: number | string
+      comprado_em: string
+      pagamento: string
+      clientes: { nome: string; email: string; telefone: string | null } | null
+    }[]
+
+    const porEmail = new Map<
+      string,
+      { nome: string; telefone: string; total: number; pedidos: number; ultima: number }
+    >()
+    for (const l of linhas) {
+      const c = l.clientes
+      if (!c) continue
+      const atual = porEmail.get(c.email) ?? {
+        nome: c.nome,
+        telefone: c.telefone ?? '',
+        total: 0,
+        pedidos: 0,
+        ultima: 0,
+      }
+      const quando = new Date(l.comprado_em).getTime()
+      porEmail.set(c.email, {
+        nome: c.nome,
+        telefone: c.telefone ?? atual.telefone,
+        // Pedido não pago não é compra: contá-lo inflaria o VIP com carrinho
+        // que nunca virou dinheiro.
+        total: atual.total + (l.pagamento === 'pago' ? Number(l.valor) : 0),
+        pedidos: atual.pedidos + (l.pagamento === 'pago' ? 1 : 0),
+        ultima: Math.max(atual.ultima, quando),
+      })
+    }
+
+    const agora = Date.now()
+    const dia = 24 * 60 * 60 * 1000
+    return [...porEmail.entries()]
+      .map(([email, c]): ClienteCrm => {
+        const dias = c.ultima ? Math.floor((agora - c.ultima) / dia) : null
+        return {
+          nome: c.nome,
+          cidade: '—',
+          iniciais: iniciaisDe(c.nome),
+          email,
+          telefone: c.telefone,
+          total: c.total,
+          pedidos: c.pedidos,
+          ultimaCompra: c.ultima ? dataCurta(new Date(c.ultima).toISOString()) : '—',
+          status: statusCliente(c.total, c.pedidos, dias),
+        }
+      })
+      .sort((a, b) => b.total - a.total)
+  },
+
+  // Promoções, atendimento e Assessor IA aguardam migrations.
   carrinhos: repositorioFixtures.carrinhos,
   campanhasMkt: repositorioFixtures.campanhasMkt,
   fluxos: repositorioFixtures.fluxos,
