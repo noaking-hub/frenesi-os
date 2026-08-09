@@ -612,3 +612,322 @@ export async function aplicarEstoqueShopify(
 
   return { aplicadas: quantidades.length, ignoradas, local: local.name }
 }
+
+// ── Pedidos ────────────────────────────────────────────────────────────────
+
+const CONSULTA_PEDIDOS = /* GraphQL */ `
+  query ($cursor: String, $filtro: String) {
+    orders(first: 50, after: $cursor, sortKey: CREATED_AT, reverse: true, query: $filtro) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        id
+        name
+        createdAt
+        displayFinancialStatus
+        displayFulfillmentStatus
+        totalPriceSet {
+          shopMoney {
+            amount
+          }
+        }
+        totalShippingPriceSet {
+          shopMoney {
+            amount
+          }
+        }
+        customer {
+          firstName
+          lastName
+          email
+          phone
+        }
+        shippingAddress {
+          city
+          provinceCode
+          address1
+          zip
+        }
+        lineItems(first: 25) {
+          nodes {
+            title
+            quantity
+            originalUnitPriceSet {
+              shopMoney {
+                amount
+              }
+            }
+            variant {
+              id
+            }
+          }
+        }
+        fulfillments(first: 1) {
+          trackingInfo(first: 1) {
+            number
+            company
+          }
+        }
+      }
+    }
+  }
+`
+
+interface PedidoShopify {
+  id: string
+  name: string
+  createdAt: string
+  displayFinancialStatus: string | null
+  displayFulfillmentStatus: string | null
+  totalPriceSet: { shopMoney: { amount: string } }
+  totalShippingPriceSet: { shopMoney: { amount: string } } | null
+  customer: {
+    firstName: string | null
+    lastName: string | null
+    email: string | null
+    phone: string | null
+  } | null
+  shippingAddress: {
+    city: string | null
+    provinceCode: string | null
+    address1: string | null
+    zip: string | null
+  } | null
+  lineItems: {
+    nodes: {
+      title: string
+      quantity: number
+      originalUnitPriceSet: { shopMoney: { amount: string } }
+      variant: { id: string } | null
+    }[]
+  }
+  fulfillments: { trackingInfo: { number: string | null; company: string | null }[] }[]
+}
+
+/**
+ * Pagamento e envio da Shopify no vocabulário do ERP.
+ *
+ * Reembolso vira `divergente` e não `pago`: o dinheiro entrou e voltou, e a
+ * conciliação financeira precisa enxergar isso como pendência, não como
+ * receita limpa.
+ */
+function pagamentoDe(status: string | null): 'pago' | 'pendente' | 'divergente' {
+  if (status === 'PAID') return 'pago'
+  if (status === 'REFUNDED' || status === 'PARTIALLY_REFUNDED') return 'divergente'
+  return 'pendente'
+}
+
+function envioDe(status: string | null, temRastreio: boolean): string {
+  if (status === 'FULFILLED') return temRastreio ? 'enviado' : 'aguardando_envio'
+  if (status === 'PARTIALLY_FULFILLED') return 'aguardando_envio'
+  return 'nao_iniciado'
+}
+
+export interface ResultadoPedidos {
+  pedidos: number
+  itens: number
+  clientes: number
+  /** Itens cuja variante não existe no ERP — não dá para baixar estoque deles. */
+  itensSemVariante: number
+  desde: string
+}
+
+/**
+ * Importa os pedidos da Shopify.
+ *
+ * A janela existe porque a API só devolve os últimos 60 dias sem o escopo
+ * `read_all_orders`, que a Shopify concede caso a caso. Pedir mais que isso
+ * volta vazio sem erro — o que pareceria "loja sem vendas".
+ */
+export async function importarPedidosShopify(dias = 60): Promise<ResultadoPedidos> {
+  if (!supabaseConfigurado()) {
+    throw new Error('O Supabase precisa estar configurado para receber a importação.')
+  }
+  const { loja } = credenciais()
+  if (!loja) {
+    throw new Error('SHOPIFY_LOJA precisa estar no .env.local (ex.: sua-loja.myshopify.com)')
+  }
+  const token = await tokenDeAcesso(loja)
+
+  const desde = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const filtro = `created_at:>=${desde}`
+
+  const pedidos: PedidoShopify[] = []
+  let cursor: string | null = null
+  for (let pagina = 0; pagina < 40; pagina++) {
+    const dados: {
+      orders: { pageInfo: { hasNextPage: boolean; endCursor: string }; nodes: PedidoShopify[] }
+    } = await chamarShopify(
+      loja,
+      token,
+      CONSULTA_PEDIDOS,
+      { cursor, filtro },
+      'ler os pedidos',
+    )
+    pedidos.push(...dados.orders.nodes)
+    if (!dados.orders.pageInfo.hasNextPage) break
+    cursor = dados.orders.pageInfo.endCursor
+  }
+
+  const sb = supabaseServer()
+
+  // Variante da loja → base e tamanho no ERP. Sem esse mapa o item entra como
+  // linha de texto: aparece no pedido, mas não baixa estoque de ninguém.
+  const { data: derivados, error: erroDerivados } = await sb
+    .from('produtos_derivados')
+    .select('base_id, variante, shopify_variant_id')
+  if (erroDerivados) throw erroDerivados
+  const porVariante = new Map(
+    (derivados ?? [])
+      .filter((d) => d.shopify_variant_id)
+      .map((d) => [
+        d.shopify_variant_id as string,
+        { baseId: d.base_id as string, variante: d.variante as number },
+      ]),
+  )
+
+  // Cliente é identificado por e-mail: é o que a Shopify garante e o que o
+  // portal de devolução usa para o cliente se encontrar.
+  const clientes = new Map<string, { nome: string; email: string; telefone: string | null; cidade: string | null; uf: string | null }>()
+  for (const p of pedidos) {
+    const email = p.customer?.email?.trim().toLowerCase()
+    if (!email) continue
+    if (!clientes.has(email)) {
+      clientes.set(email, {
+        nome: [p.customer?.firstName, p.customer?.lastName].filter(Boolean).join(' ') || email,
+        email,
+        telefone: p.customer?.phone ?? null,
+        cidade: p.shippingAddress?.city ?? null,
+        uf: p.shippingAddress?.provinceCode ?? null,
+      })
+    }
+  }
+
+  for (const parte of emLotes([...clientes.values()], 500)) {
+    const { error } = await sb.from('clientes').upsert(parte, { onConflict: 'email' })
+    if (error) throw error
+  }
+
+  const { data: idsClientes, error: erroIds } = await sb.from('clientes').select('id, email')
+  if (erroIds) throw erroIds
+  const clientePorEmail = new Map(
+    (idsClientes ?? []).map((c) => [(c.email as string).toLowerCase(), c.id as string]),
+  )
+
+  const linhasPedidos = pedidos.map((p) => {
+    const rastreio = p.fulfillments[0]?.trackingInfo[0] ?? null
+    const email = p.customer?.email?.trim().toLowerCase()
+    return {
+      id: p.name,
+      cliente_id: email ? (clientePorEmail.get(email) ?? null) : null,
+      canal: 'shopify',
+      valor: Number(p.totalPriceSet.shopMoney.amount),
+      frete: Number(p.totalShippingPriceSet?.shopMoney.amount ?? 0),
+      cashback: 0,
+      pagamento: pagamentoDe(p.displayFinancialStatus),
+      envio: envioDe(p.displayFulfillmentStatus, Boolean(rastreio?.number)),
+      comprado_em: p.createdAt,
+      destino: [p.shippingAddress?.city, p.shippingAddress?.provinceCode]
+        .filter(Boolean)
+        .join(' · ') || null,
+      cep: p.shippingAddress?.zip ?? null,
+      logradouro: p.shippingAddress?.address1 ?? null,
+      rastreio: rastreio?.number ?? null,
+    }
+  })
+
+  for (const parte of emLotes(linhasPedidos, 500)) {
+    const { error } = await sb.from('pedidos').upsert(parte, { onConflict: 'id' })
+    if (error) throw error
+  }
+
+  // Itens são reescritos por pedido: quantidade e preço podem ter mudado por
+  // edição do pedido na loja, e somar de novo duplicaria a venda.
+  const { error: erroLimpa } = await sb
+    .from('pedido_itens')
+    .delete()
+    .in('pedido_id', linhasPedidos.map((p) => p.id))
+  if (erroLimpa) throw erroLimpa
+
+  let itensSemVariante = 0
+  const linhasItens = pedidos.flatMap((p) =>
+    p.lineItems.nodes.map((i) => {
+      const casado = i.variant ? porVariante.get(i.variant.id) : undefined
+      if (!casado) itensSemVariante++
+      return {
+        pedido_id: p.name,
+        base_id: casado?.baseId ?? null,
+        descricao: i.title,
+        variante: casado?.variante ?? null,
+        quantidade: i.quantity,
+        preco: Number(i.originalUnitPriceSet.shopMoney.amount),
+      }
+    }),
+  )
+
+  for (const parte of emLotes(linhasItens, 500)) {
+    const { error } = await sb.from('pedido_itens').insert(parte)
+    if (error) throw error
+  }
+
+  const { error: erroLog } = await sb.from('sincronizacoes').insert({
+    origem: 'shopify',
+    tipo: 'pedidos',
+    perfumes: clientes.size,
+    variantes: linhasItens.length,
+    ignorados: itensSemVariante,
+    detalhes: { desde, dias },
+  })
+  if (erroLog) throw erroLog
+
+  return {
+    pedidos: linhasPedidos.length,
+    itens: linhasItens.length,
+    clientes: clientes.size,
+    itensSemVariante,
+    desde,
+  }
+}
+
+/**
+ * Deriva o consumo diário de cada base das vendas reais.
+ *
+ * Substitui o campo digitado à mão que alimentava a cobertura ("acaba em X
+ * dias"). Só considera pedidos pagos: carrinho pendente não consome perfume.
+ */
+export async function derivarConsumoDiario(dias = 30): Promise<{ bases: number }> {
+  if (!supabaseConfigurado()) {
+    throw new Error('O Supabase precisa estar configurado.')
+  }
+  const sb = supabaseServer()
+  const desde = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString()
+
+  const { data, error } = await sb
+    .from('pedido_itens')
+    .select('base_id, variante, quantidade, pedidos!inner(comprado_em, pagamento)')
+    .not('base_id', 'is', null)
+    .gte('pedidos.comprado_em', desde)
+    .eq('pedidos.pagamento', 'pago')
+  if (error) throw error
+
+  const mlPorBase = new Map<string, number>()
+  for (const i of (data ?? []) as unknown as {
+    base_id: string
+    variante: number
+    quantidade: number
+  }[]) {
+    mlPorBase.set(i.base_id, (mlPorBase.get(i.base_id) ?? 0) + i.variante * i.quantidade)
+  }
+
+  for (const [baseId, ml] of mlPorBase) {
+    const { error: erroUp } = await sb
+      .from('perfumes_base')
+      .update({ consumo_diario_ml: Math.round((ml / dias) * 100) / 100 })
+      .eq('id', baseId)
+    if (erroUp) throw erroUp
+  }
+
+  return { bases: mlPorBase.size }
+}
