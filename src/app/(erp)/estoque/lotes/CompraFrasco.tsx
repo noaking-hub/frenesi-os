@@ -41,7 +41,15 @@ export function CompraFrasco({ bases }: { bases: PerfumeBase[] }) {
 
   const volumeMl = parseNum(volumeTexto)
   const custoTotal = parseNum(custoTexto)
-  const valido = Boolean(base) && volumeMl > 0 && custoTotal > 0 && fornecedor.trim().length > 0
+  // Botão apagado sem explicação é a pior combinação: quem preencheu tudo
+  // menos um campo fica clicando sem entender. Nomeie o que falta.
+  const faltando = [
+    !base && 'escolher o perfume na lista',
+    !(volumeMl > 0) && 'o volume comprado',
+    !(custoTotal > 0) && 'o custo total',
+    !fornecedor.trim() && 'o fornecedor',
+  ].filter((f): f is string => typeof f === 'string')
+  const valido = faltando.length === 0
 
   // Prévia derivada — a mesma conta que registrar_compra() fará no banco.
   const custoNovo =
@@ -127,7 +135,9 @@ export function CompraFrasco({ bases }: { bases: PerfumeBase[] }) {
             <TituloSecao tamanho={16}>Registrar compra de frasco</TituloSecao>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-              <Rotulo>Perfume base</Rotulo>
+              <Rotulo>
+                {base ? `Perfume base · ${base.nome}` : 'Perfume base · nenhum escolhido'}
+              </Rotulo>
               <input
                 value={busca}
                 onChange={(e) => setBusca(e.target.value)}
@@ -135,25 +145,94 @@ export function CompraFrasco({ bases }: { bases: PerfumeBase[] }) {
                 className="font-sans"
                 style={campoEstilo}
               />
-              <select
-                value={baseId}
-                onChange={(e) => setBaseId(e.target.value)}
-                size={6}
+              {/*
+                Lista de botões, não `<select size>`: naquele, o navegador
+                destaca a primeira linha mesmo sem nada selecionado, e quem
+                digitava a busca achava que já tinha escolhido. Aqui só fica
+                marcado o que foi clicado.
+              */}
+              <div
+                role="listbox"
                 aria-label="Escolher perfume base"
-                className="font-sans"
-                style={{ ...campoEstilo, height: 'auto', padding: '6px 8px', fontSize: 12 }}
+                style={{
+                  maxHeight: 178,
+                  overflowY: 'auto',
+                  border: `1px solid ${base ? 'rgba(239,209,140,.28)' : 'rgba(255,255,255,.11)'}`,
+                  borderRadius: 9,
+                  background: 'rgba(255,255,255,.02)',
+                }}
               >
-                {filtradas.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {`${b.nome} · ${b.marca}${b.custoPorMl === 0 ? ' · sem custo ainda' : ''}`}
-                  </option>
-                ))}
-              </select>
-              {termo && filtradas.length === 0 && (
-                <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
-                  Nenhum perfume com esse nome — importe o catálogo da Shopify primeiro.
-                </span>
-              )}
+                {filtradas.map((b) => {
+                  const escolhido = b.id === baseId
+                  return (
+                    <button
+                      key={b.id}
+                      type="button"
+                      role="option"
+                      aria-selected={escolhido}
+                      onClick={() => setBaseId(escolhido ? '' : b.id)}
+                      className="font-sans hover:bg-[rgba(255,255,255,.04)]"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 9,
+                        width: '100%',
+                        padding: '7px 11px',
+                        border: 0,
+                        borderLeft: `2px solid ${escolhido ? 'var(--color-ouro)' : 'transparent'}`,
+                        background: escolhido ? 'rgba(239,209,140,.09)' : 'transparent',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        minWidth: 0,
+                      }}
+                    >
+                      <span
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          display: 'block',
+                          fontWeight: escolhido ? 600 : 500,
+                          fontSize: 11.5,
+                          lineHeight: 1.35,
+                          color: escolhido ? 'var(--color-ouro)' : 'var(--color-corrente)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {`${b.nome} · ${b.marca}`}
+                      </span>
+                      <span
+                        style={{
+                          flex: 'none',
+                          fontSize: 10,
+                          lineHeight: 1.2,
+                          color:
+                            b.custoPorMl === 0 ? 'var(--color-atencao)' : 'var(--color-terciario)',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {b.custoPorMl === 0 ? 'sem custo ainda' : volume(b.volumeMl)}
+                      </span>
+                    </button>
+                  )
+                })}
+                {filtradas.length === 0 && (
+                  <span
+                    className="font-sans"
+                    style={{
+                      display: 'block',
+                      padding: '16px 11px',
+                      fontSize: 10.5,
+                      color: 'var(--color-terciario)',
+                    }}
+                  >
+                    {termo
+                      ? 'Nenhum perfume com esse nome — importe o catálogo da Shopify primeiro.'
+                      : 'Nenhum perfume base cadastrado.'}
+                  </span>
+                )}
+              </div>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
@@ -239,7 +318,21 @@ export function CompraFrasco({ bases }: { bases: PerfumeBase[] }) {
               </span>
             )}
 
-            <div style={{ display: 'flex', gap: 9, justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, justifyContent: 'flex-end' }}>
+              {!valido && (
+                <span
+                  className="font-sans"
+                  style={{
+                    flex: 1,
+                    fontSize: 10.5,
+                    lineHeight: 1.45,
+                    color: 'var(--color-atencao)',
+                    textWrap: 'pretty',
+                  }}
+                >
+                  {`Falta ${faltando.join(', ').replace(/, ([^,]*)$/, ' e $1')}.`}
+                </span>
+              )}
               <BotaoSecundario altura={36} onClick={() => setAberto(false)}>
                 Cancelar
               </BotaoSecundario>
