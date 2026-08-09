@@ -59,7 +59,8 @@ export async function concluirEnvase(
   if (!ordemId) return { ok: false, erro: 'Escolha a ordem a concluir.' }
   if (!(envasadas > 0)) return { ok: false, erro: 'Informe quantas unidades foram envasadas.' }
 
-  const { data, error } = await supabaseServer().rpc('concluir_ordem_producao', {
+  const sb = supabaseServer()
+  const { data, error } = await sb.rpc('concluir_ordem_producao', {
     p_ordem_id: ordemId,
     p_envasadas: Math.floor(envasadas),
     p_operador: OPERADOR,
@@ -67,6 +68,18 @@ export async function concluirEnvase(
   if (error) {
     console.error('[producao] concluir_ordem_producao falhou:', error)
     return { ok: false, erro: mensagem(error, 'Falha ao concluir o envase.') }
+  }
+
+  // Envasado e reservado são derivados das ordens e dos pedidos. Sem
+  // reconciliar aqui, o número só se acertaria na próxima importação — e até
+  // lá a Shopify receberia menos unidades do que existem de fato.
+  const { error: erroReservas } = await sb.rpc('recalcular_reservas')
+  if (erroReservas) {
+    console.error('[producao] recalcular_reservas falhou:', erroReservas)
+    return {
+      ok: false,
+      erro: mensagem(erroReservas, 'Envase concluído, mas o estoque vendável não foi recalculado.'),
+    }
   }
 
   revalidatePath('/', 'layout')

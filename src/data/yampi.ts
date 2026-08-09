@@ -407,6 +407,12 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
     if (error) throw error
   }
 
+  // Venda que ainda não saiu é volume comprometido. Sem este passo a próxima
+  // sincronia devolveria à Shopify o número de antes da venda, e a loja
+  // voltaria a oferecer o que já foi vendido.
+  const { error: erroReservas } = await sb.rpc('recalcular_reservas')
+  if (erroReservas) throw erroReservas
+
   const { error: erroLog } = await sb.from('sincronizacoes').insert({
     origem: 'yampi',
     tipo: 'pedidos',
