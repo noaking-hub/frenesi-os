@@ -10,8 +10,13 @@ import {
   mensagemDe,
 } from '@/data/shopify'
 import type { ResultadoPedidos } from '@/data/shopify'
-import { diagnosticarYampi, yampiConfigurada } from '@/data/yampi'
-import type { DiagnosticoYampi } from '@/data/yampi'
+import {
+  diagnosticarYampi,
+  importarPedidosYampi,
+  limparPedidosShopify,
+  yampiConfigurada,
+} from '@/data/yampi'
+import type { DiagnosticoYampi, ResultadoYampi } from '@/data/yampi'
 
 export type RespostaPedidos =
   | { ok: true; resultado: ResultadoPedidos & { basesComConsumo: number } }
@@ -97,6 +102,39 @@ export async function conferirYampi(): Promise<RespostaYampi> {
     return { ok: true, ...(await diagnosticarYampi()) }
   } catch (e) {
     console.error('[yampi] diagnóstico falhou:', e)
+    return { ok: false, erro: mensagemDe(e) }
+  }
+}
+
+export type RespostaImportYampi =
+  | { ok: true; resultado: ResultadoYampi & { basesComConsumo: number; removidosShopify: number } }
+  | { ok: false; erro: string }
+
+/**
+ * Importa os pedidos da Yampi e, na sequência, deriva o consumo diário.
+ *
+ * Remove antes o espelho da Shopify: os dois conjuntos descrevem as MESMAS
+ * vendas com ids diferentes, e mantê-los somaria o faturamento duas vezes em
+ * todo KPI do sistema.
+ */
+export async function importarDaYampi(dias = 90): Promise<RespostaImportYampi> {
+  if (!yampiConfigurada()) {
+    return {
+      ok: false,
+      erro: 'Faltam as credenciais da Yampi no .env.local: YAMPI_ALIAS, YAMPI_USER_TOKEN e YAMPI_SECRET_KEY.',
+    }
+  }
+  try {
+    const { removidos } = await limparPedidosShopify()
+    const resultado = await importarPedidosYampi(dias)
+    const { bases } = await derivarConsumoDiario(30)
+    revalidatePath('/', 'layout')
+    return {
+      ok: true,
+      resultado: { ...resultado, basesComConsumo: bases, removidosShopify: removidos },
+    }
+  } catch (e) {
+    console.error('[yampi] importação falhou:', e)
     return { ok: false, erro: mensagemDe(e) }
   }
 }

@@ -16,6 +16,8 @@ import 'server-only'
  * lado da Yampi, e já provou ser instável quando um produto é recriado.
  */
 
+import { supabaseConfigurado, supabaseServer } from './supabase'
+
 const BASE = 'https://api.dooki.com.br/v2'
 
 function limpa(valor: string | undefined): string {
@@ -147,4 +149,296 @@ export async function diagnosticarYampi(): Promise<DiagnosticoYampi> {
     camposDoCliente: dentro(pedido?.customer),
     camposDoItem: dentro(pedido?.items),
   }
+}
+
+// ── Importação de pedidos ──────────────────────────────────────────────────
+
+/**
+ * Forma de um pedido da Yampi, conferida contra a resposta real da loja.
+ *
+ * Só os campos que o ERP usa. A Yampi devolve mais de sessenta por pedido —
+ * declarar todos convidaria a mapear o que ninguém lê.
+ */
+interface PedidoYampi {
+  id: number
+  number: number | string
+  created_at: { date?: string } | string | null
+  value_total: number | string | null
+  value_shipment: number | string | null
+  value_discount: number | string | null
+  /** Marcação de entrega. É daqui que o prazo de devolução começa a contar. */
+  delivered: boolean | number | null
+  date_delivery: { date?: string } | string | null
+  track_code: string | null
+  shipment_service: string | null
+  promocode: string | null
+  status?: { data?: { alias?: string; name?: string } } | null
+  customer?: { data?: ClienteYampi } | null
+  items?: { data?: ItemYampi[] } | null
+}
+
+interface ClienteYampi {
+  id: number
+  name: string | null
+  first_name: string | null
+  last_name: string | null
+  email: string | null
+  phone: { formated_number?: string; full_number?: string } | string | null
+  whatsapp: string | null
+  cpf: string | null
+  cnpj: string | null
+}
+
+interface ItemYampi {
+  id: number
+  sku?: { data?: { title?: string; sku?: string } } | null
+  item_sku: string | null
+  quantity: number
+  price: number | string | null
+  product_id: number | null
+}
+
+/** A Yampi devolve data ora como string, ora como `{ date: '...' }`. */
+function dataYampi(valor: { date?: string } | string | null | undefined): string | null {
+  if (!valor) return null
+  const bruto = typeof valor === 'string' ? valor : valor.date
+  if (!bruto) return null
+  // `2026-08-09 14:55:00.000000` não é ISO; o T e o Z fazem dele um instante.
+  const iso = bruto.includes('T') ? bruto : `${bruto.replace(' ', 'T').slice(0, 19)}Z`
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? null : d.toISOString()
+}
+
+function numero(valor: number | string | null | undefined): number {
+  const n = typeof valor === 'string' ? Number(valor) : (valor ?? 0)
+  return Number.isFinite(n) ? n : 0
+}
+
+function telefoneDe(c: ClienteYampi): string {
+  if (typeof c.phone === 'string') return c.phone
+  return c.phone?.formated_number ?? c.phone?.full_number ?? c.whatsapp ?? ''
+}
+
+/**
+ * Situação de pagamento a partir do status da Yampi.
+ *
+ * Estorno vira `divergente` e não `pago`: o dinheiro entrou e voltou, e a
+ * conciliação precisa enxergar pendência, não receita limpa.
+ */
+function pagamentoYampi(alias: string, nome: string): 'pago' | 'pendente' | 'divergente' {
+  const t = `${alias} ${nome}`.toLowerCase()
+  if (/estorn|refund|charge_?back|cancel/.test(t)) return 'divergente'
+  if (/paid|pago|aprovad|separa|enviad|entregue|faturad/.test(t)) return 'pago'
+  return 'pendente'
+}
+
+function envioYampi(alias: string, nome: string, entregue: boolean, rastreio: string | null) {
+  if (entregue) return 'entregue'
+  const t = `${alias} ${nome}`.toLowerCase()
+  if (/enviad|shipped|transito|transporte/.test(t)) return 'enviado'
+  if (rastreio) return 'enviado'
+  if (/separa|faturad|picking/.test(t)) return 'aguardando_envio'
+  return 'nao_iniciado'
+}
+
+export interface ResultadoYampi {
+  pedidos: number
+  itens: number
+  clientes: number
+  entregues: number
+  itensSemVariante: number
+  casadosPorSku: number
+  desde: string
+}
+
+export type MapaVariante = Map<string, { baseId: string; variante: number }>
+
+/**
+ * Importa os pedidos da Yampi — cliente, itens, pagamento, rastreio e entrega.
+ *
+ * O casamento do item usa o SKU, e não o id da variante: o id é da Shopify e
+ * não existe do lado da Yampi. É a única chave que os dois sistemas
+ * compartilham.
+ */
+export async function lerPedidosYampi(dias: number): Promise<PedidoYampi[]> {
+  const desde = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const ate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+
+  const pedidos: PedidoYampi[] = []
+  for (let pagina = 1; pagina <= 60; pagina++) {
+    const r = await chamarYampi<{
+      data?: PedidoYampi[]
+      meta?: { pagination?: { current_page: number; total_pages: number } }
+    }>('/orders', {
+      include: 'customer,items,status',
+      date: `created_at:${desde}|${ate}`,
+      limit: '50',
+      page: String(pagina),
+    })
+    pedidos.push(...(r.data ?? []))
+    const p = r.meta?.pagination
+    if (!p || p.current_page >= p.total_pages) break
+  }
+  return pedidos
+}
+
+/**
+ * Importa os pedidos da Yampi para o ERP.
+ *
+ * Grava com canal `yampi`, o que separa estes pedidos do espelho antigo da
+ * Shopify e permite limpar um sem tocar no outro.
+ */
+export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
+  if (!supabaseConfigurado()) {
+    throw new Error('O Supabase precisa estar configurado para receber a importação.')
+  }
+  const sb = supabaseServer()
+  const desde = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const pedidos = await lerPedidosYampi(dias)
+
+  // Ponte entre as plataformas: o SKU. O id de variante é da Shopify e não
+  // existe do lado da Yampi.
+  const { data: derivados, error: erroDerivados } = await sb
+    .from('produtos_derivados')
+    .select('base_id, variante, sku')
+    .not('sku', 'is', null)
+  if (erroDerivados) throw erroDerivados
+  const porSku: MapaVariante = new Map(
+    (derivados ?? []).map((d) => [
+      String(d.sku).trim().toLowerCase(),
+      { baseId: d.base_id as string, variante: d.variante as number },
+    ]),
+  )
+
+  const clientes = new Map<string, Record<string, unknown>>()
+  for (const p of pedidos) {
+    const c = p.customer?.data
+    const email = c?.email?.trim().toLowerCase()
+    if (!c || !email) continue
+    clientes.set(email, {
+      nome: c.name ?? [c.first_name, c.last_name].filter(Boolean).join(' ') ?? email,
+      email,
+      // O portal de devolução encontra o pedido por CPF — é o dado que a
+      // Shopify não tem e que sozinho justifica importar daqui.
+      cpf: (c.cpf ?? c.cnpj ?? '').replace(/\D/g, '') || null,
+      telefone: telefoneDe(c) || null,
+    })
+  }
+
+  for (const parte of lotes([...clientes.values()], 500)) {
+    const { error } = await sb.from('clientes').upsert(parte, { onConflict: 'email' })
+    if (error) throw error
+  }
+
+  const { data: idsClientes, error: erroIds } = await sb.from('clientes').select('id, email')
+  if (erroIds) throw erroIds
+  const clientePorEmail = new Map(
+    (idsClientes ?? []).map((c) => [(c.email as string).toLowerCase(), c.id as string]),
+  )
+
+  let entregues = 0
+  const linhasPedidos = pedidos.map((p) => {
+    const alias = p.status?.data?.alias ?? ''
+    const nome = p.status?.data?.name ?? ''
+    const entregue = Boolean(p.delivered)
+    const entregueEm = entregue ? dataYampi(p.date_delivery) : null
+    if (entregueEm) entregues++
+    const email = p.customer?.data?.email?.trim().toLowerCase()
+
+    return {
+      id: `YP-${p.number}`,
+      cliente_id: email ? (clientePorEmail.get(email) ?? null) : null,
+      canal: 'yampi',
+      valor: numero(p.value_total),
+      frete: numero(p.value_shipment),
+      cashback: 0,
+      pagamento: pagamentoYampi(alias, nome),
+      envio: envioYampi(alias, nome, entregue, p.track_code),
+      comprado_em: dataYampi(p.created_at) ?? new Date().toISOString(),
+      // Sem esta data o Portal de Devoluções não funciona: o prazo de 7 dias
+      // conta a partir dela, e é a única plataforma que a marca.
+      entregue_em: entregueEm,
+      rastreio: p.track_code,
+      gateway: null,
+    }
+  })
+
+  for (const parte of lotes(linhasPedidos, 500)) {
+    const { error } = await sb.from('pedidos').upsert(parte, { onConflict: 'id' })
+    if (error) throw error
+  }
+
+  // Itens são reescritos por pedido: quantidade e preço mudam por edição do
+  // pedido, e somar de novo duplicaria a venda.
+  const { error: erroLimpa } = await sb
+    .from('pedido_itens')
+    .delete()
+    .in('pedido_id', linhasPedidos.map((p) => p.id))
+  if (erroLimpa) throw erroLimpa
+
+  let itensSemVariante = 0
+  let casadosPorSku = 0
+  const linhasItens = pedidos.flatMap((p) =>
+    (p.items?.data ?? []).map((i) => {
+      const sku = (i.sku?.data?.sku ?? i.item_sku ?? '').trim()
+      const casado = sku ? porSku.get(sku.toLowerCase()) : undefined
+      if (casado) casadosPorSku++
+      else itensSemVariante++
+
+      return {
+        pedido_id: `YP-${p.number}`,
+        base_id: casado?.baseId ?? null,
+        descricao: i.sku?.data?.title ?? sku ?? 'Item sem descrição',
+        variante: casado?.variante ?? null,
+        quantidade: i.quantity || 1,
+        preco: numero(i.price),
+        sku: sku || null,
+      }
+    }),
+  )
+
+  for (const parte of lotes(linhasItens, 500)) {
+    const { error } = await sb.from('pedido_itens').insert(parte)
+    if (error) throw error
+  }
+
+  const { error: erroLog } = await sb.from('sincronizacoes').insert({
+    origem: 'yampi',
+    tipo: 'pedidos',
+    perfumes: clientes.size,
+    variantes: linhasItens.length,
+    ignorados: itensSemVariante,
+    detalhes: { desde, dias, entregues, casadosPorSku },
+  })
+  if (erroLog) throw erroLog
+
+  return {
+    pedidos: linhasPedidos.length,
+    itens: linhasItens.length,
+    clientes: clientes.size,
+    entregues,
+    itensSemVariante,
+    casadosPorSku,
+    desde,
+  }
+}
+
+function lotes<T>(itens: T[], tamanho: number): T[][] {
+  const partes: T[][] = []
+  for (let i = 0; i < itens.length; i += tamanho) partes.push(itens.slice(i, i + tamanho))
+  return partes
+}
+
+/**
+ * Apaga os pedidos que vieram do espelho da Shopify.
+ *
+ * Com a Yampi como origem, os dois conjuntos descrevem as MESMAS vendas com
+ * ids diferentes — mantê-los somaria o faturamento duas vezes em todo KPI.
+ */
+export async function limparPedidosShopify(): Promise<{ removidos: number }> {
+  if (!supabaseConfigurado()) throw new Error('O Supabase precisa estar configurado.')
+  const sb = supabaseServer()
+  const { data, error } = await sb.from('pedidos').delete().eq('canal', 'shopify').select('id')
+  if (error) throw error
+  return { removidos: (data ?? []).length }
 }

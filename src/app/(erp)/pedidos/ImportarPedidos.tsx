@@ -5,7 +5,7 @@ import { useState, useTransition } from 'react'
 import { COR } from '@/components/erp/tokens'
 import { plural } from '@/domain'
 
-import { conferirYampi, diagnosticarShopify, importarPedidos } from './actions'
+import { conferirYampi, diagnosticarShopify, importarDaYampi, importarPedidos } from './actions'
 
 /**
  * Traz as vendas da loja e recalcula o consumo diário a partir delas.
@@ -56,6 +56,44 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
             ? ` Falta ${r.faltando.join(', ')} — lançar a versão no dev dashboard não atualiza a instalação: abra o app na loja e aceite as permissões novas, ou reinstale.`
             : ' Está tudo que o ERP precisa.'),
       )
+    })
+
+  const importarYampi = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      setResumo(null)
+      setAviso(null)
+      setDiagnostico(null)
+      const r = await importarDaYampi(90)
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      const {
+        pedidos,
+        itens,
+        clientes,
+        entregues,
+        itensSemVariante,
+        casadosPorSku,
+        desde,
+        basesComConsumo,
+        removidosShopify,
+      } = r.resultado
+      setResumo(
+        `${plural(pedidos, 'pedido', 'pedidos')} da Yampi desde ${desde} · ${plural(itens, 'item', 'itens')} · ` +
+          `${plural(clientes, 'cliente com CPF', 'clientes com CPF')} · ${plural(entregues, 'entrega marcada', 'entregas marcadas')} · ` +
+          `${plural(casadosPorSku, 'item casado por SKU', 'itens casados por SKU')} · consumo recalculado em ${plural(basesComConsumo, 'base', 'bases')}.` +
+          (removidosShopify
+            ? ` ${plural(removidosShopify, 'pedido espelho da Shopify removido', 'pedidos espelho da Shopify removidos')} — as mesmas vendas contariam duas vezes.`
+            : ''),
+      )
+      if (itensSemVariante) {
+        setAviso(
+          `${plural(itensSemVariante, 'item não casou', 'itens não casaram')} com nenhuma variante pelo SKU. ` +
+            'Reimporte o catálogo da Shopify primeiro: é ele que grava o SKU de cada variante, e sem isso não há por onde ligar.',
+        )
+      }
     })
 
   const importar = () =>
@@ -145,15 +183,15 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
             color: 'rgba(239,209,140,.6)',
           }}
         >
-          Pedidos da Shopify
+          Pedidos
         </span>
         <span
           className="font-sans"
           style={{ fontSize: 11, lineHeight: 1.55, color: 'rgba(242,237,227,.68)', textWrap: 'pretty' }}
         >
           {total === 0
-            ? 'Nenhum pedido no ERP ainda. A importação traz os últimos 60 dias — mais que isso a Shopify só devolve com o escopo read_all_orders, concedido caso a caso.'
-            : `${plural(total, 'pedido no ERP', 'pedidos no ERP')}. Reimportar atualiza pagamento, envio e rastreio, e recalcula o consumo diário de cada base pelas vendas pagas.`}
+            ? 'Nenhum pedido no ERP ainda. A Yampi é o checkout: é dela que vêm CPF, data de entrega e o pagamento liquidado. A Shopify guarda um espelho sem esses três.'
+            : `${plural(total, 'pedido no ERP', 'pedidos no ERP')}. Importar da Yampi substitui o espelho da Shopify — as mesmas vendas com ids diferentes contariam duas vezes.`}
         </span>
         {(erro || resumo) && (
           <span
@@ -180,6 +218,27 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
           </span>
         )}
       </span>
+
+      <button
+        type="button"
+        onClick={importarYampi}
+        disabled={pendente}
+        className="botao-ouro font-sans hover:brightness-[1.07]"
+        style={{
+          height: 36,
+          padding: '0 18px',
+          flex: 'none',
+          fontWeight: 700,
+          fontSize: 11.5,
+          lineHeight: 1,
+          borderRadius: 9,
+          whiteSpace: 'nowrap',
+          cursor: pendente ? 'wait' : 'pointer',
+          opacity: pendente ? 0.6 : 1,
+        }}
+      >
+        {pendente ? 'Importando…' : 'Importar da Yampi'}
+      </button>
 
       <button
         type="button"
@@ -231,21 +290,24 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
         type="button"
         onClick={importar}
         disabled={pendente}
-        className="botao-ouro font-sans hover:brightness-[1.07]"
+        title="Espelho da Shopify: sem CPF e sem data de entrega. A Yampi é a origem."
+        className="font-sans hover:border-ouro/40 hover:text-ouro"
         style={{
           height: 36,
-          padding: '0 18px',
+          padding: '0 14px',
           flex: 'none',
-          fontWeight: 700,
-          fontSize: 11.5,
+          border: '1px solid rgba(255,255,255,.11)',
+          background: 'transparent',
+          color: 'var(--color-secundario)',
+          fontWeight: 600,
+          fontSize: 11,
           lineHeight: 1,
           borderRadius: 9,
           whiteSpace: 'nowrap',
           cursor: pendente ? 'wait' : 'pointer',
-          opacity: pendente ? 0.6 : 1,
         }}
       >
-        {pendente ? 'Importando…' : total === 0 ? 'Importar pedidos' : 'Reimportar pedidos'}
+        Importar da Shopify
       </button>
     </div>
   )
