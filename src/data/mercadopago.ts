@@ -2,6 +2,7 @@ import 'server-only'
 
 import {
   casarPagamento,
+  dataEmSaoPaulo,
   lerLiberacoes,
   linhasDeLiberacao,
   indexarPedidos,
@@ -708,6 +709,14 @@ export interface PassoAtualizacao {
   /** `pronto`: importou. `aguardando`: o Mercado Pago ainda está montando. */
   estado: 'pronto' | 'aguardando'
   linhas: string[]
+  /**
+   * Os relatórios que já existiam no instante em que pedimos um novo.
+   *
+   * É a única forma confiável de reconhecer o relatório recém-gerado: o nome
+   * do arquivo é único, e comparar nomes não depende de relógio nenhum — nem
+   * do nosso, nem do fuso da conta do Mercado Pago.
+   */
+  jaExistiam: string[]
 }
 
 /**
@@ -726,26 +735,80 @@ export interface PassoAtualizacao {
 export async function atualizarExtratoMp(
   de: string,
   ate: string,
-  opcoes: { pedir: boolean },
+  opcoes: { pedir: boolean; jaExistiam?: string[] },
 ): Promise<PassoAtualizacao> {
   const lista = await relatoriosDisponiveis()
-  const alvo = lista.find((r) => relatorioServe(r, de, ate))
+  const nomes = lista.map((r) => r.arquivo)
 
-  if (!alvo) {
-    if (!opcoes.pedir) {
-      return { estado: 'aguardando', linhas: ['O Mercado Pago ainda está montando o extrato.'] }
+  // O período declarado não é o mesmo que o conteúdo. Um relatório pedido às
+  // 10h para a janela "22/07 até hoje" declara fim = hoje e serve pelo
+  // período — mas o conteúdo dele para às 10h. Importá-lo às 21h traz 341
+  // movimentos, zero novos, e a tela diz "importado" enquanto os pagamentos
+  // da tarde não estão lá. É o pior desfecho: parece sucesso.
+  //
+  // Por isso, janela que alcança hoje SEMPRE pede um relatório novo, e só
+  // aceita um arquivo que não existia antes do pedido.
+  const janelaAberta = ate >= (dataEmSaoPaulo(new Date().toISOString()) ?? ate)
+
+  // Volta automática: serve o que apareceu depois do nosso pedido.
+  if (opcoes.jaExistiam) {
+    const conhecidos = new Set(opcoes.jaExistiam)
+    const novo = lista.find((r) => !conhecidos.has(r.arquivo) && relatorioServe(r, de, ate))
+    if (!novo) {
+      return {
+        estado: 'aguardando',
+        jaExistiam: opcoes.jaExistiam,
+        linhas: ['O Mercado Pago ainda está montando o extrato.'],
+      }
     }
+    return importarEComplementar(novo.arquivo, de, ate)
+  }
+
+  if (janelaAberta) {
     await pedirRelatorio(de, ate)
     return {
       estado: 'aguardando',
+      jaExistiam: nomes,
       linhas: [
         `Extrato de ${de} a ${ate} pedido ao Mercado Pago.`,
-        'Ele leva de alguns segundos a poucos minutos para montar. Pode deixar a tela aberta: ela importa sozinha quando ficar pronto.',
+        'Como a janela alcança hoje, um relatório novo é obrigatório: o que já existe é a foto do instante em que foi gerado e não tem o movimento das últimas horas.',
+        'Leva de alguns segundos a poucos minutos. Pode deixar a tela aberta: ela importa sozinha quando ficar pronto.',
       ],
     }
   }
 
-  const r = await importarLiberacoes(alvo.arquivo, { de, ate })
+  // Janela fechada no passado: um relatório que a cubra já está completo, e
+  // pedir outro só faria esperar por um arquivo idêntico.
+  const alvo = lista.find((r) => relatorioServe(r, de, ate))
+  if (!alvo) {
+    if (!opcoes.pedir) {
+      return {
+        estado: 'aguardando',
+        jaExistiam: nomes,
+        linhas: ['O Mercado Pago ainda está montando o extrato.'],
+      }
+    }
+    await pedirRelatorio(de, ate)
+    return {
+      estado: 'aguardando',
+      jaExistiam: nomes,
+      linhas: [
+        `Extrato de ${de} a ${ate} pedido ao Mercado Pago.`,
+        'Leva de alguns segundos a poucos minutos. Pode deixar a tela aberta: ela importa sozinha quando ficar pronto.',
+      ],
+    }
+  }
+
+  return importarEComplementar(alvo.arquivo, de, ate)
+}
+
+/** Importa o arquivo escolhido e completa com tarifas e ligação aos pedidos. */
+async function importarEComplementar(
+  arquivo: string,
+  de: string,
+  ate: string,
+): Promise<PassoAtualizacao> {
+  const r = await importarLiberacoes(arquivo, { de, ate })
   const linhas = [
     `Extrato de ${r.periodo.de} a ${r.periodo.ate} importado.`,
     `${r.linhasLidas} movimento(s) · ${r.novas} novo(s) · ${r.repetidas} já conhecido(s).`,
@@ -789,7 +852,7 @@ export async function atualizarExtratoMp(
     linhas.push(`As tarifas das vendas não puderam ser lidas agora: ${mensagemDe(e)}`)
   }
 
-  return { estado: 'pronto', linhas }
+  return { estado: 'pronto', jaExistiam: [], linhas }
 }
 
 async function listarRelatorios(): Promise<ArquivoRelatorio[]> {

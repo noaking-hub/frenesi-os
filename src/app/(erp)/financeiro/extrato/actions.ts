@@ -110,7 +110,10 @@ export async function atualizarExtrato(
   de: string,
   ate: string,
   pedir: boolean,
-): Promise<Resposta<{ estado: 'pronto' | 'aguardando'; linhas: string[] }>> {
+  jaExistiam?: string[],
+): Promise<
+  Resposta<{ estado: 'pronto' | 'aguardando'; linhas: string[]; jaExistiam: string[] }>
+> {
   const bloqueio = exigeSupabase('atualizar o extrato')
   if (bloqueio) return bloqueio
   if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) {
@@ -119,7 +122,7 @@ export async function atualizarExtrato(
   if (de > ate) return { ok: false, erro: 'A data inicial é posterior à final.' }
 
   try {
-    const passo = await atualizarExtratoMp(de, ate, { pedir })
+    const passo = await atualizarExtratoMp(de, ate, { pedir, jaExistiam })
     const linhas = [...passo.linhas]
 
     if (passo.estado === 'pronto') {
@@ -135,7 +138,7 @@ export async function atualizarExtrato(
       revalidatePath('/', 'layout')
     }
 
-    return { ok: true, estado: passo.estado, linhas }
+    return { ok: true, estado: passo.estado, linhas, jaExistiam: passo.jaExistiam }
   } catch (e) {
     console.error('[extrato] atualizar falhou:', e)
     return { ok: false, erro: mensagemDe(e) }

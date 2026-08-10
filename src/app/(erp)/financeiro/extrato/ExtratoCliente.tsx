@@ -241,6 +241,10 @@ export function ExtratoCliente({
   // Zero é "não está esperando". Acima disso, é a vez da espera — e mudar o
   // número é o que faz o efeito abaixo agendar a próxima consulta.
   const [espera, setEspera] = useState(0)
+  // Os relatórios que já existiam quando pedimos. A volta automática só
+  // aceita um arquivo que NÃO esteja nesta lista — é assim que se distingue o
+  // relatório novo do que já estava lá, sem depender de relógio nenhum.
+  const [jaExistiam, setJaExistiam] = useState<string[]>([])
   const [atualizando, setAtualizando] = useState(false)
   const [ferramentas, setFerramentas] = useState(false)
   const [editandoPeriodo, setEditandoPeriodo] = useState(false)
@@ -274,7 +278,7 @@ export function ExtratoCliente({
       setErro(null)
       setAtualizando(true)
       try {
-        const r = await atualizarExtrato(de, ate, pedir)
+        const r = await atualizarExtrato(de, ate, pedir, pedir ? undefined : jaExistiam)
         if (!r.ok) {
           setErro(r.erro)
           setEspera(0)
@@ -283,7 +287,9 @@ export function ExtratoCliente({
         setRelatorio(r.linhas)
         if (r.estado === 'pronto') {
           setEspera(0)
+          setJaExistiam([])
         } else {
+          setJaExistiam(r.jaExistiam)
           setEspera((n) => (n === 0 ? 1 : n + 1))
         }
       } catch (e) {
@@ -293,7 +299,7 @@ export function ExtratoCliente({
         setAtualizando(false)
       }
     },
-    [de, ate],
+    [de, ate, jaExistiam],
   )
 
   useEffect(() => {
