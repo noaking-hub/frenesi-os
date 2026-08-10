@@ -96,3 +96,23 @@ describe('de qual produto a página fala', () => {
     )
   })
 })
+
+describe('payload que não é JSON', () => {
+  it('não quebra com o LS.product, que é objeto JS e não JSON', () => {
+    // Chave sem aspas, string em aspas simples, escape   no meio: o
+    // JSON.parse recusa isso. Devolver vazio deixa a leitura cair no
+    // data-variants; estourar derrubaria a loja inteira.
+    const html = `<script>
+      LS.product = { id : 213068630,
+        name : 'Good\\u0020Girl\\u0020Blush\\u0020Elixir',
+        requires_shipping: true }
+    </script>`
+    expect(variantesDoHtml(html)).toEqual([])
+  })
+
+  it('prefere o data-variants quando a página publica os dois', () => {
+    const html = `<script>LS.product = { id: 1, name: 'quebrado' }</script>
+      <div data-variants="${JSON.stringify([{ name: '5ml', price: '69.90' }]).replace(/"/g, '&quot;')}"></div>`
+    expect(variantesDoHtml(html)).toEqual([{ rotulo: '5ml', preco: 69.9 }])
+  })
+})

@@ -53,7 +53,22 @@ export class LeituraBloqueada extends Error {
 
 export function mensagemDe(e: unknown): string {
   if (e instanceof Error) return e.message
-  return typeof e === 'string' ? e : 'Erro desconhecido'
+  if (typeof e === 'string') return e
+  // Erro do Supabase não é `Error`: é objeto com message, details, hint e
+  // code. Cair no "Erro desconhecido" jogava fora justamente o que explicaria
+  // a falha — e sem ele não há como consertar sem adivinhar.
+  if (e && typeof e === 'object') {
+    const o = e as Record<string, unknown>
+    const partes = [o.message, o.details, o.hint]
+      .filter((x): x is string => typeof x === 'string' && x.trim() !== '')
+    if (partes.length) return `${partes.join(' · ')}${o.code ? ` (${o.code})` : ''}`
+    try {
+      return JSON.stringify(e).slice(0, 300)
+    } catch {
+      return 'Erro sem mensagem legível'
+    }
+  }
+  return 'Erro desconhecido'
 }
 
 /** `https://loja.com/` e `loja.com` chegam ao mesmo lugar. */
@@ -541,7 +556,18 @@ export async function coletarConcorrente(concorrenteId: string): Promise<Resulta
     const atual = porProduto.get(chave)
     if (!atual || l.preco < atual.preco) porProduto.set(chave, l)
   }
-  const unicas = [...porProduto.values()]
+
+  // Segunda passada pela CHAVE, que é a chave primária da tabela. A primeira
+  // agrupa por produto e não garante unicidade dela: duas entradas da mesma
+  // página com o mesmo rótulo geram a mesma chave, e o insert inteiro morria
+  // com violação de chave duplicada — a loja aparecia com "Erro desconhecido"
+  // e nenhum preço.
+  const porChave = new Map<string, (typeof linhas)[number]>()
+  for (const l of porProduto.values()) {
+    const atual = porChave.get(l.chave)
+    if (!atual || l.preco < atual.preco) porChave.set(l.chave, l)
+  }
+  const unicas = [...porChave.values()]
   const casados = unicas.filter((l) => l.base_id !== null).length
 
   // A releitura substitui a anterior: preço antigo do mesmo item não é
