@@ -399,21 +399,40 @@ export function ExtratoCliente({
                 ? l.motivoIgnorado || 'dispensado'
                 : 'classificado'}
           </Badge>
+        ) : l.tipo === 'entrada' ? (
+          // Entrada não escolhe categoria. A receita do DRE vem dos pedidos
+          // pagos, não dos lançamentos — dar categoria de receita ao crédito
+          // contaria a mesma venda duas vezes. E oferecer "Marketing e ADS"
+          // para dinheiro entrando é oferecer um erro.
+          //
+          // O que falta nesta linha não é categoria: é o pedido. Mostrar o id
+          // do pagamento é o que permite achá-lo no painel do Mercado Pago.
+          <span
+            className="font-mono"
+            style={{
+              fontSize: 10,
+              lineHeight: 1.4,
+              color: 'rgba(242,237,227,.42)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {l.documento ? `pagamento ${l.documento}` : 'sem id do pagamento'}
+          </span>
         ) : (
-        <select
-          value={categoriaDe(l)}
-          onChange={(e) => setEscolhas((v) => ({ ...v, [chaveDe(l)]: e.target.value }))}
-          style={{ ...campo, height: 28, width: '100%', fontSize: 11.5 }}
-        >
-          <option value="">
-            {l.tipo === 'entrada' ? 'Sem categoria (recebimento)' : 'Escolha a categoria'}
-          </option>
-          {categorias.map((c) => (
-            <option key={c.nome} value={c.nome}>
-              {c.nome}
-            </option>
-          ))}
-        </select>
+          <select
+            value={categoriaDe(l)}
+            onChange={(e) => setEscolhas((v) => ({ ...v, [chaveDe(l)]: e.target.value }))}
+            style={{ ...campo, height: 28, width: '100%', fontSize: 11.5 }}
+          >
+            <option value="">Escolha a categoria</option>
+            {categorias.map((c) => (
+              <option key={c.nome} value={c.nome}>
+                {c.nome}
+              </option>
+            ))}
+          </select>
         ),
     },
     {
@@ -434,7 +453,7 @@ export function ExtratoCliente({
               })
             }
           >
-            Classificar
+            {l.tipo === 'entrada' ? 'Aceitar' : 'Classificar'}
           </BotaoSecundario>
           <BotaoSecundario
             altura={28}
@@ -926,6 +945,18 @@ export function ExtratoCliente({
             : `Despesas a categorizar (${brl(saidas)}) e entradas sem pedido correspondente (${brl(entradas)}). Venda casada com pedido e movimento da própria conta — saque, reserva — não aparecem aqui: não há o que decidir neles.`}
         </span>
       </div>
+
+      {entradas > 0 && filtro.situacao !== 'todas' && (
+        <span
+          className="font-sans"
+          style={{ fontSize: 10.5, lineHeight: 1.55, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+        >
+          As vendas desta fila não pedem categoria: a receita do DRE sai dos pedidos pagos, e dar
+          categoria de receita ao crédito contaria a mesma venda duas vezes. Elas estão aqui por
+          outro motivo — o ERP não achou a qual pedido pertencem. Cada atualização tenta ligar de
+          novo pelo id do pagamento, então a maioria some sozinha quando o pedido é importado.
+        </span>
+      )}
 
       <Filtros filtro={filtro} total={total} mostrando={pendentes.length} />
 

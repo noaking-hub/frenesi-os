@@ -290,6 +290,8 @@ export interface ResultadoSincroniaMp {
   /** Repasses atualizados com o que o gateway informou. */
   repassesConciliados: number
   repassesJaConciliados: number
+  /** Linhas do extrato ligadas ao pedido pelo id do pagamento. */
+  extratoLigado: number
   /** Pagamentos aprovados que não achamos a qual pedido pertencem. */
   semPedido: { id: string; valor: number; referencia: string; quando: string }[]
   criterios: Record<string, number>
@@ -396,6 +398,13 @@ export async function sincronizarMercadoPago(de: string, ate: string): Promise<R
     })
   }
 
+  // Pagamento → pedido, para o extrato. A busca de pagamentos é quem lê a
+  // referência externa da loja; o relatório de liberações traz o id do
+  // pagamento e mais nada sobre o pedido. Este par é a ponte entre os dois, e
+  // é exato — ao contrário de casar por valor e data, que recusa sempre que
+  // dois decants do mesmo preço caem no mesmo dia.
+  const pares = paraConciliar.map((r) => ({ gateway: r.gateway_id, pedido: r.pedido_id }))
+
   let repassesConciliados = 0
   let repassesJaConciliados = 0
   if (paraConciliar.length) {
@@ -415,6 +424,16 @@ export async function sincronizarMercadoPago(de: string, ate: string): Promise<R
     }
   }
 
+  let extratoLigado = 0
+  for (const lote of emLotes(pares, 200)) {
+    const { data, error } = await sb.rpc('ligar_extrato_ao_pedido', {
+      p_origem: 'mercadopago',
+      p_pares: lote,
+    })
+    if (error) throw new ErroMercadoPago(mensagemDe(error))
+    extratoLigado += Number(data ?? 0)
+  }
+
   return {
     periodo: { de, ate },
     conta,
@@ -422,6 +441,7 @@ export async function sincronizarMercadoPago(de: string, ate: string): Promise<R
     lidos: pagamentos.length,
     repassesConciliados,
     repassesJaConciliados,
+    extratoLigado,
     semPedido: semPedido.slice(0, 40),
     criterios,
     avisos,
@@ -743,8 +763,13 @@ export async function atualizarExtratoMp(
     linhas.push(
       `Tarifas: ${t.lidos} pagamento(s) lidos, ${t.repassesConciliados} venda(s) conciliadas agora.`,
     )
+    if (t.extratoLigado) {
+      linhas.push(`${t.extratoLigado} movimento(s) ligados ao pedido pelo id do pagamento.`)
+    }
     if (t.semPedido.length) {
-      linhas.push(`${t.semPedido.length} pagamento(s) sem pedido correspondente no ERP.`)
+      linhas.push(
+        `${t.semPedido.length} pagamento(s) sem pedido correspondente no ERP — aparecem na fila como entrada sem pedido.`,
+      )
     }
   } catch (e) {
     linhas.push(`As tarifas das vendas não puderam ser lidas agora: ${mensagemDe(e)}`)
