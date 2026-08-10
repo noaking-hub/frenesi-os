@@ -64,6 +64,7 @@ export const NAV: GrupoNav[] = [
     telas: [
       { id: 'lancamentos', label: 'Lançamentos', href: '/financeiro/lancamentos', pronta: true },
       { id: 'contas', label: 'Contas', href: '/financeiro/contas', pronta: true },
+      { id: 'extrato', label: 'Extrato', href: '/financeiro/extrato', pronta: true },
       { id: 'conciliacao', label: 'Conciliação', href: '/financeiro', pronta: true },
       { id: 'dre', label: 'DRE', href: '/financeiro/dre', pronta: true },
       { id: 'categorias', label: 'Categorias', href: '/financeiro/categorias', pronta: true },

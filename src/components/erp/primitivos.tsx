@@ -263,16 +263,20 @@ export function BotaoOuro({
   altura = 32,
   onClick,
   type = 'button',
+  desabilitado = false,
 }: {
   children: ReactNode
   altura?: number
   onClick?: () => void
   type?: 'button' | 'submit'
+  /** Desligado de verdade: sem clique, sem cursor de mão e com opacidade menor. */
+  desabilitado?: boolean
 }) {
   return (
     <button
       type={type}
       onClick={onClick}
+      disabled={desabilitado}
       className="botao-ouro font-sans hover:brightness-[1.07]"
       style={{
         height: altura,
@@ -281,7 +285,8 @@ export function BotaoOuro({
         fontSize: 11,
         lineHeight: 1,
         borderRadius: 8,
-        cursor: 'pointer',
+        cursor: desabilitado ? 'not-allowed' : 'pointer',
+        opacity: desabilitado ? 0.45 : 1,
         whiteSpace: 'nowrap',
         boxShadow: 'var(--shadow-ouro)',
       }}
@@ -295,15 +300,18 @@ export function BotaoSecundario({
   children,
   altura = 32,
   onClick,
+  desabilitado = false,
 }: {
   children: ReactNode
   altura?: number
   onClick?: () => void
+  desabilitado?: boolean
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={desabilitado}
       className="font-sans hover:border-ouro/40 hover:text-ouro"
       style={{
         height: altura,
@@ -315,7 +323,8 @@ export function BotaoSecundario({
         fontSize: 11,
         lineHeight: 1,
         borderRadius: 8,
-        cursor: 'pointer',
+        cursor: desabilitado ? 'not-allowed' : 'pointer',
+        opacity: desabilitado ? 0.45 : 1,
         whiteSpace: 'nowrap',
       }}
     >
