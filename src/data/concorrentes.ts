@@ -1,7 +1,14 @@
 import 'server-only'
 
-import { casarTitulo, parseVarianteMl } from '@/domain'
-import type { VarianteMl } from '@/domain'
+import {
+  casarTitulo,
+  ehPaginaDeProduto,
+  parseVarianteMl,
+  precoDe,
+  produtosDoJsonLd,
+  variantesDoHtml,
+} from '@/domain'
+import type { OfertaLd, VarianteMl } from '@/domain'
 
 import { supabaseConfigurado, supabaseServer } from './supabase'
 
@@ -206,7 +213,7 @@ export async function urlsDeProduto(dominio: string): Promise<string[]> {
     )
   }
 
-  const paginas = locs.filter((u) => /\/produtos?\//i.test(u) || /\/products?\//i.test(u))
+  const paginas = locs.filter(ehPaginaDeProduto)
   if (paginas.length > 0) return paginas.slice(0, MAX_PRODUTOS_NUVEMSHOP)
 
   // Era um índice: os produtos estão nos sitemaps filhos.
@@ -216,7 +223,7 @@ export async function urlsDeProduto(dominio: string): Promise<string[]> {
     if (encontradas.length >= MAX_PRODUTOS_NUVEMSHOP) break
     try {
       const xml = await texto(filho, 'abrir um sitemap do índice')
-      encontradas.push(...locsDe(xml).filter((u) => /\/produtos?\//i.test(u)))
+      encontradas.push(...locsDe(xml).filter(ehPaginaDeProduto))
     } catch {
       // Um sitemap filho ilegível não invalida os outros.
     }
@@ -227,62 +234,6 @@ export async function urlsDeProduto(dominio: string): Promise<string[]> {
     )
   }
   return encontradas.slice(0, MAX_PRODUTOS_NUVEMSHOP)
-}
-
-interface OfertaLd {
-  price?: number | string
-  priceSpecification?: { price?: number | string }
-  name?: string
-  sku?: string
-}
-
-interface ProdutoLd {
-  '@type'?: string | string[]
-  name?: string
-  offers?: OfertaLd | OfertaLd[]
-}
-
-function ehProduto(no: ProdutoLd): boolean {
-  const t = no['@type']
-  return Array.isArray(t) ? t.includes('Product') : t === 'Product'
-}
-
-function precoDe(o: OfertaLd): number {
-  const bruto = o.price ?? o.priceSpecification?.price
-  // "1.234,56" e "1234.56" convivem no mesmo padrão; o separador de milhar sai.
-  const n =
-    typeof bruto === 'string'
-      ? Number(bruto.replace(/\.(?=\d{3}\b)/g, '').replace(',', '.'))
-      : Number(bruto)
-  return Number.isFinite(n) ? n : 0
-}
-
-/** Extrai os produtos do JSON-LD de uma página. Ignora o que não for Product. */
-export function produtosDoJsonLd(html: string): { nome: string; ofertas: OfertaLd[] }[] {
-  const blocos = [
-    ...html.matchAll(/<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi),
-  ]
-  const achados: { nome: string; ofertas: OfertaLd[] }[] = []
-
-  for (const b of blocos) {
-    let dado: unknown
-    try {
-      dado = JSON.parse(b[1].trim())
-    } catch {
-      continue
-    }
-    // O bloco pode ser um objeto, uma lista, ou um @graph com os dois.
-    const candidatos: ProdutoLd[] = Array.isArray(dado)
-      ? (dado as ProdutoLd[])
-      : [(dado as ProdutoLd), ...(((dado as { '@graph'?: ProdutoLd[] })['@graph']) ?? [])]
-
-    for (const c of candidatos) {
-      if (!c || !ehProduto(c) || !c.name) continue
-      const ofertas = c.offers ? (Array.isArray(c.offers) ? c.offers : [c.offers]) : []
-      achados.push({ nome: c.name, ofertas })
-    }
-  }
-  return achados
 }
 
 async function lerLojaNuvemshop(dominio: string): Promise<PrecoObservado[]> {
@@ -303,6 +254,26 @@ async function lerLojaNuvemshop(dominio: string): Promise<PrecoObservado[]> {
 
     for (const pagina of lote) {
       if (!pagina) continue
+
+      // O caminho bom: as variações trazem o ml e o preço de cada tamanho.
+      const variacoes = variantesDoHtml(pagina.html)
+      if (variacoes.length > 0) {
+        const nome = produtosDoJsonLd(pagina.html)[0]?.nome ?? pagina.url
+        for (const v of variacoes) {
+          const variante = parseVarianteMl(v.rotulo)
+          // Sem ml reconhecível é tamanho que não vendemos (2 ml, 30 ml).
+          if (variante === null) continue
+          observados.push({
+            chave: `${pagina.url}|${v.rotulo}`,
+            titulo: `${nome} ${v.rotulo}`.trim(),
+            preco: v.preco,
+            variante,
+            url: pagina.url,
+          })
+        }
+        continue
+      }
+
       for (const p of produtosDoJsonLd(pagina.html)) {
         // Sem oferta nomeada, a página inteira é um preço só.
         const ofertas = p.ofertas.length ? p.ofertas : [{} as OfertaLd]

@@ -302,3 +302,159 @@ export function casarTitulo(
   if (melhor.score - segundo < VANTAGEM_MINIMA) return null
   return melhor
 }
+
+// ── Leitura da vitrine do concorrente ──────────────────────────────────────
+//
+// Tudo aqui é texto entrando e dado saindo: nada abre conexão. Ficam no
+// domínio porque é onde o teste alcança — e porque errar a leitura de um
+// preço aqui vira recomendação errada de preço de venda lá na frente.
+
+/**
+ * Página de UM produto, não a vitrine.
+ *
+ * `/produtos/` sozinho é a listagem, e ela também aparece no sitemap. Ler a
+ * listagem trazia o card de cada produto — nome e "a partir de" — sem o
+ * tamanho, porque o ml é variação e só existe na página do produto. Foi assim
+ * que 2.639 preços foram lidos e nenhum servia.
+ */
+export function ehPaginaDeProduto(url: string): boolean {
+  const caminho = url.replace(/^https?:\/\/[^/]+/i, '').replace(/[?#].*$/, '')
+  const m = caminho.match(/\/produtos?\/([^/]+)/i) ?? caminho.match(/\/products?\/([^/]+)/i)
+  if (!m) return false
+  const slug = m[1]
+  // Paginação da vitrine ("/produtos/page/2") não é produto.
+  return slug.length > 1 && !/^(page|pagina)$/i.test(slug) && !/^\d+$/.test(slug)
+}
+
+
+export interface OfertaLd {
+  price?: number | string
+  priceSpecification?: { price?: number | string }
+  name?: string
+  sku?: string
+}
+
+interface ProdutoLd {
+  '@type'?: string | string[]
+  name?: string
+  offers?: OfertaLd | OfertaLd[]
+}
+
+function ehProduto(no: ProdutoLd): boolean {
+  const t = no['@type']
+  return Array.isArray(t) ? t.includes('Product') : t === 'Product'
+}
+
+export function precoDe(o: OfertaLd): number {
+  const bruto = o.price ?? o.priceSpecification?.price
+  // "1.234,56" e "1234.56" convivem no mesmo padrão; o separador de milhar sai.
+  const n =
+    typeof bruto === 'string'
+      ? Number(bruto.replace(/\.(?=\d{3}\b)/g, '').replace(',', '.'))
+      : Number(bruto)
+  return Number.isFinite(n) ? n : 0
+}
+
+/** Extrai os produtos do JSON-LD de uma página. Ignora o que não for Product. */
+export function produtosDoJsonLd(html: string): { nome: string; ofertas: OfertaLd[] }[] {
+  const blocos = [
+    ...html.matchAll(/<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi),
+  ]
+  const achados: { nome: string; ofertas: OfertaLd[] }[] = []
+
+  for (const b of blocos) {
+    let dado: unknown
+    try {
+      dado = JSON.parse(b[1].trim())
+    } catch {
+      continue
+    }
+    // O bloco pode ser um objeto, uma lista, ou um @graph com os dois.
+    const candidatos: ProdutoLd[] = Array.isArray(dado)
+      ? (dado as ProdutoLd[])
+      : [(dado as ProdutoLd), ...(((dado as { '@graph'?: ProdutoLd[] })['@graph']) ?? [])]
+
+    for (const c of candidatos) {
+      if (!c || !ehProduto(c) || !c.name) continue
+      const ofertas = c.offers ? (Array.isArray(c.offers) ? c.offers : [c.offers]) : []
+      achados.push({ nome: c.name, ofertas })
+    }
+  }
+  return achados
+}
+
+/** `&quot;` e companhia: o payload vem dentro de um atributo HTML. */
+function desescapar(texto: string): string {
+  return texto
+    .replace(/&quot;/g, '"')
+    .replace(/&#34;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+}
+
+/** "34.90", "34,90", "R$ 34,90" e 34.9 chegam ao mesmo número. */
+function numeroDe(valor: unknown): number {
+  if (typeof valor === 'number') return Number.isFinite(valor) ? valor : 0
+  if (typeof valor !== 'string') return 0
+  const limpo = valor.replace(/[^\d.,]/g, '')
+  const n = Number(limpo.replace(/\.(?=\d{3}\b)/g, '').replace(',', '.'))
+  return Number.isFinite(n) ? n : 0
+}
+
+export interface VarianteLida {
+  rotulo: string
+  preco: number
+}
+
+/**
+ * Variações do produto, como o tema da Nuvemshop as publica.
+ *
+ * O ml está aqui e em nenhum outro lugar: o JSON-LD da página traz um preço
+ * só, e o título do produto não diz o tamanho. Os nomes de campo variam entre
+ * temas, então a leitura tenta os conhecidos em vez de assumir um.
+ */
+export function variantesDoHtml(html: string): VarianteLida[] {
+  const bruto =
+    html.match(/data-variants=(?:'|")([\s\S]*?)(?:'|")\s*[>\s]/)?.[1] ??
+    html.match(/LS\.product\s*=\s*(\{[\s\S]*?\});/)?.[1] ??
+    null
+  if (!bruto) return []
+
+  let dado: unknown
+  try {
+    dado = JSON.parse(desescapar(bruto))
+  } catch {
+    return []
+  }
+
+  const lista = Array.isArray(dado)
+    ? dado
+    : ((dado as { variants?: unknown[] }).variants ?? [])
+  if (!Array.isArray(lista)) return []
+
+  const lidas: VarianteLida[] = []
+  for (const v of lista as Record<string, unknown>[]) {
+    if (!v || typeof v !== 'object') continue
+
+    // O rótulo pode estar em option0/1/2, em `name`, ou numa lista de valores.
+    const partes = [v.option0, v.option1, v.option2, v.name, v.title]
+      .filter((x): x is string => typeof x === 'string' && x.trim() !== '')
+    const valores = Array.isArray(v.values)
+      ? (v.values as unknown[]).filter((x): x is string => typeof x === 'string')
+      : []
+    const rotulo = [...partes, ...valores].join(' ').trim()
+    if (!rotulo) continue
+
+    const preco = numeroDe(v.price ?? v.promotional_price ?? v.price_number)
+    // Preço absurdo é campo lido errado, não promoção: descartar é mais
+    // honesto que publicar um "menor do mercado" de mentira.
+    if (preco <= 0 || preco > 100_000) continue
+
+    lidas.push({ rotulo, preco })
+  }
+  return lidas
+}
+
