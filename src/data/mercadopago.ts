@@ -2,6 +2,8 @@ import 'server-only'
 
 import {
   casarPagamento,
+  lerLiberacoes,
+  linhasDeLiberacao,
   indexarPedidos,
   linhasDoPagamentoMp,
   normalizarPagamentoMp,
@@ -526,4 +528,147 @@ function recuar(data: string, dias: number): string {
 
 function avancar(data: string, dias: number): string {
   return new Date(Date.parse(`${data}T12:00:00Z`) + dias * 86_400_000).toISOString().slice(0, 10)
+}
+
+// ── Relatório de Liberações: o extrato de verdade ──────────────────────────
+
+/** Quanto esperar o Mercado Pago processar o relatório antes de desistir. */
+const TENTATIVAS = 20
+const ESPERA_MS = 3000
+
+interface ArquivoRelatorio {
+  file_name?: string
+  created_from?: string
+  date_created?: string
+  begin_date?: string
+  end_date?: string
+}
+
+async function texto(caminho: string): Promise<{ status: number; corpo: string }> {
+  const t = token()
+  const r = await fetch(`${BASE}${caminho}`, {
+    headers: { Authorization: `Bearer ${t}` },
+    cache: 'no-store',
+  })
+  return { status: r.status, corpo: await r.text() }
+}
+
+export interface ResultadoLiberacoes {
+  periodo: { de: string; ate: string }
+  arquivo: string
+  linhasLidas: number
+  novas: number
+  repetidas: number
+  cabecalhos: string[]
+  avisos: string[]
+}
+
+/**
+ * Gera, espera e importa o Relatório de Liberações.
+ *
+ * É assíncrono do lado do Mercado Pago: o POST devolve 202 e o arquivo
+ * aparece na lista alguns segundos depois. Por isso o laço de espera — e por
+ * isso ele desiste em vez de travar, dizendo há quanto tempo tentou.
+ *
+ * Este relatório traz o movimento inteiro da conta, saque inclusive. É o que
+ * a busca de pagamentos não vê, e a razão de o saldo calculado ter ficado
+ * R$ 72 mil acima do real.
+ */
+export async function importarLiberacoes(de: string, ate: string): Promise<ResultadoLiberacoes> {
+  if (!supabaseConfigurado()) {
+    throw new ErroMercadoPago('O Supabase precisa estar configurado para guardar o extrato.')
+  }
+
+  const antes = await listarRelatorios()
+  const conhecidos = new Set(antes.map((a) => a.file_name ?? ''))
+
+  const criacao = await fetch(`${BASE}/v1/account/release_report`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ begin_date: `${de}T00:00:00Z`, end_date: `${ate}T23:59:59Z` }),
+    cache: 'no-store',
+  })
+  if (criacao.status !== 202 && criacao.status !== 201 && criacao.status !== 200) {
+    throw new ErroMercadoPago(
+      `O Mercado Pago recusou gerar o relatório (${criacao.status}): ${(await criacao.text()).slice(0, 300)}`,
+    )
+  }
+
+  // Espera o arquivo NOVO aparecer. Pegar o mais recente sem conferir traria
+  // o relatório de outro período gerado antes, e o extrato viria errado sem
+  // nenhum erro aparecer.
+  let arquivo = ''
+  for (let i = 0; i < TENTATIVAS; i += 1) {
+    await new Promise((r) => setTimeout(r, ESPERA_MS))
+    const lista = await listarRelatorios()
+    const novo = lista.find((a) => a.file_name && !conhecidos.has(a.file_name))
+    if (novo?.file_name) {
+      arquivo = novo.file_name
+      break
+    }
+  }
+  if (!arquivo) {
+    throw new ErroMercadoPago(
+      `O relatório foi pedido, mas não ficou pronto em ${Math.round((TENTATIVAS * ESPERA_MS) / 1000)} segundos. Tente de novo em alguns minutos — o pedido continua valendo do lado do Mercado Pago.`,
+    )
+  }
+
+  const baixado = await texto(`/v1/account/release_report/${arquivo}`)
+  if (baixado.status !== 200) {
+    throw new ErroMercadoPago(
+      `Falha ao baixar ${arquivo} (${baixado.status}): ${baixado.corpo.slice(0, 300)}`,
+    )
+  }
+
+  const extrato = lerLiberacoes(baixado.corpo)
+  if (extrato.linhas.length === 0) {
+    throw new ErroMercadoPago(
+      ['Nenhuma linha foi lida do relatório.', ...extrato.avisos].join(' '),
+    )
+  }
+
+  const sb = supabaseServer()
+  await sb.rpc('garantir_conta', {
+    p_id: CONTA_MP,
+    p_nome: 'Mercado Pago',
+    p_tipo: 'Gateway',
+    p_banco: 'Mercado Pago',
+    p_uso: 'Recebimento das vendas da loja',
+  })
+
+  const linhas = linhasDeLiberacao(extrato)
+  let novas = 0
+  let repetidas = 0
+  for (const lote of emLotes(linhas, 200)) {
+    const { data, error } = await sb.rpc('importar_extrato', {
+      p_origem: 'mercadopago',
+      p_conta_id: CONTA_MP,
+      p_linhas: lote,
+    })
+    if (error) throw new ErroMercadoPago(mensagemDe(error))
+    const r = (data ?? {}) as { novas?: number; repetidas?: number }
+    novas += Number(r.novas ?? 0)
+    repetidas += Number(r.repetidas ?? 0)
+  }
+
+  return {
+    periodo: { de, ate },
+    arquivo,
+    linhasLidas: linhas.length,
+    novas,
+    repetidas,
+    cabecalhos: extrato.cabecalhos,
+    avisos: extrato.avisos,
+  }
+}
+
+async function listarRelatorios(): Promise<ArquivoRelatorio[]> {
+  const r = await texto('/v1/account/release_report/list')
+  if (r.status !== 200) return []
+  try {
+    const lista = JSON.parse(r.corpo)
+    return Array.isArray(lista) ? (lista as ArquivoRelatorio[]) : []
+  } catch {
+    return []
+  }
 }

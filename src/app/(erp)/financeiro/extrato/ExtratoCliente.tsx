@@ -22,7 +22,9 @@ import {
   classificarLinha,
   diagnosticarGateway,
   ignorarLinha,
+  importarExtratoCompleto,
   sondarExtratoCompleto,
+  zerarFinanceiro,
   recasarExtrato,
   relerGateway,
   sincronizarGateway,
@@ -336,14 +338,47 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
             desabilitado={pendente || !gatewayLigado}
             onClick={() =>
               rodar(async () => {
+                const r = await importarExtratoCompleto(de, ate)
+                if (!r.ok) throw new Error(r.erro)
+                return r.linhas
+              })
+            }
+          >
+            {pendente ? 'Gerando relatório…' : 'Importar extrato completo'}
+          </BotaoOuro>
+          <BotaoSecundario
+            altura={32}
+            desabilitado={pendente || !gatewayLigado}
+            onClick={() =>
+              rodar(async () => {
                 const r = await sondarExtratoCompleto()
                 if (!r.ok) throw new Error(r.erro)
                 return r.linhas
               })
             }
           >
-            Sondar extrato completo
-          </BotaoOuro>
+            Sondar
+          </BotaoSecundario>
+          <BotaoSecundario
+            altura={32}
+            desabilitado={pendente}
+            onClick={() =>
+              rodar(async () => {
+                if (
+                  !window.confirm(
+                    'Apagar TODO o extrato, os lançamentos que vieram dele e a conciliação dos repasses?\n\nPedidos e lançamentos digitados à mão não são tocados.',
+                  )
+                ) {
+                  return null
+                }
+                const r = await zerarFinanceiro()
+                if (!r.ok) throw new Error(r.erro)
+                return r.linhas
+              })
+            }
+          >
+            Zerar financeiro
+          </BotaoSecundario>
           <BotaoSecundario
             altura={32}
             desabilitado={pendente}

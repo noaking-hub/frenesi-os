@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import {
   CONTA_MP,
   diagnosticarMercadoPago,
+  importarLiberacoes,
   sincronizarMercadoPago,
   sondarRelatorios,
 } from '@/data/mercadopago'
@@ -87,6 +88,64 @@ export async function sondarExtratoCompleto(): Promise<Resposta<{ linhas: string
   } catch (e) {
     console.error('[extrato] sondar relatórios falhou:', e)
     return { ok: false, erro: mensagemDe(e) }
+  }
+}
+
+/**
+ * Importa o Relatório de Liberações — o extrato completo, com saque.
+ *
+ * É a fonte certa. A busca de pagamentos continua servindo para a tarifa de
+ * cada venda e para casar com o pedido; ela só nunca deveria ter sido usada
+ * como extrato.
+ */
+export async function importarExtratoCompleto(
+  de: string,
+  ate: string,
+): Promise<Resposta<{ linhas: string[] }>> {
+  const bloqueio = exigeSupabase('importar o extrato')
+  if (bloqueio) return bloqueio
+
+  try {
+    const r = await importarLiberacoes(de, ate)
+    revalidatePath('/', 'layout')
+    return {
+      ok: true,
+      linhas: [
+        `Relatório ${r.arquivo} · ${r.periodo.de} a ${r.periodo.ate}.`,
+        `${r.linhasLidas} linha(s) lidas · ${r.novas} nova(s) · ${r.repetidas} já conhecida(s).`,
+        `Colunas: ${r.cabecalhos.join(', ')}`,
+        ...r.avisos.map((a) => `Atenção: ${a}`),
+      ],
+    }
+  } catch (e) {
+    console.error('[extrato] importar liberações falhou:', e)
+    return { ok: false, erro: mensagemDe(e) }
+  }
+}
+
+/** Apaga o extrato e o que nasceu dele, para recomeçar da fonte certa. */
+export async function zerarFinanceiro(): Promise<Resposta<{ linhas: string[] }>> {
+  const bloqueio = exigeSupabase('zerar o financeiro')
+  if (bloqueio) return bloqueio
+
+  const { data, error } = await supabaseServer().rpc('zerar_financeiro', {
+    p_confirmacao: 'ZERAR',
+  })
+  if (error) {
+    console.error('[extrato] zerar_financeiro falhou:', error)
+    return { ok: false, erro: mensagemDe(error) }
+  }
+
+  const r = (data ?? {}) as { extrato?: number; lancamentos?: number; repasses?: number }
+  revalidatePath('/', 'layout')
+  return {
+    ok: true,
+    linhas: [
+      `${r.extrato ?? 0} linha(s) de extrato apagadas.`,
+      `${r.lancamentos ?? 0} lançamento(s) que vieram do extrato apagados.`,
+      `${r.repasses ?? 0} repasse(s) voltaram a ficar sem conciliação.`,
+      'Pedidos e lançamentos digitados à mão continuam intactos.',
+    ],
   }
 }
 
