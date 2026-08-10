@@ -297,7 +297,9 @@ export function FontesCliente({ fontes, bases, semDono, variantes }: Props) {
             >
               {r.erro
                 ? `${r.fonte}: ${r.erro}`
-                : `${r.fonte}: ${r.lidos} preços lidos, ${r.casados} casados com o catálogo${r.casados < r.lidos ? ` · ${r.lidos - r.casados} sem dono` : ''}.`}
+                : r.lidos === 0
+                  ? `${r.fonte}: a loja respondeu, mas nada virou preço comparável. Rode o diagnóstico.`
+                  : `${r.fonte}: ${r.lidos} preços lidos, ${r.casados} casados com o catálogo${r.casados < r.lidos ? ` · ${r.lidos - r.casados} sem dono` : ''}.`}
             </span>
           ))}
         </div>

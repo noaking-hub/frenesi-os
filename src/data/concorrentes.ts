@@ -314,7 +314,12 @@ async function lerLojaNuvemshop(dominio: string): Promise<PrecoObservado[]> {
             chave: `${pagina.url}|${o.sku ?? (rotulo || indice)}`,
             titulo: `${p.nome} ${rotulo}`.trim(),
             preco,
-            variante: parseVarianteMl(rotulo) ?? parseVarianteMl(p.nome),
+            // O tamanho pode estar no nome da oferta, no do produto ou só na
+            // URL — lojas de decant costumam pôr "…-5ml" no endereço.
+            variante:
+              parseVarianteMl(rotulo) ??
+              parseVarianteMl(p.nome) ??
+              parseVarianteMl(pagina.url.replace(/[^0-9a-z]+/gi, ' ')),
             url: pagina.url,
           })
         })
@@ -382,29 +387,70 @@ export async function diagnosticarLoja(
   passos.push({ passo: 'sitemap.xml', resultado: `${urls.length} URLs de produto` })
 
   const html = await texto(urls[0], 'abrir a primeira página de produto')
+  passos.push({ passo: 'página lida', resultado: urls[0] })
+
   const encontrados = produtosDoJsonLd(html)
+  // A página traz vários Products (o principal e os relacionados). O que
+  // interessa é o de MAIS ofertas: é nele que as variações aparecem, se
+  // aparecerem. Mostrar o primeiro trouxe a Organization e não explicou nada.
+  const principal = encontrados.slice().sort((a, b) => b.ofertas.length - a.ofertas.length)[0]
   passos.push({
-    passo: 'JSON-LD da 1ª página',
+    passo: 'JSON-LD',
     resultado: encontrados.length
-      ? `${encontrados.length} produto(s), ${encontrados[0].ofertas.length} oferta(s)`
+      ? `${encontrados.length} blocos Product · o maior tem ${principal.ofertas.length} oferta(s)`
       : 'nenhum bloco Product encontrado',
   })
 
-  const blocos = [...html.matchAll(/<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)]
   const amostra = encontrados.flatMap((p) =>
     (p.ofertas.length ? p.ofertas : [{}]).map((o) => ({
       titulo: `${p.nome} ${o.name ?? ''}`.trim(),
       preco: precoDe(o),
-      variante: parseVarianteMl(o.name ?? '') ?? parseVarianteMl(p.nome),
+      variante:
+        parseVarianteMl(o.name ?? '') ??
+        parseVarianteMl(p.nome) ??
+        parseVarianteMl(urls[0].replace(/[^0-9a-z]+/gi, ' ')),
     })),
   )
+  const comMl = amostra.filter((a) => a.variante !== null).length
+  passos.push({
+    passo: 'tamanho em ml',
+    resultado:
+      comMl > 0
+        ? `${comMl} de ${amostra.length} com ml reconhecível`
+        : 'NENHUM item traz o ml — o tamanho deve ser variação do produto',
+  })
+
+  // Quando o ml não está no JSON-LD, ele costuma estar num payload de
+  // variantes que o tema publica. Procurar por ele aqui é o que permite
+  // escrever a leitura certa em vez de tentar às cegas.
+  const pistas = [
+    ['LS.product', /LS\.product\s*=\s*(\{[\s\S]{0,4000}?\});/],
+    ['window.__st', /window\.__st\s*=\s*(\{[\s\S]{0,2000}?\});/],
+    ['variants', /"variants"\s*:\s*(\[[\s\S]{0,3000}?\])/],
+    ['data-variants', /data-variants=(?:'|")([\s\S]{0,2000}?)(?:'|")/],
+  ] as const
+  const achada = pistas.map(([nome, re]) => [nome, html.match(re)?.[1] ?? null] as const)
+  const comPayload = achada.filter(([, v]) => v !== null)
+  passos.push({
+    passo: 'payload de variações',
+    resultado: comPayload.length
+      ? comPayload.map(([nome]) => nome).join(', ')
+      : 'nenhum dos formatos conhecidos encontrado',
+  })
+
+  const blocoProduto = [
+    ...html.matchAll(/<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi),
+  ]
+    .map((m) => m[1].trim())
+    .find((t) => /"@type"\s*:\s*"?\[?[^,]*Product/.test(t))
 
   return {
     estrategia,
     passos,
     amostra: amostra.slice(0, 8),
-    // Quando a amostra vier vazia, é este trecho que diz por quê.
-    bruto: (blocos[0]?.[1] ?? html).trim().slice(0, 1500),
+    // Primeiro o payload de variações, se houver: é ele que tem o ml. Sem ele,
+    // o bloco Product — nunca a Organization, que não diz nada sobre preço.
+    bruto: (comPayload[0]?.[1] ?? blocoProduto ?? html).trim().slice(0, 1800),
   }
 }
 
@@ -470,6 +516,31 @@ export async function coletarConcorrente(concorrenteId: string): Promise<Resulta
   }
 
   const comVariante = observados.filter((o) => o.variante !== null)
+
+  // A loja respondeu e nada tinha tamanho: é falha, não silêncio. Sem esta
+  // trava a coleta gravava zero linha, marcava "parcial" e não dizia por quê —
+  // que foi exatamente o que aconteceu na primeira leitura de verdade.
+  if (observados.length > 0 && comVariante.length === 0) {
+    const amostra = observados
+      .slice(0, 3)
+      .map((o) => o.titulo)
+      .join(' · ')
+    const motivo =
+      `li ${observados.length} preços em ${fonte.dominio}, mas nenhum trazia o tamanho em ml ` +
+      `(3, 5, 8, 10 ou 15). Nesta loja o ml provavelmente é variação do produto, e o JSON-LD ` +
+      `publica só um preço por página. Exemplos do que veio: ${amostra}`
+    await sb
+      .from('concorrentes')
+      .update({
+        ultima_leitura: new Date().toISOString(),
+        ultimo_status: 'parcial',
+        ultimo_erro: motivo.slice(0, 400),
+        precos_lidos: 0,
+      })
+      .eq('id', concorrenteId)
+    throw new LeituraBloqueada(motivo)
+  }
+
   let casados = 0
 
   const linhas = comVariante.map((o) => {
