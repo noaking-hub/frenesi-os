@@ -472,8 +472,12 @@ export interface VarianteLida {
  * temas, então a leitura tenta os conhecidos em vez de assumir um.
  */
 export function variantesDoHtml(html: string): VarianteLida[] {
+  // A aspa que fecha tem que ser a MESMA que abriu. Sem a retrovisão, um
+  // atributo delimitado por aspa simples — `data-variants='[{"id":1}]'` —
+  // terminava na primeira aspa dupla do JSON, capturava `[{` e morria no
+  // parse. A loja inteira saía com quatro preços em vez de mil.
   const bruto =
-    html.match(/data-variants=(?:'|")([\s\S]*?)(?:'|")\s*[>\s]/)?.[1] ??
+    html.match(/data-variants=(["'])([\s\S]*?)\1/)?.[2] ??
     html.match(/LS\.product\s*=\s*(\{[\s\S]*?\});/)?.[1] ??
     null
   if (!bruto) return []

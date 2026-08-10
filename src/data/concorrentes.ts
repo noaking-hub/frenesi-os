@@ -413,6 +413,28 @@ export async function diagnosticarLoja(
   // Quando o ml não está no JSON-LD, ele costuma estar num payload de
   // variantes que o tema publica. Procurar por ele aqui é o que permite
   // escrever a leitura certa em vez de tentar às cegas.
+  // O que o COLETOR extrairia desta página. Antes o diagnóstico só falava do
+  // JSON-LD, que é o caminho reserva — e por isso não mostrava que a leitura
+  // das variações estava devolvendo vazio.
+  const variacoes = variantesDoHtml(html)
+  passos.push({
+    passo: 'variações lidas',
+    resultado: variacoes.length
+      ? `${variacoes.length} · ${variacoes
+          .slice(0, 5)
+          .map((v) => `${v.rotulo} = ${v.preco}`)
+          .join(' | ')}`
+      : 'nenhuma — é por aqui que o ml entra, e ele não entrou',
+  })
+
+  const amostraVariacoes = variacoes
+    .map((v) => ({
+      titulo: `${nomeDaPagina(html) ?? ''} ${v.rotulo}`.trim(),
+      preco: v.preco,
+      variante: parseVarianteMl(v.rotulo),
+    }))
+    .slice(0, 8)
+
   const pistas = [
     ['LS.product', /LS\.product\s*=\s*(\{[\s\S]{0,4000}?\});/],
     ['window.__st', /window\.__st\s*=\s*(\{[\s\S]{0,2000}?\});/],
@@ -437,7 +459,8 @@ export async function diagnosticarLoja(
   return {
     estrategia,
     passos,
-    amostra: amostra.slice(0, 8),
+    // A amostra mostra o caminho que o coletor usaria: variações primeiro.
+    amostra: amostraVariacoes.length ? amostraVariacoes : amostra.slice(0, 8),
     // Primeiro o payload de variações, se houver: é ele que tem o ml. Sem ele,
     // o bloco Product — nunca a Organization, que não diz nada sobre preço.
     bruto: (comPayload[0]?.[1] ?? blocoProduto ?? html).trim().slice(0, 1800),

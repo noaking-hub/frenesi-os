@@ -116,3 +116,32 @@ describe('payload que não é JSON', () => {
     expect(variantesDoHtml(html)).toEqual([{ rotulo: '5ml', preco: 69.9 }])
   })
 })
+
+describe('delimitador do atributo', () => {
+  const variantes = [
+    { id: 1, option0: '5ml', price: '69.90' },
+    { id: 2, option0: '10ml', price: '119.90' },
+  ]
+
+  it('lê atributo com aspa simples e JSON de aspa dupla dentro', () => {
+    // É o formato de uma das lojas. A leitura antiga fechava a captura na
+    // primeira aspa dupla do JSON e devolvia vazio — 400 páginas viravam
+    // quatro preços.
+    const html = `<div data-variants='${JSON.stringify(variantes)}'></div>`
+    expect(variantesDoHtml(html)).toEqual([
+      { rotulo: '5ml', preco: 69.9 },
+      { rotulo: '10ml', preco: 119.9 },
+    ])
+  })
+
+  it('lê atributo com aspa dupla e entidades dentro', () => {
+    const html = `<div data-variants="${JSON.stringify(variantes).replace(/"/g, '&quot;')}"></div>`
+    expect(variantesDoHtml(html)).toHaveLength(2)
+  })
+
+  it('não confunde o apóstrofo do nome com o fim do atributo', () => {
+    const com = [{ option0: '5ml', price: '69.90', name: "L&#39;Homme" }]
+    const html = `<div data-variants='${JSON.stringify(com)}'></div>`
+    expect(variantesDoHtml(html)).toHaveLength(1)
+  })
+})
