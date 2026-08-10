@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { casarTitulo, tokensDe } from '..'
+import { buscarNoCatalogo, casarTitulo, tokensDe } from '..'
 
 /** Recorte real do catálogo, incluindo os pares que se confundem. */
 const BASES = [
@@ -52,5 +52,37 @@ describe('casar título de concorrente com o catálogo', () => {
   it('não confunde Sauvage Elixir com Sauvage Eau de Parfum', () => {
     const c = casarTitulo('Sauvage Elixir Dior Eau de Parfum decant 5ml', BASES)
     expect(c?.baseId).toBe('sauvage-elixir')
+  })
+})
+
+describe('achar o perfume do catálogo pelo que foi digitado', () => {
+  it('acha mesmo com palavra nossa no meio', () => {
+    // O caso real: a loja escreve "Bleu de Chanel Eau de Parfum", o nosso
+    // catálogo escreve "Bleu de Chanel Masculino Eau de Parfum (Decant)".
+    // Num `includes` de frase contígua, o "Masculino" no meio derrubava tudo
+    // e o nosso preço não aparecia na comparação.
+    const r = buscarNoCatalogo('Bleu de Chanel Eau de Parfum', BASES)
+    expect(r[0].id).toBe('bleu-edp')
+  })
+
+  it('põe na frente quem tem menos palavra sobrando', () => {
+    const r = buscarNoCatalogo('Sauvage Eau de Parfum', BASES)
+    // "Sauvage Elixir Eau de Parfum" também atende, mas tem o Elixir sobrando.
+    expect(r[0].id).toBe('sauvage-edp')
+    expect(r.map((b) => b.id)).toContain('sauvage-elixir')
+  })
+
+  it('não devolve Eau de Toilette para quem pediu Eau de Parfum', () => {
+    const r = buscarNoCatalogo('Bleu de Chanel Eau de Parfum', BASES)
+    expect(r.map((b) => b.id)).not.toContain('bleu-edt')
+  })
+
+  it('ignora acento e caixa dos dois lados', () => {
+    const bases = [{ id: 'idole', nome: 'Idôle Feminino Eau de Parfum (Decant)', marca: 'Lancôme' }]
+    expect(buscarNoCatalogo('idole lancome', bases)[0].id).toBe('idole')
+  })
+
+  it('devolve vazio quando falta uma palavra, em vez de aproximar', () => {
+    expect(buscarNoCatalogo('Bleu de Chanel Extrait', BASES)).toEqual([])
   })
 })

@@ -533,3 +533,36 @@ function lerPayload(bruto: string): VarianteLida[] {
   return lidas
 }
 
+
+// ── Busca por nome de perfume ──────────────────────────────────────────────
+
+/**
+ * Perfumes do catálogo que atendem ao que foi digitado.
+ *
+ * A comparação é por PALAVRAS, não por trecho contíguo. Quem digita "Bleu de
+ * Chanel Eau de Parfum" não encontraria "Bleu de Chanel Masculino Eau de
+ * Parfum (Decant)" num `includes`: basta uma palavra nossa no meio para o
+ * trecho deixar de bater. E é exatamente esse o normal — cada loja escreve o
+ * nome do mesmo perfume de um jeito, o que é a razão de este módulo existir.
+ *
+ * A ordem é por proximidade: entre duas bases que atendem, ganha a que tem
+ * menos palavra sobrando. Assim "Eau de Parfum" não devolve o "Eau de
+ * Toilette" na frente.
+ */
+export function buscarNoCatalogo<T extends { nome: string; marca: string }>(
+  termo: string,
+  bases: T[],
+): T[] {
+  const alvo = [...tokensDe(termo)]
+  if (alvo.length === 0) return []
+
+  return bases
+    .map((b) => {
+      const meus = tokensDe(`${b.nome} ${b.marca}`)
+      const acertos = alvo.filter((t) => meus.has(t)).length
+      return { base: b, acertos, sobrando: meus.size - acertos }
+    })
+    .filter((x) => x.acertos === alvo.length)
+    .sort((a, b) => a.sobrando - b.sobrando)
+    .map((x) => x.base)
+}

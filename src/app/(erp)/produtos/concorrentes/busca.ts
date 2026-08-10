@@ -1,7 +1,7 @@
 'use server'
 
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
-import { VARIANTES } from '@/domain'
+import { VARIANTES, buscarNoCatalogo } from '@/domain'
 import type { VarianteMl } from '@/domain'
 
 /**
@@ -71,25 +71,30 @@ export async function buscarPrecos(termo: string): Promise<ResultadoBusca | null
   }
 
   const sb = supabaseServer()
-  const alvo = semAcento(limpo)
+
+  // Uma condição por palavra, todas exigidas. Um `ilike` com a frase inteira
+  // só acha quem escreveu igualzinho — e o concorrente nunca escreve igual:
+  // "Bleu de Chanel Eau de Parfum" não casaria com "(Decant) Chanel - Bleu de
+  // Chanel Eau de Parfum (EDP)". Seis palavras bastam para qualquer perfume.
+  const palavras = semAcento(limpo)
+    .split(' ')
+    .filter((t) => t.length >= 2)
+    .slice(0, 6)
+
+  let consulta = sb
+    .from('concorrente_precos')
+    .select('titulo, preco, variante, url, concorrentes(nome)')
+    .not('variante', 'is', null)
+  for (const palavra of palavras.length ? palavras : [limpo]) {
+    consulta = consulta.ilike('titulo', `%${palavra}%`)
+  }
 
   const [{ data: bases }, { data: precos }] = await Promise.all([
     sb.from('perfumes_base').select('id, nome, marca').eq('ativo', true).limit(500),
-    // `ilike` com % dos dois lados: quem digita "idole" quer achar
-    // "(Decant) Lancôme - Idôle Eau de Parfum (EDP) 5ml".
-    sb
-      .from('concorrente_precos')
-      .select('titulo, preco, variante, url, concorrentes(nome)')
-      .not('variante', 'is', null)
-      .ilike('titulo', `%${limpo}%`)
-      .limit(400),
+    consulta.limit(400),
   ])
 
-  // O acento não pode separar quem procura de quem publica: a comparação de
-  // nomes acontece sem ele dos dois lados.
-  const candidatos = (bases ?? []).filter((b) =>
-    semAcento(`${b.nome} ${b.marca}`).includes(alvo),
-  )
+  const candidatos = buscarNoCatalogo(limpo, bases ?? [])
   const nosso = candidatos[0] ?? null
 
   const observados = ((precos ?? []) as unknown as {
