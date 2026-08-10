@@ -102,6 +102,40 @@ export async function vascularPrecos(): Promise<Resposta<{ resumo: ResumoColeta[
 }
 
 /**
+ * Lê UMA loja.
+ *
+ * Vasculhar todas leva minutos — são centenas de páginas por loja, lidas
+ * devagar de propósito. Quando só uma mudou de preço, ou só uma estava fora do
+ * ar na rodada anterior, reler as outras é espera à toa.
+ */
+export async function vascularConcorrente(
+  id: string,
+): Promise<Resposta<{ resumo: ResumoColeta }>> {
+  const bloqueio = exigeSupabase('coletar preços')
+  if (bloqueio) return bloqueio
+
+  const { data, error } = await supabaseServer()
+    .from('concorrentes')
+    .select('id, nome, coleta')
+    .eq('id', id)
+    .maybeSingle()
+  if (error) return { ok: false, erro: error.message }
+  if (!data) return { ok: false, erro: 'Concorrente não encontrado.' }
+  if (data.coleta === 'manual') {
+    return { ok: false, erro: `${data.nome} está como leitura manual — lance os preços à mão.` }
+  }
+
+  try {
+    const r = await coletarConcorrente(id)
+    revalidatePath('/', 'layout')
+    return { ok: true, resumo: { fonte: data.nome, lidos: r.lidos, casados: r.casados, erro: null } }
+  } catch (e) {
+    revalidatePath('/', 'layout')
+    return { ok: false, erro: `${data.nome}: ${mensagemDe(e)}` }
+  }
+}
+
+/**
  * Mostra o que a loja devolve, cru.
  *
  * É a ferramenta que evita adivinhação: cada passo da leitura com o que

@@ -15,6 +15,7 @@ import {
   lancarPrecoManual,
   recasarPendentes,
   removerConcorrente,
+  vascularConcorrente,
   vascularPrecos,
   type ResumoColeta,
 } from './actions'
@@ -72,6 +73,9 @@ export function FontesCliente({ fontes, bases, semDono, variantes }: Props) {
   const [erro, setErro] = useState<string | null>(null)
   const [resumo, setResumo] = useState<ResumoColeta[] | null>(null)
   const [diagnostico, setDiagnostico] = useState<string | null>(null)
+  // Qual loja está sendo lida agora. `pendente` sozinho não diz: ele fica
+  // verdadeiro para qualquer ação, e o "Lendo…" apareceria em todas as linhas.
+  const [lendo, setLendo] = useState<string | null>(null)
   const [pendente, iniciarTransicao] = useTransition()
 
   const automaticas = fontes.filter((f) => f.coleta !== 'manual')
@@ -87,6 +91,21 @@ export function FontesCliente({ fontes, bases, semDono, variantes }: Props) {
         return
       }
       setResumo(r.resumo)
+    })
+
+  const vascularUma = (f: FonteConcorrente) =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      setResumo(null)
+      setDiagnostico(null)
+      setLendo(f.id)
+      const r = await vascularConcorrente(f.id)
+      setLendo(null)
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      setResumo([r.resumo])
     })
 
   const diagnosticar = (f: FonteConcorrente) =>
@@ -135,7 +154,12 @@ export function FontesCliente({ fontes, bases, semDono, variantes }: Props) {
           + Adicionar concorrente
         </BotaoSecundario>
         <BotaoOuro altura={34} onClick={vascular}>
-          {pendente ? 'Vasculhando…' : `Vasculhar ${plural(automaticas.length, 'loja', 'lojas')}`}
+          {/* "Todas" precisa se distinguir do botão por linha, que lê uma. */}
+          {pendente && !lendo
+            ? 'Vasculhando…'
+            : automaticas.length === 1
+              ? 'Vasculhar a loja'
+              : `Vasculhar todas · ${automaticas.length}`}
         </BotaoOuro>
       </div>
 
@@ -159,7 +183,7 @@ export function FontesCliente({ fontes, bases, semDono, variantes }: Props) {
                 key={f.id}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'minmax(0,1fr) 92px 150px 168px',
+                  gridTemplateColumns: 'minmax(0,1fr) 92px 150px 258px',
                   gap: 12,
                   alignItems: 'center',
                   padding: '10px 15px',
@@ -227,6 +251,11 @@ export function FontesCliente({ fontes, bases, semDono, variantes }: Props) {
                 </span>
 
                 <span style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                  {f.coleta !== 'manual' && (
+                    <BotaoSecundario altura={27} onClick={() => vascularUma(f)}>
+                      {lendo === f.id ? 'Lendo…' : 'Vasculhar'}
+                    </BotaoSecundario>
+                  )}
                   {f.coleta !== 'manual' && (
                     <BotaoSecundario altura={27} onClick={() => diagnosticar(f)}>
                       Diagnosticar
