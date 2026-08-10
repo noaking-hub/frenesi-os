@@ -154,7 +154,7 @@ export default async function Contas() {
                 style={{ fontSize: 9.5, lineHeight: 1.45, color: 'rgba(242,237,227,.32)', textWrap: 'pretty' }}
               >
                 {c.saldoInformado === null
-                  ? 'estimado pelo movimento lido — saque e transferência não aparecem no extrato de pagamentos'
+                  ? 'este é o movimento que conseguimos ler, NÃO o saldo — saque e transferência não aparecem no extrato de pagamentos'
                   : `saldo informado pela conta${
                       c.saldoInformadoEm
                         ? ` em ${new Date(c.saldoInformadoEm).toLocaleString('pt-BR', {

@@ -5,8 +5,8 @@ import { revalidatePath } from 'next/cache'
 import {
   CONTA_MP,
   diagnosticarMercadoPago,
-  saldoMercadoPago,
   sincronizarMercadoPago,
+  sondarRelatorios,
 } from '@/data/mercadopago'
 import { OPERADOR } from '@/data/operador'
 import { mensagemDe } from '@/data/shopify'
@@ -58,30 +58,34 @@ export async function diagnosticarGateway(
 }
 
 /**
- * Lê o saldo da conta no Mercado Pago e grava.
+ * Descobre por onde esta conta entrega saldo e extrato completo.
  *
- * Botão próprio, separado da sincronia, porque é a única coisa nesta tela
- * que responde "quanto tem na conta AGORA". Escondido dentro de uma
- * sincronia de meses, o erro dele viraria mais uma linha num relatório
- * comprido — e é justamente o número que precisa bater com o app do banco.
+ * A busca de pagamentos não vê saque nem transferência, e o endpoint de saldo
+ * da carteira respondeu 403 — ele não é liberado para aplicação. Em vez de
+ * escrever o próximo leitor em cima de um palpite, esta ação bate em todos os
+ * caminhos possíveis e mostra o que cada um respondeu, cru.
+ *
+ * Não grava nada. É medição.
  */
-export async function lerSaldo(): Promise<Resposta<{ disponivel: number; aLiberar: number }>> {
-  const bloqueio = exigeSupabase('gravar o saldo')
-  if (bloqueio) return bloqueio
-
+export async function sondarExtratoCompleto(): Promise<Resposta<{ linhas: string[] }>> {
   try {
-    const s = await saldoMercadoPago()
-    const { error } = await supabaseServer().rpc('registrar_saldo_conta', {
-      p_conta_id: CONTA_MP,
-      p_disponivel: s.disponivel,
-      p_a_liberar: s.aLiberar,
-    })
-    if (error) return { ok: false, erro: mensagemDe(error) }
-
-    revalidatePath('/', 'layout')
-    return { ok: true, disponivel: s.disponivel, aLiberar: s.aLiberar }
+    const respostas = await sondarRelatorios()
+    const linhas: string[] = []
+    for (const r of respostas) {
+      const rotulo = r.status === 200 ? 'OK' : r.status === 0 ? 'sem token' : `HTTP ${r.status}`
+      linhas.push(`${r.metodo} ${r.caminho} → ${rotulo}`)
+      linhas.push(`   ${r.corpo.replace(/\s+/g, ' ').slice(0, 400)}`)
+      linhas.push('')
+    }
+    const abertos = respostas.filter((r) => r.status === 200).map((r) => r.caminho)
+    linhas.push(
+      abertos.length
+        ? `Caminhos que esta conta abre: ${abertos.join(', ')}`
+        : 'Nenhum caminho respondeu 200 — nenhum relatório está habilitado nesta aplicação.',
+    )
+    return { ok: true, linhas }
   } catch (e) {
-    console.error('[extrato] ler saldo falhou:', e)
+    console.error('[extrato] sondar relatórios falhou:', e)
     return { ok: false, erro: mensagemDe(e) }
   }
 }

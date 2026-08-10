@@ -55,48 +55,89 @@ export class ErroMercadoPago extends Error {
   }
 }
 
-export interface SaldoMp {
-  /** O que dá para sacar agora. */
-  disponivel: number
-  /** O que ainda está preso — cartão que não liberou, retenção. */
-  aLiberar: number
-  total: number
-  /** Como o valor foi obtido, para a tela não afirmar mais do que sabe. */
-  fonte: string
+export interface RespostaCrua {
+  caminho: string
+  metodo: string
+  status: number
+  /** Começo do corpo, cru. É ele que diz o formato — não a documentação. */
+  corpo: string
 }
 
 /**
- * Saldo da conta, direto do Mercado Pago.
+ * Chamada que NÃO lança: devolve o status e o corpo, aconteça o que acontecer.
  *
- * Existe porque somar os pagamentos NÃO dá o saldo, e essa foi a lição cara
- * desta integração: `/v1/payments/search` lista PAGAMENTOS. Saque para o
- * banco, transferência, Pix enviado, pagamento de conta — nada disso é
- * pagamento recebido, então nada disso aparece ali. Somar só o que entra e
- * quase nada do que sai produziu R$ 83 mil de "saldo" numa conta com
- * R$ 10 mil.
- *
- * O saldo verdadeiro só o gateway sabe dizer. É uma chamada, e ela vale mais
- * que qualquer soma nossa.
+ * Existe para sondar. Um erro aqui é resultado, não acidente: saber que a
+ * conta responde 403 num caminho e 200 noutro é exatamente o que se quer
+ * descobrir.
  */
-export async function saldoMercadoPago(): Promise<SaldoMp> {
+async function sondar(caminho: string, metodo = 'GET', corpo?: string): Promise<RespostaCrua> {
+  const t = token()
+  if (!t) return { caminho, metodo, status: 0, corpo: 'MERCADOPAGO_ACCESS_TOKEN ausente' }
+
+  try {
+    const r = await fetch(`${BASE}${caminho}`, {
+      method: metodo,
+      headers: {
+        Authorization: `Bearer ${t}`,
+        Accept: 'application/json',
+        ...(corpo ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: corpo,
+      cache: 'no-store',
+    })
+    return { caminho, metodo, status: r.status, corpo: (await r.text()).slice(0, 700) }
+  } catch (e) {
+    return { caminho, metodo, status: -1, corpo: mensagemDe(e) }
+  }
+}
+
+/**
+ * Descobre por onde ESTA conta entrega saldo e extrato completo.
+ *
+ * A busca de pagamentos não vê saque nem transferência, e o endpoint de saldo
+ * da carteira devolveu 403 — ele não é liberado para aplicação, só para o
+ * painel. O caminho documentado é o Relatório de Liberações, que traz o
+ * movimento inteiro, saques inclusive.
+ *
+ * Só que "documentado" não é "habilitado nesta conta": cada relatório depende
+ * de permissão, e algumas contas têm um e não o outro. Em vez de escrever o
+ * leitor em cima de um palpite — já errei duas vezes assim nesta integração,
+ * no `collector_id` e no saldo —, esta função bate em todos os caminhos e
+ * devolve o que cada um respondeu, cru. O leitor vem depois, escrito em cima
+ * do formato que apareceu.
+ *
+ * Não grava nada.
+ */
+export async function sondarRelatorios(): Promise<RespostaCrua[]> {
   const id = await idDaConta()
-  if (!id) {
-    throw new ErroMercadoPago(
-      'Não consegui identificar a conta no Mercado Pago — sem o id não há saldo a consultar.',
-    )
-  }
+  const hoje = new Date().toISOString().slice(0, 10)
+  const mesPassado = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10)
 
-  const corpo = await chamar(`/users/${id}/mercadopago_account/balance`)
-  const disponivel = Number(corpo.available_balance ?? 0)
-  const aLiberar = Number(corpo.unavailable_balance ?? 0)
-  const total = Number(corpo.total_balance ?? disponivel + aLiberar)
+  const alvos: [string, string, string?][] = [
+    ['/users/me', 'GET'],
+    // Relatório de Liberações: o extrato de verdade, com saque e tarifa.
+    ['/v1/account/release_report/list', 'GET'],
+    ['/v1/account/release_report/config', 'GET'],
+    // Relatório de Conciliação: outra permissão, mesmo propósito.
+    ['/v1/account/settlement_report/list', 'GET'],
+    ['/v1/account/settlement_report/config', 'GET'],
+    // Movimentos da conta, quando a aplicação tem escopo para eles.
+    [`/v1/account/bank_report/list`, 'GET'],
+    // Saldo — o caminho que devolveu 403, mantido para registrar a resposta.
+    ...(id ? ([[`/users/${id}/mercadopago_account/balance`, 'GET']] as [string, string][]) : []),
+    // Geração sob demanda do relatório de liberações no período recente.
+    [
+      '/v1/account/release_report',
+      'POST',
+      JSON.stringify({ begin_date: `${mesPassado}T00:00:00Z`, end_date: `${hoje}T23:59:59Z` }),
+    ],
+  ]
 
-  return {
-    disponivel,
-    aLiberar,
-    total,
-    fonte: `Mercado Pago · conta ${id}`,
+  const respostas: RespostaCrua[] = []
+  for (const [caminho, metodo, corpo] of alvos) {
+    respostas.push(await sondar(caminho, metodo, corpo))
   }
+  return respostas
 }
 
 /** Id da conta que o token abriu. Vazio quando o Mercado Pago não responde. */
@@ -292,19 +333,6 @@ export async function sincronizarMercadoPago(de: string, ate: string): Promise<R
     p_banco: 'Mercado Pago',
     p_uso: 'Recebimento das vendas da loja',
   })
-
-  // O saldo vem do gateway, não da nossa soma. Falhar aqui não pode derrubar
-  // a sincronia — o extrato continua valendo mesmo sem o saldo do dia.
-  try {
-    const s = await saldoMercadoPago()
-    await sb.rpc('registrar_saldo_conta', {
-      p_conta_id: CONTA_MP,
-      p_disponivel: s.disponivel,
-      p_a_liberar: s.aLiberar,
-    })
-  } catch (e) {
-    avisos.push(`Não consegui ler o saldo da conta: ${mensagemDe(e)}`)
-  }
 
   // Os pedidos que podem corresponder a estes pagamentos. A janela é folgada
   // dos dois lados: o cartão é aprovado depois da compra, e a compra pode ter

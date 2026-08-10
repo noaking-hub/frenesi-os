@@ -22,7 +22,7 @@ import {
   classificarLinha,
   diagnosticarGateway,
   ignorarLinha,
-  lerSaldo,
+  sondarExtratoCompleto,
   recasarExtrato,
   relerGateway,
   sincronizarGateway,
@@ -336,17 +336,13 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
             desabilitado={pendente || !gatewayLigado}
             onClick={() =>
               rodar(async () => {
-                const r = await lerSaldo()
+                const r = await sondarExtratoCompleto()
                 if (!r.ok) throw new Error(r.erro)
-                return [
-                  `Saldo disponível: ${brl(r.disponivel)}.`,
-                  r.aLiberar > 0 ? `A liberar: ${brl(r.aLiberar)}.` : '',
-                  'É este número que passa a valer nas Contas — a nossa soma de pagamentos vira só "movimento lido".',
-                ].filter(Boolean)
+                return r.linhas
               })
             }
           >
-            Ler saldo da conta
+            Sondar extrato completo
           </BotaoOuro>
           <BotaoSecundario
             altura={32}
@@ -449,12 +445,16 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
                     </span>
                   </span>
 
+                  {/* Sem saldo informado, mostrar o movimento com rótulo de
+                      saldo seria repetir o mesmo número com dois nomes — e foi
+                      assim que R$ 83 mil passaram por saldo de uma conta com
+                      R$ 10 mil. Melhor dizer que não sabemos. */}
                   <span style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
                     <Valor tamanho={13} tom={c.saldoInformado === null ? 'atencao' : 'ok'}>
-                      {brl(c.saldo)}
+                      {c.saldoInformado === null ? '—' : brl(c.saldoInformado)}
                     </Valor>
                     <span className="font-sans" style={{ fontSize: 9, color: 'rgba(242,237,227,.35)' }}>
-                      {c.saldoInformado === null ? 'estimado pela leitura' : 'saldo do gateway'}
+                      {c.saldoInformado === null ? 'saldo não lido ainda' : 'saldo do gateway'}
                     </span>
                   </span>
 
