@@ -1,18 +1,18 @@
 import { NextResponse } from 'next/server'
 
-import { atualizarExtratoMp, mercadoPagoConfigurado } from '@/data/mercadopago'
+import { atualizarExtratoEsperando, mercadoPagoConfigurado } from '@/data/mercadopago'
 import { mensagemDe } from '@/data/shopify'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { importarPedidosYampi, yampiConfigurada } from '@/data/yampi'
 import { INICIO_DA_OPERACAO } from '@/domain'
 
 /**
- * Sincronia diária do financeiro.
+ * Sincronia do financeiro, de hora em hora.
  *
- * O extrato do Mercado Pago é o que sustenta a margem líquida: é dele que sai
- * a tarifa real de cada venda. Depender de alguém lembrar de clicar em
- * "Sincronizar gateway" é depender de alguém lembrar — e quando esquece, o
- * número que some é justamente o do custo.
+ * Extrato que só atualiza quando alguém clica não é extrato: quem esquece de
+ * clicar não descobre que esqueceu — a tela mostra números plausíveis do jeito
+ * que estavam ontem. Por isso a rotina roda sozinha, e a tela também se
+ * atualiza ao ser aberta quando a última leitura passou de dez minutos.
  *
  *     POST /api/financeiro/sincronizar
  *     Authorization: Bearer $CRON_SEGREDO
@@ -32,7 +32,7 @@ export const dynamic = 'force-dynamic'
 const JANELA_DIAS = 35
 
 /**
- * Quanto histórico de pedido a rotina diária traz.
+ * Quanto histórico de pedido cada rodada traz.
  *
  * Menor que a janela do extrato de propósito: o cartão parcelado só LIBERA o
  * dinheiro 30 dias depois, então o extrato precisa alcançar o mês anterior,
@@ -78,7 +78,7 @@ export async function POST(req: Request) {
   // sempre um dia atrasada é uma conciliação em que ninguém confia.
   //
   // A janela é curta porque aqui só interessa o que é novo; o histórico
-  // completo é trabalho de importação manual, não de rotina diária.
+  // completo é trabalho de importação manual, não de rotina.
   if (yampiConfigurada()) {
     try {
       const y = await importarPedidosYampi(JANELA_PEDIDOS_DIAS)
@@ -98,13 +98,15 @@ export async function POST(req: Request) {
   // Cada etapa é isolada: uma falha de rede no gateway não pode impedir a
   // varredura de ocorrências, que não depende dele.
   //
-  // A sincronia de ontem terá pedido o relatório e não o encontrado pronto —
-  // ele leva minutos para montar. Por isso a rodada de hoje IMPORTA o de
-  // ontem antes de pedir o de hoje: o atraso de um dia se resolve sozinho, em
-  // vez de virar um extrato que nunca chega.
+  // A rotina ESPERA o relatório ficar pronto, ao contrário da tela. Quem está
+  // olhando merece resposta imediata; aqui não há ninguém olhando, e esperar
+  // três minutos é o que faz o extrato se manter em dia sem depender de
+  // alguém abrir a tela e clicar.
   if (mercadoPagoConfigurado()) {
     try {
-      relatorio.mercadopago = await atualizarExtratoMp(de, ate, { pedir: true })
+      // Dez tentativas de 15s cabem folgadas nos 300s da rota, junto com a
+      // importação de pedidos que vem antes.
+      relatorio.mercadopago = await atualizarExtratoEsperando(de, ate, { tentativas: 10 })
     } catch (e) {
       relatorio.mercadopago = { erro: mensagemDe(e) }
     }
@@ -116,7 +118,7 @@ export async function POST(req: Request) {
   try {
     const { data, error } = await supabaseServer().rpc('varrer_ocorrencias', {
       p_dias: 15,
-      p_responsavel: 'Varredura diária',
+      p_responsavel: 'Varredura automática',
       p_janela_dias: 90,
     })
     relatorio.ocorrencias = error ? { erro: mensagemDe(error) } : { novas: Number(data) }
@@ -130,7 +132,7 @@ export async function POST(req: Request) {
 /** GET só para conferir que a rota está no ar; não sincroniza nada. */
 export async function GET() {
   return NextResponse.json({
-    rota: 'sincronia diária do financeiro',
+    rota: 'sincronia do financeiro, de hora em hora',
     como: 'POST com Authorization: Bearer $CRON_SEGREDO',
     configurado: Boolean(process.env.CRON_SEGREDO),
     gateway: mercadoPagoConfigurado(),

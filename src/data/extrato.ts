@@ -224,6 +224,25 @@ export async function conferenciaDeContas(): Promise<ConferenciaConta[]> {
   }))
 }
 
+/**
+ * Quando o extrato foi lido pela última vez.
+ *
+ * Serve para a tela decidir sozinha se precisa atualizar ao abrir. É a
+ * diferença entre um extrato que se mantém em dia e um que depende de alguém
+ * lembrar de clicar — e quem esquece de clicar não descobre que esqueceu: a
+ * tela mostra números plausíveis do jeito que estavam ontem.
+ */
+export async function ultimaAtualizacao(): Promise<string | null> {
+  if (!supabaseConfigurado()) return null
+  const { data } = await supabaseServer()
+    .from('relatorios_importados')
+    .select('importado_em')
+    .order('importado_em', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  return (data?.importado_em as string) ?? null
+}
+
 export interface ResultadoImportacao {
   novas: number
   repetidas: number

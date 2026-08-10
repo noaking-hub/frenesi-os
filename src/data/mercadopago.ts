@@ -802,6 +802,48 @@ export async function atualizarExtratoMp(
   return importarEComplementar(alvo.arquivo, de, ate)
 }
 
+/**
+ * Atualiza o extrato do começo ao fim, esperando o relatório ficar pronto.
+ *
+ * É a versão para a rotina automática. A tela não pode esperar — quem está
+ * olhando merece resposta imediata e a volta automática cuida do resto —, mas
+ * a rotina não tem ninguém olhando: ela pede, aguarda e importa, e é isso que
+ * mantém o extrato em dia sem depender de alguém abrir a tela.
+ *
+ * O teto de tempo existe porque a rotina roda dentro de uma requisição com
+ * limite. Estourar sem importar não perde nada: o pedido continua válido do
+ * lado do Mercado Pago e a próxima rodada encontra o arquivo pronto.
+ */
+export async function atualizarExtratoEsperando(
+  de: string,
+  ate: string,
+  opcoes: { tentativas?: number; intervaloMs?: number } = {},
+): Promise<PassoAtualizacao> {
+  const tentativas = opcoes.tentativas ?? 14
+  const intervalo = opcoes.intervaloMs ?? 15_000
+
+  const primeiro = await atualizarExtratoMp(de, ate, { pedir: true })
+  if (primeiro.estado === 'pronto') return primeiro
+
+  for (let i = 0; i < tentativas; i += 1) {
+    await new Promise((r) => setTimeout(r, intervalo))
+    const passo = await atualizarExtratoMp(de, ate, {
+      pedir: false,
+      jaExistiam: primeiro.jaExistiam,
+    })
+    if (passo.estado === 'pronto') return passo
+  }
+
+  return {
+    estado: 'aguardando',
+    jaExistiam: primeiro.jaExistiam,
+    linhas: [
+      `O relatório de ${de} a ${ate} foi pedido e não ficou pronto a tempo desta rodada.`,
+      'O pedido continua valendo: a próxima rodada encontra o arquivo e importa.',
+    ],
+  }
+}
+
 /** Importa o arquivo escolhido e completa com tarifas e ligação aos pedidos. */
 async function importarEComplementar(
   arquivo: string,

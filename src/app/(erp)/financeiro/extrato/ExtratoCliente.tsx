@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useCallback, useEffect, useState, useTransition } from 'react'
+import { useCallback, useEffect, useRef, useState, useTransition } from 'react'
 
 import {
   Badge,
@@ -71,6 +71,29 @@ const dataBr = (iso: string) => iso.split('-').reverse().join('/')
 const ESPERA_MS = 15_000
 const MAX_ESPERAS = 24
 
+/**
+ * A partir de quantos minutos o extrato é considerado velho.
+ *
+ * Abrir a tela dispara a atualização sozinha quando passou disso. Dez minutos
+ * porque cada atualização gera um relatório do lado do Mercado Pago: abrir a
+ * tela cinco vezes seguidas não pode virar cinco relatórios, e ninguém precisa
+ * do movimento do minuto anterior num extrato.
+ */
+const VALIDADE_MIN = 10
+
+/** "há 3 min", "há 2 h", "ontem". Vago de propósito quando fica velho. */
+function desdeQuando(iso: string | null): string {
+  if (!iso) return 'nunca'
+  const min = Math.floor((Date.now() - Date.parse(iso)) / 60_000)
+  if (!Number.isFinite(min) || min < 0) return 'agora'
+  if (min < 1) return 'agora'
+  if (min < 60) return `há ${min} min`
+  const h = Math.floor(min / 60)
+  if (h < 24) return `há ${h} h`
+  const d = Math.floor(h / 24)
+  return d === 1 ? 'ontem' : `há ${d} dias`
+}
+
 export interface FiltroAtual {
   situacao: 'a-decidir' | 'todas'
   tipo: string
@@ -86,6 +109,8 @@ interface Props {
   contas: ConferenciaConta[]
   categorias: { nome: string; natureza: string }[]
   gatewayLigado: boolean
+  /** Quando o extrato foi lido pela última vez. Null = nunca. */
+  atualizadoEm: string | null
 }
 
 /**
@@ -227,6 +252,7 @@ export function ExtratoCliente({
   contas,
   categorias,
   gatewayLigado,
+  atualizadoEm,
 }: Props) {
   const [de, setDe] = useState(INICIO_DA_OPERACAO)
   const [ate, setAte] = useState(hoje())
@@ -301,6 +327,20 @@ export function ExtratoCliente({
     },
     [de, ate, jaExistiam],
   )
+
+  // Atualiza sozinho ao abrir a tela, quando o extrato está velho.
+  //
+  // O `ref` garante uma vez por montagem: sem ele, cada re-render do React
+  // dispararia outro pedido de relatório ao Mercado Pago.
+  const jaTentou = useRef(false)
+  useEffect(() => {
+    if (jaTentou.current) return
+    if (!gatewayLigado) return
+    const min = atualizadoEm ? (Date.now() - Date.parse(atualizadoEm)) / 60_000 : Infinity
+    if (min < VALIDADE_MIN) return
+    jaTentou.current = true
+    void atualizar(true)
+  }, [gatewayLigado, atualizadoEm, atualizar])
 
   useEffect(() => {
     if (espera === 0) return
@@ -529,6 +569,8 @@ export function ExtratoCliente({
             className="font-sans"
             style={{ fontSize: 11, color: 'var(--color-terciario)', lineHeight: 1.5 }}
           >
+            {`lido ${desdeQuando(atualizadoEm)}`}
+            {' · '}
             {`${dataBr(de)} até ${dataBr(ate)}`}
             {' · '}
             <button
