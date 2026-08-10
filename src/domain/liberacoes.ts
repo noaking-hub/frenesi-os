@@ -246,6 +246,7 @@ export function lerLiberacoes(csv: string): ExtratoLiberacoes {
 const MOVIMENTOS: Record<string, string> = {
   payment: 'Venda recebida',
   refund: 'Estorno ao cliente',
+  reserve_for_payment: 'Reserva de pagamento',
   partial_refund: 'Estorno parcial ao cliente',
   chargeback: 'Chargeback',
   dispute: 'Disputa aberta pelo cliente',
@@ -269,14 +270,31 @@ const MOVIMENTOS: Record<string, string> = {
 }
 
 /**
+ * Movimentos cujo nome depende da direção do dinheiro.
+ *
+ * `payment` é o caso que doeu: o Mercado Pago usa a mesma palavra para a
+ * venda que a conta recebeu e para a compra que a conta pagou — etiqueta de
+ * frete, ferramenta, anúncio. Treze linhas apareceram como "Venda recebida"
+ * com sinal de saída, que é uma frase que não quer dizer nada e manda a
+ * pessoa procurar um pedido que nunca existiu.
+ */
+const POR_DIRECAO: Record<string, { entrada: string; saida: string }> = {
+  payment: { entrada: 'Venda recebida', saida: 'Compra paga pela conta' },
+  refund: { entrada: 'Estorno recebido', saida: 'Estorno ao cliente' },
+  chargeback: { entrada: 'Chargeback revertido', saida: 'Chargeback' },
+}
+
+/**
  * Traduz o movimento, preservando o que não conhece.
  *
- * Um nome novo do Mercado Pago aparece cru na tela em vez de sumir ou virar
- * "Outro" — é assim que se descobre que existe um tipo de movimento que o ERP
- * ainda não entende, em vez de nunca descobrir.
+ * `entrada` decide o nome quando a mesma palavra significa coisas opostas
+ * dependendo do sinal. Quem chama sem informar recebe o nome do crédito, que
+ * é o caso comum.
  */
-export function descreverMovimento(bruto: string): string {
+export function descreverMovimento(bruto: string, entrada = true): string {
   const chave = normalizar(bruto)
+  const doisNomes = POR_DIRECAO[chave]
+  if (doisNomes) return entrada ? doisNomes.entrada : doisNomes.saida
   return MOVIMENTOS[chave] ?? (bruto.trim() || 'Movimento sem descrição')
 }
 
@@ -300,6 +318,7 @@ const INTERNOS = new Set([
   'money_transfer',
   'cash_out',
   'reserve_for_payout',
+  'reserve_for_payment',
   'reserve_for_refund',
   'reserve_for_dispute',
   'reserve_for_bpp_shipping_return',
@@ -391,7 +410,7 @@ export function linhasDeLiberacao(extrato: ExtratoLiberacoes): LinhaExtratoBruta
     return {
       chave: `${base}:${n}`,
       ocorrido_em: l.data,
-      descricao: descreverMovimento(l.descricao),
+      descricao: descreverMovimento(l.descricao, l.liquido >= 0),
       contraparte: '',
       documento: l.fonte,
       tipo: l.liquido >= 0 ? 'entrada' : 'saida',

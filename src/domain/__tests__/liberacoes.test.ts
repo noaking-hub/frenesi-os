@@ -187,3 +187,35 @@ describe('a chave da linha sobrevive a reimportar', () => {
     expect(new Set(linhas.map((l) => l.chave)).size).toBe(2)
   })
 })
+
+describe('a mesma palavra, dois sentidos', () => {
+  it('separa a venda recebida da compra paga', () => {
+    // O Mercado Pago chama de `payment` tanto o dinheiro que entrou pela
+    // venda quanto o que saiu pagando etiqueta de frete. "Venda recebida ·
+    // − R$ 203,22" manda procurar um pedido que nunca existiu.
+    expect(descreverMovimento('payment', true)).toBe('Venda recebida')
+    expect(descreverMovimento('payment', false)).toBe('Compra paga pela conta')
+  })
+
+  it('separa o estorno que sai do que volta', () => {
+    expect(descreverMovimento('refund', false)).toBe('Estorno ao cliente')
+    expect(descreverMovimento('refund', true)).toBe('Estorno recebido')
+  })
+
+  it('a reserva de pagamento é movimento da conta', () => {
+    // Entra e sai pelo mesmo valor, como as outras reservas. Pedir categoria
+    // para ela é fabricar trabalho.
+    expect(movimentoInterno('reserve_for_payment')).toBe(true)
+  })
+
+  it('nomeia pela direção na conversão', () => {
+    const csv = `DATE;SOURCE_ID;DESCRIPTION;NET_CREDIT_AMOUNT;NET_DEBIT_AMOUNT
+2026-08-03;1;payment;0;203,22
+2026-08-03;2;payment;84,25;0`
+    const linhas = linhasDeLiberacao(lerLiberacoes(csv))
+    expect(linhas.map((l) => [l.tipo, l.descricao])).toEqual([
+      ['saida', 'Compra paga pela conta'],
+      ['entrada', 'Venda recebida'],
+    ])
+  })
+})
