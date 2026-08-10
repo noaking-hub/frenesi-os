@@ -11,6 +11,7 @@ import {
   calcularPreco,
   coberturaDe,
   conciliarLotesAbertos,
+  desvioAds,
   resumirOcorrencias,
   resumoSync,
   sincronizarBase,
@@ -122,15 +123,20 @@ export async function carregarDashboard() {
   // Módulos ainda em fixtures (pedidos, financeiro, CRM, IA) ficam de fora
   // em vez de exibir número de demonstração misturado com dado real.
   const sincronizado = origemDados() === 'supabase'
-  const [estoque, lotes, sync, parametros, solicitacoes, ocorrencias, envios] = await Promise.all([
-    carregarEstoque(),
-    carregarLotes(),
-    carregarSincronia(),
-    repo.parametros(),
-    repo.solicitacoes(),
-    repo.ocorrencias(),
-    repo.envios(),
-  ])
+  const [estoque, lotes, sync, parametros, solicitacoes, ocorrencias, envios, receita] =
+    await Promise.all([
+      carregarEstoque(),
+      carregarLotes(),
+      carregarSincronia(),
+      repo.parametros(),
+      repo.solicitacoes(),
+      repo.ocorrencias(),
+      repo.envios(),
+      repo.receitaMensal(),
+    ])
+  // Mesma ideia da perda real: o ADS foi correto um dia. A receita muda todo
+  // mês e o percentual não — sem esta conferência ele envelhece calado.
+  const ads = desvioAds(parametros.adsMensal ?? null, receita.receitaProdutos, parametros)
 
   const devAguardando = solicitacoes.filter(
     (d) => d.status === 'Nova' || d.status === 'Em análise' || d.status === 'Aguardando fotos',
@@ -182,6 +188,17 @@ export async function carregarDashboard() {
       etiqueta: 'Bloqueia',
       tom: 'erro',
       href: '/estoque',
+      origem: 'banco',
+    },
+    {
+      contagem: ads?.subestimado ? 1 : 0,
+      titulo: 'Marketing acima do parâmetro',
+      hint: ads
+        ? `${brl(parametros.adsMensal ?? 0)}/mês sobre a receita dos últimos 30 dias dá ${ads.medido.toFixed(1).replace('.', ',')}% · o parâmetro está em ${String(parametros.adsPct).replace('.', ',')}%`
+        : 'Sem gasto mensal de tráfego declarado',
+      etiqueta: 'Preço',
+      tom: 'atencao',
+      href: '/configuracoes/precificacao',
       origem: 'banco',
     },
     {

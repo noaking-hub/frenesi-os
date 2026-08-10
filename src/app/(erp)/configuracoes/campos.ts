@@ -15,8 +15,15 @@ export const SECOES_PARAMETROS: SecaoParametro[] = [
   'Produção',
 ]
 
+/**
+ * `adsMensal` fica de fora: ele não é uma taxa que se digita, é o valor que
+ * origina `adsPct`. Quem edita é a calculadora de marketing, que sabe dividir
+ * pelo faturamento — um campo de formulário aqui deixaria os dois soltos.
+ */
+export type ChaveParametro = Exclude<keyof ParametrosPrecificacao, 'adsMensal'>
+
 export interface CampoParametro {
-  chave: keyof ParametrosPrecificacao
+  chave: ChaveParametro
   label: string
   unidade: '%' | 'R$'
   hint: string

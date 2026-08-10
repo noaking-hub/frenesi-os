@@ -166,3 +166,96 @@ export function composicaoPreco(
     { label: 'Lucro líquido', valor: lucro, pct: fatia(lucro), tipo: 'lucro' },
   ]
 }
+
+export interface RateioAds {
+  /** O que se gasta por mês com tráfego pago. */
+  gastoMensal: number
+  /** Receita de produto dos pedidos pagos nos últimos 30 dias. */
+  receitaProdutos: number
+  pedidos: number
+  /** Percentual do preço que o marketing consome. É o que vira `adsPct`. */
+  pct: number
+  /** O mesmo gasto lido por pedido — só como referência de leitura. */
+  porPedido: number
+  /**
+   * `null` quando dá para confiar. Texto quando a base de rateio é fraca
+   * demais para sustentar o número.
+   */
+  ressalva: string | null
+}
+
+/** Amostra abaixo disso não sustenta um percentual que entra em todo preço. */
+const PEDIDOS_MINIMOS = 20
+
+/**
+ * Traduz o gasto mensal com tráfego no percentual que entra no preço.
+ *
+ * Quem compra tráfego sabe o valor do mês, não o percentual — mas a
+ * precificação trabalha em percentual, porque é assim que o custo se
+ * distribui entre um decant de 3 ml e um de 15 ml. A ponte é a receita.
+ *
+ * O rateio é sobre a receita de PRODUTO, sem frete: frete é repassado à
+ * transportadora e incluí-lo diluiria o marketing num dinheiro que só passa
+ * pela conta.
+ */
+export function ratearAds(gastoMensal: number, receitaProdutos: number, pedidos: number): RateioAds {
+  const valido = gastoMensal > 0 && receitaProdutos > 0
+  const pct = valido ? (gastoMensal / receitaProdutos) * 100 : 0
+
+  const ressalva =
+    gastoMensal <= 0
+      ? 'Informe quanto você gasta por mês com tráfego pago.'
+      : receitaProdutos <= 0
+        ? 'Sem pedido pago nos últimos 30 dias não há receita para ratear o marketing.'
+        : pedidos < PEDIDOS_MINIMOS
+          ? `Só ${pedidos} ${pedidos === 1 ? 'pedido pago' : 'pedidos pagos'} nos últimos 30 dias — o percentual sai instável com essa amostra.`
+          : pct >= 100
+            ? 'O gasto com tráfego passou a receita do período: não há preço que feche assim.'
+            : null
+
+  return {
+    gastoMensal,
+    receitaProdutos,
+    pedidos,
+    pct,
+    porPedido: pedidos > 0 ? gastoMensal / pedidos : 0,
+    ressalva,
+  }
+}
+
+/** Quantos pontos percentuais o ADS pode desviar antes de virar alerta. */
+export const DESVIO_ADS = 1.5
+
+export interface DesvioAds {
+  /** Percentual que o gasto mensal guardado daria com a receita de hoje. */
+  medido: number
+  /** O que está gravado como parâmetro. */
+  parametro: number
+  delta: number
+  /** O parâmetro está abaixo do medido — todo preço com custo subestimado. */
+  subestimado: boolean
+}
+
+/**
+ * Compara o ADS gravado com o que o mesmo gasto mensal daria hoje.
+ *
+ * Mesma ideia da perda real contra o parâmetro de perda: o número foi correto
+ * um dia. A receita muda todo mês; o percentual, não. Sem esta comparação ele
+ * envelheceria calado, e todo preço ficaria com o marketing subestimado sem
+ * ninguém perceber.
+ */
+export function desvioAds(
+  gastoMensal: number | null,
+  receitaProdutos: number,
+  p: ParametrosPrecificacao,
+): DesvioAds | null {
+  if (!gastoMensal || gastoMensal <= 0 || receitaProdutos <= 0) return null
+  const medido = (gastoMensal / receitaProdutos) * 100
+  const delta = medido - p.adsPct
+  return {
+    medido,
+    parametro: p.adsPct,
+    delta: Math.abs(delta),
+    subestimado: delta > DESVIO_ADS,
+  }
+}

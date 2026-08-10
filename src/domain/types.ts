@@ -107,6 +107,20 @@ export interface ParametrosPrecificacao {
   /** Estimativa de perda no envase. A perda real só é medida ao encerrar o lote. */
   perdaPct: number
   margemAlvo: number
+  /**
+   * Gasto mensal com tráfego pago que originou `adsPct`. Guardado ao lado do
+   * percentual para o ERP poder avisar quando os dois deixarem de bater — a
+   * receita muda todo mês, o percentual não. `null` quando o percentual foi
+   * digitado direto.
+   */
+  adsMensal?: number | null
+}
+
+/** Pedidos pagos e receita de produto dos últimos 30 dias. */
+export interface ReceitaMensal {
+  pedidos: number
+  /** Sem frete: ele é repassado à transportadora, não é receita de perfume. */
+  receitaProdutos: number
 }
 
 /**

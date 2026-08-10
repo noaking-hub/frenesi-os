@@ -40,6 +40,7 @@ import type {
   Pedido,
   PerfumeBase,
   ProdutoDerivado,
+  ReceitaMensal,
   SaldoCashback,
   StatusOrdem,
   TicketAtendimento,
@@ -56,6 +57,8 @@ import { supabaseConfigurado, supabaseServer } from './supabase'
  */
 export interface Repositorio {
   parametros(): Promise<ParametrosPrecificacao>
+  /** Base de rateio de custo mensal fixo (ADS): 30 dias de pedidos pagos. */
+  receitaMensal(): Promise<ReceitaMensal>
   perfumesBase(): Promise<PerfumeBase[]>
   /** Inclui inativos — só o Catálogo precisa, para poder reativar. */
   perfumesBaseTodos(): Promise<PerfumeBase[]>
@@ -105,6 +108,15 @@ export interface Repositorio {
 const repositorioFixtures: Repositorio = {
   async parametros() {
     return PARAMETROS_PADRAO
+  },
+  async receitaMensal() {
+    // A fixture não tem data em ISO, e inventar um recorte de 30 dias aqui
+    // daria número de demonstração com cara de apurado. Vale o conjunto todo.
+    const pagos = fixtures.PEDIDOS.filter((p) => p.pagamento === 'pago')
+    return {
+      pedidos: pagos.length,
+      receitaProdutos: pagos.reduce((a, p) => a + p.valor - p.frete, 0),
+    }
   },
   async perfumesBase() {
     return fixtures.PERFUMES_BASE
@@ -319,6 +331,16 @@ const repositorioSupabase: Repositorio = {
       antifraude: Number(data.antifraude),
       perdaPct: Number(data.perda_pct),
       margemAlvo: Number(data.margem_alvo),
+      adsMensal: data.ads_mensal === null ? null : Number(data.ads_mensal),
+    }
+  },
+
+  async receitaMensal() {
+    const { data, error } = await supabaseServer().from('receita_mensal').select('*').maybeSingle()
+    if (error) throw error
+    return {
+      pedidos: Number(data?.pedidos ?? 0),
+      receitaProdutos: Number(data?.receita_produtos ?? 0),
     }
   },
 

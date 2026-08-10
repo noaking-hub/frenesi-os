@@ -11,11 +11,13 @@ import {
   calcularPreco,
   coberturaDe,
   conciliarLotesAbertos,
+  desvioAds,
   fotosCompletas,
   frascoDe,
   margemDe,
   pisoMargem,
   previaEncerramento,
+  ratearAds,
   sincronizarBase,
   sincronizarVariante,
   statusDevolucao,
@@ -420,5 +422,35 @@ describe('custo médio ponderado na compra', () => {
 
   it('compra de volume zero não altera nada', () => {
     expect(custoMedioPonderado(300, 3, 0, 999)).toBe(3)
+  })
+})
+
+describe('marketing: do gasto mensal ao percentual', () => {
+  it('rateia o gasto sobre a receita de produto, não sobre o pedido', () => {
+    // R$ 7.000/mês sobre R$ 51.682,07 de produto em 268 pedidos pagos.
+    const r = ratearAds(7000, 51682.07, 268)
+    expect(r.pct).toBeCloseTo(13.544, 2)
+    expect(r.porPedido).toBeCloseTo(26.12, 2)
+    expect(r.ressalva).toBeNull()
+  })
+
+  it('recusa o número quando a base de rateio não sustenta', () => {
+    expect(ratearAds(7000, 0, 0).ressalva).toContain('Sem pedido pago')
+    expect(ratearAds(0, 51682, 268).ressalva).toContain('Informe quanto')
+    // Amostra magra dá percentual instável, e ele entraria em todo preço.
+    expect(ratearAds(7000, 4000, 9).ressalva).toContain('9 pedidos pagos')
+    expect(ratearAds(7000, 5000, 40).ressalva).toContain('passou a receita')
+  })
+
+  it('acusa quando o percentual gravado envelhece com a receita', () => {
+    const p = { ...PARAMETROS_PADRAO, adsPct: 13.5 }
+    // Mesma receita: o parâmetro está certo.
+    expect(desvioAds(7000, 51682.07, p)?.subestimado).toBe(false)
+    // Receita caiu pela metade e o gasto continua: o preço está subcusteado.
+    const caiu = desvioAds(7000, 25000, p)
+    expect(caiu?.medido).toBeCloseTo(28, 0)
+    expect(caiu?.subestimado).toBe(true)
+    // Sem gasto declarado não há o que comparar — e não se inventa alerta.
+    expect(desvioAds(null, 51682.07, p)).toBeNull()
   })
 })
