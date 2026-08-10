@@ -123,7 +123,7 @@ describe('estoque em ml, venda em unidades', () => {
     expect(esgotada.novoValor).toBe(0)
   })
 
-  it('reconhece carga por volume, por custo ou por decant envasado', () => {
+  it('separa controle de estoque de cadastro de preço', () => {
     const semNada: PerfumeBase = {
       id: 'nova',
       nome: 'Recém-importada da Shopify',
@@ -136,8 +136,17 @@ describe('estoque em ml, venda em unidades', () => {
       true,
     )
 
-    // Vendeu tudo, mas o custo da compra continua lá: é esgotada de verdade.
-    const vendida = { ...semNada, id: 'vendida', custoPorMl: 3.1 }
+    // Custo cadastrado para poder precificar, mas NENHUMA movimentação: o ERP
+    // continua sem saber o que há no frasco. Tratar como esgotada faria a
+    // sincronia zerar o produto na loja por causa de um cadastro de preço.
+    const soPreco = { ...semNada, id: 'so-preco', custoPorMl: 3.1 }
+    expect(sincronizarBase(soPreco, [], {}).variantes.every((v) => v.acao === 'sem_carga')).toBe(
+      true,
+    )
+    expect(coberturaDe(soPreco).criticidade).toBe('sem_carga')
+
+    // Entrou no livro de movimentações e zerou: é esgotada de verdade.
+    const vendida = { ...semNada, id: 'vendida', custoPorMl: 3.1, sobControle: true }
     expect(sincronizarBase(vendida, [], {}).variantes.every((v) => v.acao === 'esgotar')).toBe(true)
 
     // Sem volume nem custo, mas com decant pronto na bancada.
@@ -179,6 +188,8 @@ describe('estoque em ml, venda em unidades', () => {
       custoPorMl: 4.4,
       volumeMl: 0,
       consumoDiarioMl: 6,
+      // Já teve movimentação: zerou de verdade.
+      sobControle: true,
     })
     expect(c.criticidade).toBe('zero')
     expect(c.cobertura).toBe('Esgotado')

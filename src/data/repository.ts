@@ -286,7 +286,28 @@ interface LinhaPerfumeBase {
   ativo: boolean | null
 }
 
+/**
+ * Bases que já entraram no livro de movimentações.
+ *
+ * É o que separa "esgotada" de "o ERP não sabe" — e precisa ser derivado, não
+ * inferido do custo: cadastrar preço sem declarar volume não pode fazer a
+ * sincronia zerar o produto na loja.
+ */
+async function lerBasesSobControle(): Promise<Set<string>> {
+  const linhas = await tudoDe<{ base_id: string }>('bases_sob_controle', (de, ate) =>
+    supabaseServer()
+      .from('bases_sob_controle')
+      .select('base_id')
+      .range(de, ate) as unknown as PromiseLike<{
+      data: { base_id: string }[] | null
+      error: unknown
+    }>,
+  )
+  return new Set(linhas.map((l) => l.base_id))
+}
+
 async function lerPerfumesBase({ apenasAtivos }: { apenasAtivos: boolean }) {
+  const controladas = await lerBasesSobControle()
   const data = await tudoDe<LinhaPerfumeBase>('perfumes_base', (de, ate) => {
     const consulta = supabaseServer().from('perfumes_base').select(CAMPOS_BASE)
     return (apenasAtivos ? consulta.eq('ativo', true) : consulta)
@@ -307,6 +328,7 @@ async function lerPerfumesBase({ apenasAtivos }: { apenasAtivos: boolean }) {
     consumoDiarioMl: Number(b.consumo_diario_ml),
     imagemUrl: b.imagem_url ?? undefined,
     ativo: b.ativo ?? true,
+    sobControle: controladas.has(b.id),
   }))
 }
 

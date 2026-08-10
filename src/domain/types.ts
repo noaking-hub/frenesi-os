@@ -45,6 +45,13 @@ export interface PerfumeBase {
   ativo?: boolean
   /** Gênero definido à mão no ERP — a importação não sobrescreve. */
   generoManual?: boolean
+  /**
+   * A base já entrou no livro de movimentações — por compra, carga, produção
+   * ou inventário. É ISTO que separa "esgotada" de "o ERP não sabe", e não o
+   * custo: custo é atributo de catálogo, e preencher preço não pode fazer a
+   * sincronia zerar o produto na loja.
+   */
+  sobControle?: boolean
 }
 
 /** Decants já envasados de uma base numa variante. */

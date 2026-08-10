@@ -148,10 +148,10 @@ export function CargaCliente({ bases }: { bases: PerfumeBase[] }) {
               textWrap: 'pretty',
             }}
           >
-            O catálogo veio inteiro da Shopify, mas o volume não: a loja publica quantas unidades
-            oferece, não quanto sobrou no frasco. Declare aqui o que está na prateleira hoje — o
-            volume RESTANTE, não o tamanho original — e o custo que você pagou por ml. A partir
-            daí o ERP calcula preço, quantas unidades cada base ainda dá e o que publicar na loja.
+            Esta tela é para frasco JÁ ABERTO: declare o volume que ainda resta e o custo por ml,
+            e a base entra no controle de estoque a partir daí. Frasco novo, ainda lacrado, não
+            passa por aqui — ele é uma compra, e vai em Estoque → Lotes com o volume e o preço
+            cheios.
           </span>
           <span
             className="font-sans"
@@ -162,10 +162,11 @@ export function CargaCliente({ bases }: { bases: PerfumeBase[] }) {
               textWrap: 'pretty',
             }}
           >
-            Perfume que você não tem fica em branco e continua zerado — o que é a verdade, não uma
-            lacuna. Repetir a carga do mesmo perfume soma ao que já existe.
+            Não é preciso preencher tudo, nem hoje: o catálogo pode entrar aos poucos, e o que
+            ficar de fora simplesmente não é tocado pela sincronia com a loja. A lista começa pelo
+            que mais vende.
             {vendemEFaltam > 0
-              ? ` A lista começa pelo que mais vende: ${vendemEFaltam} das bases zeradas tiveram venda nos últimos 30 dias, e são elas que travam preço, produção e sincronia. As que nunca venderam podem esperar.`
+              ? ` ${vendemEFaltam} das bases sem estoque no ERP tiveram venda nos últimos 30 dias.`
               : ''}
           </span>
         </span>

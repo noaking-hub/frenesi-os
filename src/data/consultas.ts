@@ -147,8 +147,8 @@ export async function carregarDashboard() {
   const bases = await repo.perfumesBase()
   // Volume zero tem dois significados opostos e o Dashboard precisa separá-los:
   // sem carga é "o ERP não sabe", esgotada é "acabou". Só a segunda é risco.
-  const semCarga = bases.filter((b) => b.volumeMl === 0 && b.custoPorMl === 0)
-  const esgotadas = bases.filter((b) => b.volumeMl === 0 && b.custoPorMl > 0)
+  const semCarga = bases.filter((b) => b.volumeMl === 0 && !b.sobControle)
+  const esgotadas = bases.filter((b) => b.volumeMl === 0 && b.sobControle)
   const emRisco = estoque.criticos + esgotadas.length
 
   const { PEDIDOS_A_SEPARAR, CARRINHOS_PRIORIDADE_ALTA, COMANDOS_IA_AGUARDANDO } =
@@ -202,15 +202,16 @@ export async function carregarDashboard() {
       origem: 'banco',
     },
     {
-      // A importação da Shopify traz nome, marca e variantes — nunca volume
-      // nem custo. Enquanto ninguém declarar o que há na prateleira, a base
-      // não entra em preço, produção nem sincronia.
+      // NÃO é alarme: o estoque entra frasco a frasco, conforme cada um é
+      // deslacrado, e a maior parte do catálogo fica fora por muito tempo.
+      // Uma pendência vermelha permanente com 400 no contador ensina a
+      // ignorar o painel — que é o oposto do que ele existe para fazer.
       contagem: semCarga.length,
-      titulo: 'Perfumes sem carga inicial',
-      hint: 'Vieram da Shopify sem volume nem custo · ficam fora de preço, produção e sincronia',
-      etiqueta: 'Bloqueia',
-      tom: 'erro',
-      href: '/estoque/carga',
+      titulo: 'Perfumes fora do controle de estoque',
+      hint: 'Cada um entra ao registrar a compra do frasco · até lá, a sincronia não mexe neles na loja',
+      etiqueta: 'Cadastro',
+      tom: 'neutro',
+      href: '/estoque',
       origem: 'banco',
     },
     {

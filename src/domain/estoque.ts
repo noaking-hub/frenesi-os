@@ -130,11 +130,11 @@ export function sincronizarBase(
   publicados: Record<string, number>,
 ): BaseSync {
   const meus = derivados.filter((x) => x.baseId === base.id)
-  // Carga é qualquer sinal de que alguém já disse ao ERP o que existe: volume,
-  // custo de compra ou decant envasado. Base recém-importada da Shopify não
-  // tem nenhum dos três — e é dela que o zero enganoso vem.
-  const temCarga =
-    base.volumeMl > 0 || base.custoPorMl > 0 || meus.some((d) => d.envasadas > 0)
+  // Sob controle é ter entrado no livro de movimentações. Custo NÃO entra
+  // nessa conta: cadastrar o preço de um perfume sem declarar volume faria a
+  // base parecer esgotada, e a sincronia gravaria zero na loja por causa de
+  // um cadastro de preço.
+  const temCarga = base.sobControle === true || base.volumeMl > 0 || meus.some((d) => d.envasadas > 0)
 
   const variantes = VARIANTES.map((v) => {
     const d = meus.find((x) => x.variante === v)
@@ -209,9 +209,10 @@ export interface CoberturaBase {
 export function coberturaDe(base: PerfumeBase): CoberturaBase {
   const dias = base.consumoDiarioMl ? Math.round(base.volumeMl / base.consumoDiarioMl) : 0
 
-  // Volume zero E custo zero: nunca houve compra nem carga. O perfume pode
-  // estar na prateleira — o que falta é alguém ter dito isso ao ERP.
-  const semCarga = base.volumeMl === 0 && base.custoPorMl === 0
+  // Nunca entrou no livro de movimentações: o perfume pode estar na
+  // prateleira, o que falta é alguém ter dito isso ao ERP. Custo cadastrado
+  // não muda nada aqui — ele serve para precificar, não para controlar.
+  const semCarga = base.volumeMl === 0 && base.sobControle !== true
 
   const criticidade: Criticidade = semCarga
     ? 'sem_carga'
@@ -228,8 +229,8 @@ export function coberturaDe(base: PerfumeBase): CoberturaBase {
   const acao =
     criticidade === 'sem_carga'
       ? base.consumoDiarioMl > 0
-        ? 'Vendeu nos últimos 30 dias · declare o volume que está na prateleira'
-        : 'Sem carga inicial · o ERP não sabe se você tem este perfume'
+        ? 'Vende, mas está fora do controle · entra ao registrar a compra do próximo frasco'
+        : 'Fora do controle de estoque · entra ao registrar a compra de um frasco'
       : criticidade === 'zero'
         ? 'Recompra urgente · pedidos pagos parados'
         : criticidade === 'urgente'
@@ -250,6 +251,8 @@ export function coberturaDe(base: PerfumeBase): CoberturaBase {
         ? 'Esgotado'
         : `${dias} ${dias === 1 ? 'dia' : 'dias'}`,
     acao,
-    cta: semCarga ? 'Carregar' : base.volumeMl === 0 ? 'Recomprar' : 'Produzir',
+    // Frasco novo deslacrado é uma COMPRA: volume cheio, custo cheio. É por
+    // ela que a base entra no controle, sem precisar de mutirão de cadastro.
+    cta: semCarga ? 'Registrar compra' : base.volumeMl === 0 ? 'Recomprar' : 'Produzir',
   }
 }
