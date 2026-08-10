@@ -6,6 +6,8 @@ import {
   linhasDeLiberacao,
   indexarPedidos,
   normalizarPagamentoMp,
+  recortarJanela,
+  relatorioServe,
 } from '@/domain'
 import type {
   CasamentoPagamento,
@@ -591,6 +593,8 @@ export interface ResultadoLiberacoes {
   linhasLidas: number
   novas: number
   repetidas: number
+  /** Linhas do arquivo que caíram fora da janela pedida e foram descartadas. */
+  foraDaJanela: number
   cabecalhos: string[]
   avisos: string[]
 }
@@ -598,12 +602,17 @@ export interface ResultadoLiberacoes {
 /**
  * Baixa um relatório pronto e importa.
  *
- * O nome do arquivo é escolhido por quem chama — a tela mostra a lista com
- * período e data de criação. Escolher "o mais recente" por conta própria
- * traria o relatório de outro período sem nenhum erro aparecer, que é o tipo
- * de acerto por sorte que depois vira número errado no caixa.
+ * O `recorte` é o que torna seguro escolher o relatório sozinho. O Mercado
+ * Pago entrega o arquivo do período que quiser — o pedido de 22/07 a 10/08
+ * pode voltar como 10/07 a 11/08 —, e importar o excedente traria para o
+ * caixa desta loja o movimento de uma operação anterior. Com o recorte, o que
+ * está fora da janela é descartado na leitura e contado no relatório, em vez
+ * de virar saldo errado que ninguém sabe de onde veio.
  */
-export async function importarLiberacoes(arquivo: string): Promise<ResultadoLiberacoes> {
+export async function importarLiberacoes(
+  arquivo: string,
+  recorte?: { de: string; ate: string },
+): Promise<ResultadoLiberacoes> {
   if (!supabaseConfigurado()) {
     throw new ErroMercadoPago('O Supabase precisa estar configurado para guardar o extrato.')
   }
@@ -615,9 +624,19 @@ export async function importarLiberacoes(arquivo: string): Promise<ResultadoLibe
     )
   }
 
-  const extrato = lerLiberacoes(baixado.corpo)
-  if (extrato.linhas.length === 0) {
-    throw new ErroMercadoPago(['Nenhuma linha foi lida do relatório.', ...extrato.avisos].join(' '))
+  const lido = lerLiberacoes(baixado.corpo)
+  if (lido.linhas.length === 0) {
+    throw new ErroMercadoPago(['Nenhuma linha foi lida do relatório.', ...lido.avisos].join(' '))
+  }
+
+  const dentro = recorte ? recortarJanela(lido.linhas, recorte.de, recorte.ate) : lido.linhas
+  const foraDaJanela = lido.linhas.length - dentro.length
+  const extrato = { ...lido, linhas: dentro }
+
+  if (dentro.length === 0) {
+    throw new ErroMercadoPago(
+      `O relatório ${arquivo} tem ${lido.linhas.length} linha(s), mas nenhuma dentro de ${recorte?.de} a ${recorte?.ate}. É de outro período.`,
+    )
   }
 
   const sb = supabaseServer()
@@ -657,9 +676,81 @@ export async function importarLiberacoes(arquivo: string): Promise<ResultadoLibe
     linhasLidas: linhas.length,
     novas,
     repetidas,
+    foraDaJanela,
     cabecalhos: extrato.cabecalhos,
     avisos: extrato.avisos,
   }
+}
+
+// ── Atualização automática ─────────────────────────────────────────────────
+
+export interface PassoAtualizacao {
+  /** `pronto`: importou. `aguardando`: o Mercado Pago ainda está montando. */
+  estado: 'pronto' | 'aguardando'
+  linhas: string[]
+}
+
+/**
+ * Atualiza o extrato do jeito que deveria ter sido desde o começo: sozinho.
+ *
+ * Antes eram três cliques em ordem — pedir, listar, importar —, e a ordem
+ * estava na cabeça de quem escreveu, não na tela. Aqui o passo é decidido
+ * pelo estado real da conta:
+ *
+ *   já existe relatório que cobre a janela  →  importa e lê as tarifas
+ *   não existe                              →  pede e devolve "aguardando"
+ *
+ * `pedir` é falso na volta automática da tela: sem isso, cada consulta geraria
+ * um relatório novo e a conta encheria de arquivos idênticos.
+ */
+export async function atualizarExtratoMp(
+  de: string,
+  ate: string,
+  opcoes: { pedir: boolean },
+): Promise<PassoAtualizacao> {
+  const lista = await relatoriosDisponiveis()
+  const alvo = lista.find((r) => relatorioServe(r, de, ate))
+
+  if (!alvo) {
+    if (!opcoes.pedir) {
+      return { estado: 'aguardando', linhas: ['O Mercado Pago ainda está montando o extrato.'] }
+    }
+    await pedirRelatorio(de, ate)
+    return {
+      estado: 'aguardando',
+      linhas: [
+        `Extrato de ${de} a ${ate} pedido ao Mercado Pago.`,
+        'Ele leva de alguns segundos a poucos minutos para montar. Pode deixar a tela aberta: ela importa sozinha quando ficar pronto.',
+      ],
+    }
+  }
+
+  const r = await importarLiberacoes(alvo.arquivo, { de, ate })
+  const linhas = [
+    `Extrato de ${r.periodo.de} a ${r.periodo.ate} importado.`,
+    `${r.linhasLidas} movimento(s) · ${r.novas} novo(s) · ${r.repetidas} já conhecido(s).`,
+    ...(r.foraDaJanela
+      ? [`${r.foraDaJanela} linha(s) do arquivo eram de antes de ${de} e foram descartadas.`]
+      : []),
+    ...r.avisos.map((a) => `Atenção: ${a}`),
+  ]
+
+  // A tarifa de cada venda vem da busca de pagamentos, não do extrato. São as
+  // duas metades do mesmo número: o extrato diz quanto entrou, a busca diz
+  // quanto o gateway ficou. Falhar aqui não invalida o extrato já gravado.
+  try {
+    const t = await sincronizarMercadoPago(de, ate)
+    linhas.push(
+      `Tarifas: ${t.lidos} pagamento(s) lidos, ${t.repassesConciliados} venda(s) conciliadas agora.`,
+    )
+    if (t.semPedido.length) {
+      linhas.push(`${t.semPedido.length} pagamento(s) sem pedido correspondente no ERP.`)
+    }
+  } catch (e) {
+    linhas.push(`As tarifas das vendas não puderam ser lidas agora: ${mensagemDe(e)}`)
+  }
+
+  return { estado: 'pronto', linhas }
 }
 
 async function listarRelatorios(): Promise<ArquivoRelatorio[]> {

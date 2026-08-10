@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 
 import {
   CONTA_MP,
+  atualizarExtratoMp,
   diagnosticarMercadoPago,
   importarLiberacoes,
   pedirRelatorio,
@@ -95,6 +96,48 @@ export async function sondarExtratoCompleto(): Promise<Resposta<{ linhas: string
 }
 
 /**
+ * O único botão da tela: atualizar o extrato.
+ *
+ * A tela chama com `pedir` verdadeiro quando alguém clica, e falso na volta
+ * automática — de outro modo cada consulta geraria um relatório novo no
+ * Mercado Pago.
+ *
+ * Quando termina, recasa as linhas órfãs com os pedidos. Antes isso era um
+ * botão à parte, o que só fazia sentido para quem sabia que existia uma etapa
+ * de casamento; para quem usa, é parte de "atualizar".
+ */
+export async function atualizarExtrato(
+  de: string,
+  ate: string,
+  pedir: boolean,
+): Promise<Resposta<{ estado: 'pronto' | 'aguardando'; linhas: string[] }>> {
+  const bloqueio = exigeSupabase('atualizar o extrato')
+  if (bloqueio) return bloqueio
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) {
+    return { ok: false, erro: 'Informe o período no formato AAAA-MM-DD.' }
+  }
+  if (de > ate) return { ok: false, erro: 'A data inicial é posterior à final.' }
+
+  try {
+    const passo = await atualizarExtratoMp(de, ate, { pedir })
+    const linhas = [...passo.linhas]
+
+    if (passo.estado === 'pronto') {
+      const casou = await recasarExtrato()
+      if (casou.ok && casou.religadas > 0) {
+        linhas.push(`${casou.religadas} movimento(s) ligados ao pedido de origem.`)
+      }
+      revalidatePath('/', 'layout')
+    }
+
+    return { ok: true, estado: passo.estado, linhas }
+  } catch (e) {
+    console.error('[extrato] atualizar falhou:', e)
+    return { ok: false, erro: mensagemDe(e) }
+  }
+}
+
+/**
  * Pede ao Mercado Pago que gere o relatório do período.
  *
  * Volta na hora. A geração é assíncrona do lado deles e leva de segundos a
@@ -133,21 +176,24 @@ export async function listarRelatoriosProntos(): Promise<
   }
 }
 
-/** Baixa um relatório pronto e importa como extrato. */
+/** Baixa um relatório pronto e importa como extrato, recortado na janela. */
 export async function importarExtratoCompleto(
   arquivo: string,
+  de: string,
+  ate: string,
 ): Promise<Resposta<{ linhas: string[] }>> {
   const bloqueio = exigeSupabase('importar o extrato')
   if (bloqueio) return bloqueio
 
   try {
-    const r = await importarLiberacoes(arquivo)
+    const r = await importarLiberacoes(arquivo, { de, ate })
     revalidatePath('/', 'layout')
     return {
       ok: true,
       linhas: [
         `${r.arquivo} · movimento de ${r.periodo.de} a ${r.periodo.ate}.`,
         `${r.linhasLidas} linha(s) lidas · ${r.novas} nova(s) · ${r.repetidas} já conhecida(s).`,
+        ...(r.foraDaJanela ? [`${r.foraDaJanela} linha(s) fora de ${de}–${ate} descartadas.`] : []),
         `Colunas: ${r.cabecalhos.join(', ')}`,
         ...r.avisos.map((a) => `Atenção: ${a}`),
       ],

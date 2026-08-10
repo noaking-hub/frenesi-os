@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { lerLiberacoes, linhasDeLiberacao } from '..'
+import { lerLiberacoes, linhasDeLiberacao, recortarJanela, relatorioServe } from '..'
 
 /** Formato que a conta declarou em /v1/account/release_report/config. */
 const CSV_PT = `DATA;DATA_DE_APROVACAO_DA_TRANSACAO;ID_DA_OPERACAO;DESCRICAO;VALOR_LIQUIDO_CREDITO;VALOR_LIQUIDO_DEBITO;VALOR_BRUTO;TARIFA_MP;IMPOSTOS
@@ -69,5 +69,56 @@ describe('relatório de liberações', () => {
     )
     expect(comAspas.linhas[0].descricao).toBe('Venda, parcelada em 6x')
     expect(comAspas.linhas[0].liquido).toBe(71.66)
+  })
+})
+
+describe('escolher o relatório sozinho', () => {
+  const rel = (de: string, ate: string, jaImportado = false) => ({ de, ate, jaImportado })
+
+  it('aceita o que começa antes e alcança o fim', () => {
+    // O relatório que o Mercado Pago entrega raramente tem as datas exatas do
+    // pedido. Sobrar no começo é inofensivo: o recorte descarta.
+    expect(relatorioServe(rel('2026-07-10', '2026-08-11'), '2026-07-22', '2026-08-10')).toBe(true)
+  })
+
+  it('recusa o que para antes do fim da janela', () => {
+    // Este é o erro que pareceria sucesso: importa, diz "pronto", e as vendas
+    // dos últimos dias simplesmente não estão lá.
+    expect(relatorioServe(rel('2026-07-01', '2026-08-05'), '2026-07-22', '2026-08-10')).toBe(false)
+  })
+
+  it('recusa o que começa depois, mesmo cobrindo o fim', () => {
+    // Deixaria um buraco no começo do extrato — dinheiro que entrou e o ERP
+    // nunca soube.
+    expect(relatorioServe(rel('2026-08-01', '2026-08-11'), '2026-07-22', '2026-08-10')).toBe(false)
+  })
+
+  it('tolera um dia de folga no fim, por causa do fuso', () => {
+    // O relatório é montado no fuso do Mercado Pago; o "hoje" daqui pode
+    // estar algumas horas à frente do "hoje" de lá.
+    expect(relatorioServe(rel('2026-07-01', '2026-08-09'), '2026-07-22', '2026-08-10')).toBe(true)
+  })
+
+  it('não reimporta o que já entrou', () => {
+    expect(relatorioServe(rel('2026-07-10', '2026-08-11', true), '2026-07-22', '2026-08-10')).toBe(
+      false,
+    )
+  })
+
+  it('recusa o relatório sem período declarado', () => {
+    // Sem saber o que o arquivo cobre, importar é apostar. Pedir outro custa
+    // um minuto; descobrir depois que o caixa tem movimento de outra operação
+    // custa a confiança no número inteiro.
+    expect(relatorioServe(rel('', ''), '2026-07-22', '2026-08-10')).toBe(false)
+  })
+})
+
+describe('recorte da janela', () => {
+  it('descarta o movimento anterior ao começo da operação', () => {
+    // Esta conta é de fevereiro e só passou a receber as vendas desta loja em
+    // 22/07. Sem o recorte, um relatório mais largo traria cinco meses de
+    // outra operação para dentro do caixa da Frenesi.
+    const dentro = recortarJanela(lerLiberacoes(CSV_PT).linhas, '2026-08-08', '2026-08-10')
+    expect(dentro.map((l) => l.data)).toEqual(['2026-08-10', '2026-08-09', '2026-08-08'])
   })
 })

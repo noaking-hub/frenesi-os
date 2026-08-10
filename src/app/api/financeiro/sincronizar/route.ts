@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 
-import { mercadoPagoConfigurado, sincronizarMercadoPago } from '@/data/mercadopago'
+import { atualizarExtratoMp, mercadoPagoConfigurado } from '@/data/mercadopago'
 import { mensagemDe } from '@/data/shopify'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
+import { INICIO_DA_OPERACAO } from '@/domain'
 
 /**
  * Sincronia diária do financeiro.
@@ -53,15 +54,23 @@ export async function POST(req: Request) {
 
   const agora = new Date()
   const ate = agora.toISOString().slice(0, 10)
-  const de = new Date(agora.getTime() - JANELA_DIAS * 86_400_000).toISOString().slice(0, 10)
+  const janela = new Date(agora.getTime() - JANELA_DIAS * 86_400_000).toISOString().slice(0, 10)
+  // Nunca antes do dia em que esta conta passou a receber as vendas desta
+  // loja: o movimento anterior é de outra operação.
+  const de = janela < INICIO_DA_OPERACAO ? INICIO_DA_OPERACAO : janela
 
   const relatorio: Record<string, unknown> = { quando: agora.toISOString(), periodo: { de, ate } }
 
-  // Cada etapa é isolada: o Sicoob sem certificado não pode impedir a leitura
-  // do gateway, e a varredura de ocorrências não depende de nenhum dos dois.
+  // Cada etapa é isolada: uma falha de rede no gateway não pode impedir a
+  // varredura de ocorrências, que não depende dele.
+  //
+  // A sincronia de ontem terá pedido o relatório e não o encontrado pronto —
+  // ele leva minutos para montar. Por isso a rodada de hoje IMPORTA o de
+  // ontem antes de pedir o de hoje: o atraso de um dia se resolve sozinho, em
+  // vez de virar um extrato que nunca chega.
   if (mercadoPagoConfigurado()) {
     try {
-      relatorio.mercadopago = await sincronizarMercadoPago(de, ate)
+      relatorio.mercadopago = await atualizarExtratoMp(de, ate, { pedir: true })
     } catch (e) {
       relatorio.mercadopago = { erro: mensagemDe(e) }
     }

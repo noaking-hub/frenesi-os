@@ -234,6 +234,56 @@ export function lerLiberacoes(csv: string): ExtratoLiberacoes {
   return { linhas, cabecalhos, avisos }
 }
 
+/** O que a tela e o cron precisam saber de um relatório para decidir. */
+export interface RelatorioListado {
+  de: string
+  ate: string
+  jaImportado: boolean
+}
+
+/**
+ * Este relatório serve para atualizar a janela pedida?
+ *
+ * É a decisão que a tela passou a tomar sozinha, e é a que erra sem avisar.
+ * Duas condições, cada uma por um motivo diferente:
+ *
+ *   começa antes  →  o excedente do começo é descartado no recorte, então
+ *                    sobrar é inofensivo; faltar deixa buraco no extrato.
+ *   alcança o fim →  um relatório que para três dias atrás seria importado e
+ *                    daria a atualização por concluída, escondendo as vendas
+ *                    mais recentes. Esse é o pior desfecho: parece sucesso.
+ *
+ * Um dia de folga no fim porque o relatório é montado no fuso do Mercado Pago
+ * e o "hoje" daqui pode estar algumas horas à frente do "hoje" de lá.
+ */
+export function relatorioServe(r: RelatorioListado, de: string, ate: string): boolean {
+  if (r.jaImportado) return false
+  if (!r.de || !r.ate) return false
+  return r.de <= de && r.ate >= diaAnterior(ate)
+}
+
+function diaAnterior(iso: string): string {
+  const t = Date.parse(`${iso}T12:00:00Z`)
+  if (!Number.isFinite(t)) return iso
+  return new Date(t - 86_400_000).toISOString().slice(0, 10)
+}
+
+/**
+ * Descarta o que está fora da janela.
+ *
+ * É o que torna seguro escolher o relatório sem perguntar: o Mercado Pago
+ * entrega o arquivo do período que quiser — o pedido de 22/07 a 10/08 pode
+ * voltar como 10/07 a 11/08 — e o excedente traria para o caixa desta loja o
+ * movimento de uma operação anterior.
+ */
+export function recortarJanela(
+  linhas: LinhaLiberacao[],
+  de: string,
+  ate: string,
+): LinhaLiberacao[] {
+  return linhas.filter((l) => l.data >= de && l.data <= ate)
+}
+
 /**
  * Converte para o formato que a tabela de extrato guarda.
  *

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useCallback, useEffect, useState, useTransition } from 'react'
 
 import {
   Badge,
@@ -14,19 +14,19 @@ import {
 } from '@/components/erp/primitivos'
 import { Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR } from '@/components/erp/tokens'
-import { brl, sugerirCategoria } from '@/domain'
+import { INICIO_DA_OPERACAO, brl, sugerirCategoria } from '@/domain'
 import type { LinhaExtrato } from '@/domain'
 
 import type { ConferenciaConta } from '@/data/extrato'
 import type { RelatorioDisponivel } from '@/data/mercadopago'
 
 import {
+  atualizarExtrato,
   classificarLinha,
   diagnosticarGateway,
   ignorarLinha,
   importarExtratoCompleto,
   listarRelatoriosProntos,
-  pedirExtratoCompleto,
   sondarExtratoCompleto,
   zerarFinanceiro,
   recasarExtrato,
@@ -58,17 +58,17 @@ function hoje(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
-/**
- * Quando esta conta do Mercado Pago passou a receber as vendas da Yampi.
- *
- * A conta existe desde fevereiro e tem movimento anterior, mas ele é de
- * outra operação — puxar aquilo para cá encheria o extrato de dinheiro que
- * não é desta loja e faria o caixa do ERP discordar da realidade do negócio.
- * O período começa aqui, e a tela diz por quê.
- */
-const INICIO_DA_OPERACAO = '2026-07-22'
-
 const dataBr = (iso: string) => iso.split('-').reverse().join('/')
+
+/**
+ * Quanto a tela espera o Mercado Pago montar o extrato antes de desistir.
+ *
+ * 15 em 15 segundos por 6 minutos. O relatório costuma ficar pronto em menos
+ * de um minuto; o teto existe para a tela parar de perguntar sozinha se a
+ * pessoa esquecer a aba aberta, não porque 6 minutos signifique alguma coisa.
+ */
+const ESPERA_MS = 15_000
+const MAX_ESPERAS = 24
 
 interface Props {
   linhas: LinhaExtrato[]
@@ -96,6 +96,13 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
   const [erro, setErro] = useState<string | null>(null)
   const [pendente, iniciar] = useTransition()
 
+  // Zero é "não está esperando". Acima disso, é a vez da espera — e mudar o
+  // número é o que faz o efeito abaixo agendar a próxima consulta.
+  const [espera, setEspera] = useState(0)
+  const [atualizando, setAtualizando] = useState(false)
+  const [ferramentas, setFerramentas] = useState(false)
+  const [editandoPeriodo, setEditandoPeriodo] = useState(false)
+
   // Categoria escolhida por linha. A sugestão entra como valor inicial e o
   // operador troca quando o palpite erra — palpite que não dá para corrigir
   // vira erro gravado.
@@ -111,6 +118,55 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
   const pendentes = linhas
   const entradas = pendentes.filter((l) => l.tipo === 'entrada').reduce((a, l) => a + l.valor, 0)
   const saidas = pendentes.filter((l) => l.tipo === 'saida').reduce((a, l) => a + l.valor, 0)
+
+  /**
+   * Atualizar o extrato: um clique, e a tela se vira.
+   *
+   * `pedir` só é verdadeiro no clique. Nas voltas automáticas ela apenas
+   * pergunta se ficou pronto — pedir de novo a cada consulta encheria a conta
+   * do Mercado Pago de relatórios idênticos.
+   */
+  const atualizar = useCallback(
+    async (pedir: boolean) => {
+      setErro(null)
+      setAtualizando(true)
+      try {
+        const r = await atualizarExtrato(de, ate, pedir)
+        if (!r.ok) {
+          setErro(r.erro)
+          setEspera(0)
+          return
+        }
+        setRelatorio(r.linhas)
+        if (r.estado === 'pronto') {
+          setEspera(0)
+        } else {
+          setEspera((n) => (n === 0 ? 1 : n + 1))
+        }
+      } catch (e) {
+        setErro(e instanceof Error ? e.message : String(e))
+        setEspera(0)
+      } finally {
+        setAtualizando(false)
+      }
+    },
+    [de, ate],
+  )
+
+  useEffect(() => {
+    if (espera === 0) return
+    if (espera > MAX_ESPERAS) {
+      setErro(
+        'O Mercado Pago passou de seis minutos para montar o extrato. O pedido continua valendo do lado deles — clique em Atualizar extrato daqui a pouco e ele será importado sem pedir de novo.',
+      )
+      setEspera(0)
+      return
+    }
+    const t = setTimeout(() => {
+      void atualizar(false)
+    }, ESPERA_MS)
+    return () => clearTimeout(t)
+  }, [espera, atualizar])
 
   function rodar(acao: () => Promise<string[] | null>) {
     setErro(null)
@@ -264,178 +320,76 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
       >
         <TituloSecao tamanho={14}>Trazer o movimento</TituloSecao>
 
-        {/* Mercado Pago */}
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
-          <span style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <Rotulo>Mercado Pago · de</Rotulo>
-            <input type="date" value={de} onChange={(e) => setDe(e.target.value)} style={campo} />
+        {/* Um botão. Ele pede o extrato ao Mercado Pago, espera ficar pronto,
+            importa, lê a tarifa de cada venda e liga tudo aos pedidos — nessa
+            ordem, que é a ordem certa e não precisa estar na cabeça de quem
+            usa. As ferramentas de diagnóstico ficam guardadas abaixo. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <BotaoOuro
+            altura={36}
+            desabilitado={atualizando || espera > 0 || !gatewayLigado}
+            onClick={() => void atualizar(true)}
+          >
+            {espera > 0
+              ? `Aguardando o Mercado Pago… (${espera}/${MAX_ESPERAS})`
+              : atualizando
+                ? 'Atualizando…'
+                : 'Atualizar extrato'}
+          </BotaoOuro>
+
+          <span
+            className="font-sans"
+            style={{ fontSize: 11, color: 'var(--color-terciario)', lineHeight: 1.5 }}
+          >
+            {`${dataBr(de)} até ${dataBr(ate)}`}
+            {' · '}
+            <button
+              type="button"
+              onClick={() => setEditandoPeriodo((v) => !v)}
+              style={{
+                background: 'none',
+                border: 0,
+                padding: 0,
+                font: 'inherit',
+                color: 'var(--color-ouro)',
+                cursor: 'pointer',
+                textDecoration: 'underline',
+                textUnderlineOffset: 3,
+              }}
+            >
+              {editandoPeriodo ? 'fechar' : 'alterar período'}
+            </button>
           </span>
-          <span style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <Rotulo>até</Rotulo>
-            <input type="date" value={ate} onChange={(e) => setAte(e.target.value)} style={campo} />
-          </span>
-          <BotaoOuro
-            altura={32}
-            desabilitado={pendente || !gatewayLigado}
-            onClick={() =>
-              rodar(async () => {
-                const r = await sincronizarGateway(de, ate)
-                if (!r.ok) throw new Error(r.erro)
-                const x = r.resultado
-                return [
-                  `${x.lidos} pagamento(s) lidos de ${x.periodo.de} a ${x.periodo.ate}.`,
-                  `Repasses: ${x.repassesConciliados} conciliado(s) agora, ${x.repassesJaConciliados} já estavam.`,
-                  ...(Object.keys(x.criterios).length
-                    ? [
-                        `Casamento com pedidos: ${Object.entries(x.criterios)
-                          .map(([k, v]) => `${v} por ${k}`)
-                          .join(', ')}.`,
-                      ]
-                    : []),
-                  ...(x.semPedido.length
-                    ? [
-                        `${x.semPedido.length} pagamento(s) aprovados sem pedido correspondente:`,
-                        ...x.semPedido
-                          .slice(0, 10)
-                          .map((p) => `  · ${p.id} · ${brl(p.valor)} · ${p.quando} · ref "${p.referencia || '—'}"`),
-                      ]
-                    : []),
-                  ...x.avisos.map((a) => `Atenção: ${a}`),
-                ]
-              })
-            }
-          >
-            {pendente ? 'Lendo…' : 'Ler tarifas das vendas'}
-          </BotaoOuro>
-          <BotaoSecundario
-            altura={32}
-            desabilitado={pendente}
-            onClick={() =>
-              rodar(async () => {
-                const r = await diagnosticarGateway(de, ate)
-                if (!r.ok) throw new Error(r.erro)
-                return [...r.passos, ...(r.amostra.length ? ['', 'Amostra:', ...r.amostra] : [])]
-              })
-            }
-          >
-            Diagnosticar
-          </BotaoSecundario>
-          <BotaoSecundario
-            altura={32}
-            desabilitado={pendente || !gatewayLigado}
-            onClick={() =>
-              rodar(async () => {
-                // Reler existe porque a importação é idempotente: quando a
-                // LEITURA estava errada, ressincronizar não conserta nada.
-                if (
-                  !window.confirm(
-                    'Apagar as linhas do Mercado Pago que ainda não viraram lançamento e ler o período de novo?\n\nO que já foi classificado ou dispensado é preservado.',
-                  )
-                ) {
-                  return null
-                }
-                const r = await relerGateway(de, ate)
-                if (!r.ok) throw new Error(r.erro)
-                const x = r.resultado
-                return [
-                  `${r.apagadas} linha(s) antigas apagadas.`,
-                  `${x.lidos} pagamento(s) relidos · ${x.repassesConciliados} repasse(s) atualizados.`,
-                  ...x.avisos.map((a) => `Atenção: ${a}`),
-                ]
-              })
-            }
-          >
-            Reler do zero
-          </BotaoSecundario>
-          <BotaoOuro
-            altura={32}
-            desabilitado={pendente || !gatewayLigado}
-            onClick={() =>
-              rodar(async () => {
-                const r = await pedirExtratoCompleto(de, ate)
-                if (!r.ok) throw new Error(r.erro)
-                return r.linhas
-              })
-            }
-          >
-            1 · Pedir extrato
-          </BotaoOuro>
-          <BotaoOuro
-            altura={32}
-            desabilitado={pendente || !gatewayLigado}
-            onClick={() =>
-              rodar(async () => {
-                const r = await listarRelatoriosProntos()
-                if (!r.ok) throw new Error(r.erro)
-                setProntos(r.relatorios)
-                return r.relatorios.length
-                  ? [`${r.relatorios.length} relatório(s) prontos. Escolha abaixo qual importar.`]
-                  : [
-                      'Nenhum relatório pronto ainda.',
-                      'Se você acabou de pedir, espere um minuto e clique de novo.',
-                    ]
-              })
-            }
-          >
-            2 · Ver relatórios prontos
-          </BotaoOuro>
-          <BotaoSecundario
-            altura={32}
-            desabilitado={pendente || !gatewayLigado}
-            onClick={() =>
-              rodar(async () => {
-                const r = await sondarExtratoCompleto()
-                if (!r.ok) throw new Error(r.erro)
-                return r.linhas
-              })
-            }
-          >
-            Sondar
-          </BotaoSecundario>
-          <BotaoSecundario
-            altura={32}
-            desabilitado={pendente}
-            onClick={() =>
-              rodar(async () => {
-                if (
-                  !window.confirm(
-                    'Apagar TODO o extrato, os lançamentos que vieram dele e a conciliação dos repasses?\n\nPedidos e lançamentos digitados à mão não são tocados.',
-                  )
-                ) {
-                  return null
-                }
-                const r = await zerarFinanceiro()
-                if (!r.ok) throw new Error(r.erro)
-                return r.linhas
-              })
-            }
-          >
-            Zerar financeiro
-          </BotaoSecundario>
-          <BotaoSecundario
-            altura={32}
-            desabilitado={pendente}
-            onClick={() =>
-              rodar(async () => {
-                const r = await recasarExtrato()
-                if (!r.ok) throw new Error(r.erro)
-                return [
-                  `${r.religadas} linha(s) ligadas a um pedido agora.`,
-                  r.restantes
-                    ? `${r.restantes} continuam sem pedido correspondente no ERP.`
-                    : 'Nenhuma linha ficou órfã.',
-                ]
-              })
-            }
-          >
-            Recasar com pedidos
-          </BotaoSecundario>
+
           {!gatewayLigado && (
-            <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
+            <span className="font-sans" style={{ fontSize: 10.5, color: COR.atencao }}>
               Falta MERCADOPAGO_ACCESS_TOKEN no ambiente.
             </span>
           )}
         </div>
+
+        {espera > 0 && (
+          <span
+            className="font-sans"
+            style={{ fontSize: 11, lineHeight: 1.55, color: COR.atencao, textWrap: 'pretty' }}
+          >
+            O Mercado Pago está montando o extrato — costuma levar menos de um minuto. Pode deixar
+            esta tela aberta: ela importa sozinha assim que ficar pronto.
+          </span>
+        )}
+
+        {editandoPeriodo && (
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              <Rotulo>de</Rotulo>
+              <input type="date" value={de} onChange={(e) => setDe(e.target.value)} style={campo} />
+            </span>
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              <Rotulo>até</Rotulo>
+              <input type="date" value={ate} onChange={(e) => setAte(e.target.value)} style={campo} />
+            </span>
+          </div>
+        )}
 
         <span
           className="font-sans"
@@ -448,8 +402,180 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
         >
           {de < INICIO_DA_OPERACAO
             ? `Esta conta do Mercado Pago só passou a receber as vendas da Yampi em ${dataBr(INICIO_DA_OPERACAO)}. O que vier antes é movimento de outra operação e vai poluir o caixa desta loja.`
-            : `O extrato começa em ${dataBr(INICIO_DA_OPERACAO)}, quando esta conta passou a receber as vendas da Yampi. A conta é mais antiga, mas o movimento anterior é de outra operação.`}
+            : `O extrato começa em ${dataBr(INICIO_DA_OPERACAO)}, quando esta conta passou a receber as vendas da Yampi. A conta é mais antiga, mas o movimento anterior é de outra operação — o que vier fora dessa janela é descartado na importação.`}
         </span>
+
+        {/* ── Ferramentas ────────────────────────────────────────────────
+            Cada uma existe por um problema real que já aconteceu, e todas
+            somem do caminho de quem só quer o extrato atualizado. */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <button
+            type="button"
+            onClick={() => setFerramentas((v) => !v)}
+            style={{
+              alignSelf: 'flex-start',
+              background: 'none',
+              border: 0,
+              padding: 0,
+              fontFamily: 'inherit',
+              fontSize: 10.5,
+              letterSpacing: '.06em',
+              textTransform: 'uppercase',
+              color: 'rgba(242,237,227,.4)',
+              cursor: 'pointer',
+            }}
+          >
+            {ferramentas ? '− Ferramentas' : '+ Ferramentas'}
+          </button>
+
+          {ferramentas && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <BotaoSecundario
+                altura={30}
+                desabilitado={pendente || !gatewayLigado}
+                onClick={() =>
+                  rodar(async () => {
+                    const r = await sincronizarGateway(de, ate)
+                    if (!r.ok) throw new Error(r.erro)
+                    const x = r.resultado
+                    return [
+                      `${x.lidos} pagamento(s) lidos de ${x.periodo.de} a ${x.periodo.ate}.`,
+                      `Repasses: ${x.repassesConciliados} conciliado(s) agora, ${x.repassesJaConciliados} já estavam.`,
+                      ...(Object.keys(x.criterios).length
+                        ? [
+                            `Casamento com pedidos: ${Object.entries(x.criterios)
+                              .map(([k, v]) => `${v} por ${k}`)
+                              .join(', ')}.`,
+                          ]
+                        : []),
+                      ...(x.semPedido.length
+                        ? [
+                            `${x.semPedido.length} pagamento(s) aprovados sem pedido correspondente:`,
+                            ...x.semPedido
+                              .slice(0, 10)
+                              .map(
+                                (p) =>
+                                  `  · ${p.id} · ${brl(p.valor)} · ${p.quando} · ref "${p.referencia || '—'}"`,
+                              ),
+                          ]
+                        : []),
+                      ...x.avisos.map((a) => `Atenção: ${a}`),
+                    ]
+                  })
+                }
+              >
+                Só as tarifas
+              </BotaoSecundario>
+              <BotaoSecundario
+                altura={30}
+                desabilitado={pendente}
+                onClick={() =>
+                  rodar(async () => {
+                    const r = await recasarExtrato()
+                    if (!r.ok) throw new Error(r.erro)
+                    return [
+                      `${r.religadas} linha(s) ligadas a um pedido agora.`,
+                      r.restantes
+                        ? `${r.restantes} continuam sem pedido correspondente no ERP.`
+                        : 'Nenhuma linha ficou órfã.',
+                    ]
+                  })
+                }
+              >
+                Recasar com pedidos
+              </BotaoSecundario>
+              <BotaoSecundario
+                altura={30}
+                desabilitado={pendente || !gatewayLigado}
+                onClick={() =>
+                  rodar(async () => {
+                    const r = await listarRelatoriosProntos()
+                    if (!r.ok) throw new Error(r.erro)
+                    setProntos(r.relatorios)
+                    return r.relatorios.length
+                      ? [`${r.relatorios.length} relatório(s) no Mercado Pago.`]
+                      : ['Nenhum relatório montado nesta conta ainda.']
+                  })
+                }
+              >
+                Relatórios do Mercado Pago
+              </BotaoSecundario>
+              <BotaoSecundario
+                altura={30}
+                desabilitado={pendente}
+                onClick={() =>
+                  rodar(async () => {
+                    const r = await diagnosticarGateway(de, ate)
+                    if (!r.ok) throw new Error(r.erro)
+                    return [...r.passos, ...(r.amostra.length ? ['', 'Amostra:', ...r.amostra] : [])]
+                  })
+                }
+              >
+                Diagnosticar
+              </BotaoSecundario>
+              <BotaoSecundario
+                altura={30}
+                desabilitado={pendente || !gatewayLigado}
+                onClick={() =>
+                  rodar(async () => {
+                    const r = await sondarExtratoCompleto()
+                    if (!r.ok) throw new Error(r.erro)
+                    return r.linhas
+                  })
+                }
+              >
+                Sondar a conta
+              </BotaoSecundario>
+              <BotaoSecundario
+                altura={30}
+                desabilitado={pendente || !gatewayLigado}
+                onClick={() =>
+                  rodar(async () => {
+                    // Reler existe porque a importação é idempotente: quando a
+                    // LEITURA estava errada, ressincronizar não conserta nada.
+                    if (
+                      !window.confirm(
+                        'Apagar as linhas do Mercado Pago que ainda não viraram lançamento e ler o período de novo?\n\nO que já foi classificado ou dispensado é preservado.',
+                      )
+                    ) {
+                      return null
+                    }
+                    const r = await relerGateway(de, ate)
+                    if (!r.ok) throw new Error(r.erro)
+                    const x = r.resultado
+                    return [
+                      `${r.apagadas} linha(s) antigas apagadas.`,
+                      `${x.lidos} pagamento(s) relidos · ${x.repassesConciliados} repasse(s) atualizados.`,
+                      ...x.avisos.map((a) => `Atenção: ${a}`),
+                    ]
+                  })
+                }
+              >
+                Reler do zero
+              </BotaoSecundario>
+              <BotaoSecundario
+                altura={30}
+                desabilitado={pendente}
+                onClick={() =>
+                  rodar(async () => {
+                    if (
+                      !window.confirm(
+                        'Apagar TODO o extrato, os lançamentos que vieram dele e a conciliação dos repasses?\n\nPedidos e lançamentos digitados à mão não são tocados.',
+                      )
+                    ) {
+                      return null
+                    }
+                    const r = await zerarFinanceiro()
+                    if (!r.ok) throw new Error(r.erro)
+                    return r.linhas
+                  })
+                }
+              >
+                Zerar financeiro
+              </BotaoSecundario>
+            </div>
+          )}
+        </div>
       </section>
 
       {erro && <FaixaAlerta tom="erro" texto={erro} />}
@@ -485,7 +611,13 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
             gap: 10,
           }}
         >
-          <TituloSecao tamanho={13}>Relatórios prontos no Mercado Pago</TituloSecao>
+          <TituloSecao tamanho={13}>Relatórios montados nesta conta</TituloSecao>
+          <span
+            className="font-sans"
+            style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)' }}
+          >
+            {`O botão Atualizar extrato já escolhe e importa sozinho. Esta lista é para quando você quiser importar um arquivo específico — o que estiver fora de ${dataBr(de)}–${dataBr(ate)} é descartado do mesmo jeito.`}
+          </span>
           {prontos.map((r) => (
             <div
               key={r.arquivo}
@@ -522,7 +654,7 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
                   desabilitado={pendente}
                   onClick={() =>
                     rodar(async () => {
-                      const resposta = await importarExtratoCompleto(r.arquivo)
+                      const resposta = await importarExtratoCompleto(r.arquivo, de, ate)
                       if (!resposta.ok) throw new Error(resposta.erro)
                       return resposta.linhas
                     })

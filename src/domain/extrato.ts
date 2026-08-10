@@ -13,6 +13,17 @@
 
 export type OrigemExtrato = 'mercadopago' | 'manual'
 
+/**
+ * Quando esta conta do Mercado Pago passou a receber as vendas da Yampi.
+ *
+ * A conta é de fevereiro e tem movimento anterior, mas ele é de outra
+ * operação: trazer aquilo para cá encheria o caixa desta loja de dinheiro que
+ * não é dela. Toda importação de extrato é recortada por esta data — a da
+ * tela e a da sincronia diária, que é justamente a que ninguém está olhando
+ * quando erra.
+ */
+export const INICIO_DA_OPERACAO = '2026-07-22'
+
 /** Linha pronta para a função `importar_extrato` do banco. */
 export interface LinhaExtratoBruta {
   chave: string
