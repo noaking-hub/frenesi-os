@@ -89,3 +89,32 @@ export async function ajustarAds(adsPct: number, gastoMensal: number): Promise<R
   revalidatePath('/', 'layout')
   return { ok: true }
 }
+
+/**
+ * Grava o custo de receber medido no extrato.
+ *
+ * Só o intermediador muda; o resto do parâmetro vigente é copiado pela função
+ * do banco. Reescrever a linha inteira daqui obrigaria esta tela a conhecer
+ * campos que ela não edita, e o primeiro esquecido zeraria um custo em
+ * silêncio.
+ */
+export async function ajustarIntermediador(pct: number): Promise<RespostaAds> {
+  if (!supabaseConfigurado()) {
+    return { ok: false, erro: 'O Supabase precisa estar configurado para salvar parâmetros.' }
+  }
+  if (!Number.isFinite(pct) || pct < 0 || pct >= 100) {
+    return { ok: false, erro: 'Percentual de intermediador fora da faixa aceitável.' }
+  }
+
+  const { error } = await supabaseServer().rpc('ajustar_intermediador_parametro', {
+    p_intermediador_pct: Number(pct.toFixed(3)),
+    p_operador: OPERADOR,
+  })
+  if (error) {
+    console.error('[parametros] ajustar_intermediador_parametro falhou:', error)
+    return { ok: false, erro: error.message || error.details || 'Falha ao ajustar o intermediador.' }
+  }
+
+  revalidatePath('/', 'layout')
+  return { ok: true }
+}

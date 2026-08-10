@@ -259,3 +259,67 @@ export function desvioAds(
     subestimado: delta > DESVIO_ADS,
   }
 }
+
+// ── Custo real de receber ──────────────────────────────────────────────────
+
+export interface CustoPorMeio {
+  meio: string
+  vendas: number
+  bruto: number
+  tarifa: number
+  /** Custo daquele meio, em %. */
+  pct: number
+  /** Fatia do faturamento que passou por ele, em %. */
+  fatia: number
+}
+
+export interface CustoDeReceber {
+  meios: CustoPorMeio[]
+  bruto: number
+  tarifa: number
+  /** A média PONDERADA — é este o número que entra no preço. */
+  pct: number
+  /** O meio mais caro que tem peso relevante. */
+  maisCaro: CustoPorMeio | null
+  /** O meio mais barato com peso relevante. */
+  maisBarato: CustoPorMeio | null
+  vendas: number
+}
+
+/**
+ * Média ponderada do que custa receber.
+ *
+ * Ponderada pelo VALOR, não pela quantidade de vendas: uma venda de R$ 500 em
+ * 6x pesa mais no custo do mês que dez vendas de R$ 30 no Pix, e é o custo do
+ * mês que precisa caber no preço.
+ */
+export function custoDeReceber(meios: CustoPorMeio[]): CustoDeReceber {
+  const bruto = meios.reduce((a, m) => a + m.bruto, 0)
+  const tarifa = meios.reduce((a, m) => a + m.tarifa, 0)
+  // Um meio com fatia mínima distorce a leitura: dois pagamentos num meio
+  // caro fariam "o mais caro" apontar para algo que não move o resultado.
+  const relevantes = meios.filter((m) => m.fatia >= 1)
+  const porPreco = [...relevantes].sort((a, b) => b.pct - a.pct)
+
+  return {
+    meios,
+    bruto,
+    tarifa,
+    pct: bruto > 0 ? Math.round((tarifa / bruto) * 10000) / 100 : 0,
+    maisCaro: porPreco[0] ?? null,
+    maisBarato: porPreco[porPreco.length - 1] ?? null,
+    vendas: meios.reduce((a, m) => a + m.vendas, 0),
+  }
+}
+
+/**
+ * Quanto de tarifa um meio consome além do peso que ele tem no faturamento.
+ *
+ * É a pergunta que decide se vale manter o parcelamento sem juros: quando um
+ * meio responde por 15% do faturamento e 60% da tarifa, o que se está
+ * comprando com essa diferença é volume — e dá para medir se veio.
+ */
+export function desproporcao(m: CustoPorMeio, total: CustoDeReceber): number {
+  if (total.tarifa <= 0) return 0
+  return Math.round((m.tarifa / total.tarifa) * 1000) / 10
+}

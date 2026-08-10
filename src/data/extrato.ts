@@ -1,6 +1,6 @@
 import 'server-only'
 
-import type { LinhaExtrato, LinhaExtratoBruta, OrigemExtrato } from '@/domain'
+import type { CustoPorMeio, LinhaExtrato, LinhaExtratoBruta, OrigemExtrato } from '@/domain'
 
 import { mensagemDe } from './shopify'
 import { supabaseConfigurado, supabaseServer } from './supabase'
@@ -148,4 +148,26 @@ export async function gravarLinhas(
   }
 
   return { novas, repetidas }
+}
+
+/**
+ * Custo real de receber, por meio de pagamento.
+ *
+ * Sai da tarifa que o gateway informou em cada pagamento, nunca de tabela
+ * digitada: quando a taxa mudar, este número muda junto, sem ninguém precisar
+ * lembrar de atualizar nada.
+ */
+export async function custoPorMeio(): Promise<CustoPorMeio[]> {
+  if (!supabaseConfigurado()) return []
+  const { data, error } = await supabaseServer().from('custo_recebimento_por_meio').select('*')
+  if (error) throw new Error(mensagemDe(error))
+
+  return (data ?? []).map((m) => ({
+    meio: m.meio as string,
+    vendas: Number(m.vendas),
+    bruto: Number(m.bruto),
+    tarifa: Number(m.tarifa),
+    pct: Number(m.pct),
+    fatia: Number(m.fatia),
+  }))
 }
