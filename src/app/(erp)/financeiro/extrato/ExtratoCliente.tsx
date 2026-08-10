@@ -13,6 +13,7 @@ import {
   Valor,
 } from '@/components/erp/primitivos'
 import { Tabela, type Coluna } from '@/components/erp/Tabela'
+import { COR } from '@/components/erp/tokens'
 import { brl, sugerirCategoria } from '@/domain'
 import type { LinhaExtrato } from '@/domain'
 
@@ -54,9 +55,17 @@ function hoje(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
-function diasAtras(n: number): string {
-  return new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10)
-}
+/**
+ * Quando esta conta do Mercado Pago passou a receber as vendas da Yampi.
+ *
+ * A conta existe desde fevereiro e tem movimento anterior, mas ele é de
+ * outra operação — puxar aquilo para cá encheria o extrato de dinheiro que
+ * não é desta loja e faria o caixa do ERP discordar da realidade do negócio.
+ * O período começa aqui, e a tela diz por quê.
+ */
+const INICIO_DA_OPERACAO = '2026-07-22'
+
+const dataBr = (iso: string) => iso.split('-').reverse().join('/')
 
 interface Props {
   linhas: LinhaExtrato[]
@@ -74,7 +83,7 @@ interface Props {
  * pela primeira vez lê nessa ordem e entende o módulo.
  */
 export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Props) {
-  const [de, setDe] = useState(diasAtras(30))
+  const [de, setDe] = useState(INICIO_DA_OPERACAO)
   const [ate, setAte] = useState(hoje())
   const [relatorio, setRelatorio] = useState<string[] | null>(null)
   const [erro, setErro] = useState<string | null>(null)
@@ -268,7 +277,6 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
                 const x = r.resultado
                 return [
                   `${x.lidos} pagamento(s) lidos de ${x.periodo.de} a ${x.periodo.ate}.`,
-                  `Extrato: ${x.novasLinhas} linha(s) nova(s), ${x.linhasRepetidas} já conhecida(s).`,
                   `Repasses: ${x.repassesConciliados} conciliado(s) agora, ${x.repassesJaConciliados} já estavam.`,
                   ...(Object.keys(x.criterios).length
                     ? [
@@ -290,7 +298,7 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
               })
             }
           >
-            {pendente ? 'Lendo…' : 'Sincronizar gateway'}
+            {pendente ? 'Lendo…' : 'Ler tarifas das vendas'}
           </BotaoOuro>
           <BotaoSecundario
             altura={32}
@@ -324,8 +332,7 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
                 const x = r.resultado
                 return [
                   `${r.apagadas} linha(s) antigas apagadas.`,
-                  `${x.lidos} pagamento(s) relidos · ${x.novasLinhas} linha(s) gravadas.`,
-                  `${x.saidas} deles foram pagamentos NOSSOS (etiqueta de frete, por exemplo) e entraram como saída.`,
+                  `${x.lidos} pagamento(s) relidos · ${x.repassesConciliados} repasse(s) atualizados.`,
                   ...x.avisos.map((a) => `Atenção: ${a}`),
                 ]
               })
@@ -404,6 +411,19 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
           )}
         </div>
 
+        <span
+          className="font-sans"
+          style={{
+            fontSize: 10.5,
+            lineHeight: 1.55,
+            color: de < INICIO_DA_OPERACAO ? COR.atencao : 'var(--color-terciario)',
+            textWrap: 'pretty',
+          }}
+        >
+          {de < INICIO_DA_OPERACAO
+            ? `Esta conta do Mercado Pago só passou a receber as vendas da Yampi em ${dataBr(INICIO_DA_OPERACAO)}. O que vier antes é movimento de outra operação e vai poluir o caixa desta loja.`
+            : `O extrato começa em ${dataBr(INICIO_DA_OPERACAO)}, quando esta conta passou a receber as vendas da Yampi. A conta é mais antiga, mas o movimento anterior é de outra operação.`}
+        </span>
       </section>
 
       {erro && <FaixaAlerta tom="erro" texto={erro} />}

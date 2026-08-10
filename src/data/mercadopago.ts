@@ -5,12 +5,10 @@ import {
   lerLiberacoes,
   linhasDeLiberacao,
   indexarPedidos,
-  linhasDoPagamentoMp,
   normalizarPagamentoMp,
 } from '@/domain'
 import type {
   CasamentoPagamento,
-  LinhaExtratoBruta,
   PagamentoMp,
   PedidoParaCasar,
 } from '@/domain'
@@ -287,10 +285,6 @@ export interface ResultadoSincroniaMp {
   saidas: number
   /** Pagamentos lidos da API, aprovados ou não. */
   lidos: number
-  /** Linhas de extrato que a leitura produziu. */
-  linhas: number
-  novasLinhas: number
-  linhasRepetidas: number
   /** Repasses atualizados com o que o gateway informou. */
   repassesConciliados: number
   repassesJaConciliados: number
@@ -354,7 +348,6 @@ export async function sincronizarMercadoPago(de: string, ate: string): Promise<R
   }))
   const indice = indexarPedidos(pedidos)
 
-  const linhas: LinhaExtratoBruta[] = []
   const paraConciliar: Record<string, unknown>[] = []
   const semPedido: ResultadoSincroniaMp['semPedido'] = []
   const criterios: Record<string, number> = {}
@@ -370,9 +363,9 @@ export async function sincronizarMercadoPago(de: string, ate: string): Promise<R
       criterios[casamento.criterio] = (criterios[casamento.criterio] ?? 0) + 1
     }
 
-    linhas.push(...linhasDoPagamentoMp(p, casamento?.pedidoId ?? null, conta))
-
-    // Pagamento que fizemos não tem repasse a conciliar nem pedido a cobrar.
+    // Nada de gravar extrato aqui. O Relatório de Liberações descreve as
+    // MESMAS vendas com outra chave, e as duas fontes juntas fariam o
+    // crédito de cada venda entrar duas vezes — o saldo dobraria.
     if (p.status !== 'approved' || !recebemos) continue
 
     if (!casamento) {
@@ -395,24 +388,10 @@ export async function sincronizarMercadoPago(de: string, ate: string): Promise<R
       gateway_id: p.id,
       bruto: p.bruto,
       taxa_real: p.tarifa,
+      // O meio mora no repasse porque é dele que sai o custo real de
+      // receber, agora que o extrato vem das liberações.
+      meio: p.meio,
     })
-  }
-
-  let novasLinhas = 0
-  let linhasRepetidas = 0
-  if (linhas.length) {
-    // Lotes para não estourar o tamanho do corpo da chamada RPC.
-    for (const lote of emLotes(linhas, 200)) {
-      const { data, error } = await sb.rpc('importar_extrato', {
-        p_origem: 'mercadopago',
-        p_conta_id: CONTA_MP,
-        p_linhas: lote,
-      })
-      if (error) throw new ErroMercadoPago(mensagemDe(error))
-      const r = (data ?? {}) as { novas?: number; repetidas?: number }
-      novasLinhas += Number(r.novas ?? 0)
-      linhasRepetidas += Number(r.repetidas ?? 0)
-    }
   }
 
   let repassesConciliados = 0
@@ -439,9 +418,6 @@ export async function sincronizarMercadoPago(de: string, ate: string): Promise<R
     conta,
     saidas,
     lidos: pagamentos.length,
-    linhas: linhas.length,
-    novasLinhas,
-    linhasRepetidas,
     repassesConciliados,
     repassesJaConciliados,
     semPedido: semPedido.slice(0, 40),

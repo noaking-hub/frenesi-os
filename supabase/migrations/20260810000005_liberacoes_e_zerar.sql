@@ -39,11 +39,16 @@ begin
   delete from lancamentos where origem like 'Extrato %';
   get diagnostics v_lancamentos = row_count;
 
-  delete from extrato_linhas;
+  -- WHERE explícito em tudo: o Supabase mantém a proteção `safeupdate`, que
+  -- recusa DELETE e UPDATE sem filtro. A proteção está certa — apagar tabela
+  -- inteira sem dizer o que se apaga é o acidente que ela existe para
+  -- impedir —, então o filtro é escrito, não contornado.
+  delete from extrato_linhas where chave is not null;
   get diagnostics v_extrato = row_count;
 
   update contas_bancarias
-     set saldo_informado = null, saldo_a_liberar = null, saldo_informado_em = null;
+     set saldo_informado = null, saldo_a_liberar = null, saldo_informado_em = null
+   where saldo_informado is not null or saldo_informado_em is not null;
 
   return jsonb_build_object(
     'extrato', v_extrato,
