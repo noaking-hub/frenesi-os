@@ -187,3 +187,35 @@ describe('categorias', () => {
     expect(participacaoCategoria(categorias[0], categorias)).toBeCloseTo(63.18, 1)
   })
 })
+
+describe('receita de mais de uma origem', () => {
+  const dre = montarDre(
+    [
+      { linha: 'Vendas da loja', valor: 1000, nota: '10 pedidos pagos' },
+      { linha: 'Vendas fora da loja', valor: 250, nota: '3 recebimentos manuais' },
+    ],
+    [],
+    [{ linha: 'Frete', valor: 100, nota: '' }],
+    [],
+  )
+
+  it('soma as duas na receita bruta', () => {
+    expect(dre.receitaBruta).toBe(1250)
+    expect(dre.margemContribuicao).toBe(1150)
+  })
+
+  it('mantém cada origem em linha própria', () => {
+    // Colapsar num total esconderia de onde veio o faturamento, que é a
+    // primeira pergunta quando o número surpreende.
+    const receitas = dre.linhas.filter((l) => l.tipo === 'receita').map((l) => l.linha)
+    expect(receitas).toEqual(['Vendas da loja', 'Vendas fora da loja'])
+  })
+
+  it('mostra o subtotal só quando há mais de uma origem', () => {
+    const so = montarDre({ linha: 'Vendas da loja', valor: 1000, nota: '' }, [], [], [])
+    // Com uma origem só, um subtotal "Receita bruta" repetiria a linha de
+    // cima com outro nome.
+    expect(so.linhas.filter((l) => l.linha === 'Receita bruta')).toEqual([])
+    expect(dre.linhas.some((l) => l.linha === 'Receita bruta' && l.valor === 1250)).toBe(true)
+  })
+})

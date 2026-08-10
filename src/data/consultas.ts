@@ -325,6 +325,8 @@ export interface LinhaDre {
 export interface Dre {
   competencia: string
   receitaBruta: LinhaDre
+  /** Receita que não veio da loja — venda de balcão lançada à mão. */
+  receitasExtras: LinhaDre[]
   deducoes: LinhaDre[]
   custos: LinhaDre[]
   despesas: LinhaDre[]
@@ -367,6 +369,15 @@ export async function carregarDre(mesesAtras = 0): Promise<Dre> {
   const natureza = new Map(categorias.map((c) => [c.nome, c.natureza]))
   const doMes = lancamentos.filter((l) => noMes(l.data) && l.tipo === 'saida')
 
+  // Venda que não passou pela loja: balcão, dinheiro na mão. Só entra o
+  // lançamento de ENTRADA classificado numa categoria de natureza Receita —
+  // a regra "receita vem do pedido" continua valendo para tudo que a Yampi
+  // conhece, e é ela que impede a mesma venda de contar duas vezes.
+  const receitaManual = lancamentos.filter(
+    (l) => noMes(l.data) && l.tipo === 'entrada' && natureza.get(l.categoria) === 'Receita',
+  )
+  const foraDaLoja = receitaManual.reduce((a, l) => a + l.valor, 0)
+
   const somarPor = (filtro: (categoria: string) => boolean): LinhaDre[] => {
     const grupos = new Map<string, { valor: number; qtd: number }>()
     for (const l of doMes) {
@@ -388,18 +399,29 @@ export async function carregarDre(mesesAtras = 0): Promise<Dre> {
   return {
     competencia,
     receitaBruta: {
-      linha: 'Receita bruta',
+      linha: 'Vendas da loja',
       valor: receita,
       nota: pedidosDoMes.length
         ? `${plural(pedidosDoMes.length, 'pedido pago', 'pedidos pagos')} · ticket médio ${brl(receita / pedidosDoMes.length)}`
         : 'Nenhum pedido pago no mês',
     },
+    // Linha própria, e não somada à de cima: quando o faturamento surpreende,
+    // a primeira pergunta é de onde ele veio.
+    receitasExtras: receitaManual.length
+      ? [
+          {
+            linha: 'Vendas fora da loja',
+            valor: foraDaLoja,
+            nota: plural(receitaManual.length, 'recebimento manual', 'recebimentos manuais'),
+          },
+        ]
+      : [],
     deducoes: somarPor((c) => DEDUCOES.has(c)),
     custos: somarPor((c) => !DEDUCOES.has(c) && natureza.get(c) === 'Custo variável'),
     despesas: somarPor((c) => {
       const n = natureza.get(c)
       return n === 'Despesa fixa' || n === 'Despesa'
     }),
-    vazia: pedidosDoMes.length === 0 && doMes.length === 0,
+    vazia: pedidosDoMes.length === 0 && doMes.length === 0 && receitaManual.length === 0,
   }
 }

@@ -117,12 +117,34 @@ export function NovoLancamento({
   const [erro, setErro] = useState<string | null>(null)
   const [pendente, iniciarTransicao] = useTransition()
 
+  // Categoria de despesa em lançamento de entrada é erro de digitação
+  // oferecido como opção. Dinheiro entrando só pode ser receita; dinheiro
+  // saindo, qualquer coisa menos receita.
+  const doTipo = categorias.filter((c) =>
+    tipo === 'entrada' ? c.natureza === 'Receita' : c.natureza !== 'Receita',
+  )
+
+  // Trocar o tipo com uma categoria do outro lado selecionada gravaria a
+  // categoria errada sem ninguém ver. Escolher a primeira válida é o que
+  // mantém o formulário sempre coerente consigo mesmo.
+  const categoriaValida = doTipo.some((c) => c.nome === categoria)
+    ? categoria
+    : (doTipo[0]?.nome ?? '')
+
   const salvar = () =>
     iniciarTransicao(async () => {
       setErro(null)
+      if (!categoriaValida) {
+        setErro(
+          tipo === 'entrada'
+            ? 'Não há categoria de receita cadastrada. Crie uma em Financeiro → Categorias com natureza Receita.'
+            : 'Não há categoria de despesa cadastrada.',
+        )
+        return
+      }
       const r = await criarLancamento({
         descricao,
-        categoria,
+        categoria: categoriaValida,
         contaId,
         tipo,
         valor: parseNum(valor),
@@ -202,12 +224,17 @@ export function NovoLancamento({
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             <Campo rotulo="Categoria">
               <select
-                value={categoria}
+                value={categoriaValida}
                 onChange={(e) => setCategoria(e.target.value)}
                 className="font-sans"
                 style={{ ...CAMPO, background: '#151417' }}
               >
-                {categorias.map((c) => (
+                {doTipo.length === 0 && (
+                  <option value="">
+                    {tipo === 'entrada' ? 'Nenhuma categoria de receita' : 'Nenhuma categoria'}
+                  </option>
+                )}
+                {doTipo.map((c) => (
                   <option key={c.nome} value={c.nome}>
                     {`${c.nome} · ${c.natureza}`}
                   </option>
@@ -629,7 +656,7 @@ export function EditarConta({ conta }: { conta: ContaBancaria }) {
   )
 }
 
-const NATUREZAS: NaturezaCategoria[] = ['Custo variável', 'Despesa fixa', 'Despesa']
+const NATUREZAS: NaturezaCategoria[] = ['Receita', 'Custo variável', 'Despesa fixa', 'Despesa']
 
 export function NovaCategoria() {
   const [aberto, setAberto] = useState(false)

@@ -778,10 +778,11 @@ export const CATEGORIAS: CategoriaFinanceira[] = [
  */
 export const DRE_JULHO = {
   receitaBruta: {
-    linha: 'Receita bruta',
+    linha: 'Vendas da loja',
     valor: 198430,
     nota: '482 pedidos faturados · ticket médio R$ 412',
   },
+  receitasExtras: [],
   deducoes: [
     { linha: 'Descontos e cupons', valor: 11806, nota: '12,9% da receita promocional' },
     { linha: 'Devoluções', valor: 3820, nota: '6 solicitações · 3 reembolsadas' },

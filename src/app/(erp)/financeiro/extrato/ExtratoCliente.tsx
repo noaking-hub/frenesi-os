@@ -399,40 +399,50 @@ export function ExtratoCliente({
                 ? l.motivoIgnorado || 'dispensado'
                 : 'classificado'}
           </Badge>
-        ) : l.tipo === 'entrada' ? (
-          // Entrada não escolhe categoria. A receita do DRE vem dos pedidos
-          // pagos, não dos lançamentos — dar categoria de receita ao crédito
-          // contaria a mesma venda duas vezes. E oferecer "Marketing e ADS"
-          // para dinheiro entrando é oferecer um erro.
-          //
-          // O que falta nesta linha não é categoria: é o pedido. Mostrar o id
-          // do pagamento é o que permite achá-lo no painel do Mercado Pago.
-          <span
-            className="font-mono"
-            style={{
-              fontSize: 10,
-              lineHeight: 1.4,
-              color: 'rgba(242,237,227,.42)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {l.documento ? `pagamento ${l.documento}` : 'sem id do pagamento'}
-          </span>
         ) : (
-          <select
-            value={categoriaDe(l)}
-            onChange={(e) => setEscolhas((v) => ({ ...v, [chaveDe(l)]: e.target.value }))}
-            style={{ ...campo, height: 28, width: '100%', fontSize: 11.5 }}
-          >
-            <option value="">Escolha a categoria</option>
-            {categorias.map((c) => (
-              <option key={c.nome} value={c.nome}>
-                {c.nome}
+          // Entrada só vê categoria de receita; saída, tudo menos receita.
+          // Oferecer "Marketing e ADS" para dinheiro entrando é oferecer um
+          // erro de digitação como se fosse opção.
+          //
+          // A receita do DRE continua vindo dos pedidos pagos. Estas linhas
+          // são as que NÃO têm pedido — venda de balcão, aporte —, e é só por
+          // isso que classificá-las não conta a mesma venda duas vezes.
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+            <select
+              value={categoriaDe(l)}
+              onChange={(e) => setEscolhas((v) => ({ ...v, [chaveDe(l)]: e.target.value }))}
+              style={{ ...campo, height: 28, width: '100%', fontSize: 11.5 }}
+            >
+              <option value="">
+                {l.tipo === 'entrada' ? 'Sem categoria' : 'Escolha a categoria'}
               </option>
-            ))}
-          </select>
+              {categorias
+                .filter((c) =>
+                  l.tipo === 'entrada' ? c.natureza === 'Receita' : c.natureza !== 'Receita',
+                )
+                .map((c) => (
+                  <option key={c.nome} value={c.nome}>
+                    {c.nome}
+                  </option>
+                ))}
+            </select>
+            {l.tipo === 'entrada' && l.documento && (
+              // O id do pagamento é o que permite achar a venda no painel do
+              // Mercado Pago quando a origem do crédito não é óbvia.
+              <span
+                className="font-mono"
+                style={{
+                  fontSize: 9,
+                  color: 'rgba(242,237,227,.3)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {`pagamento ${l.documento}`}
+              </span>
+            )}
+          </span>
         ),
     },
     {

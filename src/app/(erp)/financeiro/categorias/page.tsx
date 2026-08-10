@@ -9,6 +9,7 @@ import { brl, num, participacaoCategoria, plural, resumirCategorias } from '@/do
 import type { CategoriaFinanceira, NaturezaCategoria } from '@/domain'
 
 const TOM_NATUREZA: Record<NaturezaCategoria, string> = {
+  Receita: COR.ok,
   'Custo variável': COR.atencao,
   'Despesa fixa': COR.info,
   Despesa: 'rgba(242,237,227,.5)',

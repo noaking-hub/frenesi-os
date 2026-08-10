@@ -12,7 +12,7 @@ export default async function Dre() {
   // Receita líquida, margem e resultado são DERIVADOS das linhas primitivas —
   // e as próprias linhas vêm dos lançamentos e dos pedidos pagos do mês.
   const dre = montarDre(
-    apuracao.receitaBruta,
+    [apuracao.receitaBruta, ...apuracao.receitasExtras],
     apuracao.deducoes,
     apuracao.custos,
     apuracao.despesas,

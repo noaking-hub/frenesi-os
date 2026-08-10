@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 
 import { OPERADOR } from '@/data/operador'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
+import type { NaturezaCategoria } from '@/domain'
 
 export type Resposta<T = object> = ({ ok: true } & T) | { ok: false; erro: string }
 
@@ -230,7 +231,7 @@ export async function removerConta(id: string): Promise<Resposta> {
 /** Cria uma categoria. A natureza é o que separa custo variável de estrutura. */
 export async function criarCategoria(dados: {
   nome: string
-  natureza: 'Custo variável' | 'Despesa fixa' | 'Despesa'
+  natureza: NaturezaCategoria
 }): Promise<Resposta> {
   const bloqueio = exigeSupabase('criar categorias')
   if (bloqueio) return bloqueio

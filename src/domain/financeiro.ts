@@ -161,7 +161,16 @@ export function conciliarRepasse(r: Repasse): ResultadoConciliacao {
 
 // ── Categorias ─────────────────────────────────────────────────────────────
 
-export type NaturezaCategoria = 'Custo variável' | 'Despesa fixa' | 'Despesa'
+/**
+ * O que a categoria faz com o resultado.
+ *
+ * `Receita` existe para a venda que não passa pela loja — balcão, dinheiro na
+ * mão. A receita do DRE sai dos pedidos pagos, e continua saindo: só o
+ * lançamento classificado numa categoria de receita se soma a eles, em linha
+ * própria, para que o total nunca vire um número que não bate com nenhuma das
+ * duas fontes.
+ */
+export type NaturezaCategoria = 'Receita' | 'Custo variável' | 'Despesa fixa' | 'Despesa'
 
 export interface CategoriaFinanceira {
   nome: string
@@ -250,12 +259,17 @@ export interface Dre {
  * viesse digitado, ele poderia discordar da própria soma.
  */
 export function montarDre(
-  receitaBruta: ItemDre,
+  receitas: ItemDre | ItemDre[],
   deducoes: ItemDre[],
   custos: ItemDre[],
   despesas: ItemDre[],
 ): Dre {
-  const bruta = receitaBruta.valor
+  // Uma lista, e não um número só, porque a receita tem mais de uma origem: a
+  // loja e a venda de balcão. Colapsar as duas num total esconderia de onde
+  // veio o faturamento, que é justamente a pergunta que alguém faz quando o
+  // número surpreende.
+  const linhasReceita = Array.isArray(receitas) ? receitas : [receitas]
+  const bruta = linhasReceita.reduce((a, r) => a + r.valor, 0)
   const liquida = bruta - deducoes.reduce((a, d) => a + d.valor, 0)
   const margem = liquida - custos.reduce((a, c) => a + c.valor, 0)
   const resultado = margem - despesas.reduce((a, d) => a + d.valor, 0)
@@ -272,7 +286,12 @@ export function montarDre(
 
   return {
     linhas: [
-      linha(receitaBruta.linha, bruta, 'receita', receitaBruta.nota),
+      ...linhasReceita.map((r) => linha(r.linha, r.valor, 'receita', r.nota)),
+      // O subtotal só aparece quando há mais de uma origem: com uma só, ele
+      // repetiria a linha de cima com outro nome.
+      ...(linhasReceita.length > 1
+        ? [linha('Receita bruta', bruta, 'subtotal', 'Loja e vendas fora dela')]
+        : []),
       ...deducoes.map((d) => linha(d.linha, -d.valor, 'deducao', d.nota)),
       linha('Receita líquida', liquida, 'subtotal', 'Base das margens líquidas'),
       ...custos.map((c) => linha(c.linha, -c.valor, 'custo', c.nota)),
