@@ -508,10 +508,6 @@ function avancar(data: string, dias: number): string {
 
 // ── Relatório de Liberações: o extrato de verdade ──────────────────────────
 
-/** Quanto esperar o Mercado Pago processar o relatório antes de desistir. */
-const TENTATIVAS = 20
-const ESPERA_MS = 3000
-
 interface ArquivoRelatorio {
   file_name?: string
   created_from?: string
@@ -529,9 +525,69 @@ async function texto(caminho: string): Promise<{ status: number; corpo: string }
   return { status: r.status, corpo: await r.text() }
 }
 
-export interface ResultadoLiberacoes {
-  periodo: { de: string; ate: string }
+export interface RelatorioDisponivel {
   arquivo: string
+  criadoEm: string
+  de: string
+  ate: string
+  /** Já foi importado antes? Sai da tabela de importações. */
+  jaImportado: boolean
+}
+
+/**
+ * Lista os relatórios que o Mercado Pago já tem prontos.
+ *
+ * A geração é assíncrona e pode levar minutos. Esperar dentro da requisição
+ * foi desenho errado: ela estourava em 60 segundos e o operador via um erro
+ * onde na verdade estava tudo certo, só que ainda processando. Pedir e
+ * buscar são duas ações, e a tela mostra o que existe.
+ */
+export async function relatoriosDisponiveis(): Promise<RelatorioDisponivel[]> {
+  const lista = await listarRelatorios()
+  const sb = supabaseConfigurado() ? supabaseServer() : null
+  const importados = new Set<string>()
+  if (sb) {
+    const { data } = await sb.from('relatorios_importados').select('arquivo')
+    for (const r of data ?? []) importados.add(r.arquivo as string)
+  }
+
+  return lista
+    .filter((a) => a.file_name)
+    .map((a) => ({
+      arquivo: a.file_name as string,
+      criadoEm: (a.date_created ?? '').slice(0, 19).replace('T', ' '),
+      de: (a.begin_date ?? '').slice(0, 10),
+      ate: (a.end_date ?? '').slice(0, 10),
+      jaImportado: importados.has(a.file_name as string),
+    }))
+    .sort((a, b) => b.criadoEm.localeCompare(a.criadoEm))
+}
+
+/** Pede ao Mercado Pago que gere o relatório do período. Volta na hora. */
+export async function pedirRelatorio(de: string, ate: string): Promise<string> {
+  const r = await fetch(`${BASE}/v1/account/release_report`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ begin_date: `${de}T00:00:00Z`, end_date: `${ate}T23:59:59Z` }),
+    cache: 'no-store',
+  })
+  const corpo = await r.text()
+  if (r.status !== 202 && r.status !== 201 && r.status !== 200) {
+    throw new ErroMercadoPago(
+      `O Mercado Pago recusou gerar o relatório (${r.status}): ${corpo.slice(0, 300)}`,
+    )
+  }
+  try {
+    const j = JSON.parse(corpo) as { id?: number | string }
+    return String(j.id ?? '')
+  } catch {
+    return ''
+  }
+}
+
+export interface ResultadoLiberacoes {
+  arquivo: string
+  periodo: { de: string; ate: string }
   linhasLidas: number
   novas: number
   repetidas: number
@@ -540,53 +596,16 @@ export interface ResultadoLiberacoes {
 }
 
 /**
- * Gera, espera e importa o Relatório de Liberações.
+ * Baixa um relatório pronto e importa.
  *
- * É assíncrono do lado do Mercado Pago: o POST devolve 202 e o arquivo
- * aparece na lista alguns segundos depois. Por isso o laço de espera — e por
- * isso ele desiste em vez de travar, dizendo há quanto tempo tentou.
- *
- * Este relatório traz o movimento inteiro da conta, saque inclusive. É o que
- * a busca de pagamentos não vê, e a razão de o saldo calculado ter ficado
- * R$ 72 mil acima do real.
+ * O nome do arquivo é escolhido por quem chama — a tela mostra a lista com
+ * período e data de criação. Escolher "o mais recente" por conta própria
+ * traria o relatório de outro período sem nenhum erro aparecer, que é o tipo
+ * de acerto por sorte que depois vira número errado no caixa.
  */
-export async function importarLiberacoes(de: string, ate: string): Promise<ResultadoLiberacoes> {
+export async function importarLiberacoes(arquivo: string): Promise<ResultadoLiberacoes> {
   if (!supabaseConfigurado()) {
     throw new ErroMercadoPago('O Supabase precisa estar configurado para guardar o extrato.')
-  }
-
-  const antes = await listarRelatorios()
-  const conhecidos = new Set(antes.map((a) => a.file_name ?? ''))
-
-  const criacao = await fetch(`${BASE}/v1/account/release_report`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ begin_date: `${de}T00:00:00Z`, end_date: `${ate}T23:59:59Z` }),
-    cache: 'no-store',
-  })
-  if (criacao.status !== 202 && criacao.status !== 201 && criacao.status !== 200) {
-    throw new ErroMercadoPago(
-      `O Mercado Pago recusou gerar o relatório (${criacao.status}): ${(await criacao.text()).slice(0, 300)}`,
-    )
-  }
-
-  // Espera o arquivo NOVO aparecer. Pegar o mais recente sem conferir traria
-  // o relatório de outro período gerado antes, e o extrato viria errado sem
-  // nenhum erro aparecer.
-  let arquivo = ''
-  for (let i = 0; i < TENTATIVAS; i += 1) {
-    await new Promise((r) => setTimeout(r, ESPERA_MS))
-    const lista = await listarRelatorios()
-    const novo = lista.find((a) => a.file_name && !conhecidos.has(a.file_name))
-    if (novo?.file_name) {
-      arquivo = novo.file_name
-      break
-    }
-  }
-  if (!arquivo) {
-    throw new ErroMercadoPago(
-      `O relatório foi pedido, mas não ficou pronto em ${Math.round((TENTATIVAS * ESPERA_MS) / 1000)} segundos. Tente de novo em alguns minutos — o pedido continua valendo do lado do Mercado Pago.`,
-    )
   }
 
   const baixado = await texto(`/v1/account/release_report/${arquivo}`)
@@ -598,9 +617,7 @@ export async function importarLiberacoes(de: string, ate: string): Promise<Resul
 
   const extrato = lerLiberacoes(baixado.corpo)
   if (extrato.linhas.length === 0) {
-    throw new ErroMercadoPago(
-      ['Nenhuma linha foi lida do relatório.', ...extrato.avisos].join(' '),
-    )
+    throw new ErroMercadoPago(['Nenhuma linha foi lida do relatório.', ...extrato.avisos].join(' '))
   }
 
   const sb = supabaseServer()
@@ -627,9 +644,16 @@ export async function importarLiberacoes(de: string, ate: string): Promise<Resul
     repetidas += Number(r.repetidas ?? 0)
   }
 
-  return {
-    periodo: { de, ate },
+  await sb.from('relatorios_importados').upsert({
     arquivo,
+    linhas: linhas.length,
+    importado_em: new Date().toISOString(),
+  })
+
+  const datas = extrato.linhas.map((l) => l.data).sort()
+  return {
+    arquivo,
+    periodo: { de: datas[0] ?? '', ate: datas[datas.length - 1] ?? '' },
     linhasLidas: linhas.length,
     novas,
     repetidas,

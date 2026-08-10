@@ -18,12 +18,15 @@ import { brl, sugerirCategoria } from '@/domain'
 import type { LinhaExtrato } from '@/domain'
 
 import type { ConferenciaConta } from '@/data/extrato'
+import type { RelatorioDisponivel } from '@/data/mercadopago'
 
 import {
   classificarLinha,
   diagnosticarGateway,
   ignorarLinha,
   importarExtratoCompleto,
+  listarRelatoriosProntos,
+  pedirExtratoCompleto,
   sondarExtratoCompleto,
   zerarFinanceiro,
   recasarExtrato,
@@ -86,6 +89,10 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
   const [de, setDe] = useState(INICIO_DA_OPERACAO)
   const [ate, setAte] = useState(hoje())
   const [relatorio, setRelatorio] = useState<string[] | null>(null)
+  // Relatórios que o Mercado Pago já montou. Escolher qual importar é do
+  // operador: pegar "o mais recente" por conta própria traria o de outro
+  // período sem nenhum erro aparecer.
+  const [prontos, setProntos] = useState<RelatorioDisponivel[]>([])
   const [erro, setErro] = useState<string | null>(null)
   const [pendente, iniciar] = useTransition()
 
@@ -345,13 +352,32 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
             desabilitado={pendente || !gatewayLigado}
             onClick={() =>
               rodar(async () => {
-                const r = await importarExtratoCompleto(de, ate)
+                const r = await pedirExtratoCompleto(de, ate)
                 if (!r.ok) throw new Error(r.erro)
                 return r.linhas
               })
             }
           >
-            {pendente ? 'Gerando relatório…' : 'Importar extrato completo'}
+            1 · Pedir extrato
+          </BotaoOuro>
+          <BotaoOuro
+            altura={32}
+            desabilitado={pendente || !gatewayLigado}
+            onClick={() =>
+              rodar(async () => {
+                const r = await listarRelatoriosProntos()
+                if (!r.ok) throw new Error(r.erro)
+                setProntos(r.relatorios)
+                return r.relatorios.length
+                  ? [`${r.relatorios.length} relatório(s) prontos. Escolha abaixo qual importar.`]
+                  : [
+                      'Nenhum relatório pronto ainda.',
+                      'Se você acabou de pedir, espere um minuto e clique de novo.',
+                    ]
+              })
+            }
+          >
+            2 · Ver relatórios prontos
           </BotaoOuro>
           <BotaoSecundario
             altura={32}
@@ -444,6 +470,69 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
           <pre className="font-mono" style={mono}>
             {relatorio.join('\n')}
           </pre>
+        </section>
+      )}
+
+      {prontos.length > 0 && (
+        <section
+          style={{
+            background: 'var(--color-mesa)',
+            border: '1px solid var(--color-borda-ouro)',
+            borderRadius: 'var(--radius-card)',
+            padding: 16,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+          }}
+        >
+          <TituloSecao tamanho={13}>Relatórios prontos no Mercado Pago</TituloSecao>
+          {prontos.map((r) => (
+            <div
+              key={r.arquivo}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(0,1fr) 190px 140px',
+                alignItems: 'center',
+                gap: 12,
+                padding: '9px 11px',
+                borderRadius: 9,
+                background: 'rgba(255,255,255,.02)',
+                border: '1px solid rgba(255,255,255,.05)',
+              }}
+            >
+              <span
+                className="font-mono"
+                style={{
+                  fontSize: 10.5,
+                  color: 'var(--color-ouro)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {r.arquivo}
+              </span>
+              <span className="font-mono" style={{ fontSize: 10, color: 'rgba(242,237,227,.45)' }}>
+                {[r.de && r.ate ? `${r.de} a ${r.ate}` : '', r.criadoEm].filter(Boolean).join(' · ')}
+              </span>
+              <span style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                {r.jaImportado && <Badge tom="ok">já importado</Badge>}
+                <BotaoSecundario
+                  altura={26}
+                  desabilitado={pendente}
+                  onClick={() =>
+                    rodar(async () => {
+                      const resposta = await importarExtratoCompleto(r.arquivo)
+                      if (!resposta.ok) throw new Error(resposta.erro)
+                      return resposta.linhas
+                    })
+                  }
+                >
+                  Importar
+                </BotaoSecundario>
+              </span>
+            </div>
+          ))}
         </section>
       )}
 

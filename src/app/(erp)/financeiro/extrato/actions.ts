@@ -6,9 +6,12 @@ import {
   CONTA_MP,
   diagnosticarMercadoPago,
   importarLiberacoes,
+  pedirRelatorio,
+  relatoriosDisponiveis,
   sincronizarMercadoPago,
   sondarRelatorios,
 } from '@/data/mercadopago'
+import type { RelatorioDisponivel } from '@/data/mercadopago'
 import { OPERADOR } from '@/data/operador'
 import { mensagemDe } from '@/data/shopify'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
@@ -92,26 +95,58 @@ export async function sondarExtratoCompleto(): Promise<Resposta<{ linhas: string
 }
 
 /**
- * Importa o Relatório de Liberações — o extrato completo, com saque.
+ * Pede ao Mercado Pago que gere o relatório do período.
  *
- * É a fonte certa. A busca de pagamentos continua servindo para a tarifa de
- * cada venda e para casar com o pedido; ela só nunca deveria ter sido usada
- * como extrato.
+ * Volta na hora. A geração é assíncrona do lado deles e leva de segundos a
+ * alguns minutos — esperar dentro da requisição foi desenho errado meu:
+ * estourava em 60 segundos e mostrava erro onde estava tudo certo, só que
+ * ainda processando.
  */
-export async function importarExtratoCompleto(
+export async function pedirExtratoCompleto(
   de: string,
   ate: string,
+): Promise<Resposta<{ linhas: string[] }>> {
+  try {
+    const id = await pedirRelatorio(de, ate)
+    return {
+      ok: true,
+      linhas: [
+        `Relatório pedido para ${de} a ${ate}${id ? ` (nº ${id})` : ''}.`,
+        'O Mercado Pago leva de alguns segundos a poucos minutos para montar.',
+        'Clique em "Ver relatórios prontos" daqui a pouco e importe o que aparecer.',
+      ],
+    }
+  } catch (e) {
+    console.error('[extrato] pedir relatório falhou:', e)
+    return { ok: false, erro: mensagemDe(e) }
+  }
+}
+
+/** O que o Mercado Pago já tem pronto, com período e se já foi importado. */
+export async function listarRelatoriosProntos(): Promise<
+  Resposta<{ relatorios: RelatorioDisponivel[] }>
+> {
+  try {
+    return { ok: true, relatorios: await relatoriosDisponiveis() }
+  } catch (e) {
+    return { ok: false, erro: mensagemDe(e) }
+  }
+}
+
+/** Baixa um relatório pronto e importa como extrato. */
+export async function importarExtratoCompleto(
+  arquivo: string,
 ): Promise<Resposta<{ linhas: string[] }>> {
   const bloqueio = exigeSupabase('importar o extrato')
   if (bloqueio) return bloqueio
 
   try {
-    const r = await importarLiberacoes(de, ate)
+    const r = await importarLiberacoes(arquivo)
     revalidatePath('/', 'layout')
     return {
       ok: true,
       linhas: [
-        `Relatório ${r.arquivo} · ${r.periodo.de} a ${r.periodo.ate}.`,
+        `${r.arquivo} · movimento de ${r.periodo.de} a ${r.periodo.ate}.`,
         `${r.linhasLidas} linha(s) lidas · ${r.novas} nova(s) · ${r.repetidas} já conhecida(s).`,
         `Colunas: ${r.cabecalhos.join(', ')}`,
         ...r.avisos.map((a) => `Atenção: ${a}`),
