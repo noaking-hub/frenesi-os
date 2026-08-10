@@ -128,11 +128,6 @@ export function FontesCliente({ fontes, bases, semDono, variantes }: Props) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <TituloSecao tamanho={15}>Fontes de preço</TituloSecao>
         <div style={{ flex: 1 }} />
-        {semDono.length > 0 && (
-          <BotaoSecundario altura={34} onClick={recasar}>
-            {`Tentar casar ${semDono.length} sem dono`}
-          </BotaoSecundario>
-        )}
         <BotaoSecundario altura={34} onClick={() => setLancando(true)}>
           Lançar preço à mão
         </BotaoSecundario>
@@ -147,14 +142,14 @@ export function FontesCliente({ fontes, bases, semDono, variantes }: Props) {
       {fontes.length === 0 ? (
         <EstadoVazio
           titulo="Nenhum concorrente monitorado"
-          instrucao="Cadastre a loja de um concorrente para o ERP comparar preços. Sem isso, a recomendação de preço sai só do seu custo e da sua margem alvo."
+          instrucao="Cadastre a loja de um concorrente para o ERP buscar os preços dela todo dia."
         />
       ) : (
         <div
           style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-            gap: 14,
+            border: '1px solid rgba(255,255,255,.07)',
+            borderRadius: 12,
+            overflow: 'hidden',
           }}
         >
           {fontes.map((f) => {
@@ -163,25 +158,22 @@ export function FontesCliente({ fontes, bases, semDono, variantes }: Props) {
               <div
                 key={f.id}
                 style={{
-                  background: 'linear-gradient(150deg,#16151A,#101011)',
-                  border: `1px solid ${COR[tom] === COR.neutro ? 'var(--color-borda)' : `${COR[tom]}44`}`,
-                  borderRadius: 'var(--radius-card)',
-                  padding: '15px 16px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 9,
-                  minWidth: 0,
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(0,1fr) 92px 150px 168px',
+                  gap: 12,
+                  alignItems: 'center',
+                  padding: '10px 15px',
+                  borderBottom: '1px solid rgba(255,255,255,.04)',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
                   <span
                     className="font-sans"
                     style={{
-                      flex: 1,
-                      minWidth: 0,
+                      display: 'block',
                       fontWeight: 600,
-                      fontSize: 12.5,
-                      lineHeight: 1.25,
+                      fontSize: 12,
+                      lineHeight: 1.3,
                       color: 'var(--color-corrente)',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -190,76 +182,58 @@ export function FontesCliente({ fontes, bases, semDono, variantes }: Props) {
                   >
                     {f.nome}
                   </span>
+                  {/* O motivo cru da falha fica na linha, não escondido. */}
                   <span
                     className="font-sans"
                     style={{
-                      fontWeight: 600,
-                      fontSize: 9,
-                      lineHeight: 1,
-                      letterSpacing: '.08em',
-                      textTransform: 'uppercase',
-                      color: COR[tom],
-                      border: `1px solid ${COR[tom]}`,
-                      borderRadius: 'var(--radius-pill)',
-                      padding: '3px 7px',
-                      whiteSpace: 'nowrap',
+                      display: 'block',
+                      fontSize: 9.5,
+                      lineHeight: 1.35,
+                      color: f.erro ? COR.erro : 'rgba(242,237,227,.32)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: f.erro ? 'normal' : 'nowrap',
                     }}
                   >
-                    {ROTULO_FONTE[f.status]}
-                  </span>
-                </div>
-
-                <span
-                  className="font-mono"
-                  style={{
-                    display: 'block',
-                    fontSize: 10.5,
-                    lineHeight: 1.2,
-                    color: 'rgba(239,209,140,.6)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {f.dominio}
-                </span>
-
-                <span style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <span
-                    className="font-sans"
-                    style={{ fontWeight: 500, fontSize: 11.5, color: 'var(--color-secundario)' }}
-                  >
-                    {f.itensLidos ? `${f.itensLidos} preços lidos` : 'Nenhum preço lido'}
-                  </span>
-                  <span className="font-sans" style={{ fontSize: 10, color: 'rgba(242,237,227,.35)' }}>
-                    {f.quando || 'nunca'}
+                    {f.erro ?? f.dominio}
                   </span>
                 </span>
 
-                {/* O motivo cru da falha, sem tradução que perca informação. */}
                 <span
                   className="font-sans"
                   style={{
-                    fontSize: 10,
-                    lineHeight: 1.4,
-                    color: f.erro ? COR.erro : 'var(--color-terciario)',
-                    textWrap: 'pretty',
+                    fontWeight: 600,
+                    fontSize: 9,
+                    letterSpacing: '.08em',
+                    textTransform: 'uppercase',
+                    color: COR[tom],
+                    border: `1px solid ${COR[tom]}`,
+                    borderRadius: 'var(--radius-pill)',
+                    padding: '3px 7px',
+                    textAlign: 'center',
+                    whiteSpace: 'nowrap',
                   }}
                 >
-                  {f.erro ??
-                    (f.coleta === 'manual'
-                      ? 'Leitura manual · preços digitados'
-                      : `Leitura por ${f.coleta} · roda quando você vasculhar`)}
+                  {ROTULO_FONTE[f.status]}
                 </span>
 
-                <span style={{ display: 'flex', gap: 7, marginTop: 2 }}>
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <Valor tamanho={11.5} tom="var(--color-secundario)" style={{ display: 'block' }}>
+                    {f.itensLidos ? `${f.itensLidos} preços` : 'nenhum preço'}
+                  </Valor>
+                  <span className="font-sans" style={{ fontSize: 9.5, color: 'rgba(242,237,227,.32)' }}>
+                    {f.quando || 'nunca lida'}
+                  </span>
+                </span>
+
+                <span style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                   {f.coleta !== 'manual' && (
-                    <BotaoSecundario altura={28} onClick={() => diagnosticar(f)}>
+                    <BotaoSecundario altura={27} onClick={() => diagnosticar(f)}>
                       Diagnosticar
                     </BotaoSecundario>
                   )}
                   <BotaoSecundario
-                    altura={28}
+                    altura={27}
                     onClick={() =>
                       iniciarTransicao(async () => {
                         const r = await removerConcorrente(f.id)
@@ -327,7 +301,24 @@ export function FontesCliente({ fontes, bases, semDono, variantes }: Props) {
         </pre>
       )}
 
-      {semDono.length > 0 && <SemDono itens={semDono} bases={bases} />}
+      {semDono.length > 0 && (
+        <details>
+          <summary
+            className="font-sans"
+            style={{
+              cursor: 'pointer',
+              fontSize: 11,
+              color: 'var(--color-terciario)',
+              padding: '4px 0',
+            }}
+          >
+            {`${semDono.length} preços lidos que o ERP não soube de qual perfume são`}
+          </summary>
+          <div style={{ marginTop: 10 }}>
+            <SemDono itens={semDono} bases={bases} aoRecasar={recasar} />
+          </div>
+        </details>
+      )}
 
       {adicionando && <NovoConcorrente aoFechar={() => setAdicionando(false)} />}
       {lancando && (
@@ -349,7 +340,15 @@ export function FontesCliente({ fontes, bases, semDono, variantes }: Props) {
  * parecer completa quando falta metade — e é sobre essa comparação que o preço
  * de venda vai ser decidido.
  */
-function SemDono({ itens, bases }: { itens: TituloSemDono[]; bases: PerfumeBase[] }) {
+function SemDono({
+  itens,
+  bases,
+  aoRecasar,
+}: {
+  itens: TituloSemDono[]
+  bases: PerfumeBase[]
+  aoRecasar: () => void
+}) {
   const [erro, setErro] = useState<string | null>(null)
   const [pendente, iniciarTransicao] = useTransition()
 
@@ -366,6 +365,11 @@ function SemDono({ itens, bases }: { itens: TituloSemDono[]; bases: PerfumeBase[
       }}
     >
       <TituloSecao tamanho={14}>{`${itens.length} preços sem dono`}</TituloSecao>
+      <span>
+        <BotaoSecundario altura={28} onClick={aoRecasar}>
+          Tentar casar de novo
+        </BotaoSecundario>
+      </span>
       <span
         className="font-sans"
         style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
