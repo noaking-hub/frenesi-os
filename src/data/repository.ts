@@ -849,6 +849,8 @@ const repositorioSupabase: Repositorio = {
         saidasMes: Number(c.saidas_mes),
         uso: (c.uso as string) || '—',
         principal: Boolean(c.principal),
+        saldoInformado: c.saldo_informado === null ? null : Number(c.saldo_informado),
+        saldoInformadoEm: (c.saldo_informado_em as string) ?? null,
       }),
     )
   },

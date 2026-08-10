@@ -67,6 +67,15 @@ export interface ContaBancaria {
   saidasMes: number
   uso: string
   principal: boolean
+  /**
+   * Saldo que a própria conta informou. Quando existe, `saldo` é ele.
+   *
+   * Distinguir os dois importa: somar pagamentos não dá saldo, porque saque e
+   * transferência não são pagamentos recebidos. Uma conta sem saldo informado
+   * mostra uma estimativa, e a tela precisa poder dizer isso.
+   */
+  saldoInformado: number | null
+  saldoInformadoEm: string | null
 }
 
 export function saldoConsolidado(contas: ContaBancaria[]): number {

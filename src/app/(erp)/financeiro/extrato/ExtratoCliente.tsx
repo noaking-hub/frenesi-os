@@ -510,26 +510,31 @@ export function ExtratoCliente({
             gap: 12,
           }}
         >
-          <span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <TituloSecao tamanho={14}>Saldo do ERP contra o extrato</TituloSecao>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <TituloSecao tamanho={14}>Saldo das contas</TituloSecao>
             <span
               className="font-sans"
-              style={{ fontSize: 10.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+              style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
             >
-              A diferença entre as duas colunas é a fila de classificação — o saldo do ERP só anda
-              quando a linha vira lançamento.
+              O saldo vem do próprio gateway. A nossa leitura de pagamentos não vê saque nem
+              transferência, então ela explica as vendas — não fecha o caixa.
             </span>
           </span>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {contas.map((c) => {
-              const diferenca = Math.round((c.saldoExtrato - c.saldo) * 100) / 100
+              // A diferença entre o saldo real e o que conseguimos ler é,
+              // literalmente, o que saiu da conta sem passar por um pagamento
+              // recebido: saque, transferência, Pix enviado, conta paga.
+              const naoLido = c.saldoInformado === null
+                ? null
+                : Math.round((c.movimentoLido - c.saldoInformado) * 100) / 100
               return (
                 <div
                   key={c.id}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'minmax(0,1fr) 120px 120px minmax(200px,auto)',
+                    gridTemplateColumns: 'minmax(0,1fr) 140px 140px minmax(190px,auto)',
                     alignItems: 'center',
                     gap: 12,
                     padding: '10px 12px',
@@ -544,15 +549,30 @@ export function ExtratoCliente({
                       {`${c.banco || '—'} · ${c.linhasLidas} linha(s) lida(s)`}
                     </span>
                   </span>
-                  <Valor tamanho={12} peso={400} tom="rgba(242,237,227,.7)">
-                    {brl(c.saldo)}
-                  </Valor>
-                  <Valor tamanho={12} peso={400} tom="rgba(242,237,227,.7)">
-                    {brl(c.saldoExtrato)}
-                  </Valor>
-                  <span style={{ display: 'flex', justifyContent: 'flex-end', minWidth: 0 }}>
-                    {c.aClassificar > 0 ? (
-                      <Badge tom="atencao">{`${c.aClassificar} a classificar · ${brl(Math.abs(diferenca))}`}</Badge>
+
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
+                    <Valor tamanho={13} tom={c.saldoInformado === null ? 'atencao' : 'ok'}>
+                      {brl(c.saldo)}
+                    </Valor>
+                    <span className="font-sans" style={{ fontSize: 9, color: 'rgba(242,237,227,.35)' }}>
+                      {c.saldoInformado === null ? 'estimado pela leitura' : 'saldo do gateway'}
+                    </span>
+                  </span>
+
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
+                    <Valor tamanho={12} peso={400} tom="rgba(242,237,227,.7)">
+                      {brl(c.movimentoLido)}
+                    </Valor>
+                    <span className="font-sans" style={{ fontSize: 9, color: 'rgba(242,237,227,.35)' }}>
+                      movimento que lemos
+                    </span>
+                  </span>
+
+                  <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    {naoLido !== null && Math.abs(naoLido) > 1 ? (
+                      <Badge tom="info">{`${brl(naoLido)} saíram sem virar linha`}</Badge>
+                    ) : c.aClassificar > 0 ? (
+                      <Badge tom="atencao">{`${c.aClassificar} precisam de você`}</Badge>
                     ) : (
                       <Badge tom="ok">Em dia</Badge>
                     )}

@@ -54,9 +54,9 @@ describe('lançamentos', () => {
 
 describe('contas', () => {
   const contas: ContaBancaria[] = [
-    { id: 'a', nome: 'Inter', tipo: '', banco: '', saldo: 38420, entradasMes: 0, saidasMes: 0, uso: '', principal: true },
-    { id: 'b', nome: 'Nubank', tipo: '', banco: '', saldo: 18960, entradasMes: 0, saidasMes: 0, uso: '', principal: false },
-    { id: 'c', nome: 'Reserva', tipo: '', banco: '', saldo: 5100, entradasMes: 0, saidasMes: 0, uso: '', principal: false },
+    { id: 'a', nome: 'Inter', tipo: '', banco: '', saldo: 38420, entradasMes: 0, saidasMes: 0, uso: '', principal: true, saldoInformado: null, saldoInformadoEm: null },
+    { id: 'b', nome: 'Nubank', tipo: '', banco: '', saldo: 18960, entradasMes: 0, saidasMes: 0, uso: '', principal: false, saldoInformado: null, saldoInformadoEm: null },
+    { id: 'c', nome: 'Reserva', tipo: '', banco: '', saldo: 5100, entradasMes: 0, saidasMes: 0, uso: '', principal: false, saldoInformado: null, saldoInformadoEm: null },
   ]
 
   it('consolida o saldo e reparte a participação', () => {

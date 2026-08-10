@@ -738,9 +738,9 @@ export const LANCAMENTOS: Lancamento[] = [
 ]
 
 export const CONTAS: ContaBancaria[] = [
-  { id: 'inter', nome: 'Inter PJ', tipo: 'Conta corrente', banco: 'Banco Inter · 077', saldo: 38420, entradasMes: 16240, saidasMes: 12980, uso: 'Operacional · repasses e fornecedores', principal: true },
-  { id: 'nubank', nome: 'Nubank PJ', tipo: 'Conta corrente', banco: 'Nu Pagamentos · 260', saldo: 18960, entradasMes: 5340, saidasMes: 4111, uso: 'Ferramentas, ADS e assinaturas', principal: false },
-  { id: 'reserva', nome: 'Reserva', tipo: 'Caixa de rendimento', banco: 'Inter · CDB liquidez diária', saldo: 5100, entradasMes: 0, saidasMes: 0, uso: 'Colchão de 1 mês de custo fixo', principal: false },
+  { id: 'inter', nome: 'Inter PJ', tipo: 'Conta corrente', banco: 'Banco Inter · 077', saldo: 38420, entradasMes: 16240, saidasMes: 12980, uso: 'Operacional · repasses e fornecedores', principal: true, saldoInformado: null, saldoInformadoEm: null },
+  { id: 'nubank', nome: 'Nubank PJ', tipo: 'Conta corrente', banco: 'Nu Pagamentos · 260', saldo: 18960, entradasMes: 5340, saidasMes: 4111, uso: 'Ferramentas, ADS e assinaturas', principal: false, saldoInformado: null, saldoInformadoEm: null },
+  { id: 'reserva', nome: 'Reserva', tipo: 'Caixa de rendimento', banco: 'Inter · CDB liquidez diária', saldo: 5100, entradasMes: 0, saidasMes: 0, uso: 'Colchão de 1 mês de custo fixo', principal: false, saldoInformado: null, saldoInformadoEm: null },
 ]
 
 /**

@@ -145,6 +145,27 @@ export default async function Contas() {
               >
                 {c.uso}
               </span>
+
+              {/* De onde vem o saldo. Sem isto, uma estimativa e um fato têm a
+                  mesma cara — e foi assim que o ERP mostrou R$ 83 mil numa
+                  conta com R$ 10 mil. */}
+              <span
+                className="font-mono"
+                style={{ fontSize: 9.5, lineHeight: 1.45, color: 'rgba(242,237,227,.32)', textWrap: 'pretty' }}
+              >
+                {c.saldoInformado === null
+                  ? 'estimado pelo movimento lido — saque e transferência não aparecem no extrato de pagamentos'
+                  : `saldo informado pela conta${
+                      c.saldoInformadoEm
+                        ? ` em ${new Date(c.saldoInformadoEm).toLocaleString('pt-BR', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}`
+                        : ''
+                    }`}
+              </span>
             </div>
           )
         })}

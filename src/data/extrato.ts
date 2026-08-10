@@ -139,8 +139,12 @@ export interface ConferenciaConta {
   id: string
   nome: string
   banco: string
-  /** Saldo que o ERP conhece: soma dos lançamentos baixados. */
+  /** O saldo que vale: informado pelo gateway quando existe. */
   saldo: number
+  /** Saldo que a própria conta informou. Null quando ela não informa. */
+  saldoInformado: number | null
+  /** O que a nossa leitura soma — parcial, falta o que sai sem ser pagamento. */
+  movimentoLido: number
   /** Soma do que o extrato mostra, classificado ou não. */
   saldoExtrato: number
   aClassificar: number
@@ -168,6 +172,8 @@ export async function conferenciaDeContas(): Promise<ConferenciaConta[]> {
     nome: c.nome as string,
     banco: (c.banco as string) ?? '',
     saldo: Number(c.saldo),
+    saldoInformado: c.saldo_informado === null ? null : Number(c.saldo_informado),
+    movimentoLido: Number(c.movimento_lido),
     saldoExtrato: Number(c.saldo_extrato),
     aClassificar: Number(c.a_classificar),
     linhasLidas: Number(c.linhas_lidas),

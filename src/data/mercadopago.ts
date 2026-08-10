@@ -55,6 +55,50 @@ export class ErroMercadoPago extends Error {
   }
 }
 
+export interface SaldoMp {
+  /** O que dá para sacar agora. */
+  disponivel: number
+  /** O que ainda está preso — cartão que não liberou, retenção. */
+  aLiberar: number
+  total: number
+  /** Como o valor foi obtido, para a tela não afirmar mais do que sabe. */
+  fonte: string
+}
+
+/**
+ * Saldo da conta, direto do Mercado Pago.
+ *
+ * Existe porque somar os pagamentos NÃO dá o saldo, e essa foi a lição cara
+ * desta integração: `/v1/payments/search` lista PAGAMENTOS. Saque para o
+ * banco, transferência, Pix enviado, pagamento de conta — nada disso é
+ * pagamento recebido, então nada disso aparece ali. Somar só o que entra e
+ * quase nada do que sai produziu R$ 83 mil de "saldo" numa conta com
+ * R$ 10 mil.
+ *
+ * O saldo verdadeiro só o gateway sabe dizer. É uma chamada, e ela vale mais
+ * que qualquer soma nossa.
+ */
+export async function saldoMercadoPago(): Promise<SaldoMp> {
+  const id = await idDaConta()
+  if (!id) {
+    throw new ErroMercadoPago(
+      'Não consegui identificar a conta no Mercado Pago — sem o id não há saldo a consultar.',
+    )
+  }
+
+  const corpo = await chamar(`/users/${id}/mercadopago_account/balance`)
+  const disponivel = Number(corpo.available_balance ?? 0)
+  const aLiberar = Number(corpo.unavailable_balance ?? 0)
+  const total = Number(corpo.total_balance ?? disponivel + aLiberar)
+
+  return {
+    disponivel,
+    aLiberar,
+    total,
+    fonte: `Mercado Pago · conta ${id}`,
+  }
+}
+
 /** Id da conta que o token abriu. Vazio quando o Mercado Pago não responde. */
 export async function idDaConta(): Promise<string> {
   try {
@@ -248,6 +292,19 @@ export async function sincronizarMercadoPago(de: string, ate: string): Promise<R
     p_banco: 'Mercado Pago',
     p_uso: 'Recebimento das vendas da loja',
   })
+
+  // O saldo vem do gateway, não da nossa soma. Falhar aqui não pode derrubar
+  // a sincronia — o extrato continua valendo mesmo sem o saldo do dia.
+  try {
+    const s = await saldoMercadoPago()
+    await sb.rpc('registrar_saldo_conta', {
+      p_conta_id: CONTA_MP,
+      p_disponivel: s.disponivel,
+      p_a_liberar: s.aLiberar,
+    })
+  } catch (e) {
+    avisos.push(`Não consegui ler o saldo da conta: ${mensagemDe(e)}`)
+  }
 
   // Os pedidos que podem corresponder a estes pagamentos. A janela é folgada
   // dos dois lados: o cartão é aprovado depois da compra, e a compra pode ter
