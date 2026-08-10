@@ -28,10 +28,18 @@ export function emailConfigurado(): boolean {
   return Boolean(chave && remetente)
 }
 
+export interface Anexo {
+  nome: string
+  /** Conteúdo em texto; vai codificado em base64 para o provedor. */
+  conteudo: string
+}
+
 export interface Entrega {
   para: string
   assunto: string
   html: string
+  /** Arquivos que seguem junto — o razão do mês para o escritório, por exemplo. */
+  anexos?: Anexo[]
 }
 
 /**
@@ -59,6 +67,14 @@ export async function entregar(m: Entrega): Promise<{ id: string }> {
       subject: m.assunto,
       html: m.html,
       ...(responder ? { reply_to: responder } : {}),
+      ...(m.anexos?.length
+        ? {
+            attachments: m.anexos.map((a) => ({
+              filename: a.nome,
+              content: Buffer.from(a.conteudo, 'utf8').toString('base64'),
+            })),
+          }
+        : {}),
     }),
     cache: 'no-store',
   })

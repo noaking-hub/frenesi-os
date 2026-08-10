@@ -18,7 +18,6 @@ const EM_DEMONSTRACAO: { prefixo: string; falta: string }[] = [
   { prefixo: '/pedidos/ocorrencias', falta: 'a tabela de ocorrências de entrega' },
   { prefixo: '/pedidos/devolucoes', falta: 'a triagem de devolução ligada ao portal' },
   { prefixo: '/crm/carrinhos', falta: 'a importação de carrinhos abandonados da Yampi' },
-  { prefixo: '/financeiro/contabil', falta: 'a emissão de notas e o plano de contas' },
   { prefixo: '/crm/campanhas', falta: 'a tabela de campanhas de marketing' },
   { prefixo: '/crm/emails', falta: 'a tabela de fluxos de e-mail' },
   { prefixo: '/crm/giftback', falta: 'as tabelas de cashback e giftback' },
