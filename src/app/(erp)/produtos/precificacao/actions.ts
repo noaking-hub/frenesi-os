@@ -4,6 +4,9 @@ import { revalidatePath } from 'next/cache'
 
 import { aplicarPrecosShopify, mensagemDe, type AlvoPreco } from '@/data/shopify'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
+import type { VarianteMl } from '@/domain'
+
+import { buscarPrecos } from '../concorrentes/busca'
 
 export type RespostaPrecos =
   | { ok: true; aplicadas: number; ignoradas: { variante: string; motivo: string }[] }
@@ -104,4 +107,46 @@ export async function publicarPrecos(itens: PrecoAPublicar[]): Promise<RespostaP
     console.error('[shopify] publicação de preço falhou:', e)
     return { ok: false, erro: mensagemDe(e) }
   }
+}
+
+export interface PrecoDeMercado {
+  variante: VarianteMl
+  /** Menor preço encontrado entre os concorrentes. */
+  menor: number
+  fonte: string
+  /** Quantas lojas têm esta variante deste perfume. */
+  lojas: number
+}
+
+/**
+ * O menor preço do mercado para este perfume, por variante.
+ *
+ * Reaproveita a busca da tela de Concorrentes — a mesma que entende que "EDT"
+ * e "Eau de Toilette" são o mesmo produto. Duas implementações de busca
+ * divergiriam, e aí o preço mostrado aqui não seria o mesmo que aparece lá.
+ */
+export async function mercadoDaBase(baseId: string): Promise<PrecoDeMercado[]> {
+  if (!supabaseConfigurado()) return []
+
+  const { data: base } = await supabaseServer()
+    .from('perfumes_base')
+    .select('nome')
+    .eq('id', baseId)
+    .maybeSingle()
+  if (!base?.nome) return []
+
+  const r = await buscarPrecos(String(base.nome))
+  if (!r) return []
+
+  return r.linhas
+    .filter((l) => l.menor !== null)
+    .map((l) => {
+      const barata = Object.values(l.porFonte).sort((a, b) => a.preco - b.preco)[0]
+      return {
+        variante: l.variante,
+        menor: l.menor as number,
+        fonte: barata?.fonte ?? '—',
+        lojas: Object.keys(l.porFonte).length,
+      }
+    })
 }

@@ -91,7 +91,10 @@ export function ParametrosCliente({ parametros, perdaRealMedia }: Props) {
     {
       label: 'Total de taxas variáveis',
       valor: `${num(Math.round(taxas * 100) / 100)}%`,
-      hint: 'Intermediador, checkout, imposto e ADS',
+      // O desconto de Pix entra na soma desde que passou a ser custo de
+      // receber. Deixar o rótulo antigo esconderia justamente a parcela que
+      // mais pesa nesta operação.
+      hint: 'Intermediador, checkout, imposto, ADS e desconto de Pix',
       tom: 'atencao',
     },
     {

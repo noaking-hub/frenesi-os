@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 
 import { Modal } from '@/components/erp/Modal'
 import { Badge, BotaoSecundario, FaixaAlerta, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
@@ -21,7 +21,8 @@ import {
 } from '@/domain'
 import type { ParametrosPrecificacao, PerfumeBase, VarianteMl } from '@/domain'
 
-import { publicarPrecos } from './actions'
+import { mercadoDaBase, publicarPrecos } from './actions'
+import type { PrecoDeMercado } from './actions'
 
 interface Props {
   bases: PerfumeBase[]
@@ -38,6 +39,12 @@ interface Linha {
   custoProduto: number
   praticado: number | null
   unidades: number
+  /** Menor preço entre os concorrentes, quando a busca acha esta variante. */
+  mercado: PrecoDeMercado | null
+  /** O que será publicado: o digitado à mão, ou o sugerido. */
+  aPublicar: number
+  /** Verdadeiro quando o preço foi digitado, não calculado. */
+  manual: boolean
 }
 
 const FILTROS = ['Com custo', 'Sem custo', 'Todos'] as const
@@ -56,8 +63,32 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
   const [custoTexto, setCustoTexto] = useState<string | null>(null)
   const [margemTexto, setMargemTexto] = useState<string | null>(null)
   const [trocando, setTrocando] = useState(false)
+  // Preço digitado à mão, por variante. Sobrepõe o sugerido só nesta base:
+  // trocar de perfume limpa, senão o número de um vazaria para o outro.
+  const [manuais, setManuais] = useState<Partial<Record<VarianteMl, string>>>({})
+  const [mercado, setMercado] = useState<PrecoDeMercado[]>([])
+  const [lendoMercado, setLendoMercado] = useState(false)
 
   const base = bases.find((b) => b.id === baseId) ?? bases[0]
+
+  // O preço de mercado é do perfume selecionado: trocar de base tem de
+  // limpar o anterior, senão a tela compara o preço de um com o do outro.
+  useEffect(() => {
+    let atual = true
+    setMercado([])
+    setManuais({})
+    setLendoMercado(true)
+    mercadoDaBase(base.id)
+      .then((r) => {
+        if (atual) setMercado(r)
+      })
+      .finally(() => {
+        if (atual) setLendoMercado(false)
+      })
+    return () => {
+      atual = false
+    }
+  }, [base.id])
 
   // Os campos editáveis recalculam tudo na hora: preço, margem e composição
   // saem do mesmo `calcularPreco` que a tela de Configurações usa.
@@ -68,6 +99,8 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
 
   const linhas: Linha[] = VARIANTES.map((v) => {
     const c = calcularPreco(custoPorMl, v, params)
+    const digitado = manuais[v]
+    const manual = digitado !== undefined && digitado !== '' && parseNum(digitado) > 0
     return {
       variante: v,
       ideal: c.ideal,
@@ -77,6 +110,9 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
       custoProduto: c.custoProduto,
       praticado: precos[base.id]?.[v] ?? null,
       unidades: Math.floor(base.volumeMl / v),
+      mercado: mercado.find((m) => m.variante === v) ?? null,
+      aPublicar: manual ? parseNum(digitado) : c.sugerido,
+      manual,
     }
   })
 
@@ -109,20 +145,9 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
       ),
     },
     {
-      chave: 'ideal',
-      titulo: 'Ideal',
-      largura: '92px',
-      alinhamento: 'right',
-      render: (l) => (
-        <Valor tamanho={12} peso={400} tom="var(--color-secundario)">
-          {brl(l.ideal)}
-        </Valor>
-      ),
-    },
-    {
       chave: 'sugerido',
       titulo: 'Sugerido',
-      largura: '100px',
+      largura: '104px',
       alinhamento: 'right',
       render: (l) => (
         <Valor tamanho={14} tom="ouro">
@@ -164,9 +189,124 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
       ),
     },
     {
+      chave: 'mercado',
+      titulo: 'Menor do mercado',
+      largura: '132px',
+      alinhamento: 'right',
+      render: (l) => {
+        if (!l.mercado) {
+          return (
+            <span
+              className="font-sans"
+              style={{ fontSize: 10, lineHeight: 1.3, color: 'rgba(242,237,227,.3)' }}
+            >
+              {lendoMercado ? 'lendo…' : 'sem leitura'}
+            </span>
+          )
+        }
+        // A diferença contra o que VAMOS publicar, não contra o ideal: é essa
+        // a decisão em cima da mesa quando se olha o concorrente.
+        const dif = l.aPublicar - l.mercado.menor
+        return (
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-end' }}>
+            <Valor tamanho={12} peso={400}>
+              {brl(l.mercado.menor)}
+            </Valor>
+            <span
+              className="font-sans"
+              style={{
+                fontSize: 9.5,
+                lineHeight: 1.3,
+                color: dif > 0 ? COR.atencao : COR.ok,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {dif > 0 ? `estamos ${brl(dif)} acima` : `estamos ${brl(Math.abs(dif))} abaixo`}
+            </span>
+            <span
+              className="font-mono"
+              style={{ fontSize: 9, color: 'rgba(242,237,227,.3)', whiteSpace: 'nowrap' }}
+            >
+              {`${l.mercado.fonte} · ${plural(l.mercado.lojas, 'loja', 'lojas')}`}
+            </span>
+          </span>
+        )
+      },
+    },
+    {
+      chave: 'aPublicar',
+      titulo: 'Preço a publicar',
+      largura: '148px',
+      render: (l) => (
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              height: 30,
+              padding: '0 9px',
+              border: `1px solid ${l.manual ? 'rgba(239,209,140,.45)' : 'rgba(255,255,255,.11)'}`,
+              background: 'rgba(255,255,255,.03)',
+              borderRadius: 8,
+            }}
+          >
+            <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>
+              R$
+            </span>
+            <input
+              value={manuais[l.variante] ?? texto(l.sugerido)}
+              onChange={(e) =>
+                setManuais((m) => ({ ...m, [l.variante]: e.target.value.replace(/[^0-9.,]/g, '') }))
+              }
+              onClick={(e) => e.stopPropagation()}
+              className="font-mono"
+              inputMode="decimal"
+              aria-label={`Preço de ${l.variante} ml`}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                border: 0,
+                outline: 0,
+                background: 'transparent',
+                color: l.manual ? 'var(--color-ouro)' : 'var(--color-corrente)',
+                fontWeight: 500,
+                fontSize: 12.5,
+              }}
+            />
+          </span>
+          {l.manual && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                setManuais((m) => {
+                  const novo = { ...m }
+                  delete novo[l.variante]
+                  return novo
+                })
+              }}
+              className="font-sans hover:brightness-125"
+              style={{
+                border: 0,
+                background: 'transparent',
+                padding: 0,
+                fontSize: 9.5,
+                color: 'var(--color-ouro)',
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              {`voltar para ${brl(l.sugerido)}`}
+            </button>
+          )}
+        </span>
+      ),
+    },
+    {
       chave: 'publicado',
       titulo: 'Publicado hoje',
-      largura: 'minmax(0,1fr)',
+      largura: 'minmax(120px,1fr)',
       render: (l) => {
         const dif = l.praticado === null ? null : l.praticado - l.ideal
         return (
@@ -909,7 +1049,11 @@ function PublicarPrecos({
   const [recusadas, setRecusadas] = useState<{ variante: string; motivo: string }[]>([])
   const [pendente, iniciarTransicao] = useTransition()
 
-  const mudam = linhas.filter((l) => l.sugerido > 0 && l.praticado !== l.sugerido)
+  // O que vai para a loja é `aPublicar`: o digitado à mão quando existe, o
+  // sugerido quando não. Publicar sempre o sugerido tornaria o campo de
+  // edição decorativo — pior que não ter campo nenhum.
+  const mudam = linhas.filter((l) => l.aPublicar > 0 && l.praticado !== l.aPublicar)
+  const manuais = mudam.filter((l) => l.manual).length
 
   const publicar = () =>
     iniciarTransicao(async () => {
@@ -917,7 +1061,7 @@ function PublicarPrecos({
       setResumo(null)
       setRecusadas([])
       const r = await publicarPrecos(
-        mudam.map((l) => ({ baseId: base.id, variante: l.variante, preco: l.sugerido })),
+        mudam.map((l) => ({ baseId: base.id, variante: l.variante, preco: l.aPublicar })),
       )
       if (!r.ok) {
         setErro(r.erro)
@@ -931,7 +1075,12 @@ function PublicarPrecos({
       )
     })
 
-  const travado = pendente || simulando || mudam.length === 0
+  // Simular trava a publicação do preço CALCULADO, porque ele sairia de um
+  // custo que não está no catálogo. O preço digitado à mão não vem do custo
+  // — ele é a decisão explícita de quem digitou —, então continua podendo
+  // sair. Travar os dois transformaria o campo de edição em enfeite.
+  const soManuais = mudam.length > 0 && mudam.every((l) => l.manual)
+  const travado = pendente || (simulando && !soManuais) || mudam.length === 0
 
   return (
     <section
@@ -951,12 +1100,12 @@ function PublicarPrecos({
           className="font-sans"
           style={{ fontSize: 11, lineHeight: 1.55, color: 'rgba(242,237,227,.68)', textWrap: 'pretty' }}
         >
-          {simulando
-            ? 'Você está simulando com um custo diferente do cadastrado. Publicar sairia de um número que não está no catálogo — ajuste o custo da base antes.'
+          {simulando && !soManuais
+            ? 'Você está simulando com um custo diferente do cadastrado. O preço calculado sairia de um número que não está no catálogo — ajuste o custo da base, ou digite o preço à mão.'
             : mudam.length === 0
               ? 'Todas as variantes desta base já estão publicadas no preço sugerido.'
-              : `${plural(mudam.length, 'variante muda', 'variantes mudam')} de preço: ${mudam
-                  .map((l) => `${l.variante} ml ${l.praticado === null ? '' : `${brl(l.praticado)} → `}${brl(l.sugerido)}`)
+              : `${plural(mudam.length, 'variante muda', 'variantes mudam')} de preço${manuais ? ` (${manuais} à mão)` : ''}: ${mudam
+                  .map((l) => `${l.variante} ml ${l.praticado === null ? '' : `${brl(l.praticado)} → `}${brl(l.aPublicar)}${l.manual ? ' (à mão)' : ''}`)
                   .join(' · ')}.`}
         </span>
         <span
