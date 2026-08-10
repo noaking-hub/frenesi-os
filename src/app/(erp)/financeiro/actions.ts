@@ -28,6 +28,11 @@ export interface NovoLancamento {
   venceEm: string
   baixado: boolean
   recorrente: boolean
+  /** Quanto já entrou. Null usa `baixado` como atalho para tudo ou nada. */
+  recebido?: number | null
+  /** mensal, semanal… Null é lançamento único. */
+  recorrencia?: string | null
+  recorrenciaAte?: string | null
 }
 
 /**
@@ -36,7 +41,9 @@ export interface NovoLancamento {
  * `baixado` decide o que a tela mostra depois: com baixa é realizado e entra
  * no saldo da conta; sem baixa é previsão e fica na fila.
  */
-export async function criarLancamento(dados: NovoLancamento): Promise<Resposta<{ id: string }>> {
+export async function criarLancamento(
+  dados: NovoLancamento,
+): Promise<Resposta<{ id: string; criadas: number }>> {
   const bloqueio = exigeSupabase('criar lançamentos')
   if (bloqueio) return bloqueio
   if (!dados.descricao.trim()) return { ok: false, erro: 'Informe a descrição.' }
@@ -54,14 +61,126 @@ export async function criarLancamento(dados: NovoLancamento): Promise<Resposta<{
     p_recorrente: dados.recorrente,
     p_origem: 'Manual',
     p_operador: OPERADOR,
+    p_recebido: dados.recebido ?? null,
+    p_recorrencia: dados.recorrencia || null,
+    p_recorrencia_ate: dados.recorrenciaAte || null,
   })
   if (error) {
     console.error('[financeiro] registrar_lancamento falhou:', error)
     return falha(error, 'Falha ao criar o lançamento.')
   }
 
+  const r = (data ?? {}) as { id?: string; criadas?: number }
   revalidatePath('/', 'layout')
-  return { ok: true, id: String(data) }
+  return { ok: true, id: String(r.id ?? ''), criadas: Number(r.criadas ?? 1) }
+}
+
+/**
+ * Edita o lançamento. Com `serie`, alcança as ocorrências FUTURAS.
+ *
+ * Nunca as passadas: reescrever o aluguel de março porque o de setembro
+ * reajustou mudaria um fato já ocorrido, e o DRE de março passaria a
+ * discordar do que foi pago.
+ */
+export async function editarLancamento(
+  id: string,
+  dados: Omit<NovoLancamento, 'baixado' | 'recorrente'> & { serie: boolean },
+): Promise<Resposta<{ alterados: number }>> {
+  const bloqueio = exigeSupabase('editar lançamentos')
+  if (bloqueio) return bloqueio
+  if (!dados.descricao.trim()) return { ok: false, erro: 'Informe a descrição.' }
+  if (!(dados.valor > 0)) return { ok: false, erro: 'O valor deve ser maior que zero.' }
+
+  const { data, error } = await supabaseServer().rpc('editar_lancamento', {
+    p_id: id,
+    p_descricao: dados.descricao,
+    p_categoria: dados.categoria,
+    p_conta_id: dados.contaId,
+    p_tipo: dados.tipo,
+    p_valor: dados.valor,
+    p_ocorrido_em: dados.ocorridoEm || null,
+    p_vence_em: dados.venceEm || null,
+    p_serie: dados.serie,
+  })
+  if (error) {
+    console.error('[financeiro] editar_lancamento falhou:', error)
+    return falha(error, 'Falha ao salvar o lançamento.')
+  }
+
+  revalidatePath('/', 'layout')
+  return { ok: true, alterados: Number(data ?? 1) }
+}
+
+/**
+ * Registra quanto entrou ou saiu de fato — podendo ser menos que o total.
+ *
+ * É o que faltava para a venda parcelada: em vez de três lançamentos soltos
+ * que o ERP não sabe serem a mesma venda, um lançamento com o combinado e o
+ * recebido caminhando até se encontrarem.
+ */
+export async function registrarRecebimento(
+  id: string,
+  valor: number,
+  quando: string,
+): Promise<Resposta<{ recebido: number; falta: number; quitado: boolean }>> {
+  const bloqueio = exigeSupabase('registrar recebimentos')
+  if (bloqueio) return bloqueio
+  if (!(valor > 0)) return { ok: false, erro: 'Informe quanto entrou.' }
+
+  const { data, error } = await supabaseServer().rpc('registrar_recebimento', {
+    p_id: id,
+    p_valor: valor,
+    p_quando: quando || null,
+    p_operador: OPERADOR,
+  })
+  if (error) {
+    console.error('[financeiro] registrar_recebimento falhou:', error)
+    return falha(error, 'Falha ao registrar o recebimento.')
+  }
+
+  const r = (data ?? {}) as { recebido?: number; falta?: number; quitado?: boolean }
+  revalidatePath('/', 'layout')
+  return {
+    ok: true,
+    recebido: Number(r.recebido ?? 0),
+    falta: Number(r.falta ?? 0),
+    quitado: Boolean(r.quitado),
+  }
+}
+
+/** Zera os recebimentos e devolve o lançamento para em aberto. */
+export async function estornarRecebimento(id: string): Promise<Resposta> {
+  const bloqueio = exigeSupabase('estornar recebimentos')
+  if (bloqueio) return bloqueio
+
+  const { error } = await supabaseServer().rpc('estornar_recebimento', { p_id: id })
+  if (error) {
+    console.error('[financeiro] estornar_recebimento falhou:', error)
+    return falha(error, 'Falha ao estornar.')
+  }
+  revalidatePath('/', 'layout')
+  return { ok: true }
+}
+
+/** Apaga o lançamento. A linha do extrato que o originou volta para a fila. */
+export async function excluirLancamento(
+  id: string,
+  serie: boolean,
+): Promise<Resposta<{ apagados: number }>> {
+  const bloqueio = exigeSupabase('excluir lançamentos')
+  if (bloqueio) return bloqueio
+
+  const { data, error } = await supabaseServer().rpc('excluir_lancamento', {
+    p_id: id,
+    p_serie: serie,
+  })
+  if (error) {
+    console.error('[financeiro] excluir_lancamento falhou:', error)
+    return falha(error, 'Falha ao excluir o lançamento.')
+  }
+
+  revalidatePath('/', 'layout')
+  return { ok: true, apagados: Number(data ?? 1) }
 }
 
 /** Dar baixa é reconhecer que o dinheiro entrou ou saiu de fato. */

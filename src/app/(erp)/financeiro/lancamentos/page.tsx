@@ -1,22 +1,17 @@
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
 import { Badge, BotaoOuro, FaixaAlerta, TituloSecao, Valor } from '@/components/erp/primitivos'
 import { CelulaDupla, Tabela, type Coluna } from '@/components/erp/Tabela'
-import type { Tom } from '@/components/erp/tokens'
+import { COR, type Tom } from '@/components/erp/tokens'
 import { repositorio } from '@/data/repository'
 
-import { BotaoBaixa, NovoLancamento } from '../Widgets'
-import {
-  brl,
-  lancamentoPendente,
-  plural,
-  resumirLancamentos,
-  saldoConsolidado,
-} from '@/domain'
+import { AcoesLancamento, NovoLancamento } from '../Widgets'
+import { brl, plural, resumirLancamentos, saldoConsolidado, saldoEmAberto } from '@/domain'
 import type { Lancamento, StatusLancamento } from '@/domain'
 
 const TOM_STATUS: Record<StatusLancamento, Tom> = {
   Pago: 'ok',
   Recebido: 'ok',
+  Parcial: 'ouro',
   'A pagar': 'atencao',
   Vencido: 'erro',
   Previsto: 'info',
@@ -51,9 +46,11 @@ export default async function Lancamentos() {
       tom: r.vencido ? 'erro' : 'ok',
     },
     {
-      label: 'A receber previsto',
+      label: 'A receber',
       valor: brl(r.aReceber),
-      hint: 'Repasses ainda não creditados',
+      hint: r.aReceberQtd
+        ? `${plural(r.aReceberQtd, 'lançamento em aberto', 'lançamentos em aberto')} · só o que falta`
+        : 'Nada a receber',
       tom: 'info',
     },
     {
@@ -107,7 +104,7 @@ export default async function Lancamentos() {
             >
               {l.descricao}
             </span>
-            {l.recorrente && (
+            {(l.recorrencia ?? l.recorrente) && (
               <span
                 className="font-sans"
                 style={{
@@ -124,7 +121,7 @@ export default async function Lancamentos() {
                   whiteSpace: 'nowrap',
                 }}
               >
-                Recorrente
+                {l.recorrencia ?? 'Recorrente'}
               </span>
             )}
           </span>
@@ -166,13 +163,25 @@ export default async function Lancamentos() {
     {
       chave: 'valor',
       titulo: 'Valor',
-      largura: '124px',
+      largura: '150px',
       alinhamento: 'right',
-      render: (l) => (
-        <Valor tamanho={12.5} tom={l.tipo === 'entrada' ? 'ok' : 'var(--color-corrente)'}>
-          {`${l.tipo === 'entrada' ? '+' : '−'} ${brl(l.valor)}`}
-        </Valor>
-      ),
+      render: (l) => {
+        const falta = saldoEmAberto(l)
+        return (
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
+            <Valor tamanho={12.5} tom={l.tipo === 'entrada' ? 'ok' : 'var(--color-corrente)'}>
+              {`${l.tipo === 'entrada' ? '+' : '−'} ${brl(l.valor)}`}
+            </Valor>
+            {/* Só aparece quando há parcial. Mostrar "faltam R$ 0,00" em toda
+                linha quitada seria ruído em cima da informação. */}
+            {l.recebido > 0 && falta > 0 && (
+              <span className="font-mono" style={{ fontSize: 9.5, color: COR.ouro }}>
+                {`faltam ${brl(falta)}`}
+              </span>
+            )}
+          </span>
+        )
+      },
     },
     {
       chave: 'status',
@@ -183,9 +192,9 @@ export default async function Lancamentos() {
     {
       chave: 'acao',
       titulo: 'Ação',
-      largura: '104px',
-      render: (l) =>
-        lancamentoPendente(l) ? <BotaoBaixa id={l.id} descricao={l.descricao} /> : null,
+      largura: '162px',
+      alinhamento: 'right',
+      render: (l) => <AcoesLancamento lancamento={l} contas={contas} categorias={categorias} />,
     },
   ]
 

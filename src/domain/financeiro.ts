@@ -6,7 +6,19 @@
  * da comparação entre o recebido e o líquido esperado.
  */
 
-export type StatusLancamento = 'Pago' | 'Recebido' | 'A pagar' | 'Vencido' | 'Previsto'
+/**
+ * `Parcial` existe porque a venda parcelada é o caso comum, não a exceção.
+ * Sem ele, um lançamento de R$ 1.299 com R$ 400 recebidos só podia ser "pago"
+ * — afirmando que entrou o dobro do que entrou — ou "a receber" — escondendo
+ * que quase um terço já entrou.
+ */
+export type StatusLancamento =
+  | 'Pago'
+  | 'Recebido'
+  | 'Parcial'
+  | 'A pagar'
+  | 'Vencido'
+  | 'Previsto'
 
 export interface Lancamento {
   id: string
@@ -15,16 +27,49 @@ export interface Lancamento {
   categoria: string
   conta: string
   tipo: 'entrada' | 'saida'
+  /** O total combinado. */
   valor: number
+  /** Quanto já entrou ou saiu de fato. */
+  recebido: number
   status: StatusLancamento
   recorrente: boolean
+  /** Cadência da repetição, quando existe: mensal, semanal… */
+  recorrencia: string | null
+  /** Liga as ocorrências de uma mesma repetição. */
+  serieId: string | null
+  categoriaId: string
+  contaId: string
+  /** AAAA-MM-DD, para o formulário de edição. */
+  ocorridoEm: string
+  venceEm: string | null
   /** De onde o lançamento veio: Manual, Recorrente, Conciliação, Estoque, Assessor IA. */
   origem: string
 }
 
-/** Ainda precisa de baixa — é o que o botão "Dar baixa" resolve. */
+/** O que ainda falta entrar ou sair. Nunca negativo. */
+export function saldoEmAberto(l: Lancamento): number {
+  return Math.max(0, Math.round((l.valor - l.recebido) * 100) / 100)
+}
+
+/**
+ * Status a partir dos fatos, nunca gravado.
+ *
+ * Um enum guardado envelheceria sozinho à meia-noite do vencimento — a conta
+ * que estava "a pagar" ontem está vencida hoje sem ninguém ter tocado nela.
+ */
+export function statusDoLancamento(
+  l: { tipo: 'entrada' | 'saida'; valor: number; recebido: number; venceEm: string | null },
+  hoje: string,
+): StatusLancamento {
+  if (l.recebido >= l.valor) return l.tipo === 'entrada' ? 'Recebido' : 'Pago'
+  if (l.recebido > 0) return 'Parcial'
+  if (!l.venceEm) return 'Previsto'
+  return l.venceEm < hoje ? 'Vencido' : 'A pagar'
+}
+
+/** Ainda tem dinheiro a entrar ou sair. */
 export function lancamentoPendente(l: Lancamento): boolean {
-  return l.status === 'A pagar' || l.status === 'Vencido'
+  return l.status !== 'Pago' && l.status !== 'Recebido'
 }
 
 export interface ResumoLancamentos {
@@ -32,24 +77,37 @@ export interface ResumoLancamentos {
   aPagarQtd: number
   vencido: number
   vencidoQtd: number
-  /** Entradas previstas: repasses ainda não creditados. */
+  /** O que ainda falta entrar. */
   aReceber: number
+  aReceberQtd: number
   recorrentes: number
   recorrentesQtd: number
 }
 
+/**
+ * Os totais somam o que FALTA, não o valor cheio.
+ *
+ * Um lançamento de R$ 1.299 com R$ 400 já recebidos deve R$ 899 ao "a
+ * receber". Somar o total mostraria como pendente um dinheiro que já está na
+ * conta — e o saldo projetado, que soma as duas coisas, contaria esses R$ 400
+ * duas vezes.
+ */
 export function resumirLancamentos(lancs: Lancamento[]): ResumoLancamentos {
-  const aPagar = lancs.filter((l) => l.status === 'A pagar')
-  const vencidos = lancs.filter((l) => l.status === 'Vencido')
-  const previstos = lancs.filter((l) => l.tipo === 'entrada' && l.status === 'Previsto')
+  const emAberto = lancs.filter((l) => l.tipo === 'saida' && lancamentoPendente(l))
+  const vencidos = emAberto.filter((l) => l.status === 'Vencido')
+  const aPagar = emAberto.filter((l) => l.status !== 'Vencido')
+  const aReceber = lancs.filter((l) => l.tipo === 'entrada' && lancamentoPendente(l))
   const recorrentes = lancs.filter((l) => l.recorrente)
 
+  const falta = (ls: Lancamento[]) => ls.reduce((a, l) => a + saldoEmAberto(l), 0)
+
   return {
-    aPagar: aPagar.reduce((a, l) => a + l.valor, 0),
+    aPagar: falta(aPagar),
     aPagarQtd: aPagar.length,
-    vencido: vencidos.reduce((a, l) => a + l.valor, 0),
+    vencido: falta(vencidos),
     vencidoQtd: vencidos.length,
-    aReceber: previstos.reduce((a, l) => a + l.valor, 0),
+    aReceber: falta(aReceber),
+    aReceberQtd: aReceber.length,
     recorrentes: recorrentes.reduce((a, l) => a + l.valor, 0),
     recorrentesQtd: recorrentes.length,
   }

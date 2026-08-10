@@ -10,6 +10,8 @@ import {
   resumirCategorias,
   resumirLancamentos,
   saldoConsolidado,
+  saldoEmAberto,
+  statusDoLancamento,
 } from '..'
 import type { CategoriaFinanceira, ContaBancaria, Lancamento, Repasse } from '..'
 
@@ -21,8 +23,15 @@ const lanc = (p: Partial<Lancamento>): Lancamento => ({
   conta: 'Inter PJ',
   tipo: 'saida',
   valor: 100,
+  recebido: 0,
   status: 'Pago',
   recorrente: false,
+  recorrencia: null,
+  serieId: null,
+  categoriaId: 'Serviços',
+  contaId: 'inter',
+  ocorridoEm: '2026-08-05',
+  venceEm: null,
   origem: 'Manual',
   ...p,
 })
@@ -34,8 +43,8 @@ describe('lançamentos', () => {
       lanc({ id: 'B', status: 'A pagar', valor: 2180 }),
       lanc({ id: 'C', status: 'Vencido', valor: 4310 }),
       lanc({ id: 'D', tipo: 'entrada', status: 'Previsto', valor: 8432.1 }),
-      lanc({ id: 'E', tipo: 'entrada', status: 'Recebido', valor: 5218.4 }),
-      lanc({ id: 'F', status: 'Pago', valor: 890, recorrente: true }),
+      lanc({ id: 'E', tipo: 'entrada', status: 'Recebido', valor: 5218.4, recebido: 5218.4 }),
+      lanc({ id: 'F', status: 'Pago', valor: 890, recebido: 890, recorrente: true }),
     ])
     expect(r.aPagar).toBe(3420)
     expect(r.aPagarQtd).toBe(2)
@@ -44,11 +53,44 @@ describe('lançamentos', () => {
     expect(r.recorrentes).toBe(890)
   })
 
-  it('marca como pendente só o que precisa de baixa', () => {
+  it('conta só o que FALTA, não o valor cheio', () => {
+    // A venda de R$ 1.299 com R$ 400 já recebidos deve R$ 899. Somar o total
+    // mostraria como pendente um dinheiro que já está na conta — e o saldo
+    // projetado, que soma saldo + a receber, contaria os R$ 400 duas vezes.
+    const r = resumirLancamentos([
+      lanc({ id: 'A', tipo: 'entrada', status: 'Parcial', valor: 1299, recebido: 400 }),
+    ])
+    expect(r.aReceber).toBe(899)
+    expect(r.aReceberQtd).toBe(1)
+  })
+
+  it('marca como pendente tudo que ainda tem dinheiro a mover', () => {
+    // Entrada prevista é pendente: o dinheiro não chegou. Antes ela ficava de
+    // fora, e o "a receber" da tela era menor que a realidade.
     expect(lancamentoPendente(lanc({ status: 'A pagar' }))).toBe(true)
     expect(lancamentoPendente(lanc({ status: 'Vencido' }))).toBe(true)
-    expect(lancamentoPendente(lanc({ status: 'Pago' }))).toBe(false)
-    expect(lancamentoPendente(lanc({ status: 'Previsto', tipo: 'entrada' }))).toBe(false)
+    expect(lancamentoPendente(lanc({ status: 'Parcial' }))).toBe(true)
+    expect(lancamentoPendente(lanc({ status: 'Previsto', tipo: 'entrada' }))).toBe(true)
+    expect(lancamentoPendente(lanc({ status: 'Pago', recebido: 100 }))).toBe(false)
+  })
+
+  it('lê o status dos fatos, sem enum gravado', () => {
+    const st = (recebido: number, venceEm: string | null) =>
+      statusDoLancamento({ tipo: 'saida', valor: 1000, recebido, venceEm }, '2026-08-10')
+
+    expect(st(1000, '2026-08-01')).toBe('Pago')
+    expect(st(400, '2026-08-01')).toBe('Parcial')
+    // Vencido é leitura da data contra hoje. Guardado como campo, a conta
+    // viraria "vencida" só quando alguém abrisse a tela.
+    expect(st(0, '2026-08-01')).toBe('Vencido')
+    expect(st(0, '2026-08-30')).toBe('A pagar')
+    expect(st(0, null)).toBe('Previsto')
+  })
+
+  it('nunca deixa o saldo em aberto ficar negativo', () => {
+    // Pagar a mais acontece — juros, arredondamento do banco. Devolver
+    // negativo faria o "a pagar" da tela diminuir com contas que sobraram.
+    expect(saldoEmAberto(lanc({ valor: 100, recebido: 130 }))).toBe(0)
   })
 })
 

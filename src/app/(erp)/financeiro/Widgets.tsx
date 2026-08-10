@@ -6,7 +6,13 @@ import { Modal } from '@/components/erp/Modal'
 import { BotaoOuro, BotaoSecundario, Rotulo, Switch, TituloSecao } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
 import { parseNum } from '@/domain'
-import type { CategoriaFinanceira, ContaBancaria, NaturezaCategoria } from '@/domain'
+import { brl, saldoEmAberto } from '@/domain'
+import type {
+  CategoriaFinanceira,
+  ContaBancaria,
+  Lancamento,
+  NaturezaCategoria,
+} from '@/domain'
 
 import {
   conciliarRepasse,
@@ -15,7 +21,11 @@ import {
   criarLancamento,
   darBaixa,
   editarConta,
+  editarLancamento,
+  estornarRecebimento,
+  excluirLancamento,
   preverRepasses,
+  registrarRecebimento,
   removerConta,
 } from './actions'
 
@@ -90,6 +100,17 @@ function Confirmar({
 
 const hoje = () => new Date().toISOString().slice(0, 10)
 
+/** Cadências que o banco aceita. A lista aqui e o CHECK lá precisam bater. */
+const CADENCIAS = [
+  { valor: 'semanal', rotulo: 'Toda semana' },
+  { valor: 'quinzenal', rotulo: 'A cada 15 dias' },
+  { valor: 'mensal', rotulo: 'Todo mês' },
+  { valor: 'bimestral', rotulo: 'A cada 2 meses' },
+  { valor: 'trimestral', rotulo: 'A cada 3 meses' },
+  { valor: 'semestral', rotulo: 'A cada 6 meses' },
+  { valor: 'anual', rotulo: 'Todo ano' },
+] as const
+
 /**
  * Novo lançamento.
  *
@@ -114,6 +135,11 @@ export function NovoLancamento({
   const [venceEm, setVenceEm] = useState('')
   const [baixado, setBaixado] = useState(false)
   const [recorrente, setRecorrente] = useState(false)
+  // Quanto já entrou, quando não foi tudo. Vazio significa "nada ainda", e
+  // `baixado` continua sendo o atalho para "entrou tudo".
+  const [recebido, setRecebido] = useState('')
+  const [recorrencia, setRecorrencia] = useState('')
+  const [recorrenciaAte, setRecorrenciaAte] = useState('')
   const [erro, setErro] = useState<string | null>(null)
   const [pendente, iniciarTransicao] = useTransition()
 
@@ -151,7 +177,10 @@ export function NovoLancamento({
         ocorridoEm,
         venceEm,
         baixado,
-        recorrente,
+        recorrente: recorrente || Boolean(recorrencia),
+        recebido: recebido.trim() === '' ? null : parseNum(recebido),
+        recorrencia: recorrencia || null,
+        recorrenciaAte: recorrenciaAte || null,
       })
       if (!r.ok) {
         setErro(r.erro)
@@ -159,6 +188,7 @@ export function NovoLancamento({
       }
       setDescricao('')
       setValor('')
+      setRecebido('')
       setAberto(false)
     })
 
@@ -285,10 +315,68 @@ export function NovoLancamento({
             ligado={baixado}
             onChange={setBaixado}
           />
+
+          <Campo rotulo="Já entrou parte (opcional)">
+            <input
+              value={recebido}
+              onChange={(e) => setRecebido(e.target.value.replace(/[^0-9.,]/g, ''))}
+              inputMode="decimal"
+              placeholder="0,00"
+              className="font-mono focus:border-ouro/45"
+              style={CAMPO}
+            />
+          </Campo>
+          <span
+            className="font-sans"
+            style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+          >
+            Para venda parcelada: o valor acima é o total combinado e aqui vai o que já entrou. O
+            que falta aparece em “a receber” até ser quitado, em vez de virar três lançamentos
+            soltos que ninguém sabe serem a mesma venda.
+          </span>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <Campo rotulo="Repetir">
+              <select
+                value={recorrencia}
+                onChange={(e) => setRecorrencia(e.target.value)}
+                className="font-sans"
+                style={{ ...CAMPO, background: '#151417' }}
+              >
+                <option value="">Não repete</option>
+                {CADENCIAS.map((c) => (
+                  <option key={c.valor} value={c.valor}>
+                    {c.rotulo}
+                  </option>
+                ))}
+              </select>
+            </Campo>
+            <Campo rotulo="Repetir até (opcional)">
+              <input
+                type="date"
+                value={recorrenciaAte}
+                onChange={(e) => setRecorrenciaAte(e.target.value)}
+                disabled={!recorrencia}
+                className="font-mono focus:border-ouro/45"
+                style={{ ...CAMPO, background: '#151417', opacity: recorrencia ? 1 : 0.45 }}
+              />
+            </Campo>
+          </div>
+          {recorrencia && (
+            <span
+              className="font-sans"
+              style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+            >
+              As próximas ocorrências são criadas como lançamentos de verdade, em aberto — dá para
+              ajustar o valor de uma, baixar outra e apagar a terceira sem mexer nas demais. Sem
+              data-limite, vai até um ano à frente.
+            </span>
+          )}
+
           <Linha
             titulo="Recorrente"
-            explicacao="Marca despesas que se repetem todo mês. Elas somam no KPI de recorrentes, que é a conta fixa da operação."
-            ligado={recorrente}
+            explicacao="Marca a despesa como fixa no KPI de recorrentes, mesmo sem gerar ocorrências futuras."
+            ligado={recorrente || Boolean(recorrencia)}
             onChange={setRecorrente}
           />
 
@@ -351,6 +439,354 @@ function Linha({
 }
 
 /** Baixa de um lançamento, direto na linha da tabela. */
+/**
+ * Ações de um lançamento: receber, editar, excluir.
+ *
+ * Tudo num menu só porque a coluna de ação tem largura de um botão, e três
+ * botões lado a lado empurrariam o valor para fora da tela nas resoluções
+ * onde este ERP de fato é usado.
+ */
+export function AcoesLancamento({
+  lancamento,
+  contas,
+  categorias,
+}: {
+  lancamento: Lancamento
+  contas: ContaBancaria[]
+  categorias: CategoriaFinanceira[]
+}) {
+  const [modal, setModal] = useState<'receber' | 'editar' | null>(null)
+  const [erro, setErro] = useState<string | null>(null)
+  const [pendente, iniciarTransicao] = useTransition()
+
+  const falta = saldoEmAberto(lancamento)
+  const entrada = lancamento.tipo === 'entrada'
+
+  // ── Receber ──────────────────────────────────────────────────────────────
+  const [quanto, setQuanto] = useState(String(falta).replace('.', ','))
+  const [quando, setQuando] = useState(hoje())
+
+  const receber = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      const r = await registrarRecebimento(lancamento.id, parseNum(quanto), quando)
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      setModal(null)
+    })
+
+  const estornar = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      if (!window.confirm(`Desfazer os recebimentos de "${lancamento.descricao}"?`)) return
+      const r = await estornarRecebimento(lancamento.id)
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      setModal(null)
+    })
+
+  // ── Editar ───────────────────────────────────────────────────────────────
+  const [descricao, setDescricao] = useState(lancamento.descricao)
+  const [categoria, setCategoria] = useState(lancamento.categoriaId)
+  const [contaId, setContaId] = useState(lancamento.contaId)
+  const [tipo, setTipo] = useState<'entrada' | 'saida'>(lancamento.tipo)
+  const [valor, setValor] = useState(String(lancamento.valor).replace('.', ','))
+  const [ocorridoEm, setOcorridoEm] = useState(lancamento.ocorridoEm)
+  const [venceEm, setVenceEm] = useState(lancamento.venceEm ?? '')
+  const [serie, setSerie] = useState(false)
+
+  const doTipo = categorias.filter((c) =>
+    tipo === 'entrada' ? c.natureza === 'Receita' : c.natureza !== 'Receita',
+  )
+  const categoriaValida = doTipo.some((c) => c.nome === categoria)
+    ? categoria
+    : (doTipo[0]?.nome ?? '')
+
+  const salvar = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      const r = await editarLancamento(lancamento.id, {
+        descricao,
+        categoria: categoriaValida,
+        contaId,
+        tipo,
+        valor: parseNum(valor),
+        ocorridoEm,
+        venceEm,
+        serie,
+      })
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      setModal(null)
+    })
+
+  const excluir = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      const aviso = lancamento.serieId
+        ? `Excluir "${lancamento.descricao}"?\n\nOK apaga ${serie ? 'esta E as próximas ocorrências ainda não recebidas' : 'só esta ocorrência'}.`
+        : `Excluir "${lancamento.descricao}"?`
+      if (!window.confirm(aviso)) return
+      const r = await excluirLancamento(lancamento.id, serie)
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      setModal(null)
+    })
+
+  return (
+    <>
+      <span style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+        {falta > 0 && (
+          <BotaoSecundario altura={27} onClick={() => setModal('receber')}>
+            {entrada ? 'Receber' : 'Pagar'}
+          </BotaoSecundario>
+        )}
+        <BotaoSecundario altura={27} onClick={() => setModal('editar')}>
+          Editar
+        </BotaoSecundario>
+      </span>
+
+      {modal === 'receber' && (
+        <Modal
+          titulo={entrada ? 'Registrar recebimento' : 'Registrar pagamento'}
+          largura={440}
+          aoFechar={() => setModal(null)}
+        >
+          <TituloSecao tamanho={15}>{lancamento.descricao}</TituloSecao>
+          <span
+            className="font-sans"
+            style={{ fontSize: 11.5, lineHeight: 1.6, color: 'var(--color-secundario)' }}
+          >
+            {`Combinado ${brl(lancamento.valor)} · já ${entrada ? 'entrou' : 'saiu'} ${brl(lancamento.recebido)} · faltam `}
+            <strong style={{ color: COR.ouro }}>{brl(falta)}</strong>
+          </span>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <Campo rotulo={entrada ? 'Quanto entrou (R$)' : 'Quanto saiu (R$)'}>
+              <input
+                value={quanto}
+                onChange={(e) => setQuanto(e.target.value.replace(/[^0-9.,]/g, ''))}
+                inputMode="decimal"
+                autoFocus
+                className="font-mono focus:border-ouro/45"
+                style={CAMPO}
+              />
+            </Campo>
+            <Campo rotulo="Quando">
+              <input
+                type="date"
+                value={quando}
+                onChange={(e) => setQuando(e.target.value)}
+                className="font-mono focus:border-ouro/45"
+                style={{ ...CAMPO, background: '#151417' }}
+              />
+            </Campo>
+          </div>
+          <span
+            className="font-sans"
+            style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+          >
+            Pode ser menos que o total. O restante continua em aberto e aparece no “a receber” até
+            ser quitado.
+          </span>
+
+          <Erro texto={erro} />
+          <div style={{ display: 'flex', gap: 9, alignItems: 'center' }}>
+            {lancamento.recebido > 0 && (
+              <button
+                type="button"
+                onClick={estornar}
+                disabled={pendente}
+                className="font-sans"
+                style={{
+                  background: 'none',
+                  border: 0,
+                  padding: 0,
+                  fontSize: 11.5,
+                  color: COR.erro,
+                  cursor: pendente ? 'default' : 'pointer',
+                  textDecoration: 'underline',
+                  textUnderlineOffset: 3,
+                }}
+              >
+                Estornar tudo
+              </button>
+            )}
+            <div style={{ flex: 1 }} />
+            <BotaoSecundario altura={36} onClick={() => setModal(null)}>
+              Cancelar
+            </BotaoSecundario>
+            <Confirmar rotulo="Registrar" onClick={receber} pendente={pendente} />
+          </div>
+        </Modal>
+      )}
+
+      {modal === 'editar' && (
+        <Modal titulo="Editar lançamento" largura={560} aoFechar={() => setModal(null)}>
+          <TituloSecao tamanho={15}>Editar lançamento</TituloSecao>
+
+          <Campo rotulo="Descrição">
+            <input
+              value={descricao}
+              onChange={(e) => setDescricao(e.target.value)}
+              autoFocus
+              className="font-sans focus:border-ouro/45"
+              style={CAMPO}
+            />
+          </Campo>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <Campo rotulo="Tipo">
+              <div style={{ display: 'flex', gap: 8 }}>
+                {(['saida', 'entrada'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setTipo(t)}
+                    className="hover:border-ouro/40 font-sans"
+                    style={{
+                      flex: 1,
+                      height: 38,
+                      border: `1px solid ${tipo === t ? 'rgba(239,209,140,.45)' : 'rgba(255,255,255,.1)'}`,
+                      background: tipo === t ? 'rgba(239,209,140,.09)' : 'transparent',
+                      color: tipo === t ? COR.ouro : 'rgba(242,237,227,.65)',
+                      fontWeight: 600,
+                      fontSize: 11.5,
+                      borderRadius: 9,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {t === 'saida' ? 'Saída' : 'Entrada'}
+                  </button>
+                ))}
+              </div>
+            </Campo>
+            <Campo rotulo="Valor total (R$)">
+              <input
+                value={valor}
+                onChange={(e) => setValor(e.target.value.replace(/[^0-9.,]/g, ''))}
+                inputMode="decimal"
+                className="font-mono focus:border-ouro/45"
+                style={CAMPO}
+              />
+            </Campo>
+          </div>
+
+          {lancamento.recebido > 0 && (
+            <span
+              className="font-sans"
+              style={{ fontSize: 10.5, lineHeight: 1.5, color: COR.atencao, textWrap: 'pretty' }}
+            >
+              {`Já ${entrada ? 'entraram' : 'saíram'} ${brl(lancamento.recebido)} neste lançamento — o total não pode ficar abaixo disso. Para reduzir, estorne primeiro.`}
+            </span>
+          )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <Campo rotulo="Categoria">
+              <select
+                value={categoriaValida}
+                onChange={(e) => setCategoria(e.target.value)}
+                className="font-sans"
+                style={{ ...CAMPO, background: '#151417' }}
+              >
+                {doTipo.map((c) => (
+                  <option key={c.nome} value={c.nome}>
+                    {`${c.nome} · ${c.natureza}`}
+                  </option>
+                ))}
+              </select>
+            </Campo>
+            <Campo rotulo="Conta">
+              <select
+                value={contaId}
+                onChange={(e) => setContaId(e.target.value)}
+                className="font-sans"
+                style={{ ...CAMPO, background: '#151417' }}
+              >
+                {contas.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {`${c.nome} · ${c.banco}`}
+                  </option>
+                ))}
+              </select>
+            </Campo>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <Campo rotulo="Data do lançamento">
+              <input
+                type="date"
+                value={ocorridoEm}
+                onChange={(e) => setOcorridoEm(e.target.value)}
+                className="font-mono focus:border-ouro/45"
+                style={{ ...CAMPO, background: '#151417' }}
+              />
+            </Campo>
+            <Campo rotulo="Vencimento (opcional)">
+              <input
+                type="date"
+                value={venceEm}
+                onChange={(e) => setVenceEm(e.target.value)}
+                className="font-mono focus:border-ouro/45"
+                style={{ ...CAMPO, background: '#151417' }}
+              />
+            </Campo>
+          </div>
+
+          {lancamento.serieId && (
+            <Linha
+              titulo="Aplicar às próximas ocorrências"
+              explicacao="Alcança só as futuras ainda não recebidas. As passadas ficam como estão — reescrever o aluguel de março porque o de setembro reajustou mudaria um fato já ocorrido."
+              ligado={serie}
+              onChange={setSerie}
+            />
+          )}
+
+          <Erro texto={erro} />
+          <div style={{ display: 'flex', gap: 9, alignItems: 'center' }}>
+            <button
+              type="button"
+              onClick={excluir}
+              disabled={pendente}
+              className="font-sans"
+              style={{
+                background: 'none',
+                border: 0,
+                padding: 0,
+                fontSize: 11.5,
+                color: COR.erro,
+                cursor: pendente ? 'default' : 'pointer',
+                textDecoration: 'underline',
+                textUnderlineOffset: 3,
+              }}
+            >
+              Excluir
+            </button>
+            <div style={{ flex: 1 }} />
+            <BotaoSecundario altura={36} onClick={() => setModal(null)}>
+              Cancelar
+            </BotaoSecundario>
+            <Confirmar
+              rotulo="Salvar"
+              onClick={salvar}
+              pendente={pendente}
+              desabilitado={!descricao.trim()}
+            />
+          </div>
+        </Modal>
+      )}
+    </>
+  )
+}
+
 export function BotaoBaixa({ id, descricao }: { id: string; descricao: string }) {
   const [erro, setErro] = useState<string | null>(null)
   const [pendente, iniciarTransicao] = useTransition()

@@ -1,6 +1,14 @@
 import 'server-only'
 
-import { PARAMETROS_PADRAO, aferirItem, iniciaisDe, montarEnvio, statusCliente, statusDevolucao } from '@/domain'
+import {
+  PARAMETROS_PADRAO,
+  aferirItem,
+  iniciaisDe,
+  montarEnvio,
+  statusCliente,
+  statusDevolucao,
+  statusDoLancamento,
+} from '@/domain'
 import type {
   AutorizadoIa,
   AvaliacaoCupom,
@@ -796,8 +804,9 @@ const repositorioSupabase: Repositorio = {
     const { data, error } = await supabaseServer()
       .from('lancamentos')
       .select(
-        'id, ocorrido_em, descricao, categoria, conta_id, tipo, valor, baixado_em, ' +
-          'vence_em, recorrente, origem, contas_bancarias(nome)',
+        'id, ocorrido_em, descricao, categoria, conta_id, tipo, valor, recebido, ' +
+          'baixado_em, vence_em, recorrente, recorrencia, serie_id, origem, ' +
+          'contas_bancarias(nome)',
       )
       .order('ocorrido_em', { ascending: false })
       .limit(500)
@@ -813,18 +822,26 @@ const repositorioSupabase: Repositorio = {
         conta: l.contas_bancarias?.nome ?? '—',
         tipo: l.tipo,
         valor: Number(l.valor),
-        // O status não é campo: é a leitura da baixa contra o vencimento. Um
-        // enum gravado envelheceria sozinho à meia-noite do vencimento.
-        status: l.baixado_em
-          ? l.tipo === 'entrada'
-            ? 'Recebido'
-            : 'Pago'
-          : !l.vence_em
-            ? 'Previsto'
-            : l.vence_em < hoje
-              ? 'Vencido'
-              : 'A pagar',
+        recebido: Number(l.recebido ?? 0),
+        // O status não é campo: é a leitura do recebido contra o total e o
+        // vencimento. Um enum gravado envelheceria sozinho à meia-noite do
+        // vencimento, sem ninguém ter tocado no lançamento.
+        status: statusDoLancamento(
+          {
+            tipo: l.tipo,
+            valor: Number(l.valor),
+            recebido: Number(l.recebido ?? 0),
+            venceEm: l.vence_em,
+          },
+          hoje,
+        ),
         recorrente: l.recorrente,
+        recorrencia: l.recorrencia ?? null,
+        serieId: l.serie_id ?? null,
+        categoriaId: l.categoria ?? '',
+        contaId: l.conta_id ?? '',
+        ocorridoEm: l.ocorrido_em,
+        venceEm: l.vence_em,
         origem: l.origem,
       }),
     )
@@ -1074,9 +1091,12 @@ interface LinhaLancamento {
   conta_id: string | null
   tipo: 'entrada' | 'saida'
   valor: number | string
+  recebido: number | string | null
   baixado_em: string | null
   vence_em: string | null
   recorrente: boolean
+  recorrencia: string | null
+  serie_id: string | null
   origem: string
   contas_bancarias: { nome: string } | null
 }
