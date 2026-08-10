@@ -25,6 +25,8 @@ import {
   diagnosticarGateway,
   ignorarLinha,
   importarOfx,
+  recasarExtrato,
+  relerGateway,
   sincronizarBanco,
   sincronizarGateway,
 } from './actions'
@@ -319,6 +321,52 @@ export function ExtratoCliente({
             }
           >
             Diagnosticar
+          </BotaoSecundario>
+          <BotaoSecundario
+            altura={32}
+            desabilitado={pendente || !gatewayLigado}
+            onClick={() =>
+              rodar(async () => {
+                // Reler existe porque a importação é idempotente: quando a
+                // LEITURA estava errada, ressincronizar não conserta nada.
+                if (
+                  !window.confirm(
+                    'Apagar as linhas do Mercado Pago que ainda não viraram lançamento e ler o período de novo?\n\nO que já foi classificado ou dispensado é preservado.',
+                  )
+                ) {
+                  return null
+                }
+                const r = await relerGateway(de, ate)
+                if (!r.ok) throw new Error(r.erro)
+                const x = r.resultado
+                return [
+                  `${r.apagadas} linha(s) antigas apagadas.`,
+                  `${x.lidos} pagamento(s) relidos · ${x.novasLinhas} linha(s) gravadas.`,
+                  `${x.saidas} deles foram pagamentos NOSSOS (etiqueta de frete, por exemplo) e entraram como saída.`,
+                  ...x.avisos.map((a) => `Atenção: ${a}`),
+                ]
+              })
+            }
+          >
+            Reler do zero
+          </BotaoSecundario>
+          <BotaoSecundario
+            altura={32}
+            desabilitado={pendente}
+            onClick={() =>
+              rodar(async () => {
+                const r = await recasarExtrato()
+                if (!r.ok) throw new Error(r.erro)
+                return [
+                  `${r.religadas} linha(s) ligadas a um pedido agora.`,
+                  r.restantes
+                    ? `${r.restantes} continuam sem pedido correspondente no ERP.`
+                    : 'Nenhuma linha ficou órfã.',
+                ]
+              })
+            }
+          >
+            Recasar com pedidos
           </BotaoSecundario>
           {!gatewayLigado && (
             <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>

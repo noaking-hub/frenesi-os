@@ -92,6 +92,10 @@ export interface PagamentoMp {
   meio: string
   descricao: string
   pagador: string
+  /** Quem RECEBEU o dinheiro. */
+  collectorId: string
+  /** Quem PAGOU. */
+  payerId: string
 }
 
 const MEIO_MP: Record<string, string> = {
@@ -165,6 +169,8 @@ export function normalizarPagamentoMp(cru: Record<string, unknown>): PagamentoMp
     meio,
     descricao: s(cru.description).trim(),
     pagador: s(pagador.email).trim(),
+    collectorId: s(cru.collector_id),
+    payerId: s(pagador.id),
   }
 }
 
@@ -179,10 +185,20 @@ export function normalizarPagamentoMp(cru: Record<string, unknown>): PagamentoMp
  * Pagamento não aprovado não vira linha nenhuma: intenção de pagar não é
  * dinheiro em conta.
  */
-export function linhasDoPagamentoMp(p: PagamentoMp, pedidoId: string | null): LinhaExtratoBruta[] {
+export function linhasDoPagamentoMp(
+  p: PagamentoMp,
+  pedidoId: string | null,
+  nossaConta: string,
+): LinhaExtratoBruta[] {
   const linhas: LinhaExtratoBruta[] = []
   const aprovado = p.status === 'approved' || p.status === 'refunded' || p.status === 'charged_back'
   if (!aprovado) return linhas
+
+  // A busca de pagamentos do Mercado Pago devolve TAMBÉM o que a conta pagou,
+  // não só o que ela recebeu — compra de etiqueta de frete, por exemplo. Sem
+  // olhar quem é o recebedor, dinheiro saindo entra no ERP como venda, e o
+  // caixa erra duas vezes: a mais na entrada e a menos na despesa.
+  const recebemos = !nossaConta || p.collectorId === nossaConta
 
   // A data do crédito é a da liberação: é quando o dinheiro passa a ser
   // nosso. Enquanto o MP não libera, a venda existe e o saldo não.
@@ -194,15 +210,19 @@ export function linhasDoPagamentoMp(p: PagamentoMp, pedidoId: string | null): Li
       descricao: [p.meio, p.descricao].filter(Boolean).join(' · ') || 'Venda Mercado Pago',
       contraparte: p.pagador,
       documento: p.referencia,
-      tipo: 'entrada',
-      valor: p.liquido,
-      pedido_id: pedidoId,
+      tipo: recebemos ? 'entrada' : 'saida',
+      // Quando somos nós que pagamos, o valor é o que saiu por inteiro: a
+      // tarifa do gateway é do lado de quem recebeu, não do nosso.
+      valor: recebemos ? p.liquido : p.bruto,
+      // Pagamento que NÓS fizemos não pertence a pedido de venda nenhum.
+      pedido_id: recebemos ? pedidoId : null,
       bruto: {
         bruto: p.bruto,
-        tarifa: p.tarifa,
+        tarifa: recebemos ? p.tarifa : 0,
         status: p.status,
         referencia: p.referencia,
         liberado_em: p.liberadoEm,
+        recebemos,
       },
     })
   }
@@ -217,9 +237,10 @@ export function linhasDoPagamentoMp(p: PagamentoMp, pedidoId: string | null): Li
         descricao: `Estorno · ${p.meio}`,
         contraparte: p.pagador,
         documento: p.referencia,
-        tipo: 'saida',
+        // Estorno desfaz o movimento original: se entrou, sai; se saiu, volta.
+        tipo: recebemos ? 'saida' : 'entrada',
         valor: p.estornado,
-        pedido_id: pedidoId,
+        pedido_id: recebemos ? pedidoId : null,
         bruto: { estorno_de: p.id, status: p.status },
       })
     }
@@ -287,7 +308,32 @@ export function casarPagamento(
   p: PagamentoMp,
   indice: IndicePedidos,
 ): CasamentoPagamento | null {
-  const ref = p.referencia.trim()
+  const data = dataEmSaoPaulo(p.aprovadoEm ?? '')
+  return casarObservacao({ referencia: p.referencia, valor: p.bruto, data: data ?? '' }, indice)
+}
+
+/** O que se sabe de um pagamento, seja ele recém-lido ou já gravado. */
+export interface ObservacaoDePagamento {
+  referencia: string
+  valor: number
+  /** AAAA-MM-DD. */
+  data: string
+}
+
+/**
+ * O casamento propriamente dito, separado de onde os dados vieram.
+ *
+ * Existe em separado porque a mesma decisão precisa rodar duas vezes: na
+ * leitura, com o pagamento fresco da API, e depois — quando mais histórico de
+ * pedidos é importado — sobre a linha já gravada. Duas implementações da
+ * mesma regra divergiriam no primeiro ajuste, e aí o mesmo pagamento casaria
+ * de um jeito na entrada e de outro no reprocessamento.
+ */
+export function casarObservacao(
+  o: ObservacaoDePagamento,
+  indice: IndicePedidos,
+): CasamentoPagamento | null {
+  const ref = o.referencia.trim()
   if (ref) {
     if (indice.porId.has(ref)) return { pedidoId: ref, criterio: 'referencia' }
 
@@ -297,11 +343,10 @@ export function casarPagamento(
     if (porSufixo && porSufixo.length > 1) return null
   }
 
-  const dataPagamento = dataEmSaoPaulo(p.aprovadoEm ?? '')
-  if (!dataPagamento) return null
+  if (!o.data) return null
 
-  const mesmoValor = indice.porCentavos.get(Math.round(p.bruto * 100)) ?? []
-  const perto = mesmoValor.filter((c) => distanciaEmDias(c.data, dataPagamento) <= JANELA_DIAS)
+  const mesmoValor = indice.porCentavos.get(Math.round(o.valor * 100)) ?? []
+  const perto = mesmoValor.filter((c) => distanciaEmDias(c.data, o.data) <= JANELA_DIAS)
   if (perto.length === 1) return { pedidoId: perto[0].id, criterio: 'valor-e-data' }
 
   return null
@@ -460,7 +505,7 @@ export function lerOfx(texto: string): ExtratoOfx {
 const PISTAS: { termos: string[]; categoria: string }[] = [
   { termos: ['tarifa', 'taxa', 'iof', 'mensalidade', 'cesta', 'anuidade', 'juros'], categoria: 'Taxas de pagamento' },
   { termos: ['das ', 'darf', 'simples nacional', 'imposto', 'inss', 'fgts', 'issqn'], categoria: 'Imposto' },
-  { termos: ['correios', 'melhor envio', 'jadlog', 'loggi', 'frete', 'sedex', 'total express'], categoria: 'Frete' },
+  { termos: ['correios', 'melhor envio', 'jadlog', 'loggi', 'frete', 'sedex', 'total express', 'etiqueta'], categoria: 'Frete' },
   { termos: ['meta plat', 'facebook', 'google ads', 'googleads', 'tiktok', 'ads', 'publicidade', 'trafego', 'tráfego'], categoria: 'Marketing e ADS' },
   { termos: ['frasco', 'embalagem', 'rotulo', 'rótulo', 'valvula', 'válvula', 'pipeta', 'caixa'], categoria: 'Frascos e insumos' },
   { termos: ['perfume', 'fragrancia', 'fragrância', 'importado', 'essencia', 'essência'], categoria: 'Perfume base' },

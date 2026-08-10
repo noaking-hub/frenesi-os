@@ -55,6 +55,18 @@ export class ErroMercadoPago extends Error {
   }
 }
 
+/** Id da conta que o token abriu. Vazio quando o Mercado Pago não responde. */
+export async function idDaConta(): Promise<string> {
+  try {
+    const eu = await chamar('/users/me')
+    return eu.id === undefined || eu.id === null ? '' : String(eu.id)
+  } catch {
+    // Falhar aqui não pode derrubar a sincronia: sem o id, tudo é tratado
+    // como recebimento e o aviso aparece no relatório.
+    return ''
+  }
+}
+
 async function chamar(caminho: string): Promise<Record<string, unknown>> {
   const t = token()
   if (!t) {
@@ -182,6 +194,10 @@ function proximoDia(data: string): string {
 
 export interface ResultadoSincroniaMp {
   periodo: { de: string; ate: string }
+  /** Id da conta que o token abriu. Sem ele não dá para saber quem recebeu. */
+  conta: string
+  /** Pagamentos que NÓS fizemos — etiqueta de frete, por exemplo. */
+  saidas: number
   /** Pagamentos lidos da API, aprovados ou não. */
   lidos: number
   /** Linhas de extrato que a leitura produziu. */
@@ -211,6 +227,17 @@ export async function sincronizarMercadoPago(de: string, ate: string): Promise<R
   }
 
   const avisos: string[] = []
+
+  // Quem somos, para separar o que recebemos do que pagamos. A busca de
+  // pagamentos devolve os dois, e sem esta pergunta a compra de etiqueta de
+  // frete entra no ERP como venda.
+  const conta = await idDaConta()
+  if (!conta) {
+    avisos.push(
+      'Não consegui identificar o id da conta no Mercado Pago; todo pagamento do período foi tratado como recebimento.',
+    )
+  }
+
   const pagamentos = await pagamentosDoPeriodo(de, ate, avisos)
   const sb = supabaseServer()
 
@@ -245,15 +272,21 @@ export async function sincronizarMercadoPago(de: string, ate: string): Promise<R
   const semPedido: ResultadoSincroniaMp['semPedido'] = []
   const criterios: Record<string, number> = {}
 
+  let saidas = 0
+
   for (const p of pagamentos) {
-    const casamento: CasamentoPagamento | null = casarPagamento(p, indice)
+    const recebemos = !conta || p.collectorId === conta
+    if (!recebemos) saidas += 1
+
+    const casamento: CasamentoPagamento | null = recebemos ? casarPagamento(p, indice) : null
     if (casamento) {
       criterios[casamento.criterio] = (criterios[casamento.criterio] ?? 0) + 1
     }
 
-    linhas.push(...linhasDoPagamentoMp(p, casamento?.pedidoId ?? null))
+    linhas.push(...linhasDoPagamentoMp(p, casamento?.pedidoId ?? null, conta))
 
-    if (p.status !== 'approved') continue
+    // Pagamento que fizemos não tem repasse a conciliar nem pedido a cobrar.
+    if (p.status !== 'approved' || !recebemos) continue
 
     if (!casamento) {
       // Dinheiro que entrou sem venda registrada é exatamente o caso que
@@ -316,6 +349,8 @@ export async function sincronizarMercadoPago(de: string, ate: string): Promise<R
 
   return {
     periodo: { de, ate },
+    conta,
+    saidas,
     lidos: pagamentos.length,
     linhas: linhas.length,
     novasLinhas,

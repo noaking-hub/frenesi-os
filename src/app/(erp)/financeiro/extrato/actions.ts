@@ -3,12 +3,12 @@
 import { revalidatePath } from 'next/cache'
 
 import { gravarLinhas } from '@/data/extrato'
-import { diagnosticarMercadoPago, sincronizarMercadoPago } from '@/data/mercadopago'
+import { CONTA_MP, diagnosticarMercadoPago, sincronizarMercadoPago } from '@/data/mercadopago'
 import { OPERADOR } from '@/data/operador'
 import { mensagemDe } from '@/data/shopify'
 import { CONTA_SICOOB, diagnosticarSicoob, sincronizarSicoob } from '@/data/sicoob'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
-import { decodificarOfx, lerOfx } from '@/domain'
+import { casarObservacao, decodificarOfx, indexarPedidos, lerOfx } from '@/domain'
 import type { ResultadoSincroniaMp } from '@/data/mercadopago'
 
 export type Resposta<T = object> = ({ ok: true } & T) | { ok: false; erro: string }
@@ -233,4 +233,97 @@ export async function classificarRecebimentos(contaId: string): Promise<Resposta
 
   revalidatePath('/', 'layout')
   return { ok: true, feitas: Number(data) }
+}
+
+/**
+ * Apaga a leitura do gateway e lê de novo.
+ *
+ * A importação é idempotente pela chave do pagamento — o que é certo quando
+ * o fato não muda. Quando a LEITURA estava errada, porém, ressincronizar não
+ * conserta: a linha já existe e é preservada. Este é o caminho para desfazer
+ * uma leitura ruim, e ele só alcança o que ninguém classificou ainda.
+ */
+export async function relerGateway(
+  de: string,
+  ate: string,
+): Promise<Resposta<{ apagadas: number; resultado: ResultadoSincroniaMp }>> {
+  const bloqueio = exigeSupabase('reler o Mercado Pago')
+  if (bloqueio) return bloqueio
+
+  try {
+    const { data, error } = await supabaseServer().rpc('descartar_leitura', {
+      p_origem: 'mercadopago',
+      p_conta_id: CONTA_MP,
+    })
+    if (error) return { ok: false, erro: mensagemDe(error) }
+
+    const resultado = await sincronizarMercadoPago(de, ate)
+    revalidatePath('/', 'layout')
+    return { ok: true, apagadas: Number(data), resultado }
+  } catch (e) {
+    console.error('[extrato] reler gateway falhou:', e)
+    return { ok: false, erro: mensagemDe(e) }
+  }
+}
+
+/**
+ * Tenta de novo casar com pedido as linhas que ficaram órfãs.
+ *
+ * Serve para depois de importar mais histórico de pedidos: a linha do extrato
+ * de fevereiro não achou pedido porque o pedido de fevereiro não existia no
+ * ERP. Sem isto, a única saída seria apagar e reler o extrato inteiro.
+ */
+export async function recasarExtrato(): Promise<Resposta<{ religadas: number; restantes: number }>> {
+  const bloqueio = exigeSupabase('recasar o extrato')
+  if (bloqueio) return bloqueio
+
+  try {
+    const sb = supabaseServer()
+    const [{ data: linhas, error: e1 }, { data: pedidos, error: e2 }] = await Promise.all([
+      sb
+        .from('extrato_linhas')
+        .select('chave, ocorrido_em, documento, bruto')
+        .eq('origem', 'mercadopago')
+        .eq('tipo', 'entrada')
+        .is('pedido_id', null)
+        .limit(2000),
+      sb.from('pedidos').select('id, valor, comprado_em').limit(10000),
+    ])
+    if (e1) return { ok: false, erro: mensagemDe(e1) }
+    if (e2) return { ok: false, erro: mensagemDe(e2) }
+
+    const indice = indexarPedidos(
+      (pedidos ?? []).map((p) => ({
+        id: p.id as string,
+        valor: Number(p.valor),
+        data: String(p.comprado_em).slice(0, 10),
+      })),
+    )
+
+    let religadas = 0
+    for (const l of (linhas ?? []) as unknown as {
+      chave: string
+      ocorrido_em: string
+      documento: string
+      bruto: { bruto?: number } | null
+    }[]) {
+      const achou = casarObservacao(
+        { referencia: l.documento ?? '', valor: Number(l.bruto?.bruto ?? 0), data: l.ocorrido_em },
+        indice,
+      )
+      if (!achou) continue
+      const { error } = await sb.rpc('religar_extrato', {
+        p_origem: 'mercadopago',
+        p_chave: l.chave,
+        p_pedido_id: achou.pedidoId,
+      })
+      if (!error) religadas += 1
+    }
+
+    revalidatePath('/', 'layout')
+    return { ok: true, religadas, restantes: (linhas ?? []).length - religadas }
+  } catch (e) {
+    console.error('[extrato] recasar falhou:', e)
+    return { ok: false, erro: mensagemDe(e) }
+  }
 }
