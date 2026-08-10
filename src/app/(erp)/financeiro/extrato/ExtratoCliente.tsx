@@ -1,5 +1,6 @@
 'use client'
 
+import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useState, useTransition } from 'react'
 
 import {
@@ -70,11 +71,145 @@ const dataBr = (iso: string) => iso.split('-').reverse().join('/')
 const ESPERA_MS = 15_000
 const MAX_ESPERAS = 24
 
+export interface FiltroAtual {
+  situacao: 'a-decidir' | 'todas'
+  tipo: string
+  de: string
+  ate: string
+  busca: string
+}
+
 interface Props {
   linhas: LinhaExtrato[]
+  total: number
+  filtro: FiltroAtual
   contas: ConferenciaConta[]
   categorias: { nome: string; natureza: string }[]
   gatewayLigado: boolean
+}
+
+/**
+ * Filtros do extrato, guardados na URL.
+ *
+ * Na URL e não no estado do componente por três motivos que aparecem no uso:
+ * o filtro sobrevive ao F5 que toda classificação provoca, o link pode ser
+ * mandado para outra pessoa, e o botão voltar do navegador desfaz o filtro em
+ * vez de sair da tela.
+ */
+function Filtros({ filtro, total, mostrando }: { filtro: FiltroAtual; total: number; mostrando: number }) {
+  const router = useRouter()
+  const [busca, setBusca] = useState(filtro.busca)
+  const [pendente, iniciar] = useTransition()
+
+  const aplicar = useCallback(
+    (mudanca: Partial<FiltroAtual>) => {
+      const novo = { ...filtro, ...mudanca }
+      const p = new URLSearchParams()
+      if (novo.situacao === 'todas') p.set('situacao', 'todas')
+      if (novo.tipo) p.set('tipo', novo.tipo)
+      if (novo.de) p.set('de', novo.de)
+      if (novo.ate) p.set('ate', novo.ate)
+      if (novo.busca.trim()) p.set('busca', novo.busca.trim())
+      const qs = p.toString()
+      iniciar(() => router.replace(qs ? `/financeiro/extrato?${qs}` : '/financeiro/extrato'))
+    },
+    [filtro, router],
+  )
+
+  const limpo =
+    filtro.situacao === 'a-decidir' && !filtro.tipo && !filtro.de && !filtro.ate && !filtro.busca
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <Rotulo>Mostrar</Rotulo>
+          <select
+            value={filtro.situacao}
+            onChange={(e) => aplicar({ situacao: e.target.value as FiltroAtual['situacao'] })}
+            style={{ ...campo, minWidth: 178 }}
+          >
+            <option value="a-decidir">Só o que precisa de você</option>
+            <option value="todas">Todo o movimento</option>
+          </select>
+        </span>
+
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <Rotulo>Direção</Rotulo>
+          <select
+            value={filtro.tipo}
+            onChange={(e) => aplicar({ tipo: e.target.value })}
+            style={{ ...campo, minWidth: 118 }}
+          >
+            <option value="">Entradas e saídas</option>
+            <option value="entrada">Só entradas</option>
+            <option value="saida">Só saídas</option>
+          </select>
+        </span>
+
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <Rotulo>De</Rotulo>
+          <input
+            type="date"
+            value={filtro.de}
+            onChange={(e) => aplicar({ de: e.target.value })}
+            style={campo}
+          />
+        </span>
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <Rotulo>Até</Rotulo>
+          <input
+            type="date"
+            value={filtro.ate}
+            onChange={(e) => aplicar({ ate: e.target.value })}
+            style={campo}
+          />
+        </span>
+
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: 1, minWidth: 180 }}>
+          <Rotulo>Buscar</Rotulo>
+          <input
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') aplicar({ busca })
+            }}
+            onBlur={() => {
+              if (busca !== filtro.busca) aplicar({ busca })
+            }}
+            placeholder="Descrição, pedido, documento…"
+            style={{ ...campo, width: '100%' }}
+          />
+        </span>
+
+        {!limpo && (
+          <BotaoSecundario
+            altura={32}
+            desabilitado={pendente}
+            onClick={() => {
+              setBusca('')
+              aplicar({ situacao: 'a-decidir', tipo: '', de: '', ate: '', busca: '' })
+            }}
+          >
+            Limpar
+          </BotaoSecundario>
+        )}
+      </div>
+
+      <span
+        className="font-sans"
+        style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)' }}
+      >
+        {pendente
+          ? 'Filtrando…'
+          : total === 0
+            ? 'Nenhum movimento com esses filtros.'
+            : mostrando < total
+              ? `Mostrando ${mostrando} de ${total} movimentos. Aperte o período para ver o resto.`
+              : `${total} movimento(s).`}
+      </span>
+    </div>
+  )
 }
 
 /**
@@ -85,7 +220,14 @@ interface Props {
  * ERP está atrasado —, e só então a fila de classificação. Quem abre a tela
  * pela primeira vez lê nessa ordem e entende o módulo.
  */
-export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Props) {
+export function ExtratoCliente({
+  linhas,
+  total,
+  filtro,
+  contas,
+  categorias,
+  gatewayLigado,
+}: Props) {
   const [de, setDe] = useState(INICIO_DA_OPERACAO)
   const [ate, setAte] = useState(hoje())
   const [relatorio, setRelatorio] = useState<string[] | null>(null)
@@ -112,12 +254,13 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
   const categoriaDe = (l: LinhaExtrato) =>
     escolhas[chaveDe(l)] ?? sugerirCategoria(l.descricao, l.tipo) ?? ''
 
-  // A fila já chega filtrada do banco: só o que precisa de decisão. Crédito
-  // de venda casado com pedido não entra — ele não tem categoria a escolher
-  // (a receita do DRE vem do pedido) nem saldo a mover (o extrato já moveu).
+  // A filtragem acontece no banco; aqui só se soma o que veio.
   const pendentes = linhas
   const entradas = pendentes.filter((l) => l.tipo === 'entrada').reduce((a, l) => a + l.valor, 0)
   const saidas = pendentes.filter((l) => l.tipo === 'saida').reduce((a, l) => a + l.valor, 0)
+
+  /** Uma linha resolvida não tem o que decidir — mostra o estado, não um menu. */
+  const resolvida = (l: LinhaExtrato) => Boolean(l.lancamentoId) || l.ignorado || l.interno
 
   /**
    * Atualizar o extrato: um clique, e a tela se vira.
@@ -247,7 +390,16 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
       chave: 'categoria',
       titulo: 'Categoria',
       largura: '190px',
-      render: (l) => (
+      render: (l) =>
+        resolvida(l) ? (
+          <Badge tom={l.interno ? 'info' : l.ignorado ? 'neutro' : 'ok'}>
+            {l.interno
+              ? 'movimento da conta'
+              : l.ignorado
+                ? l.motivoIgnorado || 'dispensado'
+                : 'classificado'}
+          </Badge>
+        ) : (
         <select
           value={categoriaDe(l)}
           onChange={(e) => setEscolhas((v) => ({ ...v, [chaveDe(l)]: e.target.value }))}
@@ -262,14 +414,15 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
             </option>
           ))}
         </select>
-      ),
+        ),
     },
     {
       chave: 'acao',
       titulo: '',
       largura: '188px',
       alinhamento: 'right',
-      render: (l) => (
+      render: (l) =>
+        resolvida(l) ? null : (
         <span style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
           <BotaoSecundario
             altura={28}
@@ -300,7 +453,7 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
             Dispensar
           </BotaoSecundario>
         </span>
-      ),
+        ),
     },
   ]
 
@@ -760,20 +913,30 @@ export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Pr
       )}
 
       {/* ── Fila ─────────────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <TituloSecao tamanho={16}>Precisam de você</TituloSecao>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+        <TituloSecao tamanho={16}>
+          {filtro.situacao === 'todas' ? 'Movimento da conta' : 'Precisam de você'}
+        </TituloSecao>
         <span
           className="font-sans"
           style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
         >
-          {`Despesas a categorizar (${brl(saidas)}) e entradas sem pedido correspondente (${brl(entradas)}). As vendas casadas com pedido não aparecem aqui: não há o que decidir nelas.`}
+          {filtro.situacao === 'todas'
+            ? `Tudo que o extrato trouxe: ${brl(entradas)} entrando, ${brl(saidas)} saindo nas linhas listadas.`
+            : `Despesas a categorizar (${brl(saidas)}) e entradas sem pedido correspondente (${brl(entradas)}). Venda casada com pedido e movimento da própria conta — saque, reserva — não aparecem aqui: não há o que decidir neles.`}
         </span>
       </div>
 
+      <Filtros filtro={filtro} total={total} mostrando={pendentes.length} />
+
       {pendentes.length === 0 ? (
         <EstadoVazio
-          titulo="Nada na fila"
-          instrucao="As vendas conciliam sozinhas. Só despesa sem categoria e entrada sem pedido aparecem aqui."
+          titulo={filtro.situacao === 'todas' ? 'Nenhum movimento' : 'Nada na fila'}
+          instrucao={
+            filtro.situacao === 'todas'
+              ? 'Nenhuma linha bate com os filtros. Amplie o período ou limpe a busca.'
+              : 'As vendas conciliam sozinhas. Só despesa sem categoria e entrada sem pedido aparecem aqui.'
+          }
         />
       ) : (
         <Tabela

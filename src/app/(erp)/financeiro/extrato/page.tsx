@@ -16,12 +16,38 @@ export const dynamic = 'force-dynamic'
  * cada venda depois da tarifa, o banco conta o resto do movimento, e a fila de
  * classificação transforma cada linha em lançamento com categoria.
  */
-export default async function Extrato() {
-  const [linhas, contas, categorias, resumo] = await Promise.all([
-    // Só o que precisa de decisão. O crédito de venda já casado com pedido
-    // não tem categoria a escolher nem saldo a mover — pedir confirmação
-    // para ele era inventar trabalho.
-    lerExtrato({ situacao: 'a-decidir', limite: 400 }),
+/** O que a URL carrega. Filtro na URL é filtro que sobrevive ao F5. */
+interface Busca {
+  situacao?: string
+  tipo?: string
+  de?: string
+  ate?: string
+  busca?: string
+}
+
+export default async function Extrato({
+  searchParams,
+}: {
+  searchParams: Promise<Busca>
+}) {
+  const sp = await searchParams
+  const filtro = {
+    // Por padrão, só o que precisa de decisão. O crédito de venda já casado
+    // com pedido não tem categoria a escolher nem saldo a mover — pedir
+    // confirmação para ele era inventar trabalho.
+    situacao: sp.situacao === 'todas' ? ('todas' as const) : ('a-decidir' as const),
+    tipo:
+      sp.tipo === 'entrada' || sp.tipo === 'saida'
+        ? (sp.tipo as 'entrada' | 'saida')
+        : undefined,
+    de: sp.de || undefined,
+    ate: sp.ate || undefined,
+    busca: sp.busca || undefined,
+    limite: 400,
+  }
+
+  const [pagina, contas, categorias, resumo] = await Promise.all([
+    lerExtrato(filtro),
     conferenciaDeContas(),
     lerCategorias(),
     resumoDoExtrato(),
@@ -74,7 +100,15 @@ export default async function Extrato() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <FaixaKpis kpis={kpis} />
       <ExtratoCliente
-        linhas={linhas}
+        linhas={pagina.linhas}
+        total={pagina.total}
+        filtro={{
+          situacao: filtro.situacao,
+          tipo: filtro.tipo ?? '',
+          de: filtro.de ?? '',
+          ate: filtro.ate ?? '',
+          busca: filtro.busca ?? '',
+        }}
         contas={contas}
         categorias={categorias}
         gatewayLigado={mercadoPagoConfigurado()}

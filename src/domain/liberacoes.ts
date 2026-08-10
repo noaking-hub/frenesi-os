@@ -234,6 +234,82 @@ export function lerLiberacoes(csv: string): ExtratoLiberacoes {
   return { linhas, cabecalhos, avisos }
 }
 
+/**
+ * O que cada movimento do relatório quer dizer, em português.
+ *
+ * A coluna DESCRIPTION vem com o nome interno da operação — `payment`,
+ * `reserve_for_payout`, `payout`. Deixar isso na tela obriga quem lê a
+ * decorar jargão de API para saber se R$ 25 saíram ou só foram reservados,
+ * e "reserve_for_payout" aparecendo duas vezes com sinais opostos parece
+ * erro quando é só o dinheiro sendo separado antes de sair.
+ */
+const MOVIMENTOS: Record<string, string> = {
+  payment: 'Venda recebida',
+  refund: 'Estorno ao cliente',
+  partial_refund: 'Estorno parcial ao cliente',
+  chargeback: 'Chargeback',
+  dispute: 'Disputa aberta pelo cliente',
+  payout: 'Transferência para o banco',
+  payout_reversal: 'Transferência devolvida',
+  withdrawal: 'Saque',
+  transfer: 'Transferência',
+  money_transfer: 'Transferência',
+  reserve_for_payout: 'Reserva para transferência',
+  reserve_for_refund: 'Reserva para estorno',
+  reserve_for_dispute: 'Reserva para disputa',
+  reserve_for_bpp_shipping_return: 'Reserva para devolução de frete',
+  release: 'Liberação de reserva',
+  settlement: 'Liquidação',
+  tax: 'Imposto retido',
+  fee: 'Tarifa do Mercado Pago',
+  mp_fee: 'Tarifa do Mercado Pago',
+  shipping: 'Frete',
+  credit_payment: 'Pagamento com saldo',
+  cash_out: 'Saque em dinheiro',
+}
+
+/**
+ * Traduz o movimento, preservando o que não conhece.
+ *
+ * Um nome novo do Mercado Pago aparece cru na tela em vez de sumir ou virar
+ * "Outro" — é assim que se descobre que existe um tipo de movimento que o ERP
+ * ainda não entende, em vez de nunca descobrir.
+ */
+export function descreverMovimento(bruto: string): string {
+  const chave = normalizar(bruto)
+  return MOVIMENTOS[chave] ?? (bruto.trim() || 'Movimento sem descrição')
+}
+
+/**
+ * Movimentos da própria conta — a conta se mexendo, não uma despesa.
+ *
+ * Saque e reserva mudam o saldo e não têm decisão nenhuma a tomar: não são
+ * receita, não são custo, não têm categoria. Deixá-los na fila de
+ * classificação enche a tela de trabalho inventado, e uma fila cheia de
+ * trabalho inventado é uma fila que ninguém olha — inclusive a despesa de
+ * verdade que está no meio dela.
+ *
+ * Note que não é o mesmo que dispensar: dispensado sai do saldo, e um saque
+ * fora do saldo é o defeito que mostrou R$ 83 mil numa conta com R$ 10 mil.
+ */
+const INTERNOS = new Set([
+  'payout',
+  'payout_reversal',
+  'withdrawal',
+  'transfer',
+  'money_transfer',
+  'cash_out',
+  'reserve_for_payout',
+  'reserve_for_refund',
+  'reserve_for_dispute',
+  'reserve_for_bpp_shipping_return',
+  'release',
+])
+
+export function movimentoInterno(bruto: string): boolean {
+  return INTERNOS.has(normalizar(bruto))
+}
+
 /** O que a tela e o cron precisam saber de um relatório para decidir. */
 export interface RelatorioListado {
   de: string
@@ -287,27 +363,41 @@ export function recortarJanela(
 /**
  * Converte para o formato que a tabela de extrato guarda.
  *
- * A chave junta data, operação e posição: o mesmo pagamento aparece mais de
- * uma vez no relatório (liberação e tarifa são linhas distintas), e usar só o
- * id da operação faria uma sobrescrever a outra.
+ * A chave descreve o CONTEÚDO da linha — dia, operação, movimento, valor —, e
+ * não a posição dela no arquivo. A diferença aparece na segunda importação: o
+ * relatório de hoje contém tudo o que o de ontem tinha mais o movimento novo,
+ * e uma chave posicional faria cada linha antiga cair numa posição diferente
+ * e entrar de novo. O saldo dobraria a cada atualização, que é a falha que
+ * ninguém percebe olhando a tela — só olhando o banco.
+ *
+ * O contador no fim continua existindo porque duas linhas idênticas no mesmo
+ * dia são possíveis: dois estornos de R$ 18,94 do mesmo pedido são dois
+ * fatos, não um repetido.
  */
 export function linhasDeLiberacao(extrato: ExtratoLiberacoes): LinhaExtratoBruta[] {
   const porChave = new Map<string, number>()
 
   return extrato.linhas.map((l) => {
-    const base = `${l.data}:${l.fonte || 's'}`
+    const centavos = Math.round(l.liquido * 100)
+    const base = [
+      l.data,
+      l.fonte || 's',
+      normalizar(l.descricao).slice(0, 28) || 'x',
+      centavos,
+    ].join(':')
     const n = (porChave.get(base) ?? 0) + 1
     porChave.set(base, n)
 
     return {
       chave: `${base}:${n}`,
       ocorrido_em: l.data,
-      descricao: l.descricao,
+      descricao: descreverMovimento(l.descricao),
       contraparte: '',
       documento: l.fonte,
       tipo: l.liquido >= 0 ? 'entrada' : 'saida',
       valor: Math.abs(l.liquido),
       pedido_id: null,
+      interno: movimentoInterno(l.descricao),
       bruto: {
         bruto: l.bruto,
         tarifa: l.tarifa,

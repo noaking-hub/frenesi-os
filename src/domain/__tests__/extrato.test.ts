@@ -197,6 +197,7 @@ describe('resumo do extrato', () => {
     lancamentoId: null,
     ignorado: false,
     motivoIgnorado: '',
+    interno: false,
     ...over,
   })
 

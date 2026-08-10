@@ -36,6 +36,8 @@ export interface LinhaExtratoBruta {
   valor: number
   pedido_id: string | null
   bruto: unknown
+  /** Movimento da própria conta: entra no saldo, fora da fila de decisão. */
+  interno?: boolean
 }
 
 /** Linha já gravada, como a tela lê. */
@@ -54,6 +56,8 @@ export interface LinhaExtrato {
   lancamentoId: string | null
   ignorado: boolean
   motivoIgnorado: string
+  /** Saque, reserva, liberação: conta no saldo, não pede decisão nenhuma. */
+  interno: boolean
 }
 
 // ── Datas ──────────────────────────────────────────────────────────────────

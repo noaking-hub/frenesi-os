@@ -27,6 +27,7 @@ interface LinhaCrua {
   lancamento_id: string | null
   ignorado: boolean
   motivo_ignorado: string
+  interno?: boolean
   contas_bancarias?: { nome: string } | null
 }
 
@@ -46,6 +47,7 @@ function traduzir(l: LinhaCrua): LinhaExtrato {
     lancamentoId: l.lancamento_id,
     ignorado: l.ignorado,
     motivoIgnorado: l.motivo_ignorado,
+    interno: Boolean(l.interno),
   }
 }
 
@@ -57,38 +59,79 @@ export interface FiltroExtrato {
    */
   situacao?: 'a-decidir' | 'todas'
   contaId?: string
+  /** AAAA-MM-DD, inclusivos. */
+  de?: string
+  ate?: string
+  tipo?: 'entrada' | 'saida'
+  /** Texto livre: descrição, contraparte, documento ou pedido. */
+  busca?: string
   limite?: number
 }
 
-export async function lerExtrato(filtro: FiltroExtrato = {}): Promise<LinhaExtrato[]> {
-  if (!supabaseConfigurado()) return []
+/**
+ * Texto seguro para o `or` do PostgREST.
+ *
+ * Vírgula e parêntese são sintaxe de filtro ali, não conteúdo: um cliente
+ * chamado "Souza, Maria" quebraria a consulta inteira e a tela mostraria um
+ * erro incompreensível em vez de resultado.
+ */
+function textoDeBusca(bruto: string): string {
+  return bruto.trim().replace(/[,()*%]/g, ' ').replace(/\s+/g, ' ').slice(0, 60)
+}
+
+export interface PaginaExtrato {
+  linhas: LinhaExtrato[]
+  /** Quantas linhas o filtro encontrou ao todo, além das que couberam. */
+  total: number
+}
+
+export async function lerExtrato(filtro: FiltroExtrato = {}): Promise<PaginaExtrato> {
+  if (!supabaseConfigurado()) return { linhas: [], total: 0 }
   const sb = supabaseServer()
   const limite = filtro.limite ?? 300
 
-  const aDecidir = filtro.situacao === 'a-decidir'
+  const aDecidir = filtro.situacao !== 'todas'
 
   let consulta = aDecidir
     ? sb
         .from('extrato_a_decidir')
         .select(
           'origem, chave, conta_id, conta_nome, ocorrido_em, descricao, contraparte, documento, ' +
-            'tipo, valor, pedido_id, lancamento_id, ignorado, motivo_ignorado',
+            'tipo, valor, pedido_id, lancamento_id, ignorado, motivo_ignorado, interno',
+          { count: 'exact' },
         )
         .limit(limite)
     : sb
         .from('extrato_linhas')
         .select(
           'origem, chave, conta_id, ocorrido_em, descricao, contraparte, documento, tipo, valor, ' +
-            'pedido_id, lancamento_id, ignorado, motivo_ignorado, contas_bancarias(nome)',
+            'pedido_id, lancamento_id, ignorado, motivo_ignorado, interno, contas_bancarias(nome)',
+          { count: 'exact' },
         )
         .order('ocorrido_em', { ascending: false })
+        .order('valor', { ascending: false })
         .limit(limite)
 
   if (filtro.contaId) consulta = consulta.eq('conta_id', filtro.contaId)
+  if (filtro.de) consulta = consulta.gte('ocorrido_em', filtro.de)
+  if (filtro.ate) consulta = consulta.lte('ocorrido_em', filtro.ate)
+  if (filtro.tipo) consulta = consulta.eq('tipo', filtro.tipo)
 
-  const { data, error } = await consulta
+  const busca = filtro.busca ? textoDeBusca(filtro.busca) : ''
+  if (busca) {
+    consulta = consulta.or(
+      ['descricao', 'contraparte', 'documento', 'pedido_id']
+        .map((c) => `${c}.ilike.%${busca}%`)
+        .join(','),
+    )
+  }
+
+  const { data, error, count } = await consulta
   if (error) throw new Error(mensagemDe(error))
-  return ((data ?? []) as unknown as LinhaCrua[]).map(traduzir)
+  return {
+    linhas: ((data ?? []) as unknown as LinhaCrua[]).map(traduzir),
+    total: count ?? (data ?? []).length,
+  }
 }
 
 export interface ResumoDoExtrato {

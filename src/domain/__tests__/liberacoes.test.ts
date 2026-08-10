@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import { lerLiberacoes, linhasDeLiberacao, recortarJanela, relatorioServe } from '..'
+import {
+  descreverMovimento,
+  lerLiberacoes,
+  linhasDeLiberacao,
+  movimentoInterno,
+  recortarJanela,
+  relatorioServe,
+} from '..'
 
 /** Formato que a conta declarou em /v1/account/release_report/config. */
 const CSV_PT = `DATA;DATA_DE_APROVACAO_DA_TRANSACAO;ID_DA_OPERACAO;DESCRICAO;VALOR_LIQUIDO_CREDITO;VALOR_LIQUIDO_DEBITO;VALOR_BRUTO;TARIFA_MP;IMPOSTOS
@@ -120,5 +127,63 @@ describe('recorte da janela', () => {
     // outra operação para dentro do caixa da Frenesi.
     const dentro = recortarJanela(lerLiberacoes(CSV_PT).linhas, '2026-08-08', '2026-08-10')
     expect(dentro.map((l) => l.data)).toEqual(['2026-08-10', '2026-08-09', '2026-08-08'])
+  })
+})
+
+describe('o que cada movimento quer dizer', () => {
+  it('traduz o jargão da API', () => {
+    expect(descreverMovimento('reserve_for_payout')).toBe('Reserva para transferência')
+    expect(descreverMovimento('payout')).toBe('Transferência para o banco')
+    expect(descreverMovimento('payment')).toBe('Venda recebida')
+  })
+
+  it('preserva o que não conhece, em vez de esconder', () => {
+    // Um tipo novo do Mercado Pago aparecendo cru na tela é como se descobre
+    // que ele existe. Virar "Outro" seria nunca descobrir.
+    expect(descreverMovimento('novo_tipo_qualquer')).toBe('novo_tipo_qualquer')
+  })
+
+  it('separa o que a conta faz consigo mesma do que é despesa', () => {
+    // Saque e reserva mudam o saldo e não têm categoria a escolher. Estorno
+    // tem: é receita voltando, e o DRE precisa saber.
+    expect(movimentoInterno('payout')).toBe(true)
+    expect(movimentoInterno('reserve_for_refund')).toBe(true)
+    expect(movimentoInterno('refund')).toBe(false)
+    expect(movimentoInterno('payment')).toBe(false)
+  })
+
+  it('marca a linha interna na conversão', () => {
+    const csv = `DATE;SOURCE_ID;DESCRIPTION;NET_CREDIT_AMOUNT;NET_DEBIT_AMOUNT
+2026-08-10;7;payout;0;25,00
+2026-08-10;8;payment;94,48;0`
+    const linhas = linhasDeLiberacao(lerLiberacoes(csv))
+    expect(linhas.map((l) => l.interno)).toEqual([true, false])
+  })
+})
+
+describe('a chave da linha sobrevive a reimportar', () => {
+  it('não muda quando o relatório novo traz linhas a mais no mesmo dia', () => {
+    // Este é o defeito que dobraria o saldo a cada atualização, e que só
+    // apareceria olhando o banco: com chave posicional, a linha de ontem cai
+    // numa posição diferente no relatório de hoje e entra de novo.
+    const ontem = `DATE;SOURCE_ID;DESCRIPTION;NET_CREDIT_AMOUNT;NET_DEBIT_AMOUNT
+2026-08-10;;payout;0;25,00`
+    const hoje = `DATE;SOURCE_ID;DESCRIPTION;NET_CREDIT_AMOUNT;NET_DEBIT_AMOUNT
+2026-08-10;;reserve_for_payout;25,00;0
+2026-08-10;;payout;0;25,00`
+
+    const a = linhasDeLiberacao(lerLiberacoes(ontem))
+    const b = linhasDeLiberacao(lerLiberacoes(hoje))
+    expect(b.find((l) => l.descricao === 'Transferência para o banco')!.chave).toBe(a[0].chave)
+  })
+
+  it('mantém duas linhas idênticas como dois fatos', () => {
+    // Dois estornos iguais no mesmo dia são dois estornos. Colapsar em um
+    // esconderia dinheiro que saiu de verdade.
+    const csv = `DATE;SOURCE_ID;DESCRIPTION;NET_CREDIT_AMOUNT;NET_DEBIT_AMOUNT
+2026-08-10;9;refund;0;18,94
+2026-08-10;9;refund;0;18,94`
+    const linhas = linhasDeLiberacao(lerLiberacoes(csv))
+    expect(new Set(linhas.map((l) => l.chave)).size).toBe(2)
   })
 })

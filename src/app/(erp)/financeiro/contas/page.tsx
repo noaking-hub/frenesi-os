@@ -2,7 +2,7 @@ import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
 import { Barra, BotaoSecundario, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
 import { repositorio } from '@/data/repository'
 
-import { NovaConta } from '../Widgets'
+import { EditarConta, NovaConta } from '../Widgets'
 import { brl, num, participacao, plural, resumirLancamentos, saldoConsolidado } from '@/domain'
 
 export default async function Contas() {
@@ -85,26 +85,28 @@ export default async function Contas() {
                     {c.banco}
                   </span>
                 </span>
-                {c.principal && (
-                  <span
-                    className="font-sans"
-                    style={{
-                      fontWeight: 600,
-                      fontSize: 9,
-                      lineHeight: 1,
-                      letterSpacing: '.08em',
-                      textTransform: 'uppercase',
-                      color: 'var(--color-ouro)',
-                      border: '1px solid rgba(239,209,140,.3)',
-                      borderRadius: 'var(--radius-pill)',
-                      padding: '3px 7px',
-                      flex: 'none',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    Principal
-                  </span>
-                )}
+                <span style={{ display: 'flex', alignItems: 'center', gap: 7, flex: 'none' }}>
+                  {c.principal && (
+                    <span
+                      className="font-sans"
+                      style={{
+                        fontWeight: 600,
+                        fontSize: 9,
+                        lineHeight: 1,
+                        letterSpacing: '.08em',
+                        textTransform: 'uppercase',
+                        color: 'var(--color-ouro)',
+                        border: '1px solid rgba(239,209,140,.3)',
+                        borderRadius: 'var(--radius-pill)',
+                        padding: '3px 7px',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      Principal
+                    </span>
+                  )}
+                  <EditarConta conta={c} />
+                </span>
               </div>
 
               <Valor tamanho={24}>{brl(c.saldo)}</Valor>

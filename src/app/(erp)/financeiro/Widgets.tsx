@@ -8,7 +8,16 @@ import { COR } from '@/components/erp/tokens'
 import { parseNum } from '@/domain'
 import type { CategoriaFinanceira, ContaBancaria, NaturezaCategoria } from '@/domain'
 
-import { conciliarRepasse, criarCategoria, criarConta, criarLancamento, darBaixa, preverRepasses } from './actions'
+import {
+  conciliarRepasse,
+  criarCategoria,
+  criarConta,
+  criarLancamento,
+  darBaixa,
+  editarConta,
+  preverRepasses,
+  removerConta,
+} from './actions'
 
 const CAMPO = {
   height: 38,
@@ -446,6 +455,172 @@ export function NovaConta() {
               onClick={salvar}
               pendente={pendente}
               desabilitado={!nome.trim() || !banco.trim()}
+            />
+          </div>
+        </Modal>
+      )}
+    </>
+  )
+}
+
+/**
+ * Editar a conta — inclusive apagá-la e informar o saldo real.
+ *
+ * O saldo é o campo que muda o comportamento do módulo inteiro. Vazio, o ERP
+ * mostra o que conseguiu somar do extrato e diz que é uma leitura. Preenchido,
+ * ele passa a mostrar o número que você digitou, com a data em que digitou —
+ * porque a conta do Mercado Pago não entrega saldo por API (responde 403), e
+ * fingir que a soma é o saldo foi como o ERP chegou a mostrar R$ 83 mil numa
+ * conta com R$ 10 mil.
+ */
+export function EditarConta({ conta }: { conta: ContaBancaria }) {
+  const [aberto, setAberto] = useState(false)
+  const [nome, setNome] = useState(conta.nome)
+  const [banco, setBanco] = useState(conta.banco)
+  const [tipo, setTipo] = useState(conta.tipo)
+  const [uso, setUso] = useState(conta.uso)
+  const [principal, setPrincipal] = useState(conta.principal)
+  const [saldo, setSaldo] = useState(
+    conta.saldoInformado === null ? '' : String(conta.saldoInformado).replace('.', ','),
+  )
+  const [erro, setErro] = useState<string | null>(null)
+  const [pendente, iniciarTransicao] = useTransition()
+
+  const salvar = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      const informado = saldo.trim() === '' ? null : parseNum(saldo)
+      if (informado !== null && !Number.isFinite(informado)) {
+        setErro('O saldo precisa ser um número. Deixe vazio para voltar a usar a soma do extrato.')
+        return
+      }
+      const r = await editarConta(conta.id, {
+        nome,
+        tipo,
+        banco,
+        uso,
+        principal,
+        saldoInformado: informado,
+      })
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      setAberto(false)
+    })
+
+  const remover = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      if (!window.confirm(`Remover a conta "${conta.nome}"?`)) return
+      const r = await removerConta(conta.id)
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      setAberto(false)
+    })
+
+  return (
+    <>
+      <BotaoSecundario altura={26} onClick={() => setAberto(true)}>
+        Editar
+      </BotaoSecundario>
+
+      {aberto && (
+        <Modal titulo={`Editar ${conta.nome}`} largura={480} aoFechar={() => setAberto(false)}>
+          <TituloSecao tamanho={15}>{`Editar ${conta.nome}`}</TituloSecao>
+          <Campo rotulo="Nome">
+            <input
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              autoFocus
+              className="font-sans focus:border-ouro/45"
+              style={CAMPO}
+            />
+          </Campo>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <Campo rotulo="Banco">
+              <input
+                value={banco}
+                onChange={(e) => setBanco(e.target.value)}
+                className="font-sans focus:border-ouro/45"
+                style={CAMPO}
+              />
+            </Campo>
+            <Campo rotulo="Tipo">
+              <input
+                value={tipo}
+                onChange={(e) => setTipo(e.target.value)}
+                className="font-sans focus:border-ouro/45"
+                style={CAMPO}
+              />
+            </Campo>
+          </div>
+          <Campo rotulo="Para que serve">
+            <input
+              value={uso}
+              onChange={(e) => setUso(e.target.value)}
+              className="font-sans focus:border-ouro/45"
+              style={CAMPO}
+            />
+          </Campo>
+
+          <Campo rotulo="Saldo real da conta (opcional)">
+            <input
+              value={saldo}
+              onChange={(e) => setSaldo(e.target.value)}
+              placeholder="10788,55"
+              inputMode="decimal"
+              className="font-mono focus:border-ouro/45"
+              style={CAMPO}
+            />
+          </Campo>
+          <span
+            className="font-sans"
+            style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+          >
+            Preencha com o saldo que aparece no app do banco ou do gateway. Enquanto estiver vazio, o
+            ERP mostra a soma do extrato e avisa que é leitura, não saldo. O Mercado Pago não
+            entrega saldo por API — este campo existe por causa disso.
+          </span>
+
+          <Linha
+            titulo="Conta principal"
+            explicacao="A que o ERP assume como padrão. Só pode haver uma — marcar esta desmarca a anterior."
+            ligado={principal}
+            onChange={setPrincipal}
+          />
+
+          <Erro texto={erro} />
+          <div style={{ display: 'flex', gap: 9, alignItems: 'center' }}>
+            <button
+              type="button"
+              onClick={remover}
+              disabled={pendente}
+              className="font-sans"
+              style={{
+                background: 'none',
+                border: 0,
+                padding: 0,
+                fontSize: 11.5,
+                color: COR.erro,
+                cursor: pendente ? 'default' : 'pointer',
+                textDecoration: 'underline',
+                textUnderlineOffset: 3,
+              }}
+            >
+              Remover conta
+            </button>
+            <div style={{ flex: 1 }} />
+            <BotaoSecundario altura={36} onClick={() => setAberto(false)}>
+              Cancelar
+            </BotaoSecundario>
+            <Confirmar
+              rotulo="Salvar"
+              onClick={salvar}
+              pendente={pendente}
+              desabilitado={!nome.trim()}
             />
           </div>
         </Modal>

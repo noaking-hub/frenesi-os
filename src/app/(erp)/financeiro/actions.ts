@@ -133,6 +133,100 @@ export async function criarConta(dados: {
   return { ok: true }
 }
 
+/**
+ * Edita a conta: nome, banco, tipo, uso, principal e o saldo informado.
+ *
+ * O saldo informado é o campo que faltava. Nem toda conta entrega saldo por
+ * API — a do Mercado Pago responde 403 nesse caminho —, e sem um lugar para
+ * digitar o saldo real o ERP fica preso ao que conseguiu somar do extrato,
+ * que é sempre uma aproximação do dia em que se leu. Digitar o número que
+ * está no app é mais honesto que exibir a soma como se fosse o saldo.
+ */
+export async function editarConta(
+  id: string,
+  dados: {
+    nome: string
+    tipo: string
+    banco: string
+    uso: string
+    principal: boolean
+    /** Null apaga o saldo informado e devolve o comando ao extrato. */
+    saldoInformado: number | null
+  },
+): Promise<Resposta> {
+  const bloqueio = exigeSupabase('editar contas')
+  if (bloqueio) return bloqueio
+  if (!dados.nome.trim()) return { ok: false, erro: 'Informe o nome da conta.' }
+
+  const sb = supabaseServer()
+  if (dados.principal) {
+    const { error } = await sb
+      .from('contas_bancarias')
+      .update({ principal: false })
+      .eq('principal', true)
+      .neq('id', id)
+    if (error) return falha(error, 'Falha ao trocar a conta principal.')
+  }
+
+  const { error } = await sb
+    .from('contas_bancarias')
+    .update({
+      nome: dados.nome.trim(),
+      tipo: dados.tipo.trim() || 'Conta corrente',
+      banco: dados.banco.trim(),
+      uso: dados.uso.trim(),
+      principal: dados.principal,
+      saldo_informado: dados.saldoInformado,
+      // Sem a data, um saldo digitado em julho tem a mesma cara de um digitado
+      // hoje — e o de julho está errado hoje.
+      saldo_informado_em: dados.saldoInformado === null ? null : new Date().toISOString(),
+    })
+    .eq('id', id)
+  if (error) {
+    console.error('[financeiro] editar conta falhou:', error)
+    return falha(error, 'Falha ao salvar a conta.')
+  }
+
+  revalidatePath('/', 'layout')
+  return { ok: true }
+}
+
+/**
+ * Remove a conta, desde que ela esteja vazia.
+ *
+ * Apagar uma conta com extrato ou lançamento levaria junto o histórico que
+ * sustenta o DRE, e nada disso seria reconstruível. Por isso a recusa é
+ * explícita e diz quantos registros existem: quem quer mesmo remover sabe o
+ * que precisa mover antes.
+ */
+export async function removerConta(id: string): Promise<Resposta> {
+  const bloqueio = exigeSupabase('remover contas')
+  if (bloqueio) return bloqueio
+
+  const sb = supabaseServer()
+  const [extrato, lancamentos] = await Promise.all([
+    sb.from('extrato_linhas').select('chave', { count: 'exact', head: true }).eq('conta_id', id),
+    sb.from('lancamentos').select('id', { count: 'exact', head: true }).eq('conta_id', id),
+  ])
+
+  const presos = (extrato.count ?? 0) + (lancamentos.count ?? 0)
+  if (presos > 0) {
+    return {
+      ok: false,
+      erro: `Esta conta tem ${extrato.count ?? 0} linha(s) de extrato e ${lancamentos.count ?? 0} lançamento(s). Apagá-la levaria esse histórico junto — mova ou apague esses registros antes.`,
+    }
+  }
+
+  const { error } = await sb.from('contas_bancarias').delete().eq('id', id)
+  if (error) {
+    console.error('[financeiro] remover conta falhou:', error)
+    return falha(error, 'Falha ao remover a conta.')
+  }
+
+  revalidatePath('/', 'layout')
+  return { ok: true }
+}
+
 /** Cria uma categoria. A natureza é o que separa custo variável de estrutura. */
 export async function criarCategoria(dados: {
   nome: string

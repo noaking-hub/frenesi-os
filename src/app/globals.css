@@ -184,6 +184,28 @@
   border: 0;
 }
 
+/* A lista aberta de um <select> é desenhada pelo sistema, não pela página:
+   o campo herda o tema escuro, mas as opções caem no padrão do navegador e
+   ficam cinza sobre branco — ilegíveis. Pintar o <option> é o único jeito de
+   alcançá-las. `color-scheme: dark` faz o resto (seta, foco, rolagem). */
+.erp select {
+  color-scheme: dark;
+}
+.erp select option {
+  background: #17161a;
+  color: #f2ede3;
+}
+.erp select option:checked {
+  background: #2a2620;
+  color: var(--color-ouro);
+}
+/* Mesma história no seletor de data: sem isto o calendário abre branco. */
+.erp input[type='date'],
+.erp input[type='datetime-local'],
+.erp input[type='month'] {
+  color-scheme: dark;
+}
+
 /* Barra de rolagem dourada do ERP. */
 .erp ::-webkit-scrollbar {
   width: 9px;
