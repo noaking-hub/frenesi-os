@@ -125,7 +125,12 @@ export async function atualizarExtrato(
     if (passo.estado === 'pronto') {
       const casou = await recasarExtrato()
       if (casou.ok && casou.religadas > 0) {
-        linhas.push(`${casou.religadas} movimento(s) ligados ao pedido de origem.`)
+        linhas.push(`${casou.religadas} movimento(s) ligados ao pedido por valor e data.`)
+      }
+      if (casou.ok && casou.restantes > 0) {
+        linhas.push(
+          `${casou.restantes} venda(s) continuam sem pedido. Importe os pedidos da Yampi em Pedidos → Importar: é lá que vem o id da transação, que liga sem palpite.`,
+        )
       }
       revalidatePath('/', 'layout')
     }
@@ -343,12 +348,22 @@ export async function relerGateway(
  * de fevereiro não achou pedido porque o pedido de fevereiro não existia no
  * ERP. Sem isto, a única saída seria apagar e reler o extrato inteiro.
  */
-export async function recasarExtrato(): Promise<Resposta<{ religadas: number; restantes: number }>> {
+export async function recasarExtrato(): Promise<
+  Resposta<{ porTransacao: number; religadas: number; restantes: number }>
+> {
   const bloqueio = exigeSupabase('recasar o extrato')
   if (bloqueio) return bloqueio
 
   try {
     const sb = supabaseServer()
+
+    // Primeiro a ligação exata, pelo id que a Yampi guardou na transação do
+    // pedido. Só o que sobrar dela passa pelo casamento por valor e data, que
+    // é palpite e recusa quando dois decants do mesmo preço caem no mesmo dia.
+    const { data: porTransacao } = await sb.rpc('ligar_extrato_por_transacao', {
+      p_origem: 'mercadopago',
+    })
+
     const [{ data: linhas, error: e1 }, { data: pedidos, error: e2 }] = await Promise.all([
       sb
         .from('extrato_linhas')
@@ -391,7 +406,12 @@ export async function recasarExtrato(): Promise<Resposta<{ religadas: number; re
     }
 
     revalidatePath('/', 'layout')
-    return { ok: true, religadas, restantes: (linhas ?? []).length - religadas }
+    return {
+      ok: true,
+      porTransacao: Number(porTransacao ?? 0),
+      religadas,
+      restantes: (linhas ?? []).length - religadas,
+    }
   } catch (e) {
     console.error('[extrato] recasar falhou:', e)
     return { ok: false, erro: mensagemDe(e) }

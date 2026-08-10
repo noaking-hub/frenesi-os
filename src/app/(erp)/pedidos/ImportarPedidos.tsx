@@ -46,7 +46,11 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
         `Yampi "${r.alias}" conectada · ${r.pedidos} pedidos. ` +
           `Campos do pedido: ${r.camposDoPedido.join(', ') || '—'}. ` +
           `Cliente: ${r.camposDoCliente.join(', ') || '—'}. ` +
-          `Item: ${r.camposDoItem.join(', ') || '—'}.`,
+          `Item: ${r.camposDoItem.join(', ') || '—'}. ` +
+          `Transação: ${r.camposDaTransacao.join(', ') || '— (nenhuma na amostra)'}. ` +
+          // Sem identificador aqui, nenhuma venda vai encontrar o crédito do
+          // extrato. Melhor descobrir agora que num fechamento de mês.
+          `Id do gateway que consigo ler: ${r.identificadoresDaAmostra.join(', ') || 'NENHUM — a ponte com o extrato não vai funcionar'}.`,
       )
     })
 
@@ -86,6 +90,9 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
         entregues,
         itensSemVariante,
         casadosPorSku,
+        transacoes,
+        pedidosSemTransacao,
+        extratoLigado,
         desde,
         basesComConsumo,
         removidosShopify,
@@ -93,12 +100,25 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
       setResumo(
         `${plural(pedidos, 'pedido', 'pedidos')} da Yampi desde ${desde} · ${plural(itens, 'item', 'itens')} · ` +
           `${plural(clientes, 'cliente com CPF', 'clientes com CPF')} · ${plural(entregues, 'entrega marcada', 'entregas marcadas')} · ` +
-          `${plural(casadosPorSku, 'item casado por SKU', 'itens casados por SKU')} · consumo recalculado em ${plural(basesComConsumo, 'base', 'bases')}.` +
+          `${plural(casadosPorSku, 'item casado por SKU', 'itens casados por SKU')} · ` +
+          `${plural(transacoes, 'transação de pagamento', 'transações de pagamento')} · ` +
+          `consumo recalculado em ${plural(basesComConsumo, 'base', 'bases')}.` +
+          (extratoLigado
+            ? ` ${plural(extratoLigado, 'movimento do extrato encontrou a venda', 'movimentos do extrato encontraram a venda')} pelo id da transação.`
+            : '') +
           (removidosShopify
             ? ` ${plural(removidosShopify, 'pedido espelho da Shopify removido', 'pedidos espelho da Shopify removidos')} — as mesmas vendas contariam duas vezes.`
             : ''),
       )
-      if (itensSemVariante) {
+      if (pedidosSemTransacao) {
+        // Pedido pago sem transação é uma venda que o extrato nunca vai
+        // achar: ela vai ficar na fila "entrada sem pedido" para sempre, e
+        // saber disso agora é o que permite investigar antes de virar rotina.
+        setAviso(
+          `${plural(pedidosSemTransacao, 'pedido pago veio', 'pedidos pagos vieram')} sem transação de pagamento. ` +
+            'Esses créditos no extrato não vão encontrar a venda sozinhos — pode ser pagamento por fora do gateway ou uma permissão a menos na chave da Yampi.',
+        )
+      } else if (itensSemVariante) {
         setAviso(
           `${plural(itensSemVariante, 'item não casou', 'itens não casaram')} com nenhuma variante pelo SKU. ` +
             'Reimporte o catálogo da Shopify primeiro: é ele que grava o SKU de cada variante, e sem isso não há por onde ligar.',

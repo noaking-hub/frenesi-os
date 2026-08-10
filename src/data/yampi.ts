@@ -16,6 +16,8 @@ import 'server-only'
  * lado da Yampi, e já provou ser instável quando um produto é recriado.
  */
 
+import { transacoesDoPedido } from '@/domain'
+
 import { supabaseConfigurado, supabaseServer } from './supabase'
 
 const BASE = 'https://api.dooki.com.br/v2'
@@ -116,6 +118,16 @@ export interface DiagnosticoYampi {
   camposDoPedido: string[]
   camposDoCliente: string[]
   camposDoItem: string[]
+  /**
+   * Campos da transação de pagamento e os identificadores que o leitor colheu
+   * de uma venda real.
+   *
+   * É a única forma de saber se a ponte com o extrato vai funcionar antes de
+   * depender dela: se a lista de identificadores vier vazia, nenhuma venda vai
+   * encontrar o crédito, e é melhor descobrir aqui que num fechamento de mês.
+   */
+  camposDaTransacao: string[]
+  identificadoresDaAmostra: string[]
 }
 
 /**
@@ -142,12 +154,16 @@ export async function diagnosticarYampi(): Promise<DiagnosticoYampi> {
     return alvo && typeof alvo === 'object' ? Object.keys(alvo).sort() : []
   }
 
+  const transacoes = pedido ? transacoesDoPedido(pedido) : []
+
   return {
     alias,
     pedidos: resposta.meta?.pagination?.total ?? (pedido ? 1 : 0),
     camposDoPedido: pedido ? Object.keys(pedido).sort() : [],
     camposDoCliente: dentro(pedido?.customer),
     camposDoItem: dentro(pedido?.items),
+    camposDaTransacao: dentro(pedido?.transactions),
+    identificadoresDaAmostra: transacoes.flatMap((t) => t.identificadores),
   }
 }
 
@@ -187,6 +203,14 @@ interface PedidoYampi {
   status?: { data?: { alias?: string; name?: string } } | null
   customer?: { data?: ClienteYampi } | null
   items?: { data?: ItemYampi[] } | null
+  /**
+   * As transações de pagamento — a ponte com o extrato.
+   *
+   * Sem tipo estrito de propósito: quem lê é `transacoesDoPedido`, no domínio,
+   * que colhe todos os identificadores possíveis em vez de apostar num nome
+   * de campo. Declarar a forma aqui seria fingir que ela é conhecida.
+   */
+  transactions?: unknown
 }
 
 interface EnderecoYampi {
@@ -297,6 +321,12 @@ export interface ResultadoYampi {
   entregues: number
   itensSemVariante: number
   casadosPorSku: number
+  /** Transações de pagamento lidas — a ponte com o extrato do gateway. */
+  transacoes: number
+  /** Pedidos pagos que vieram sem transação. Cada um é uma venda que o extrato não vai achar. */
+  pedidosSemTransacao: number
+  /** Linhas do extrato que encontraram a venda graças a estas transações. */
+  extratoLigado: number
   desde: string
 }
 
@@ -321,7 +351,12 @@ export async function lerPedidosYampi(dias: number): Promise<PedidoYampi[]> {
     }>('/orders', {
       // `shipping_address` não vem sem pedir: sem ele o pedido chega sem
       // cidade, CEP nem logradouro, e a ficha fica com três campos vazios.
-      include: 'customer,items,status,shipping_address',
+      //
+      // `transactions` é o que liga a venda ao dinheiro: traz o id que o
+      // Mercado Pago devolveu, e é o mesmo que aparece no extrato. Sem ele
+      // sobra casar por valor e data, que recusa sempre que dois decants do
+      // mesmo preço caem no mesmo dia — e eram 89 vendas órfãs por isso.
+      include: 'customer,items,status,shipping_address,transactions',
       date: `created_at:${desde}|${ate}`,
       limit: '50',
       page: String(pagina),
@@ -467,6 +502,46 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
     if (error) throw error
   }
 
+  // ── Transações: a ponte entre a venda e o dinheiro ───────────────────────
+  //
+  // Guardadas depois dos pedidos porque a chave estrangeira exige que o
+  // pedido exista. Reimportar sobrescreve: o status da transação muda quando
+  // um pagamento é estornado, e a versão nova é a que vale.
+  let pedidosSemTransacao = 0
+  const linhasTransacoes = pedidos.flatMap((p) => {
+    const transacoes = transacoesDoPedido(p as unknown as Record<string, unknown>)
+    const autorizado = Boolean(p.authorized) || Boolean(p.has_payment)
+    // Pedido não pago sem transação é normal — não houve pagamento. Pedido
+    // PAGO sem transação é o caso que interessa: é uma venda que o extrato
+    // não vai conseguir achar, e o número precisa aparecer no relatório.
+    if (autorizado && transacoes.length === 0) pedidosSemTransacao += 1
+
+    return transacoes.map((t) => ({
+      pedido_id: `YP-${p.number}`,
+      transacao_id: t.id,
+      gateway: t.gateway,
+      status: t.status,
+      valor: t.valor,
+      parcelas: t.parcelas,
+      identificadores: t.identificadores,
+      lido_em: new Date().toISOString(),
+    }))
+  })
+
+  for (const parte of lotes(linhasTransacoes, 500)) {
+    const { error } = await sb
+      .from('pedido_transacoes')
+      .upsert(parte, { onConflict: 'pedido_id,transacao_id' })
+    if (error) throw error
+  }
+
+  // O dinheiro pode ter chegado antes do pedido. Ligar aqui resolve esse
+  // atraso; a atualização do extrato resolve o inverso.
+  const { data: ligadas, error: erroLigar } = await sb.rpc('ligar_extrato_por_transacao', {
+    p_origem: 'mercadopago',
+  })
+  if (erroLigar) throw erroLigar
+
   // Venda que ainda não saiu é volume comprometido. Sem este passo a próxima
   // sincronia devolveria à Shopify o número de antes da venda, e a loja
   // voltaria a oferecer o que já foi vendido.
@@ -479,7 +554,15 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
     perfumes: clientes.size,
     variantes: linhasItens.length,
     ignorados: itensSemVariante,
-    detalhes: { desde, dias, entregues, casadosPorSku },
+    detalhes: {
+      desde,
+      dias,
+      entregues,
+      casadosPorSku,
+      transacoes: linhasTransacoes.length,
+      pedidosSemTransacao,
+      extratoLigado: Number(ligadas ?? 0),
+    },
   })
   if (erroLog) throw erroLog
 
@@ -490,6 +573,9 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
     entregues,
     itensSemVariante,
     casadosPorSku,
+    transacoes: linhasTransacoes.length,
+    pedidosSemTransacao,
+    extratoLigado: Number(ligadas ?? 0),
     desde,
   }
 }

@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { atualizarExtratoMp, mercadoPagoConfigurado } from '@/data/mercadopago'
 import { mensagemDe } from '@/data/shopify'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
+import { importarPedidosYampi, yampiConfigurada } from '@/data/yampi'
 import { INICIO_DA_OPERACAO } from '@/domain'
 
 /**
@@ -29,6 +30,16 @@ export const maxDuration = 300
 export const dynamic = 'force-dynamic'
 
 const JANELA_DIAS = 35
+
+/**
+ * Quanto histórico de pedido a rotina diária traz.
+ *
+ * Menor que a janela do extrato de propósito: o cartão parcelado só LIBERA o
+ * dinheiro 30 dias depois, então o extrato precisa alcançar o mês anterior,
+ * mas o pedido daquela venda já foi importado quando ela aconteceu. Puxar 35
+ * dias de pedido todo dia seria reler o mesmo mês 35 vezes.
+ */
+const JANELA_PEDIDOS_DIAS = 10
 
 function autorizado(req: Request): boolean {
   const esperado = process.env.CRON_SEGREDO
@@ -60,6 +71,29 @@ export async function POST(req: Request) {
   const de = janela < INICIO_DA_OPERACAO ? INICIO_DA_OPERACAO : janela
 
   const relatorio: Record<string, unknown> = { quando: agora.toISOString(), periodo: { de, ate } }
+
+  // Os pedidos vêm PRIMEIRO, e por um motivo estrutural: é da Yampi que sai o
+  // id da transação, e é ele que liga o crédito do extrato à venda. Rodando
+  // depois, a ligação só aconteceria no dia seguinte — e uma conciliação
+  // sempre um dia atrasada é uma conciliação em que ninguém confia.
+  //
+  // A janela é curta porque aqui só interessa o que é novo; o histórico
+  // completo é trabalho de importação manual, não de rotina diária.
+  if (yampiConfigurada()) {
+    try {
+      const y = await importarPedidosYampi(JANELA_PEDIDOS_DIAS)
+      relatorio.yampi = {
+        pedidos: y.pedidos,
+        transacoes: y.transacoes,
+        pedidosSemTransacao: y.pedidosSemTransacao,
+        extratoLigado: y.extratoLigado,
+      }
+    } catch (e) {
+      relatorio.yampi = { erro: mensagemDe(e) }
+    }
+  } else {
+    relatorio.yampi = { pulado: 'credenciais da Yampi não estão definidas' }
+  }
 
   // Cada etapa é isolada: uma falha de rede no gateway não pode impedir a
   // varredura de ocorrências, que não depende dele.

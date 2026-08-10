@@ -646,9 +646,10 @@ export function ExtratoCliente({
                     const r = await recasarExtrato()
                     if (!r.ok) throw new Error(r.erro)
                     return [
-                      `${r.religadas} linha(s) ligadas a um pedido agora.`,
+                      `${r.porTransacao} ligada(s) pelo id da transação da Yampi — ligação exata.`,
+                      `${r.religadas} ligada(s) por valor e data.`,
                       r.restantes
-                        ? `${r.restantes} continuam sem pedido correspondente no ERP.`
+                        ? `${r.restantes} continuam sem pedido. Importe os pedidos da Yampi: é de lá que vem o id da transação.`
                         : 'Nenhuma linha ficou órfã.',
                     ]
                   })
@@ -953,8 +954,10 @@ export function ExtratoCliente({
         >
           As vendas desta fila não pedem categoria: a receita do DRE sai dos pedidos pagos, e dar
           categoria de receita ao crédito contaria a mesma venda duas vezes. Elas estão aqui por
-          outro motivo — o ERP não achou a qual pedido pertencem. Cada atualização tenta ligar de
-          novo pelo id do pagamento, então a maioria some sozinha quando o pedido é importado.
+          outro motivo — o ERP não achou a qual pedido pertencem. A ligação certa vem do id da
+          transação que a Yampi guarda em cada pedido; se muitas estiverem aqui, importe os pedidos
+          em <strong style={{ fontWeight: 600 }}>Pedidos → Importar da Yampi</strong> e elas somem
+          sozinhas na próxima atualização.
         </span>
       )}
 

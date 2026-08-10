@@ -755,6 +755,20 @@ export async function atualizarExtratoMp(
     ...r.avisos.map((a) => `Atenção: ${a}`),
   ]
 
+  // A ligação exata: o id que a Yampi guardou na transação do pedido é o
+  // mesmo que o extrato traz. Roda antes da busca de pagamentos porque não
+  // depende de rede nenhuma — é uma junção dentro do banco.
+  try {
+    const { data: ligadas } = await supabaseServer().rpc('ligar_extrato_por_transacao', {
+      p_origem: 'mercadopago',
+    })
+    if (Number(ligadas ?? 0) > 0) {
+      linhas.push(`${ligadas} venda(s) ligadas ao pedido pela transação da Yampi.`)
+    }
+  } catch {
+    /* a ligação é melhoria, não pré-requisito do extrato */
+  }
+
   // A tarifa de cada venda vem da busca de pagamentos, não do extrato. São as
   // duas metades do mesmo número: o extrato diz quanto entrou, a busca diz
   // quanto o gateway ficou. Falhar aqui não invalida o extrato já gravado.

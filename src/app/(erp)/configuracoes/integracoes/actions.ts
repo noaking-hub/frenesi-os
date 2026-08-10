@@ -60,6 +60,10 @@ export async function testarIntegracao(id: string): Promise<Resposta<{ linhas: s
             `Loja: ${d.alias} · ${d.pedidos} pedido(s) na conta`,
             `Campos do pedido: ${d.camposDoPedido.slice(0, 18).join(', ')}`,
             `Campos do cliente: ${d.camposDoCliente.slice(0, 12).join(', ')}`,
+            `Campos da transação: ${d.camposDaTransacao.slice(0, 18).join(', ') || '— nenhuma transação na amostra'}`,
+            d.identificadoresDaAmostra.length
+              ? `Id do gateway lido da transação: ${d.identificadoresDaAmostra.join(', ')} — é por ele que o extrato acha a venda`
+              : 'ATENÇÃO: não consegui ler nenhum id de gateway na transação. Sem ele, o crédito do extrato não encontra o pedido.',
           ],
         }
       }
