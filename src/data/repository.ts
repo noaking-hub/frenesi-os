@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { PARAMETROS_PADRAO, iniciaisDe, montarEnvio, statusCliente } from '@/domain'
+import { PARAMETROS_PADRAO, aferirItem, iniciaisDe, montarEnvio, statusCliente, statusDevolucao } from '@/domain'
 import type {
   AutorizadoIa,
   AvaliacaoCupom,
@@ -687,7 +687,78 @@ const repositorioSupabase: Repositorio = {
       valor: Number(o.pedidos?.valor ?? 0),
     }))
   },
-  solicitacoes: repositorioFixtures.solicitacoes,
+  /**
+   * Devoluções abertas no portal.
+   *
+   * `itens` do ERP é a CONFERÊNCIA — o volume medido quando o pacote chega —,
+   * não a escolha do cliente. Antes de o pacote chegar a lista é vazia, e a
+   * triagem diz que ainda não há o que decidir. Usar a escolha do cliente como
+   * se fosse medição faria a triagem aprovar pelo que ele disse.
+   */
+  async solicitacoes() {
+    const { data, error } = await supabaseServer()
+      .from('solicitacoes_devolucao')
+      .select(
+        'protocolo, pedido_id, tipo, motivo, comentario, itens, fotos, status, aberta_em, ' +
+          'reverso, lacre, conferencia, ' +
+          'pedidos(valor, destino, gateway, rastreio, entregue_em, clientes(nome, email, telefone, cpf))',
+      )
+      .order('aberta_em', { ascending: false })
+      .limit(200)
+    if (error) throw error
+
+    const linhas = (data ?? []) as unknown as LinhaSolicitacao[]
+    const dia = 24 * 60 * 60 * 1000
+
+    return linhas.map((s): SolicitacaoErp => {
+      const cliente = s.pedidos?.clientes
+      const entregue = s.pedidos?.entregue_em
+      const diasDesdeEntrega = entregue
+        ? Math.floor((Date.now() - Date.parse(entregue)) / dia)
+        : null
+      const prazo = statusDevolucao(diasDesdeEntrega)
+      const cpf = (cliente?.cpf ?? '').replace(/\D/g, '')
+
+      return {
+        id: s.protocolo,
+        pedidoId: s.pedido_id,
+        cliente: cliente?.nome ?? 'Cliente sem cadastro',
+        destino: s.pedidos?.destino ?? '—',
+        // Documento mascarado: a tela de triagem não precisa do CPF inteiro,
+        // e o que não aparece não vaza em print de tela.
+        identificacao: cpf ? `CPF ${cpf.slice(0, 3)}.***.***-${cpf.slice(-2)}` : '—',
+        email: cliente?.email ?? '',
+        telefone: cliente?.telefone ?? '',
+        abertura: new Date(s.aberta_em).toLocaleString('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        tipo: s.tipo,
+        motivo: s.motivo,
+        comentario: s.comentario,
+        valor: Number(s.pedidos?.valor ?? 0),
+        prazo: prazo.mensagem,
+        prazoOk: prazo.elegivel,
+        status: s.status,
+        gateway: s.pedidos?.gateway === 'frenet' ? 'Frenet' : 'Melhor Envio',
+        etiquetaIda: s.pedidos?.rastreio ?? '',
+        reverso: s.reverso,
+        lacre: s.lacre,
+        // O portal ainda não recebe arquivo: o que existe é a confirmação de
+        // que o cliente tirou cada foto obrigatória.
+        fotos: [
+          s.fotos?.nivel ? 'Volume no frasco (confirmada)' : '',
+          s.fotos?.lacre ? 'Lacre / recrave (confirmada)' : '',
+        ].filter(Boolean),
+        itens: (s.conferencia ?? []).map((i) =>
+          aferirItem(i.perfume, i.variante, Number(i.medido_ml), i.observacao ?? ''),
+        ),
+        itensSolicitados: s.itens ?? [],
+      }
+    })
+  },
 
   async ordens() {
     const { data, error } = await supabaseServer()
@@ -1145,6 +1216,29 @@ function rotuloEnvio(envio: string): Pedido['envio'] {
     atrasado: 'Atrasado',
   }
   return mapa[envio] ?? 'Não iniciado'
+}
+
+interface LinhaSolicitacao {
+  protocolo: string
+  pedido_id: string
+  tipo: SolicitacaoErp['tipo']
+  motivo: string
+  comentario: string
+  itens: string[]
+  fotos: { nivel?: boolean; lacre?: boolean } | null
+  status: SolicitacaoErp['status']
+  aberta_em: string
+  reverso: string
+  lacre: SolicitacaoErp['lacre']
+  conferencia: { perfume: string; variante: VarianteMl; medido_ml: number | string; observacao?: string }[]
+  pedidos: {
+    valor: number | string
+    destino: string | null
+    gateway: string | null
+    rastreio: string | null
+    entregue_em: string | null
+    clientes: { nome: string; email: string; telefone: string; cpf: string } | null
+  } | null
 }
 
 export function repositorio(): Repositorio {

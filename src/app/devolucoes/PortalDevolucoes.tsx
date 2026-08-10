@@ -26,7 +26,7 @@ import {
 } from '@/domain'
 import type { MotivoDevolucao, Pedido } from '@/domain'
 
-import { buscarPedidos } from './actions'
+import { abrirDevolucao, buscarPedidos } from './actions'
 
 const PASSOS = ['Acesso', 'Pedidos', 'Itens', 'Motivo', 'Fotos', 'Pronto'] as const
 
@@ -43,6 +43,9 @@ export function PortalDevolucoes() {
   const [motivo, setMotivo] = useState<MotivoDevolucao | ''>('')
   const [comentario, setComentario] = useState('')
   const [fotos, setFotos] = useState({ nivel: false, lacre: false })
+  const [protocolo, setProtocolo] = useState<string | null>(null)
+  const [erroEnvio, setErroEnvio] = useState<string | null>(null)
+  const [enviando, iniciarEnvio] = useTransition()
 
   const pedido = pedidos.find((p) => p.id === pedidoId) ?? null
   const chaveItem = (idx: number) => `${pedidoId}-${idx}`
@@ -597,10 +600,41 @@ export function PortalDevolucoes() {
               ]}
             />
 
+            {erroEnvio && (
+              <Corpo>
+                <span style={{ color: '#9b3d3d' }}>{erroEnvio}</span>
+              </Corpo>
+            )}
+
             <div style={{ display: 'flex', gap: 9 }}>
               <BotaoSecundario onClick={voltar}>Voltar</BotaoSecundario>
-              <BotaoPrimario ativo={fotosOk} onClick={() => setPasso(6)} style={{ flex: 1 }}>
-                Enviar solicitação
+              <BotaoPrimario
+                ativo={fotosOk && !enviando}
+                onClick={() => {
+                  if (!fotosOk || !pedido || enviando) return
+                  setErroEnvio(null)
+                  iniciarEnvio(async () => {
+                    const r = await abrirDevolucao({
+                      pedidoId: pedido.id,
+                      motivo,
+                      itens: selecionados.map((i) => `${i.perfume} · ${i.variante} ml`),
+                      comentario,
+                      fotos,
+                    })
+                    // Só avança quando a solicitação existe do outro lado.
+                    // Mostrar "enviada" e não ter registrado nada é o erro que
+                    // o cliente só descobre quando cobra uma resposta.
+                    if (!r.ok) {
+                      setErroEnvio(r.erro)
+                      return
+                    }
+                    setProtocolo(r.protocolo)
+                    setPasso(6)
+                  })
+                }}
+                style={{ flex: 1 }}
+              >
+                {enviando ? 'Enviando…' : 'Enviar solicitação'}
               </BotaoPrimario>
             </div>
           </Passo>
@@ -643,7 +677,7 @@ export function PortalDevolucoes() {
                 Solicitação enviada
               </h1>
               <Corpo>
-                {`Protocolo DEV-1042 aberto para o pedido ${pedido.id}. Enviamos a confirmação para ${ident}.`}
+                {`Protocolo ${protocolo ?? '—'} aberto para o pedido ${pedido.id}. Guarde este número: é por ele que encontramos a sua solicitação.`}
               </Corpo>
             </div>
 

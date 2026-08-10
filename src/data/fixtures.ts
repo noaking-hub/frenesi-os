@@ -621,7 +621,10 @@ export interface SolicitacaoErp {
   reverso: string
   lacre: EstadoLacre
   fotos: string[]
+  /** A conferência: volume medido de cada item recebido. Vazia antes de chegar. */
   itens: ItemAferido[]
+  /** O que o cliente marcou no portal. É contra esta lista que se confere. */
+  itensSolicitados?: string[]
 }
 
 /**

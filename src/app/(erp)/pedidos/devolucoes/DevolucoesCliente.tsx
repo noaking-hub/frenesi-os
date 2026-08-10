@@ -1,9 +1,9 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useTransition } from 'react'
 
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
-import { Barra, BotaoOuro, Losango, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
+import { Barra, BotaoOuro, FaixaAlerta, Losango, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
 import { BORDA, COR, FAIXA, type Tom } from '@/components/erp/tokens'
 import {
   PASSOS_DEVOLUCAO,
@@ -17,7 +17,9 @@ import {
   triarDevolucao,
   volume,
 } from '@/domain'
-import type { ItemAferido, StatusSolicitacao, Triagem } from '@/domain'
+import type { ItemAferido, StatusSolicitacao, Triagem, VarianteMl } from '@/domain'
+
+import { conferirDevolucao, moverSolicitacao } from './actions'
 import type { SolicitacaoErp } from '@/data/fixtures'
 
 const TOM_STATUS: Record<StatusSolicitacao, Tom> = {
@@ -36,13 +38,87 @@ type Filtro = 'Abertas' | 'Novas' | 'Em análise' | 'Aguardando reverso' | 'A co
 
 const RESOLUCOES = ['Reembolso integral', 'Troca por outro perfume', 'Cupom + 10% de bônus']
 
-export function DevolucoesCliente({ solicitacoes }: { solicitacoes: SolicitacaoErp[] }) {
+export function DevolucoesCliente({
+  solicitacoes,
+  ligado,
+}: {
+  solicitacoes: SolicitacaoErp[]
+  ligado: boolean
+}) {
   const [filtro, setFiltro] = useState<Filtro>('Abertas')
   const [selecionada, setSelecionada] = useState(solicitacoes[0]?.id ?? '')
-  // Decisões tomadas nesta sessão. Com backend, viram mutações.
+  // Espelho local do que já foi gravado, para a ficha não voltar ao estado
+  // antigo no intervalo entre a gravação e a revalidação da rota.
   const [decisoes, setDecisoes] = useState<
     Record<string, { status?: StatusSolicitacao; resolucao?: string; reverso?: string }>
   >({})
+  const [erro, setErro] = useState<string | null>(null)
+  const [, iniciar] = useTransition()
+
+  /**
+   * Grava a decisão e só então espelha na tela.
+   *
+   * A resolução (reembolso, troca, crédito) é escolha de tela e não muda o
+   * fluxo no banco — por isso ela não vira gravação; o status e o reverso sim.
+   */
+  function decidir(d: SolicitacaoErp, patch: { status?: StatusSolicitacao; resolucao?: string; reverso?: string }) {
+    setErro(null)
+    if (!ligado && (patch.status || patch.reverso)) {
+      setErro('Sem o Supabase configurado a decisão não seria gravada em lugar nenhum.')
+      return
+    }
+
+    if (patch.status === 'Recebida') {
+      // Receber é conferir: sem o volume medido a triagem não tem número
+      // nenhum para sustentar a decisão, e "recebida" viraria um carimbo.
+      const pedidos = d.itensSolicitados ?? []
+      if (pedidos.length === 0) {
+        setErro('Esta devolução não tem itens registrados — confira o cadastro antes de receber.')
+        return
+      }
+      const medidos: { perfume: string; variante: VarianteMl; medidoMl: number; observacao: string }[] = []
+      for (const item of pedidos) {
+        const variante = Number(item.match(/(\d+)\s*ml/i)?.[1] ?? 0) as VarianteMl
+        const bruto = window.prompt(`Volume medido de "${item}", em ml:`, String(variante))
+        if (bruto === null) return
+        const medidoMl = Number(bruto.replace(',', '.'))
+        if (!Number.isFinite(medidoMl)) {
+          setErro(`"${bruto}" não é um volume.`)
+          return
+        }
+        medidos.push({ perfume: item.split(' · ')[0], variante, medidoMl, observacao: '' })
+      }
+      const lacre = window.prompt('Estado do lacre: intacto, rompido-no-transporte ou violado', 'intacto')
+      iniciar(async () => {
+        const r = await conferirDevolucao(d.id, medidos, lacre ?? 'intacto')
+        if (!r.ok) {
+          setErro(r.erro)
+          return
+        }
+        setDecisoes((s) => ({ ...s, [d.id]: { ...s[d.id], status: 'Recebida' } }))
+      })
+      return
+    }
+
+    if (patch.status || patch.reverso) {
+      iniciar(async () => {
+        const r = await moverSolicitacao(
+          d.id,
+          patch.status ?? statusDe(d),
+          '',
+          patch.reverso ?? '',
+        )
+        if (!r.ok) {
+          setErro(r.erro)
+          return
+        }
+        setDecisoes((s) => ({ ...s, [d.id]: { ...s[d.id], ...patch } }))
+      })
+      return
+    }
+
+    setDecisoes((s) => ({ ...s, [d.id]: { ...s[d.id], ...patch } }))
+  }
 
   const statusDe = (d: SolicitacaoErp): StatusSolicitacao =>
     decisoes[d.id]?.status ?? d.status
@@ -111,6 +187,8 @@ export function DevolucoesCliente({ solicitacoes }: { solicitacoes: SolicitacaoE
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <FaixaKpis kpis={kpis} />
+
+      {erro && <FaixaAlerta tom="erro" texto={erro} />}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
         {filtros.map((f) => {
@@ -289,9 +367,7 @@ export function DevolucoesCliente({ solicitacoes }: { solicitacoes: SolicitacaoE
             status={statusDe(sel)}
             reverso={reversoDe(sel)}
             resolucao={decisoes[sel.id]?.resolucao ?? RESOLUCOES[0]}
-            aoDecidir={(patch) =>
-              setDecisoes((s) => ({ ...s, [sel.id]: { ...s[sel.id], ...patch } }))
-            }
+            aoDecidir={(patch) => decidir(sel, patch)}
           />
         )}
       </div>
