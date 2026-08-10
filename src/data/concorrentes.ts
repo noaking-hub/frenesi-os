@@ -3,6 +3,7 @@ import 'server-only'
 import {
   casarTitulo,
   ehPaginaDeProduto,
+  nomeDaPagina,
   parseVarianteMl,
   precoDe,
   produtosDoJsonLd,
@@ -258,7 +259,10 @@ async function lerLojaNuvemshop(dominio: string): Promise<PrecoObservado[]> {
       // O caminho bom: as variações trazem o ml e o preço de cada tamanho.
       const variacoes = variantesDoHtml(pagina.html)
       if (variacoes.length > 0) {
-        const nome = produtosDoJsonLd(pagina.html)[0]?.nome ?? pagina.url
+        // O nome vem do documento, não do primeiro Product da página: entre os
+        // blocos JSON-LD estão os relacionados do carrossel.
+        const nome = nomeDaPagina(pagina.html) ?? produtosDoJsonLd(pagina.html)[0]?.nome
+        if (!nome) continue
         for (const v of variacoes) {
           const variante = parseVarianteMl(v.rotulo)
           // Sem ml reconhecível é tamanho que não vendemos (2 ml, 30 ml).
@@ -512,12 +516,9 @@ export async function coletarConcorrente(concorrenteId: string): Promise<Resulta
     throw new LeituraBloqueada(motivo)
   }
 
-  let casados = 0
-
   const linhas = comVariante.map((o) => {
     const chaveEnsinada = normalizarTitulo(o.titulo)
     const baseId = ensinados.get(chaveEnsinada) ?? casarTitulo(o.titulo, catalogo)?.baseId ?? null
-    if (baseId) casados++
     return {
       concorrente_id: concorrenteId,
       chave: o.chave,
@@ -530,6 +531,19 @@ export async function coletarConcorrente(concorrenteId: string): Promise<Resulta
     }
   })
 
+  // Uma loja vende UM preço por perfume e tamanho. Ler três é sinal de que o
+  // mesmo produto apareceu em URLs diferentes — e três linhas contraditórias
+  // fariam a tela exibir dezenove "concorrentes" onde há um. Vale o menor:
+  // é o que o cliente pagaria naquela loja.
+  const porProduto = new Map<string, (typeof linhas)[number]>()
+  for (const l of linhas) {
+    const chave = `${l.base_id ?? l.titulo}|${l.variante}`
+    const atual = porProduto.get(chave)
+    if (!atual || l.preco < atual.preco) porProduto.set(chave, l)
+  }
+  const unicas = [...porProduto.values()]
+  const casados = unicas.filter((l) => l.base_id !== null).length
+
   // A releitura substitui a anterior: preço antigo do mesmo item não é
   // histórico útil aqui, é ruído que puxaria o "menor do mercado" para baixo.
   const { error: erroLimpar } = await sb
@@ -538,8 +552,8 @@ export async function coletarConcorrente(concorrenteId: string): Promise<Resulta
     .eq('concorrente_id', concorrenteId)
   if (erroLimpar) throw erroLimpar
 
-  for (let i = 0; i < linhas.length; i += 500) {
-    const { error } = await sb.from('concorrente_precos').insert(linhas.slice(i, i + 500))
+  for (let i = 0; i < unicas.length; i += 500) {
+    const { error } = await sb.from('concorrente_precos').insert(unicas.slice(i, i + 500))
     if (error) throw error
   }
 
@@ -549,17 +563,13 @@ export async function coletarConcorrente(concorrenteId: string): Promise<Resulta
       ultima_leitura: new Date().toISOString(),
       // Parcial quando a loja respondeu mas metade dos títulos não achou dono:
       // dizer "lida" ali daria a entender que a comparação está completa.
-      ultimo_status: casados === 0 || casados < linhas.length / 2 ? 'parcial' : 'lida',
+      ultimo_status: casados === 0 || casados < unicas.length / 2 ? 'parcial' : 'lida',
       ultimo_erro: null,
-      precos_lidos: linhas.length,
+      precos_lidos: unicas.length,
     })
     .eq('id', concorrenteId)
 
-  return {
-    lidos: linhas.length,
-    casados,
-    semVariante: observados.length - comVariante.length,
-  }
+  return { lidos: unicas.length, casados, semVariante: observados.length - comVariante.length }
 }
 
 /** Mesma normalização que a tabela de apelidos guarda. */

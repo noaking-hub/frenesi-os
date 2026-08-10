@@ -17,7 +17,13 @@ import type { ParametrosPrecificacao, PerfumeBase, VarianteMl } from './types'
 
 export type PosicaoMercado = 'acima' | 'na-media' | 'menor-preco'
 
-export type TipoRecomendacao = 'baixar' | 'subir' | 'manter-ideal' | 'saudavel'
+export type TipoRecomendacao =
+  | 'baixar'
+  | 'subir'
+  | 'manter-ideal'
+  | 'saudavel'
+  /** Base sem custo por ml: não há margem a calcular, logo não há recomendação. */
+  | 'sem-custo'
 
 export interface AnaliseMercado {
   base: PerfumeBase
@@ -53,6 +59,27 @@ export function analisarMercado(
   const ideal = calc.sugerido
   const menor = Math.min(...precos)
   const maior = Math.max(...precos)
+
+  // Sem custo por ml, `calcularPreco` cobre só taxas e fixos — o "ideal" sai
+  // uma fração do preço real e TODA recomendação vira "baixe". Recomendar
+  // preço a partir de custo zero é o erro mais caro que esta tela pode
+  // cometer, então ela se cala em vez de sugerir.
+  if (base.custoPorMl <= 0) {
+    return {
+      base, variante, precos, menor, nosso,
+      nossaMargem: 0,
+      ideal: 0,
+      posicao: nosso > maior ? 'acima' : nosso < menor ? 'menor-preco' : 'na-media',
+      alvoCompetitivo: 0,
+      podeCompetir: false,
+      abaixoIdeal: false,
+      oportunidade: false,
+      recomendacao: 'sem-custo',
+      precoRecomendado: nosso,
+      frase:
+        'Sem recomendação: esta base não tem custo por ml cadastrado, e sem custo não há margem a proteger.',
+    }
+  }
 
   const posicao: PosicaoMercado =
     nosso > maior ? 'acima' : nosso < menor ? 'menor-preco' : 'na-media'
@@ -402,6 +429,34 @@ function numeroDe(valor: unknown): number {
   const limpo = valor.replace(/[^\d.,]/g, '')
   const n = Number(limpo.replace(/\.(?=\d{3}\b)/g, '').replace(',', '.'))
   return Number.isFinite(n) ? n : 0
+}
+
+
+/**
+ * Nome do produto PRINCIPAL da página.
+ *
+ * Pegar o primeiro bloco JSON-LD não serve: a página de produto da Nuvemshop
+ * traz também os relacionados do carrossel, cada um com o próprio Product. Se
+ * o primeiro for um relacionado, o preço da página é gravado com o nome de
+ * OUTRO perfume — foi o que fez um decant de 5 ml de Coco Mademoiselle
+ * aparecer com dezenove preços entre R$ 39,90 e R$ 229,90.
+ *
+ * `og:title` é do documento, não de um card dentro dele. É a única fonte da
+ * página que não tem como se referir ao vizinho.
+ */
+export function nomeDaPagina(html: string): string | null {
+  const og =
+    html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)?.[1] ??
+    html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i)?.[1] ??
+    null
+  if (og) return desescapar(og).trim() || null
+
+  const titulo = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]
+  if (!titulo) return null
+  // Corta só no pipe. Hífen NÃO serve de separador aqui: os títulos desta
+  // loja são "(Decant) Armaf - Club de Nuit", e cortar no traço deixaria o
+  // produto reduzido à marca.
+  return desescapar(titulo).split('|')[0].trim() || null
 }
 
 export interface VarianteLida {

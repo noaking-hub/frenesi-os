@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { ehPaginaDeProduto, variantesDoHtml } from '..'
+import { ehPaginaDeProduto, nomeDaPagina, variantesDoHtml } from '..'
 
 describe('quais URLs do sitemap são produto', () => {
   it('recusa a vitrine, que é o que quebrou a primeira coleta', () => {
@@ -61,5 +61,38 @@ describe('variações do produto na Nuvemshop', () => {
   it('devolve vazio quando não há payload, em vez de inventar', () => {
     expect(variantesDoHtml('<html><body>sem nada</body></html>')).toEqual([])
     expect(variantesDoHtml('<div data-variants="{quebrado"></div>')).toEqual([])
+  })
+})
+
+describe('de qual produto a página fala', () => {
+  it('usa o og:title, não o primeiro Product do carrossel', () => {
+    // A página traz os relacionados com JSON-LD próprio. Pegar o primeiro
+    // gravava o preço da página com o nome do vizinho — foi assim que um
+    // 5 ml de Coco Mademoiselle apareceu com preço de R$ 229,90.
+    const html = `
+      <head>
+        <meta property="og:title" content="(Decant) Lancôme - Idôle Eau de Parfum (EDP)">
+        <title>(Decant) Lancôme - Idôle | Tabs Perfumes</title>
+      </head>
+      <script type="application/ld+json">
+        {"@type":"Product","name":"(Decant) Afnan - 9pm","offers":{"price":"59.66"}}
+      </script>`
+    expect(nomeDaPagina(html)).toBe('(Decant) Lancôme - Idôle Eau de Parfum (EDP)')
+  })
+
+  it('cai para o <title> e corta o nome da loja', () => {
+    expect(nomeDaPagina('<title>(Decant) Armaf - Club de Nuit | Tabs Perfumes</title>')).toBe(
+      '(Decant) Armaf - Club de Nuit',
+    )
+  })
+
+  it('devolve nulo quando a página não se identifica', () => {
+    expect(nomeDaPagina('<html><body>nada</body></html>')).toBeNull()
+  })
+
+  it('desescapa entidade no título', () => {
+    expect(nomeDaPagina('<meta property="og:title" content="Chanel &amp; Co 5ml">')).toBe(
+      'Chanel & Co 5ml',
+    )
   })
 })

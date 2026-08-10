@@ -14,6 +14,7 @@ const TOM_REC: Record<AnaliseMercado['recomendacao'], Tom> = {
   subir: 'erro',
   'manter-ideal': 'atencao',
   saudavel: 'ok',
+  'sem-custo': 'neutro',
 }
 
 /**
@@ -132,14 +133,16 @@ export default async function Concorrentes() {
         <Valor
           tamanho={12}
           tom={
-            m.nossaMargem >= parametros.margemAlvo - 0.5
-              ? 'ok'
-              : m.nossaMargem >= parametros.margemAlvo - 5
-                ? 'atencao'
-                : 'erro'
+            m.recomendacao === 'sem-custo'
+              ? 'var(--color-apagado)'
+              : m.nossaMargem >= parametros.margemAlvo - 0.5
+                ? 'ok'
+                : m.nossaMargem >= parametros.margemAlvo - 5
+                  ? 'atencao'
+                  : 'erro'
           }
         >
-          {pct(m.nossaMargem)}
+          {m.recomendacao === 'sem-custo' ? '—' : pct(m.nossaMargem)}
         </Valor>
       ),
     },
@@ -186,9 +189,11 @@ export default async function Concorrentes() {
       titulo: 'Ideal',
       largura: '96px',
       alinhamento: 'right',
+      // Travessão, não R$ 0,00: sem custo não existe preço ideal, e zero ali
+      // pareceria um número apurado.
       render: (m) => (
         <Valor tamanho={12} peso={400} tom="rgba(242,237,227,.6)">
-          {brl(m.ideal)}
+          {m.recomendacao === 'sem-custo' ? '—' : brl(m.ideal)}
         </Valor>
       ),
     },
