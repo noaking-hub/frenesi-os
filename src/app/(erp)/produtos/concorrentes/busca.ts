@@ -1,7 +1,7 @@
 'use server'
 
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
-import { VARIANTES, buscarNoCatalogo } from '@/domain'
+import { VARIANTES, buscarNoCatalogo, formasDeBusca } from '@/domain'
 import type { VarianteMl } from '@/domain'
 
 /**
@@ -46,15 +46,6 @@ export interface ResultadoBusca {
   semBanco: boolean
 }
 
-function semAcento(t: string): string {
-  return t
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
 export async function buscarPrecos(termo: string): Promise<ResultadoBusca | null> {
   const limpo = termo.trim()
   if (limpo.length < 3) return null
@@ -72,21 +63,28 @@ export async function buscarPrecos(termo: string): Promise<ResultadoBusca | null
 
   const sb = supabaseServer()
 
-  // Uma condição por palavra, todas exigidas. Um `ilike` com a frase inteira
-  // só acha quem escreveu igualzinho — e o concorrente nunca escreve igual:
-  // "Bleu de Chanel Eau de Parfum" não casaria com "(Decant) Chanel - Bleu de
-  // Chanel Eau de Parfum (EDP)". Seis palavras bastam para qualquer perfume.
-  const palavras = semAcento(limpo)
-    .split(' ')
-    .filter((t) => t.length >= 2)
-    .slice(0, 6)
+  // Um grupo por palavra, todos exigidos — e dentro do grupo, as formas em
+  // que aquela palavra pode aparecer. Só a concentração tem mais de uma:
+  // "Eau de Toilette" e "EDT" são o mesmo produto, e uma loja escreve de um
+  // jeito, outra de outro. Sem isso, quem procura por extenso não acha quem
+  // abreviou — e ignorar a concentração seria pior, porque ela separa dois
+  // produtos com preços diferentes.
+  const grupos = formasDeBusca(limpo).slice(0, 6)
 
   let consulta = sb
     .from('concorrente_precos')
     .select('titulo, preco, variante, url, concorrentes(nome)')
     .not('variante', 'is', null)
-  for (const palavra of palavras.length ? palavras : [limpo]) {
-    consulta = consulta.ilike('titulo', `%${palavra}%`)
+
+  for (const formas of grupos.length ? grupos : [[limpo]]) {
+    // Vírgula e parêntese são a sintaxe do filtro; num nome de perfume eles
+    // quebrariam a consulta inteira em vez de buscar.
+    const seguras = formas.map((f) => f.replace(/[(),*]/g, ' ').trim()).filter(Boolean)
+    if (seguras.length === 0) continue
+    consulta =
+      seguras.length === 1
+        ? consulta.ilike('titulo', `%${seguras[0]}%`)
+        : consulta.or(seguras.map((f) => `titulo.ilike.%${f}%`).join(','))
   }
 
   const [{ data: bases }, { data: precos }] = await Promise.all([

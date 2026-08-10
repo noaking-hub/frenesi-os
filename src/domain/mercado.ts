@@ -267,10 +267,54 @@ const GENERICAS = new Set([
   'para',
 ])
 
+/**
+ * Concentração escrita por extenso e em sigla são a MESMA coisa.
+ *
+ * "Eau de Toilette" e "EDT" convivem no mesmo mercado, às vezes na mesma
+ * loja. Sem juntar as duas, procurar por extenso não acha quem abreviou — e
+ * a concentração é justamente o que separa dois produtos com preços
+ * diferentes, então ignorá-la também não serve.
+ *
+ * A conversão é para a sigla porque ela é curta e inequívoca: "parfum"
+ * sozinho aparece em "eau de parfum" e em "extrait de parfum".
+ */
+export function normalizarConcentracao(texto: string): string {
+  return (
+    texto
+      // A ordem importa: "eau de parfum" antes de qualquer regra com
+      // "parfum" solto, senão a primeira come parte da segunda.
+      .replace(/\beau\s+de\s+toilette\b/gi, ' edt ')
+      .replace(/\beau\s+de\s+parfum\b/gi, ' edp ')
+      .replace(/\beau\s+de\s+cologne\b/gi, ' edc ')
+      .replace(/\bextrait\s+de\s+parfum\b/gi, ' extrait ')
+      .replace(/\beau\s+fraiche\b/gi, ' edf ')
+  )
+}
+
+/** Como cada concentração pode aparecer escrita numa loja. */
+const FORMAS_CONCENTRACAO: Record<string, string[]> = {
+  edt: ['edt', 'eau de toilette'],
+  edp: ['edp', 'eau de parfum'],
+  edc: ['edc', 'eau de cologne'],
+  edf: ['edf', 'eau fraiche'],
+  extrait: ['extrait'],
+}
+
+/**
+ * O que procurar no título do concorrente, agrupado.
+ *
+ * Cada grupo é uma exigência: o título precisa conter ALGUMA das formas do
+ * grupo. Só a concentração tem mais de uma forma — o resto é a palavra tal
+ * como foi digitada.
+ */
+export function formasDeBusca(termo: string): string[][] {
+  return [...tokensDe(termo)].map((t) => FORMAS_CONCENTRACAO[t] ?? [t])
+}
+
 /** Sem acento, sem caixa, sem pontuação — e sem os números de volume. */
 export function tokensDe(texto: string): Set<string> {
   return new Set(
-    texto
+    normalizarConcentracao(texto)
       .toLowerCase()
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')

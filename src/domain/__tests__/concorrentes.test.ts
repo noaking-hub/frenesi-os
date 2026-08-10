@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { buscarNoCatalogo, casarTitulo, tokensDe } from '..'
+import { buscarNoCatalogo, casarTitulo, formasDeBusca, tokensDe } from '..'
 
 /** Recorte real do catálogo, incluindo os pares que se confundem. */
 const BASES = [
@@ -84,5 +84,35 @@ describe('achar o perfume do catálogo pelo que foi digitado', () => {
 
   it('devolve vazio quando falta uma palavra, em vez de aproximar', () => {
     expect(buscarNoCatalogo('Bleu de Chanel Extrait', BASES)).toEqual([])
+  })
+})
+
+describe('EDT é Eau de Toilette', () => {
+  it('acha o mesmo perfume escrito das duas formas', () => {
+    const porExtenso = buscarNoCatalogo('Bleu de Chanel Eau de Toilette', BASES)
+    const emSigla = buscarNoCatalogo('Bleu de Chanel EDT', BASES)
+    expect(porExtenso[0].id).toBe('bleu-edt')
+    expect(emSigla[0].id).toBe('bleu-edt')
+  })
+
+  it('continua separando toilette de parfum', () => {
+    // Juntar as formas não pode virar ignorar a concentração: são dois
+    // produtos com preços diferentes.
+    expect(buscarNoCatalogo('Bleu de Chanel EDP', BASES)[0].id).toBe('bleu-edp')
+    expect(buscarNoCatalogo('Bleu de Chanel EDT', BASES).map((b) => b.id)).not.toContain('bleu-edp')
+  })
+
+  it('procura as duas formas no título do concorrente', () => {
+    // A Tabs escreve "EDT"; a Eau de Leon, "Eau de Toilette". Uma busca só
+    // tem de alcançar as duas.
+    const grupos = formasDeBusca('Bleu de Chanel Eau de Toilette')
+    const daConcentracao = grupos.find((g) => g.includes('edt'))
+    expect(daConcentracao).toEqual(['edt', 'eau de toilette'])
+    expect(grupos.map((g) => g[0])).toEqual(expect.arrayContaining(['bleu', 'chanel', 'edt']))
+  })
+
+  it('casa título de concorrente que abrevia com base que escreve por extenso', () => {
+    const c = casarTitulo('(Decant) Chanel - Bleu de Chanel EDT 10ml', BASES)
+    expect(c?.baseId).toBe('bleu-edt')
   })
 })
