@@ -109,12 +109,31 @@ export function analisarMercado(
   }
 }
 
+export type StatusFonte = 'nunca' | 'lida' | 'parcial' | 'bloqueada' | 'manual'
+
 export interface FonteConcorrente {
+  id: string
   nome: string
   dominio: string
-  status: 'Lida' | 'Parcial' | 'Bloqueada'
+  status: StatusFonte
+  /**
+   * Como o preço entra: `nuvemshop` lê sitemap + JSON-LD da vitrine,
+   * `shopify` lê /products.json, `manual` só recebe preço digitado.
+   */
+  coleta: 'shopify' | 'nuvemshop' | 'manual'
+  /** Quando foi a última tentativa. Vazio enquanto não houve nenhuma. */
   quando: string
   itensLidos: number
+  /** Motivo cru da última falha. É o que evita adivinhar por que não leu. */
+  erro: string | null
+}
+
+export const ROTULO_FONTE: Record<StatusFonte, string> = {
+  nunca: 'Nunca lida',
+  lida: 'Lida',
+  parcial: 'Parcial',
+  bloqueada: 'Bloqueada',
+  manual: 'Manual',
 }
 
 // ── Kits e combos ──────────────────────────────────────────────────────────
@@ -192,4 +211,94 @@ export function resumirKits(avaliados: KitAvaliado[]): ResumoKits {
       ? avaliados.reduce((a, k) => a + k.margem * k.receita30, 0) / receita
       : 0,
   }
+}
+
+// ── Casar título de concorrente com o nosso catálogo ───────────────────────
+
+/**
+ * Palavras que quase todo decant carrega e que por isso não distinguem nada.
+ *
+ * A lista é curta de propósito. "Intense", "Elixir", "Masculino", "Parfum" e
+ * "Toilette" NÃO entram: neste catálogo elas separam produtos diferentes —
+ * Bleu de Chanel Eau de Parfum e Eau de Toilette são duas bases, com preços
+ * diferentes. Descartá-las por parecerem genéricas casaria uma com a outra.
+ */
+const GENERICAS = new Set([
+  'decant',
+  'decants',
+  'fracionado',
+  'fracionados',
+  'perfume',
+  'perfumes',
+  'ml',
+  'de',
+  'da',
+  'do',
+  'the',
+  'e',
+  'com',
+  'para',
+])
+
+/** Sem acento, sem caixa, sem pontuação — e sem os números de volume. */
+export function tokensDe(texto: string): Set<string> {
+  return new Set(
+    texto
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\d+\s*ml\b/g, ' ')
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length > 1 && !GENERICAS.has(t) && !/^\d+$/.test(t)),
+  )
+}
+
+export interface Casamento {
+  baseId: string
+  /** Fração dos tokens da nossa base presentes no título do concorrente. */
+  score: number
+}
+
+/** Cobertura mínima para aceitar um casamento automático. */
+export const SCORE_MINIMO = 0.7
+/** Vantagem mínima sobre o segundo colocado. Empate técnico não casa. */
+export const VANTAGEM_MINIMA = 0.15
+
+/**
+ * Descobre de qual base nossa um título de concorrente fala.
+ *
+ * Devolve `null` quando não há certeza — e isso é o ponto. Um preço casado com
+ * o perfume errado não fica só errado: ele entra na comparação de mercado e
+ * empurra o preço de venda de OUTRO produto. Duas travas evitam isso: a
+ * cobertura precisa ser alta, e o segundo colocado precisa ficar claramente
+ * atrás. Empate técnico vira trabalho manual, não palpite.
+ */
+export function casarTitulo(
+  titulo: string,
+  bases: { id: string; nome: string; marca: string }[],
+): Casamento | null {
+  const alvo = tokensDe(titulo)
+  if (alvo.size === 0) return null
+
+  let melhor: Casamento | null = null
+  let segundo = 0
+
+  for (const b of bases) {
+    const meus = tokensDe(`${b.nome} ${b.marca}`)
+    if (meus.size === 0) continue
+    let acertos = 0
+    for (const t of meus) if (alvo.has(t)) acertos++
+    const score = acertos / meus.size
+
+    if (!melhor || score > melhor.score) {
+      segundo = melhor?.score ?? 0
+      melhor = { baseId: b.id, score }
+    } else if (score > segundo) {
+      segundo = score
+    }
+  }
+
+  if (!melhor || melhor.score < SCORE_MINIMO) return null
+  if (melhor.score - segundo < VANTAGEM_MINIMA) return null
+  return melhor
 }

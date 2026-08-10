@@ -737,8 +737,56 @@ const repositorioSupabase: Repositorio = {
       nota: e.nota as string,
     }))
   },
-  concorrentesFontes: repositorioFixtures.concorrentesFontes,
-  mercado: repositorioFixtures.mercado,
+  async concorrentesFontes() {
+    const { data, error } = await supabaseServer()
+      .from('concorrentes')
+      .select('id, nome, dominio, coleta, ultimo_status, ultima_leitura, ultimo_erro, precos_lidos')
+      .order('nome')
+    if (error) throw error
+    return (data ?? []).map(
+      (c): FonteConcorrente => ({
+        id: c.id as string,
+        nome: c.nome as string,
+        dominio: c.dominio as string,
+        coleta: c.coleta as 'shopify' | 'manual',
+        status: c.ultimo_status as FonteConcorrente['status'],
+        quando: c.ultima_leitura ? dataCurta(c.ultima_leitura as string) : '',
+        itensLidos: Number(c.precos_lidos ?? 0),
+        erro: (c.ultimo_erro as string | null) ?? null,
+      }),
+    )
+  },
+
+  /**
+   * Preços de mercado por base e variante.
+   *
+   * Só entra observação casada com o catálogo: preço sem dono não sabe de qual
+   * perfume fala, e entrar na comparação como se soubesse decidiria o preço de
+   * venda de um produto pelo preço de outro.
+   */
+  async mercado() {
+    const linhas = await tudoDe<{ base_id: string; variante: number; preco: number | string }>(
+      'concorrente_precos',
+      (de, ate) =>
+        supabaseServer()
+          .from('concorrente_precos')
+          .select('base_id, variante, preco')
+          .not('base_id', 'is', null)
+          .not('variante', 'is', null)
+          .range(de, ate) as unknown as PromiseLike<{
+          data: { base_id: string; variante: number; preco: number | string }[] | null
+          error: unknown
+        }>,
+    )
+
+    const mapa: Record<string, Partial<Record<VarianteMl, number[]>>> = {}
+    for (const l of linhas) {
+      const v = l.variante as VarianteMl
+      const daBase = (mapa[l.base_id] ??= {})
+      ;(daBase[v] ??= []).push(Number(l.preco))
+    }
+    return mapa
+  },
   kits: repositorioFixtures.kits,
   usuarios: repositorioFixtures.usuarios,
   perfis: repositorioFixtures.perfis,

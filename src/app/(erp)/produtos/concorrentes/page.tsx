@@ -1,10 +1,13 @@
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
-import { BotaoOuro, BotaoSecundario, TituloSecao, Valor } from '@/components/erp/primitivos'
+import { EstadoVazio, TituloSecao, Valor } from '@/components/erp/primitivos'
 import { CelulaDupla, Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR, type Tom } from '@/components/erp/tokens'
 import { repositorio } from '@/data/repository'
-import { analisarMercado, brl, pad2, pct } from '@/domain'
-import type { AnaliseMercado, FonteConcorrente, VarianteMl } from '@/domain'
+import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
+import { VARIANTES, analisarMercado, brl, pad2, pct } from '@/domain'
+import type { AnaliseMercado } from '@/domain'
+
+import { FontesCliente, type TituloSemDono } from './FontesCliente'
 
 const TOM_REC: Record<AnaliseMercado['recomendacao'], Tom> = {
   baixar: 'ouro',
@@ -13,26 +16,51 @@ const TOM_REC: Record<AnaliseMercado['recomendacao'], Tom> = {
   saudavel: 'ok',
 }
 
-const TOM_FONTE: Record<FonteConcorrente['status'], Tom> = {
-  Lida: 'ok',
-  Parcial: 'atencao',
-  Bloqueada: 'erro',
+/**
+ * Títulos lidos que o casamento automático recusou.
+ *
+ * Vêm para a tela porque escondê-los faria a comparação parecer completa
+ * quando falta metade — e é sobre ela que o preço de venda é decidido.
+ */
+async function lerSemDono(): Promise<TituloSemDono[]> {
+  if (!supabaseConfigurado()) return []
+  const { data, error } = await supabaseServer()
+    .from('concorrente_precos')
+    .select('titulo, preco, variante, concorrentes(nome)')
+    .is('base_id', null)
+    .order('titulo')
+    .limit(200)
+  if (error) throw error
+  return (
+    (data ?? []) as unknown as {
+      titulo: string
+      preco: number | string
+      variante: number | null
+      concorrentes: { nome: string } | null
+    }[]
+  ).map((l) => ({
+    titulo: l.titulo,
+    preco: Number(l.preco),
+    variante: l.variante,
+    fonte: l.concorrentes?.nome ?? '—',
+  }))
 }
-
-const VARIANTES_COMPARADAS: VarianteMl[] = [5, 10]
 
 export default async function Concorrentes() {
   const repo = repositorio()
-  const [bases, mercado, precos, parametros, fontes] = await Promise.all([
+  const [bases, mercado, precos, parametros, fontes, semDono] = await Promise.all([
     repo.perfumesBase(),
     repo.mercado(),
     repo.precoPraticado(),
     repo.parametros(),
     repo.concorrentesFontes(),
+    lerSemDono(),
   ])
 
+  // Todas as variantes, não só 5 e 10 ml: o concorrente pode estar barato
+  // justamente na que ficava de fora da comparação.
   const linhas: AnaliseMercado[] = bases.flatMap((base) =>
-    VARIANTES_COMPARADAS.flatMap((v) => {
+    VARIANTES.flatMap((v) => {
       const precosConc = mercado[base.id]?.[v]
       const nosso = precos[base.id]?.[v]
       if (!precosConc?.length || !nosso) return []
@@ -43,7 +71,7 @@ export default async function Concorrentes() {
   const acima = linhas.filter((l) => l.posicao === 'acima')
   const abaixoIdeal = linhas.filter((l) => l.abaixoIdeal)
   const oportunidades = linhas.filter((l) => l.oportunidade)
-  const lendo = fontes.filter((f) => f.status === 'Lida')
+  const lendo = fontes.filter((f) => f.status === 'lida' || f.status === 'parcial')
 
   const kpis: Kpi[] = [
     {
@@ -54,7 +82,10 @@ export default async function Concorrentes() {
     {
       label: 'Produtos comparados',
       valor: String(linhas.length),
-      hint: 'Variantes de 5 e 10 ml',
+      hint: semDono.length
+        ? `${semDono.length} preços lidos ainda sem dono`
+        : 'Cruzamentos com preço nosso e do mercado',
+      tom: semDono.length ? 'atencao' : 'neutro',
     },
     {
       label: 'Acima do mercado',
@@ -192,98 +223,7 @@ export default async function Concorrentes() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14 }}>
-        {fontes.map((f) => (
-          <div
-            key={f.dominio}
-            style={{
-              background: 'linear-gradient(150deg,#16151A,#101011)',
-              border: `1px solid ${
-                f.status === 'Bloqueada'
-                  ? 'rgba(194,90,80,.28)'
-                  : f.status === 'Parcial'
-                    ? 'rgba(217,140,63,.22)'
-                    : 'rgba(92,158,112,.22)'
-              }`,
-              borderRadius: 'var(--radius-card)',
-              padding: '15px 16px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 9,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-              <span
-                className="font-sans"
-                style={{
-                  fontWeight: 600,
-                  fontSize: 12.5,
-                  lineHeight: 1.25,
-                  color: 'var(--color-corrente)',
-                  flex: 1,
-                  minWidth: 0,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {f.nome}
-              </span>
-              <span
-                className="font-sans"
-                style={{
-                  fontWeight: 600,
-                  fontSize: 9,
-                  lineHeight: 1,
-                  letterSpacing: '.08em',
-                  textTransform: 'uppercase',
-                  color: COR[TOM_FONTE[f.status]],
-                  border: `1px solid ${COR[TOM_FONTE[f.status]]}`,
-                  borderRadius: 'var(--radius-pill)',
-                  padding: '3px 7px',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {f.status}
-              </span>
-            </div>
-            <span
-              className="font-mono"
-              style={{
-                fontSize: 10.5,
-                lineHeight: 1,
-                color: 'rgba(239,209,140,.6)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {f.dominio}
-            </span>
-            <span style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span
-                className="font-sans"
-                style={{ fontWeight: 500, fontSize: 11.5, lineHeight: 1.3, color: 'var(--color-secundario)' }}
-              >
-                {f.itensLidos ? `${f.itensLidos} preços lidos` : 'Nenhum preço lido'}
-              </span>
-              <span className="font-sans" style={{ fontSize: 10, lineHeight: 1.3, color: 'rgba(242,237,227,.35)' }}>
-                {f.quando}
-              </span>
-            </span>
-            <span
-              className="font-sans"
-              style={{ fontSize: 10, lineHeight: 1.4, color: 'var(--color-terciario)' }}
-            >
-              {f.status === 'Bloqueada'
-                ? 'Bloqueio por robô · leitura manual necessária'
-                : f.status === 'Parcial'
-                  ? 'Algumas páginas sem preço estruturado'
-                  : 'Leitura automática a cada 12h'}
-            </span>
-          </div>
-        ))}
-      </div>
+      <FontesCliente fontes={fontes} bases={bases} semDono={semDono} variantes={VARIANTES} />
 
       <FaixaKpis kpis={kpis} />
 
@@ -296,17 +236,21 @@ export default async function Concorrentes() {
           {/* A regra que manda na recomendação, dita de frente. */}
           Nenhuma recomendação fura o piso de margem de {pct(Math.max(0, parametros.margemAlvo - 10), 0)}.
         </span>
-        <div style={{ flex: 1 }} />
-        <BotaoSecundario altura={34}>+ Adicionar concorrente</BotaoSecundario>
-        <BotaoOuro altura={34}>Vasculhar preços agora</BotaoOuro>
       </div>
 
-      <Tabela
-        colunas={colunas}
-        itens={linhas}
-        chaveDe={(m) => `${m.base.id}-${m.variante}`}
-        bandeiraDe={(m) => TOM_REC[m.recomendacao] === 'ok' ? null : TOM_REC[m.recomendacao]}
-      />
+      {linhas.length === 0 ? (
+        <EstadoVazio
+          titulo="Nenhum produto comparado ainda"
+          instrucao="A comparação precisa de duas pontas: um preço seu publicado e ao menos um preço de concorrente casado com o mesmo perfume. Vasculhe as lojas acima ou lance um preço à mão para a primeira linha aparecer."
+        />
+      ) : (
+        <Tabela
+          colunas={colunas}
+          itens={linhas}
+          chaveDe={(m) => `${m.base.id}-${m.variante}`}
+          bandeiraDe={(m) => (TOM_REC[m.recomendacao] === 'ok' ? null : TOM_REC[m.recomendacao])}
+        />
+      )}
     </div>
   )
 }
