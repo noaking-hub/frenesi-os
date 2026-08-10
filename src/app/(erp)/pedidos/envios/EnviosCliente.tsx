@@ -1,9 +1,9 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useTransition } from 'react'
 
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
-import { BotaoOuro, Ponto, Rotulo, Switch, TituloSecao, Valor } from '@/components/erp/primitivos'
+import { BotaoOuro, FaixaAlerta, Ponto, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
 import { CelulaDupla, Tabela, type Coluna } from '@/components/erp/Tabela'
 import { Modal } from '@/components/erp/Modal'
 import { COR, type Tom } from '@/components/erp/tokens'
@@ -16,6 +16,8 @@ import {
   resumirEnvios,
 } from '@/domain'
 import type { Envio, EstadoShopify, StatusRastreio } from '@/domain'
+
+import { baixarNaShopify } from './actions'
 
 const TOM_RASTREIO: Record<StatusRastreio, Tom> = {
   'pagamento-pendente': 'neutro',
@@ -36,16 +38,62 @@ const TOM_SHOPIFY: Record<EstadoShopify, Tom> = {
 
 type Filtro = 'Todos' | 'Em trânsito' | 'Entregues' | 'Aguardando baixa' | 'Exceções' | 'Aguardando postagem'
 
-export function EnviosCliente({ envios }: { envios: Envio[] }) {
+export function EnviosCliente({
+  envios,
+  yampiLigada,
+  shopifyLigada,
+}: {
+  envios: Envio[]
+  yampiLigada: boolean
+  shopifyLigada: boolean
+}) {
   const [filtro, setFiltro] = useState<Filtro>('Todos')
-  // Baixas aplicadas nesta sessão. Com a integração real isto vira mutação.
+  // Baixas que a Shopify JÁ confirmou nesta sessão. A revalidação da rota
+  // traz o estado do banco em seguida; isto só evita a linha piscar de volta
+  // para "aguardando baixa" no intervalo.
   const [baixados, setBaixados] = useState<Record<string, boolean>>({})
   const [rastreioAberto, setRastreioAberto] = useState<Envio | null>(null)
-  const [lendoYampi, setLendoYampi] = useState(true)
-  const [baixaAutomatica, setBaixaAutomatica] = useState(true)
+  const [recado, setRecado] = useState<string | null>(null)
+  const [erro, setErro] = useState<string | null>(null)
+  const [pendente, iniciar] = useTransition()
 
-  // Aplica as baixas locais sobre os dados antes de qualquer contagem, para que
-  // KPIs, filtros e linhas nunca discordem depois de um clique.
+  function baixar(ids?: string[]) {
+    setErro(null)
+    setRecado(null)
+    iniciar(async () => {
+      const r = await baixarNaShopify(ids)
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      const x = r.resultado
+      // Só some da fila o que a Shopify aceitou. O resto continua visível com
+      // o motivo — a alternativa seria o pedido sumir da tela sem ter sido
+      // baixado, e o problema voltar como chamado do cliente.
+      const falhou = new Set(x.ignorados.map((i) => i.pedido))
+      setBaixados((s) => {
+        const novo = { ...s }
+        for (const id of ids ?? fila.map((e) => e.pedidoId)) {
+          if (!falhou.has(id) && !x.semEspelho.includes(id)) novo[id] = true
+        }
+        return novo
+      })
+      setRecado(
+        [
+          `${x.entregues} entrega(s) marcada(s) na Shopify · ${x.fechados} pedido(s) fechado(s).`,
+          x.semEspelho.length
+            ? `${x.semEspelho.length} pedido(s) nasceram fora da Shopify e não têm o que baixar lá: ${x.semEspelho.slice(0, 5).join(', ')}.`
+            : '',
+          ...x.ignorados.slice(0, 5).map((i) => `${i.pedido}: ${i.motivo}`),
+        ]
+          .filter(Boolean)
+          .join(' '),
+      )
+    })
+  }
+
+  // Aplica as baixas confirmadas sobre os dados antes de qualquer contagem,
+  // para que KPIs, filtros e linhas nunca discordem depois de um clique.
   const atuais = useMemo<Envio[]>(
     () =>
       envios.map((e) =>
@@ -188,7 +236,8 @@ export function EnviosCliente({ envios }: { envios: Envio[] }) {
         aguardaBaixaShopify(e) ? (
           <button
             type="button"
-            onClick={() => setBaixados((s) => ({ ...s, [e.pedidoId]: true }))}
+            onClick={() => baixar([e.pedidoId])}
+            disabled={pendente || !shopifyLigada}
             className="font-sans hover:bg-[rgba(239,209,140,.18)]"
             style={{
               height: 27,
@@ -231,30 +280,31 @@ export function EnviosCliente({ envios }: { envios: Envio[] }) {
         <CardIntegracao
           sigla="YP"
           nome="Yampi"
-          ligado={lendoYampi}
-          aoAlternar={setLendoYampi}
-          status={lendoYampi ? 'Rastreamento ativo' : 'Desligado'}
+          ligado={yampiLigada}
+          status={yampiLigada ? 'Credenciais presentes' : 'Sem credencial'}
           detalhe={
-            lendoYampi
-              ? 'Frete e rastreio de Melhor Envio e Frenet · consulta a cada 15 min'
-              : 'Leitura de rastreio desligada · nenhuma entrega será capturada'
+            yampiLigada
+              ? 'É dela que vêm o código de rastreio e a confirmação de entrega — o histórico da transportadora ela não devolve'
+              : 'Sem YAMPI_ALIAS e as duas chaves, a importação de pedidos não traz rastreio nem entrega'
           }
         />
         <CardIntegracao
           sigla="SH"
           nome="Shopify · baixa de entrega"
-          ligado={baixaAutomatica}
-          aoAlternar={setBaixaAutomatica}
-          status={baixaAutomatica ? 'Automática' : 'Manual'}
+          ligado={shopifyLigada}
+          status={shopifyLigada ? 'Pronta para baixar' : 'Sem credencial'}
           detalhe={
-            baixaAutomatica
-              ? 'A Yampi não reporta a entrega · o ERP marca o pedido como entregue na Shopify'
-              : 'Baixa somente com confirmação manual nesta tela'
+            shopifyLigada
+              ? 'A Yampi não reporta a entrega · a baixa parte daqui, com o botão, e só é gravada quando a loja confirma'
+              : 'Sem as credenciais da Shopify o ERP não consegue marcar o pedido como entregue na loja'
           }
         />
       </div>
 
       <FaixaKpis kpis={kpis} />
+
+      {erro && <FaixaAlerta tom="erro" texto={erro} />}
+      {recado && <FaixaAlerta tom="ok" texto={recado} />}
 
       {fila.length > 0 && (
         <div
@@ -281,19 +331,8 @@ export function EnviosCliente({ envios }: { envios: Envio[] }) {
               ? `O pedido ${fila[0].pedidoId} foi entregue na Yampi e continua aberto na Shopify.`
               : `${fila.length} pedidos entregues na Yampi continuam abertos na Shopify.`}
           </span>
-          <BotaoOuro
-            altura={34}
-            onClick={() =>
-              setBaixados((s) => {
-                const novo = { ...s }
-                fila.forEach((e) => {
-                  novo[e.pedidoId] = true
-                })
-                return novo
-              })
-            }
-          >
-            Marcar entregues na Shopify
+          <BotaoOuro altura={34} desabilitado={pendente || !shopifyLigada} onClick={() => baixar()}>
+            {pendente ? 'Baixando…' : 'Marcar entregues na Shopify'}
           </BotaoOuro>
         </div>
       )}
@@ -384,8 +423,8 @@ export function EnviosCliente({ envios }: { envios: Envio[] }) {
               className="font-sans"
               style={{ fontSize: 11, lineHeight: 1.4, color: 'var(--color-terciario)', textWrap: 'pretty' }}
             >
-              Yampi consultada a cada 15 min · a Shopify recebe a baixa direto do ERP, já que a
-              Yampi não reporta a entrega
+              Os eventos são os marcos que a Yampi e o ERP registram — a transportadora não está
+              integrada, então não há leitura de rastreio aqui
             </span>
           </div>
         }
@@ -396,7 +435,7 @@ export function EnviosCliente({ envios }: { envios: Envio[] }) {
           envio={rastreioAberto}
           aoFechar={() => setRastreioAberto(null)}
           aoBaixar={() => {
-            setBaixados((s) => ({ ...s, [rastreioAberto.pedidoId]: true }))
+            baixar([rastreioAberto.pedidoId])
             setRastreioAberto(null)
           }}
         />
@@ -405,20 +444,25 @@ export function EnviosCliente({ envios }: { envios: Envio[] }) {
   )
 }
 
+/**
+ * Estado de uma integração.
+ *
+ * Não é interruptor: era, e um interruptor que não desliga nada mente sobre
+ * quem manda. O que a credencial permite ou não permite é fato do ambiente,
+ * e o card diz qual dos dois é.
+ */
 function CardIntegracao({
   sigla,
   nome,
   status,
   detalhe,
   ligado,
-  aoAlternar,
 }: {
   sigla: string
   nome: string
   status: string
   detalhe: string
   ligado: boolean
-  aoAlternar: (v: boolean) => void
 }) {
   const tom: Tom = ligado ? 'ok' : 'atencao'
   return (
@@ -486,7 +530,7 @@ function CardIntegracao({
           {detalhe}
         </span>
       </div>
-      <Switch ligado={ligado} onChange={aoAlternar} label={nome} />
+      <Ponto tom={ligado ? 'ok' : 'atencao'} tamanho={7} />
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import type { GatewayFrete } from './types'
+import type { GatewayFrete, StatusEnvio } from './types'
 
 /**
  * Rastreamento e baixa na Shopify.
@@ -179,5 +179,152 @@ export function resumirOcorrencias(ocorrencias: Ocorrencia[]): ResumoOcorrencias
     mediaAtraso: atrasadas.length
       ? Math.round(atrasadas.reduce((a, o) => a + diasAlemDoPrazo(o), 0) / atrasadas.length)
       : 0,
+  }
+}
+
+// ── Envio derivado do pedido ───────────────────────────────────────────────
+
+/** O que o banco sabe sobre a entrega de um pedido. */
+export interface PedidoParaEnvio {
+  id: string
+  cliente: string
+  destino: string
+  transportadora: string
+  gateway: GatewayFrete
+  rastreio: string
+  envio: StatusEnvio
+  pago: boolean
+  /** ISO da compra. */
+  compradoEm: string
+  entregueEm: string | null
+  /** Quando o ERP espelhou o envio na Shopify. */
+  enviadoShopifyEm: string | null
+  entregaShopifyEm: string | null
+}
+
+/** Dias de compra sem entrega a partir dos quais o pedido vira exceção. */
+const DIAS_PARA_EXCECAO = 15
+
+function diasEntre(de: string, ate: Date): number {
+  const t = Date.parse(de)
+  if (Number.isNaN(t)) return 0
+  return Math.floor((ate.getTime() - t) / 86_400_000)
+}
+
+function dataHora(iso: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+/**
+ * Monta o envio a partir do que o pedido realmente registra.
+ *
+ * Os eventos são MARCOS, não leituras da transportadora: a Yampi devolve o
+ * código de rastreio e a confirmação de entrega, nunca o histórico de
+ * escaneamentos. Inventar "Objeto em trânsito · CTE Curitiba" a partir de uma
+ * data seria escrever ficção com aparência de rastreio — e alguém decidiria
+ * abrir reclamação com base nela.
+ *
+ * `entrega-nao-efetuada` não é produzido aqui de propósito: nenhuma fonte
+ * atual nos diz que a entrega falhou. O que dá para afirmar é que o pedido
+ * passou de `DIAS_PARA_EXCECAO` dias sem entrega, e isso é `sem-movimentacao`.
+ */
+export function montarEnvio(p: PedidoParaEnvio, agora = new Date()): Envio {
+  const dias = diasEntre(p.compradoEm, agora)
+
+  const status: StatusRastreio = !p.pago
+    ? 'pagamento-pendente'
+    : p.envio === 'Entregue'
+      ? 'entregue'
+      : // Retido é a transportadora dizendo que a entrega não saiu — é o único
+        // caso em que temos afirmação de falha, e não dedução por tempo.
+        p.envio === 'Retido'
+        ? 'entrega-nao-efetuada'
+        : p.envio === 'Atrasado' || dias > DIAS_PARA_EXCECAO
+          ? 'sem-movimentacao'
+          : p.envio === 'Enviado'
+            ? 'em-transito'
+            : 'aguardando-postagem'
+
+  const shopify: EstadoShopify = !p.pago
+    ? 'aguardando-pagamento'
+    : p.envio === 'Entregue'
+      ? p.entregaShopifyEm
+        ? 'entregue'
+        : 'aguardando-baixa'
+      : p.enviadoShopifyEm
+        ? 'em-transito'
+        : 'aguardando-envio'
+
+  const eventos: EventoRastreio[] = []
+  eventos.push({
+    quando: dataHora(p.compradoEm),
+    descricao: p.pago ? 'Pagamento confirmado na Yampi' : 'Pedido criado, pagamento pendente',
+    local: 'Yampi',
+    severidade: p.pago ? 'ok' : 'neutro',
+  })
+  if (p.rastreio) {
+    eventos.push({
+      // A Yampi não diz QUANDO a etiqueta foi emitida — só que existe código.
+      quando: '—',
+      descricao: `Código de rastreio emitido: ${p.rastreio}`,
+      local: p.transportadora || 'Transportadora',
+      severidade: 'info',
+    })
+  }
+  if (p.enviadoShopifyEm) {
+    eventos.push({
+      quando: dataHora(p.enviadoShopifyEm),
+      descricao: 'Envio espelhado na Shopify · cliente avisado com o código',
+      local: 'Shopify',
+      severidade: 'info',
+    })
+  }
+  if (p.entregueEm) {
+    eventos.push({
+      quando: dataHora(p.entregueEm),
+      descricao: 'Entrega confirmada na Yampi',
+      local: 'Yampi',
+      severidade: 'ok',
+    })
+  }
+  if (p.entregaShopifyEm) {
+    eventos.push({
+      quando: dataHora(p.entregaShopifyEm),
+      descricao: 'Entrega espelhada e pedido fechado na Shopify',
+      local: 'Shopify',
+      severidade: 'ok',
+    })
+  }
+  if (status === 'sem-movimentacao') {
+    eventos.push({
+      quando: '—',
+      descricao: `${dias} dias desde a compra sem entrega confirmada`,
+      local: '',
+      severidade: 'erro',
+    })
+  }
+
+  const ultimo = eventos[eventos.length - 1]
+
+  return {
+    pedidoId: p.id,
+    cliente: p.cliente,
+    destino: p.destino,
+    transportadora: p.transportadora || 'Não informada',
+    gateway: p.gateway,
+    rastreio: p.rastreio,
+    status,
+    ultimoEvento: ultimo.descricao,
+    eventoQuando: ultimo.quando,
+    shopify,
+    eventos,
   }
 }

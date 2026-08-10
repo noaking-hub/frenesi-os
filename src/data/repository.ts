@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { PARAMETROS_PADRAO, iniciaisDe, statusCliente } from '@/domain'
+import { PARAMETROS_PADRAO, iniciaisDe, montarEnvio, statusCliente } from '@/domain'
 import type {
   AutorizadoIa,
   AvaliacaoCupom,
@@ -577,7 +577,61 @@ const repositorioSupabase: Repositorio = {
   // próprias — o schema cobre `devolucoes`, mas não o extrato de eventos nem a
   // aferição de volume. Até lá estas três leem os fixtures, mesmo com o
   // Supabase configurado, em vez de fingir uma consulta que não existe.
-  envios: repositorioFixtures.envios,
+  /**
+   * Envios derivados dos pedidos.
+   *
+   * Não há tabela de rastreamento porque não há de onde preenchê-la: a Yampi
+   * devolve o código e a confirmação de entrega, nunca o histórico de
+   * escaneamentos da transportadora. O que o ERP sabe são os marcos — compra
+   * paga, código emitido, envio espelhado, entrega confirmada — e é isso que
+   * o domínio monta.
+   */
+  async envios() {
+    const { data, error } = await supabaseServer()
+      .from('pedidos')
+      .select(
+        'id, destino, pagamento, envio, comprado_em, entregue_em, gateway, rastreio, ' +
+          'enviado_shopify_em, entrega_shopify_em, clientes(nome)',
+      )
+      .order('comprado_em', { ascending: false })
+      .limit(500)
+    if (error) throw error
+
+    const linhas = (data ?? []) as unknown as {
+      id: string
+      destino: string | null
+      pagamento: string
+      envio: string
+      comprado_em: string
+      entregue_em: string | null
+      gateway: string | null
+      rastreio: string | null
+      enviado_shopify_em: string | null
+      entrega_shopify_em: string | null
+      clientes: { nome: string } | null
+    }[]
+
+    return linhas.map((p) =>
+      montarEnvio({
+        id: p.id,
+        cliente: p.clientes?.nome ?? 'Cliente sem cadastro',
+        destino: p.destino ?? '—',
+        // A Yampi manda o serviço no pedido, mas o ERP ainda não o guarda em
+        // coluna própria. Deixar vazio faz o domínio escrever "Não informada",
+        // que é a verdade — melhor que repetir o gateway como se fosse a
+        // transportadora.
+        transportadora: '',
+        gateway: p.gateway === 'frenet' ? 'Frenet' : 'Melhor Envio',
+        rastreio: p.rastreio ?? '',
+        envio: rotuloEnvio(p.envio),
+        pago: p.pagamento === 'pago',
+        compradoEm: p.comprado_em,
+        entregueEm: p.entregue_em,
+        enviadoShopifyEm: p.enviado_shopify_em,
+        entregaShopifyEm: p.entrega_shopify_em,
+      }),
+    )
+  },
   ocorrencias: repositorioFixtures.ocorrencias,
   solicitacoes: repositorioFixtures.solicitacoes,
 
