@@ -99,37 +99,65 @@ export function identificadoresDaTransacao(cru: Record<string, unknown>): string
 }
 
 /**
+ * Onde o pedido da Yampi guarda o pagamento.
+ *
+ * São duas relações, não uma: o pedido real desta loja traz `transactions` E
+ * `payments` na lista de campos. Não dá para saber daqui qual das duas carrega
+ * o id do gateway — e o custo de olhar as duas é zero, enquanto o custo de
+ * olhar a errada é a integração inteira não funcionar em silêncio.
+ */
+const RELACOES = ['transactions', 'payments'] as const
+
+/** A Yampi ora embrulha a relação em `{ data: [...] }`, ora devolve a lista. */
+function listaDe(valor: unknown): unknown[] {
+  if (Array.isArray(valor)) return valor
+  if (valor && typeof valor === 'object') {
+    const dentro = (valor as { data?: unknown }).data
+    if (Array.isArray(dentro)) return dentro
+    // Pagamento único vem como objeto, sem lista em volta.
+    if (dentro && typeof dentro === 'object') return [dentro]
+    return [valor]
+  }
+  return []
+}
+
+/**
  * Traduz as transações que vieram junto de um pedido da Yampi.
  *
- * A Yampi ora embrulha a relação em `{ data: [...] }`, ora devolve a lista
- * direta — as duas formas aparecem na mesma API dependendo do endpoint.
+ * A mesma transação pode aparecer nas duas relações. A deduplicação é por id
+ * de transação: gravar duas linhas para o mesmo pagamento não quebraria a
+ * conciliação — o casamento é por identificador —, mas deixaria a contagem do
+ * relatório mentindo sobre quantos pagamentos existem.
  */
 export function transacoesDoPedido(pedido: Record<string, unknown>): TransacaoPedido[] {
-  const bruto = pedido.transactions
-  const lista = Array.isArray(bruto)
-    ? bruto
-    : bruto && typeof bruto === 'object' && Array.isArray((bruto as { data?: unknown }).data)
-      ? ((bruto as { data: unknown[] }).data as unknown[])
-      : []
+  const porId = new Map<string, TransacaoPedido>()
 
-  const transacoes: TransacaoPedido[] = []
-  for (const item of lista) {
-    if (!item || typeof item !== 'object') continue
-    const t = item as Record<string, unknown>
-    const identificadores = identificadoresDaTransacao(t)
+  for (const relacao of RELACOES) {
+    for (const item of listaDe(pedido[relacao])) {
+      if (!item || typeof item !== 'object') continue
+      const t = item as Record<string, unknown>
+      const identificadores = identificadoresDaTransacao(t)
 
-    // Sem nenhum identificador não há ponte a construir, e guardar a linha
-    // vazia só encheria a tabela de nada.
-    if (identificadores.length === 0) continue
+      // Sem nenhum identificador não há ponte a construir, e guardar a linha
+      // vazia só encheria a tabela de nada.
+      if (identificadores.length === 0) continue
 
-    transacoes.push({
-      id: texto(t.id) || identificadores[0],
-      gateway: texto(t.gateway ?? t.gateway_name ?? t.payment_method).slice(0, 40),
-      status: texto(t.status ?? t.status_name).slice(0, 40),
-      valor: numero(t.amount ?? t.value ?? t.value_total),
-      parcelas: numero(t.installments ?? t.installment),
-      identificadores,
-    })
+      const id = texto(t.id) || identificadores[0]
+      const anterior = porId.get(id)
+      porId.set(id, {
+        id,
+        gateway: texto(t.gateway ?? t.gateway_name ?? t.payment_method).slice(0, 40) ||
+          (anterior?.gateway ?? ''),
+        status: texto(t.status ?? t.status_name).slice(0, 40) || (anterior?.status ?? ''),
+        valor: numero(t.amount ?? t.value ?? t.value_total) || (anterior?.valor ?? 0),
+        parcelas: numero(t.installments ?? t.installment) || (anterior?.parcelas ?? 0),
+        // Uma relação pode conhecer um id que a outra não tem. Juntar as duas
+        // listas é de graça e é justamente o que faz a ponte sobreviver a não
+        // saber qual delas o gateway preencheu.
+        identificadores: [...new Set([...(anterior?.identificadores ?? []), ...identificadores])],
+      })
+    }
   }
-  return transacoes
+
+  return [...porId.values()]
 }

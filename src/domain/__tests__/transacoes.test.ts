@@ -80,3 +80,38 @@ describe('transações do pedido', () => {
     expect(transacoesDoPedido({ transactions: null })).toEqual([])
   })
 })
+
+describe('as duas relações de pagamento', () => {
+  it('lê a transação que veio em `payments`', () => {
+    // O pedido real desta loja traz `transactions` E `payments`. Olhar só uma
+    // faria a ponte não funcionar — em silêncio, que é o pior jeito.
+    const t = transacoesDoPedido({ payments: { data: [TRANSACAO] } })
+    expect(t[0].identificadores).toContain('172981567954')
+  })
+
+  it('não conta a mesma transação duas vezes', () => {
+    // Aparecer nas duas relações é o caso esperado. Duplicar não quebraria a
+    // conciliação — o casamento é por identificador —, mas faria o relatório
+    // mentir sobre quantos pagamentos o pedido tem.
+    const t = transacoesDoPedido({
+      transactions: { data: [TRANSACAO] },
+      payments: { data: [TRANSACAO] },
+    })
+    expect(t).toHaveLength(1)
+  })
+
+  it('junta os identificadores que cada relação conhece', () => {
+    // Uma pode trazer o id que a outra não tem. Somar as listas é de graça e
+    // é o que faz a ponte sobreviver a não saber qual delas o gateway usa.
+    const t = transacoesDoPedido({
+      transactions: [{ id: 7, transaction_id: '111111111111' }],
+      payments: [{ id: 7, gateway_transaction_id: '222222222222' }],
+    })
+    expect(t).toHaveLength(1)
+    expect(t[0].identificadores.sort()).toEqual(['111111111111', '222222222222'])
+  })
+
+  it('aceita pagamento único fora de lista', () => {
+    expect(transacoesDoPedido({ payments: { data: TRANSACAO } })).toHaveLength(1)
+  })
+})

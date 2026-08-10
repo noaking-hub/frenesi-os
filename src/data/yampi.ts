@@ -143,7 +143,7 @@ export async function diagnosticarYampi(): Promise<DiagnosticoYampi> {
   const resposta = await chamarYampi<{
     data?: Record<string, unknown>[]
     meta?: { pagination?: { total?: number } }
-  }>('/orders', { include: 'customer,items,status,transactions', limit: '1' })
+  }>('/orders', { include: 'customer,items,status,transactions,payments', limit: '1' })
 
   const pedido = resposta.data?.[0]
   const dentro = (valor: unknown): string[] => {
@@ -162,7 +162,9 @@ export async function diagnosticarYampi(): Promise<DiagnosticoYampi> {
     camposDoPedido: pedido ? Object.keys(pedido).sort() : [],
     camposDoCliente: dentro(pedido?.customer),
     camposDoItem: dentro(pedido?.items),
-    camposDaTransacao: dentro(pedido?.transactions),
+    camposDaTransacao: [
+      ...new Set([...dentro(pedido?.transactions), ...dentro(pedido?.payments)]),
+    ].sort(),
     identificadoresDaAmostra: transacoes.flatMap((t) => t.identificadores),
   }
 }
@@ -356,7 +358,7 @@ export async function lerPedidosYampi(dias: number): Promise<PedidoYampi[]> {
       // Mercado Pago devolveu, e é o mesmo que aparece no extrato. Sem ele
       // sobra casar por valor e data, que recusa sempre que dois decants do
       // mesmo preço caem no mesmo dia — e eram 89 vendas órfãs por isso.
-      include: 'customer,items,status,shipping_address,transactions',
+      include: 'customer,items,status,shipping_address,transactions,payments',
       date: `created_at:${desde}|${ate}`,
       limit: '50',
       page: String(pagina),
