@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useRef, useState, useTransition } from 'react'
+import { useRef, useState, useTransition } from 'react'
 
 import {
   Badge,
@@ -20,7 +20,6 @@ import type { ConferenciaConta } from '@/data/extrato'
 
 import {
   classificarLinha,
-  classificarRecebimentos,
   diagnosticarBanco,
   diagnosticarGateway,
   ignorarLinha,
@@ -101,15 +100,10 @@ export function ExtratoCliente({
   const categoriaDe = (l: LinhaExtrato) =>
     escolhas[chaveDe(l)] ?? sugerirCategoria(l.descricao, l.tipo) ?? ''
 
-  const pendentes = useMemo(() => linhas.filter((l) => !l.lancamentoId && !l.ignorado), [linhas])
-  // Entrada já casada com um pedido é o crédito daquela venda: não há
-  // categoria a escolher, porque a receita do DRE vem do pedido. Clicar 141
-  // vezes para dizer "sim, é venda" não é conferência, é digitação — e depois
-  // de vinte linhas ninguém lê mais o que está aprovando.
-  const recebimentosDeVenda = useMemo(
-    () => pendentes.filter((l) => l.tipo === 'entrada' && l.pedidoId),
-    [pendentes],
-  )
+  // A fila já chega filtrada do banco: só o que precisa de decisão. Crédito
+  // de venda casado com pedido não entra — ele não tem categoria a escolher
+  // (a receita do DRE vem do pedido) nem saldo a mover (o extrato já moveu).
+  const pendentes = linhas
   const entradas = pendentes.filter((l) => l.tipo === 'entrada').reduce((a, l) => a + l.valor, 0)
   const saidas = pendentes.filter((l) => l.tipo === 'saida').reduce((a, l) => a + l.valor, 0)
 
@@ -572,39 +566,19 @@ export function ExtratoCliente({
 
       {/* ── Fila ─────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <TituloSecao tamanho={16}>A classificar</TituloSecao>
-        <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
-          {`${brl(entradas)} de entradas e ${brl(saidas)} de saídas esperando virar lançamento`}
+        <TituloSecao tamanho={16}>Precisam de você</TituloSecao>
+        <span
+          className="font-sans"
+          style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+        >
+          {`Despesas a categorizar (${brl(saidas)}) e entradas sem pedido correspondente (${brl(entradas)}). As vendas casadas com pedido não aparecem aqui: não há o que decidir nelas.`}
         </span>
-        <div style={{ flex: 1 }} />
-        {recebimentosDeVenda.length > 0 && (
-          <BotaoOuro
-            altura={32}
-            desabilitado={pendente}
-            onClick={() =>
-              rodar(async () => {
-                const r = await classificarRecebimentos(recebimentosDeVenda[0].contaId)
-                if (!r.ok) throw new Error(r.erro)
-                return [
-                  `${r.feitas} crédito(s) de venda viraram lançamento.`,
-                  'Ficaram na fila as entradas sem pedido casado e todas as saídas — são as que precisam de decisão.',
-                ]
-              })
-            }
-          >
-            {`Classificar ${recebimentosDeVenda.length} crédito(s) de venda`}
-          </BotaoOuro>
-        )}
       </div>
 
       {pendentes.length === 0 ? (
         <EstadoVazio
           titulo="Nada na fila"
-          instrucao={
-            linhas.length === 0
-              ? 'Sincronize o Mercado Pago ou importe o OFX do banco para trazer o movimento.'
-              : 'Todo movimento lido já virou lançamento ou foi dispensado.'
-          }
+          instrucao="As vendas conciliam sozinhas. Só despesa sem categoria e entrada sem pedido aparecem aqui."
         />
       ) : (
         <Tabela

@@ -121,6 +121,10 @@ export interface ParametrosPrecificacao {
    * digitado direto.
    */
   adsMensal?: number | null
+  /** Desconto oferecido no checkout para pagamento no Pix, em %. */
+  descontoPixPct: number
+  /** Fatia do faturamento que vem no Pix, em %. Medida no extrato. */
+  fatiaPixPct: number
 }
 
 /** Pedidos pagos e receita de produto dos últimos 30 dias. */

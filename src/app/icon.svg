@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Favicon da marca. O F em serifa sobre o fundo escuro é o que a barra
+       lateral já mostra; o losango é o motivo que se repete no ERP inteiro.
+       Sem isto o Next serve o ícone padrão dele, que é de outra marca. -->
+  <rect width="64" height="64" rx="14" fill="#12100d"/>
+  <rect x="8.5" y="8.5" width="47" height="47" rx="10" fill="none" stroke="#efd18c" stroke-opacity=".22"/>
+  <g fill="#efd18c">
+    <!-- F em hastes retas: em 16px a serifa some, o traço grosso permanece. -->
+    <rect x="21" y="17" width="6.5" height="30"/>
+    <rect x="21" y="17" width="22" height="6"/>
+    <rect x="21" y="29" width="17" height="5.5"/>
+  </g>
+</svg>

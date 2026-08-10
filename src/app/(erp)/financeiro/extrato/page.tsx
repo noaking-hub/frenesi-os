@@ -1,9 +1,9 @@
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
-import { conferenciaDeContas, lerExtrato } from '@/data/extrato'
+import { conferenciaDeContas, lerExtrato, resumoDoExtrato } from '@/data/extrato'
 import { mercadoPagoConfigurado } from '@/data/mercadopago'
 import { faltaParaSicoob, sicoobConfigurado } from '@/data/sicoob'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
-import { brl, pad2, resumirExtrato } from '@/domain'
+import { brl, pad2, plural } from '@/domain'
 
 import { ExtratoCliente } from './ExtratoCliente'
 
@@ -18,23 +18,32 @@ export const dynamic = 'force-dynamic'
  * classificação transforma cada linha em lançamento com categoria.
  */
 export default async function Extrato() {
-  const [linhas, contas, categorias] = await Promise.all([
-    lerExtrato({ situacao: 'todas', limite: 400 }),
+  const [linhas, contas, categorias, resumo] = await Promise.all([
+    // Só o que precisa de decisão. O crédito de venda já casado com pedido
+    // não tem categoria a escolher nem saldo a mover — pedir confirmação
+    // para ele era inventar trabalho.
+    lerExtrato({ situacao: 'a-decidir', limite: 400 }),
     conferenciaDeContas(),
     lerCategorias(),
+    resumoDoExtrato(),
   ])
 
-  const resumo = resumirExtrato(linhas)
   const faltaNoBanco = faltaParaSicoob()
 
   const kpis: Kpi[] = [
     {
-      label: 'A classificar',
-      valor: pad2(resumo.aClassificar),
-      hint: resumo.aClassificar
-        ? 'Cada linha aqui é dinheiro que se moveu e o DRE ainda não viu'
-        : 'Todo movimento lido já virou lançamento',
-      tom: resumo.aClassificar ? 'atencao' : 'ok',
+      label: 'Precisam de você',
+      valor: pad2(resumo.aDecidir),
+      hint: resumo.aDecidir
+        ? 'Despesas a categorizar e entradas sem pedido correspondente'
+        : 'Nada pendente de decisão',
+      tom: resumo.aDecidir ? 'atencao' : 'ok',
+    },
+    {
+      label: 'Vendas conciliadas',
+      valor: pad2(resumo.conciliadas),
+      hint: 'Crédito casado com o pedido — nada a fazer nelas',
+      tom: 'ok',
     },
     {
       label: 'Entradas lidas',
@@ -51,7 +60,7 @@ export default async function Extrato() {
     {
       label: 'Movimento líquido',
       valor: brl(resumo.saldo),
-      hint: `${resumo.linhas} linha(s) no extrato · ${resumo.ignoradas} dispensada(s)`,
+      hint: `${plural(resumo.linhas, 'linha lida', 'linhas lidas')} no extrato`,
       tom: resumo.saldo >= 0 ? 'ok' : 'erro',
     },
     {

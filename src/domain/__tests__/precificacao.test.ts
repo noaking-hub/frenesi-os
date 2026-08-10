@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { custoDeReceber, desproporcao } from '..'
+import {
+  PARAMETROS_PADRAO,
+  calcularPreco,
+  custoDeReceber,
+  descontoPixPct,
+  desproporcao,
+  margemDe,
+  taxasPct,
+} from '..'
 import type { CustoPorMeio } from '..'
 
 describe('custo real de receber', () => {
@@ -49,5 +57,38 @@ describe('custo real de receber', () => {
     const r = custoDeReceber([])
     expect(r.pct).toBe(0)
     expect(r.maisCaro).toBeNull()
+  })
+})
+
+describe('desconto de Pix no preço', () => {
+  const BASE = { ...PARAMETROS_PADRAO, descontoPixPct: 0, fatiaPixPct: 0 }
+
+  it('pesa o desconto pela fatia que de fato usa o Pix', () => {
+    // 10% de desconto num canal que é 3/4 das vendas custa 7,5 pontos do
+    // preço de tabela. Descontar 10% cheio cobraria de quem paga no cartão.
+    expect(descontoPixPct({ ...BASE, descontoPixPct: 10, fatiaPixPct: 74.9 })).toBe(7.49)
+    expect(descontoPixPct({ ...BASE, descontoPixPct: 10, fatiaPixPct: 100 })).toBe(10)
+    expect(descontoPixPct(BASE)).toBe(0)
+  })
+
+  it('entra nas taxas que formam o preço', () => {
+    const com = { ...BASE, descontoPixPct: 10, fatiaPixPct: 74.9 }
+    expect(taxasPct(com) - taxasPct(BASE)).toBeCloseTo(7.49, 2)
+  })
+
+  it('sobe o preço sugerido o bastante para o desconto caber', () => {
+    // O ponto todo: o preço de tabela precisa aguentar o desconto e ainda
+    // fechar a margem alvo. Sem isso, três em cada quatro vendas fecham
+    // abaixo do que o ERP diz.
+    const sem = calcularPreco(4.7, 5, BASE)
+    const com = calcularPreco(4.7, 5, { ...BASE, descontoPixPct: 10, fatiaPixPct: 74.9 })
+    expect(com.sugerido).toBeGreaterThan(sem.sugerido)
+    // E a margem no preço novo continua batendo a alvo.
+    expect(com.margem).toBeGreaterThanOrEqual(BASE.margemAlvo - 1)
+  })
+
+  it('a margem de um preço praticado cai quando o desconto é contado', () => {
+    const com = { ...BASE, descontoPixPct: 10, fatiaPixPct: 74.9 }
+    expect(margemDe(73.9, 24.44, com)).toBeLessThan(margemDe(73.9, 24.44, BASE))
   })
 })

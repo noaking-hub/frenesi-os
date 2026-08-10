@@ -50,8 +50,12 @@ function traduzir(l: LinhaCrua): LinhaExtrato {
 }
 
 export interface FiltroExtrato {
-  /** 'pendentes' esconde o que já virou lançamento ou foi dispensado. */
-  situacao?: 'pendentes' | 'todas'
+  /**
+   * 'a-decidir' traz só o que exige alguém olhando: saída sem categoria e
+   * entrada sem pedido casado. Crédito de venda já conciliado não entra —
+   * ele não tem categoria a escolher nem saldo a mover.
+   */
+  situacao?: 'a-decidir' | 'todas'
   contaId?: string
   limite?: number
 }
@@ -61,23 +65,74 @@ export async function lerExtrato(filtro: FiltroExtrato = {}): Promise<LinhaExtra
   const sb = supabaseServer()
   const limite = filtro.limite ?? 300
 
-  let consulta = sb
-    .from('extrato_linhas')
-    .select(
-      'origem, chave, conta_id, ocorrido_em, descricao, contraparte, documento, tipo, valor, ' +
-        'pedido_id, lancamento_id, ignorado, motivo_ignorado, contas_bancarias(nome)',
-    )
-    .order('ocorrido_em', { ascending: false })
-    .limit(limite)
+  const aDecidir = filtro.situacao === 'a-decidir'
 
-  if (filtro.situacao !== 'todas') {
-    consulta = consulta.is('lancamento_id', null).eq('ignorado', false)
-  }
+  let consulta = aDecidir
+    ? sb
+        .from('extrato_a_decidir')
+        .select(
+          'origem, chave, conta_id, conta_nome, ocorrido_em, descricao, contraparte, documento, ' +
+            'tipo, valor, pedido_id, lancamento_id, ignorado, motivo_ignorado',
+        )
+        .limit(limite)
+    : sb
+        .from('extrato_linhas')
+        .select(
+          'origem, chave, conta_id, ocorrido_em, descricao, contraparte, documento, tipo, valor, ' +
+            'pedido_id, lancamento_id, ignorado, motivo_ignorado, contas_bancarias(nome)',
+        )
+        .order('ocorrido_em', { ascending: false })
+        .limit(limite)
+
   if (filtro.contaId) consulta = consulta.eq('conta_id', filtro.contaId)
 
   const { data, error } = await consulta
   if (error) throw new Error(mensagemDe(error))
   return ((data ?? []) as unknown as LinhaCrua[]).map(traduzir)
+}
+
+export interface ResumoDoExtrato {
+  linhas: number
+  entradas: number
+  saidas: number
+  saldo: number
+  /** Créditos de venda já ligados a um pedido — nada a decidir neles. */
+  conciliadas: number
+  aDecidir: number
+}
+
+/**
+ * Números do extrato inteiro.
+ *
+ * A tela lista só o que precisa de decisão; os totais são de tudo. Trazer as
+ * 349 linhas para somar duas colunas seria desperdício que só cresce, então a
+ * soma acontece no banco.
+ */
+export async function resumoDoExtrato(): Promise<ResumoDoExtrato> {
+  const vazio: ResumoDoExtrato = {
+    linhas: 0,
+    entradas: 0,
+    saidas: 0,
+    saldo: 0,
+    conciliadas: 0,
+    aDecidir: 0,
+  }
+  if (!supabaseConfigurado()) return vazio
+
+  const { data, error } = await supabaseServer().from('extrato_resumo').select('*').single()
+  if (error) throw new Error(mensagemDe(error))
+  if (!data) return vazio
+
+  const entradas = Number(data.entradas)
+  const saidas = Number(data.saidas)
+  return {
+    linhas: Number(data.linhas),
+    entradas,
+    saidas,
+    saldo: Math.round((entradas - saidas) * 100) / 100,
+    conciliadas: Number(data.conciliadas),
+    aDecidir: Number(data.a_decidir),
+  }
 }
 
 export interface ConferenciaConta {

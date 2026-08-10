@@ -118,3 +118,29 @@ export async function ajustarIntermediador(pct: number): Promise<RespostaAds> {
   revalidatePath('/', 'layout')
   return { ok: true }
 }
+
+/** Grava o desconto de Pix do checkout e a fatia medida no extrato. */
+export async function ajustarPix(descontoPct: number, fatiaPct: number): Promise<RespostaAds> {
+  if (!supabaseConfigurado()) {
+    return { ok: false, erro: 'O Supabase precisa estar configurado para salvar parâmetros.' }
+  }
+  if (!Number.isFinite(descontoPct) || descontoPct < 0 || descontoPct >= 100) {
+    return { ok: false, erro: 'Desconto de Pix fora da faixa aceitável.' }
+  }
+  if (!Number.isFinite(fatiaPct) || fatiaPct < 0 || fatiaPct > 100) {
+    return { ok: false, erro: 'Fatia de Pix fora da faixa aceitável.' }
+  }
+
+  const { error } = await supabaseServer().rpc('ajustar_pix_parametro', {
+    p_desconto_pct: Number(descontoPct.toFixed(3)),
+    p_fatia_pct: Number(fatiaPct.toFixed(3)),
+    p_operador: OPERADOR,
+  })
+  if (error) {
+    console.error('[parametros] ajustar_pix_parametro falhou:', error)
+    return { ok: false, erro: error.message || error.details || 'Falha ao ajustar o Pix.' }
+  }
+
+  revalidatePath('/', 'layout')
+  return { ok: true }
+}

@@ -2,24 +2,26 @@
 
 import { useState, useTransition } from 'react'
 
-import { BotaoOuro, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
+import { BotaoOuro, BotaoSecundario, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
-import { brl, custoDeReceber, desproporcao, pct, plural } from '@/domain'
+import { brl, custoDeReceber, descontoPixPct, pct } from '@/domain'
 import type { CustoPorMeio, ParametrosPrecificacao } from '@/domain'
 
-import { ajustarIntermediador } from './actions'
+import { ajustarIntermediador, ajustarPix } from './actions'
 
 /**
- * Do que o gateway cobrou para o percentual que entra no preço.
+ * Quanto do preço de tabela não chega na conta.
  *
- * A tabela de taxas do Mercado Pago lista o pior caso de cada modalidade —
- * 14,94% para 6x sem juros. Não é isso que a operação custa: é a média
- * ponderada da mistura real de quem compra. Precificar tudo pelo pior caso
- * faz o cliente do Pix pagar por um parcelamento que ele não usou, e a conta
- * some no preço, onde ninguém a vê.
+ * A versão anterior desta tela despejava oito linhas de percentual por meio
+ * de pagamento e mandava o operador concluir sozinho. Errado: o que precisa
+ * ser dito são duas parcelas e uma soma.
  *
- * Nada aqui é digitado: cada percentual vem da tarifa que o próprio gateway
- * informou em cada pagamento.
+ *   desconto de Pix  — o preço que o cliente não paga
+ *   tarifa do gateway — o que o Mercado Pago retém
+ *
+ * O detalhamento por meio continua disponível, escondido atrás de um clique,
+ * porque ele responde outra pergunta: se vale manter o parcelamento sem
+ * juros. Misturar as duas perguntas na mesma tela foi o erro.
  */
 export function CustoDeReceber({
   parametros,
@@ -28,52 +30,34 @@ export function CustoDeReceber({
   parametros: ParametrosPrecificacao
   meios: CustoPorMeio[]
 }) {
+  const [aberto, setAberto] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
-  const [salvo, setSalvo] = useState(false)
+  const [salvo, setSalvo] = useState<string | null>(null)
   const [pendente, iniciar] = useTransition()
 
   const r = custoDeReceber(meios)
-  const noParametro = parametros.intermediadorPct
-  const diferenca = Math.round((noParametro - r.pct) * 100) / 100
-  const mudaOParametro = Math.abs(diferenca) >= 0.05
+  const pesoPix = descontoPixPct(parametros)
+  const tarifa = parametros.intermediadorPct
+  const total = Math.round((pesoPix + tarifa) * 100) / 100
 
-  if (meios.length === 0) {
-    return (
-      <section
-        style={{
-          background: 'var(--color-mesa)',
-          border: '1px solid var(--color-borda)',
-          borderRadius: 16,
-          padding: '19px 20px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 8,
-        }}
-      >
-        <TituloSecao tamanho={14.5}>Custo real de receber</TituloSecao>
-        <span
-          className="font-sans"
-          style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--color-terciario)', textWrap: 'pretty' }}
-        >
-          Sincronize o Mercado Pago em Financeiro → Extrato. Com os pagamentos lidos, este bloco
-          mostra o que cada meio custou de fato e a média ponderada que deveria entrar no preço —
-          em vez do pior caso da tabela de taxas.
-        </span>
-      </section>
-    )
-  }
+  // A fatia de Pix medida no extrato, contra a que está gravada.
+  const pixMedido = meios.find((m) => m.meio.toLowerCase().startsWith('pix'))
+  const fatiaMedida = pixMedido?.fatia ?? 0
+  const fatiaDesatualizada = fatiaMedida > 0 && Math.abs(fatiaMedida - parametros.fatiaPixPct) >= 1
+  const tarifaDesatualizada = r.pct > 0 && Math.abs(r.pct - tarifa) >= 0.05
 
-  const aplicar = () =>
+  function rodar(acao: () => Promise<{ ok: true } | { ok: false; erro: string }>, recado: string) {
+    setErro(null)
+    setSalvo(null)
     iniciar(async () => {
-      setErro(null)
-      setSalvo(false)
-      const resposta = await ajustarIntermediador(r.pct)
+      const resposta = await acao()
       if (!resposta.ok) {
         setErro(resposta.erro)
         return
       }
-      setSalvo(true)
+      setSalvo(recado)
     })
+  }
 
   return (
     <section
@@ -84,109 +68,152 @@ export function CustoDeReceber({
         padding: '19px 20px',
         display: 'flex',
         flexDirection: 'column',
-        gap: 15,
+        gap: 14,
       }}
     >
       <span style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-        <TituloSecao tamanho={14.5}>Custo real de receber</TituloSecao>
+        <TituloSecao tamanho={14.5}>Quanto do preço não chega na conta</TituloSecao>
         <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
-          {`${plural(r.vendas, 'pagamento lido', 'pagamentos lidos')} nos últimos 90 dias · tarifa informada pelo gateway`}
+          Entra no cálculo de todo preço sugerido
         </span>
       </span>
 
-      <div style={{ display: 'flex', gap: 30, flexWrap: 'wrap' }}>
-        <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <Rotulo>Média ponderada</Rotulo>
-          <Valor tamanho={26} tom="ouro">
-            {pct(r.pct, 2)}
-          </Valor>
+      {/* Duas parcelas e uma soma. Nada além disso. */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 18, flexWrap: 'wrap' }}>
+        <Parcela
+          rotulo="Desconto de Pix"
+          valor={pct(pesoPix, 2)}
+          nota={
+            parametros.descontoPixPct > 0
+              ? `${pct(parametros.descontoPixPct, 0)} de desconto em ${pct(parametros.fatiaPixPct, 1)} das vendas`
+              : 'nenhum desconto cadastrado'
+          }
+        />
+        <span className="font-mono" style={{ fontSize: 18, color: 'rgba(242,237,227,.3)', paddingBottom: 12 }}>
+          +
         </span>
-        <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <Rotulo>No parâmetro hoje</Rotulo>
-          <Valor tamanho={26} tom={mudaOParametro ? COR.atencao : COR.ok}>
-            {pct(noParametro, 2)}
-          </Valor>
+        <Parcela
+          rotulo="Tarifa do gateway"
+          valor={pct(tarifa, 2)}
+          nota={r.pct > 0 ? `medido: ${pct(r.pct, 2)} em ${r.vendas} pagamentos` : 'sem medição ainda'}
+        />
+        <span className="font-mono" style={{ fontSize: 18, color: 'rgba(242,237,227,.3)', paddingBottom: 12 }}>
+          =
         </span>
-        <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <Rotulo>Tarifa paga no período</Rotulo>
-          <Valor tamanho={26}>{brl(r.tarifa)}</Valor>
-        </span>
+        <Parcela rotulo="Custo de receber" valor={pct(total, 2)} nota="do preço de tabela" destaque />
       </div>
 
-      {/* Uma linha por meio: o preço e o peso, lado a lado. É a leitura que
-          decide se o parcelamento sem juros está pagando o que custa. */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-        {r.meios.map((m) => {
-          const daTarifa = desproporcao(m, r)
-          const pesado = daTarifa > m.fatia * 2 && m.fatia >= 1
-          return (
-            <div
-              key={m.meio}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'minmax(0,1fr) 64px 74px 78px minmax(0,1.1fr)',
-                alignItems: 'center',
-                gap: 10,
-                padding: '7px 10px',
-                borderRadius: 9,
-                background: pesado ? 'rgba(224,168,74,.06)' : 'rgba(255,255,255,.02)',
-                border: `1px solid ${pesado ? 'rgba(224,168,74,.18)' : 'rgba(255,255,255,.05)'}`,
-              }}
+      {(fatiaDesatualizada || tarifaDesatualizada) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {tarifaDesatualizada && (
+            <BotaoOuro
+              altura={32}
+              desabilitado={pendente}
+              onClick={() =>
+                rodar(() => ajustarIntermediador(r.pct), `Tarifa do gateway agora é ${pct(r.pct, 2)}.`)
+              }
             >
-              <span
-                className="font-sans"
-                style={{ fontWeight: 500, fontSize: 11.5, color: 'var(--color-corrente)' }}
-              >
-                {m.meio}
-              </span>
-              <span className="font-mono" style={{ fontSize: 11, color: COR.atencao, textAlign: 'right' }}>
-                {pct(m.pct, 2)}
-              </span>
-              <span className="font-mono" style={{ fontSize: 11, color: 'rgba(242,237,227,.5)', textAlign: 'right' }}>
-                {brl(m.tarifa)}
-              </span>
-              <span className="font-mono" style={{ fontSize: 11, color: 'rgba(242,237,227,.5)', textAlign: 'right' }}>
-                {pct(m.fatia, 1)}
-              </span>
-              <span
-                className="font-sans"
-                style={{ fontSize: 10, lineHeight: 1.35, color: 'var(--color-terciario)', textWrap: 'pretty' }}
-              >
-                {`${pct(m.fatia, 1)} do faturamento · ${pct(daTarifa, 1)} da tarifa`}
-              </span>
-            </div>
-          )
-        })}
-      </div>
+              {`Usar a tarifa medida · ${pct(r.pct, 2)}`}
+            </BotaoOuro>
+          )}
+          {fatiaDesatualizada && (
+            <BotaoOuro
+              altura={32}
+              desabilitado={pendente}
+              onClick={() =>
+                rodar(
+                  () => ajustarPix(parametros.descontoPixPct, fatiaMedida),
+                  `Fatia de Pix atualizada para ${pct(fatiaMedida, 1)}.`,
+                )
+              }
+            >
+              {`Usar a fatia de Pix medida · ${pct(fatiaMedida, 1)}`}
+            </BotaoOuro>
+          )}
+        </div>
+      )}
 
-      {r.maisCaro && r.maisBarato && r.maisCaro.meio !== r.maisBarato.meio && (
+      {(erro || salvo) && (
         <span
           className="font-sans"
-          style={{ fontSize: 11, lineHeight: 1.6, color: 'rgba(242,237,227,.7)', textWrap: 'pretty' }}
+          style={{ fontSize: 11, lineHeight: 1.5, color: erro ? COR.erro : COR.ok, textWrap: 'pretty' }}
         >
-          {`${r.maisCaro.meio} custa ${pct(r.maisCaro.pct, 2)} e responde por ${pct(desproporcao(r.maisCaro, r), 0)} de toda a tarifa, com ${pct(r.maisCaro.fatia, 1)} do faturamento. ${r.maisBarato.meio} custa ${pct(r.maisBarato.pct, 2)}. Quem paga o parcelamento sem juros é o preço de todo mundo — inclusive de quem escolheu ${r.maisBarato.meio.toLowerCase()}.`}
+          {erro ?? salvo}
         </span>
       )}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <BotaoOuro altura={36} desabilitado={pendente || !mudaOParametro} onClick={aplicar}>
-          {pendente ? 'Aplicando…' : `Usar ${pct(r.pct, 2)} no preço`}
-        </BotaoOuro>
-        <span
-          className="font-sans"
-          style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty', flex: 1 }}
-        >
-          {erro
-            ? erro
-            : salvo
-              ? 'Parâmetro atualizado. Os preços sugeridos já usam o custo medido.'
-              : mudaOParametro
-                ? diferenca > 0
-                  ? `O parâmetro está ${pct(diferenca, 2)} acima do medido — cada preço carrega esse custo a mais.`
-                  : `O parâmetro está ${pct(Math.abs(diferenca), 2)} abaixo do medido — a margem real é menor que a calculada.`
-                : 'O parâmetro já reflete o custo medido.'}
-        </span>
-      </div>
+      {meios.length > 0 && (
+        <>
+          <span style={{ display: 'flex' }}>
+            <BotaoSecundario altura={28} onClick={() => setAberto((v) => !v)}>
+              {aberto ? 'Esconder o detalhe por meio' : 'Ver por meio de pagamento'}
+            </BotaoSecundario>
+          </span>
+
+          {aberto && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              <span
+                className="font-sans"
+                style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+              >
+                Só a tarifa do gateway — o desconto de Pix não aparece aqui porque ele sai do preço,
+                não do crédito. Serve para decidir se o parcelamento sem juros se paga.
+              </span>
+              {r.meios.map((m) => (
+                <div
+                  key={m.meio}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(0,1fr) 70px 84px 84px',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '6px 10px',
+                    borderRadius: 8,
+                    background: 'rgba(255,255,255,.02)',
+                  }}
+                >
+                  <span className="font-sans" style={{ fontSize: 11.5, color: 'var(--color-corrente)' }}>
+                    {m.meio}
+                  </span>
+                  <span className="font-mono" style={{ fontSize: 11, color: COR.atencao, textAlign: 'right' }}>
+                    {pct(m.pct, 2)}
+                  </span>
+                  <span className="font-mono" style={{ fontSize: 11, color: 'rgba(242,237,227,.5)', textAlign: 'right' }}>
+                    {brl(m.tarifa)}
+                  </span>
+                  <span className="font-mono" style={{ fontSize: 11, color: 'rgba(242,237,227,.5)', textAlign: 'right' }}>
+                    {`${pct(m.fatia, 1)} das vendas`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </section>
+  )
+}
+
+function Parcela({
+  rotulo,
+  valor,
+  nota,
+  destaque = false,
+}: {
+  rotulo: string
+  valor: string
+  nota: string
+  destaque?: boolean
+}) {
+  return (
+    <span style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 150 }}>
+      <Rotulo>{rotulo}</Rotulo>
+      <Valor tamanho={destaque ? 28 : 22} tom={destaque ? 'ouro' : undefined}>
+        {valor}
+      </Valor>
+      <span className="font-sans" style={{ fontSize: 10, lineHeight: 1.4, color: 'var(--color-terciario)' }}>
+        {nota}
+      </span>
+    </span>
   )
 }

@@ -354,6 +354,8 @@ const repositorioSupabase: Repositorio = {
       perdaPct: Number(data.perda_pct),
       margemAlvo: Number(data.margem_alvo),
       adsMensal: data.ads_mensal === null ? null : Number(data.ads_mensal),
+      descontoPixPct: Number(data.desconto_pix_pct ?? 0),
+      fatiaPixPct: Number(data.fatia_pix_pct ?? 0),
     }
   },
 

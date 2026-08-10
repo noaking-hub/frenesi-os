@@ -12,6 +12,23 @@ export const PARAMETROS_PADRAO: ParametrosPrecificacao = {
   antifraude: 0.49,
   perdaPct: 3.0,
   margemAlvo: 25,
+  descontoPixPct: 0,
+  fatiaPixPct: 0,
+}
+
+/**
+ * Peso do desconto de Pix sobre o preço de tabela, em pontos percentuais.
+ *
+ * É o maior custo de receber que existe aqui — 10% de desconto num canal que
+ * responde por três quartos das vendas pesa 7,5 pontos, contra 0,43% de
+ * tarifa do gateway no mesmo Pix. Ignorá-lo fazia o ERP discutir centavos e
+ * perder o desconto que sai em toda venda.
+ *
+ * O peso é o desconto vezes a fatia: não adianta descontar 10% do preço
+ * inteiro se um quarto dos clientes paga no cartão e não leva desconto.
+ */
+export function descontoPixPct(p: ParametrosPrecificacao): number {
+  return Math.round(((p.descontoPixPct * p.fatiaPixPct) / 100) * 1000) / 1000
 }
 
 /** Quanto o piso de margem fica abaixo da margem alvo, em pontos percentuais. */
@@ -19,7 +36,7 @@ export const FOLGA_PISO = 10
 
 /** Soma das taxas percentuais que incidem sobre o preço. */
 export function taxasPct(p: ParametrosPrecificacao): number {
-  return p.intermediadorPct + p.checkoutPct + p.impostoPct + p.adsPct
+  return p.intermediadorPct + p.checkoutPct + p.impostoPct + p.adsPct + descontoPixPct(p)
 }
 
 /** Soma dos custos fixos por pedido. */
@@ -131,6 +148,7 @@ export function composicaoPreco(
   const intermediacao = preco * (p.intermediadorPct / 100) + p.intermediadorFixo + p.antifraude
   const checkoutImposto = preco * ((p.checkoutPct + p.impostoPct) / 100)
   const ads = preco * (p.adsPct / 100)
+  const pix = preco * (descontoPixPct(p) / 100)
   const embalagem = p.insumos + p.freteSubsidio
   const lucro = lucroDe(preco, custoProduto, p)
 
@@ -163,6 +181,19 @@ export function composicaoPreco(
       tipo: 'taxa',
     },
     { label: 'Marketing e ADS', valor: -ads, pct: p.adsPct, tipo: 'taxa' },
+    // O desconto de Pix não é taxa de ninguém: é preço que o cliente não
+    // paga. Aparece como linha própria porque some do caixa igual às outras
+    // e, nesta operação, pesa mais que todas elas juntas.
+    ...(pix > 0
+      ? [
+          {
+            label: `Desconto de Pix · ${p.descontoPixPct}% em ${p.fatiaPixPct}% das vendas`,
+            valor: -pix,
+            pct: descontoPixPct(p),
+            tipo: 'taxa' as const,
+          },
+        ]
+      : []),
     { label: 'Lucro líquido', valor: lucro, pct: fatia(lucro), tipo: 'lucro' },
   ]
 }
