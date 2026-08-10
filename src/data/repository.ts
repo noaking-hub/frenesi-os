@@ -632,7 +632,61 @@ const repositorioSupabase: Repositorio = {
       }),
     )
   },
-  ocorrencias: repositorioFixtures.ocorrencias,
+  /**
+   * Ocorrências com o pedido e o cliente juntos.
+   *
+   * `dias` e `prazo` são calculados na leitura: gravar "faltam 3 dias" numa
+   * coluna criaria um número que envelhece sozinho à meia-noite.
+   */
+  async ocorrencias() {
+    const { data, error } = await supabaseServer()
+      .from('ocorrencias')
+      .select(
+        'id, pedido_id, tipo, estado, aberta_em, prazo, acao, ' +
+          'pedidos(valor, destino, gateway, rastreio, clientes(nome))',
+      )
+      .order('aberta_em', { ascending: false })
+      .limit(300)
+    if (error) throw error
+
+    const linhas = (data ?? []) as unknown as {
+      id: string
+      pedido_id: string
+      tipo: string
+      estado: string
+      aberta_em: string
+      prazo: string | null
+      acao: string
+      pedidos: {
+        valor: number | string
+        destino: string | null
+        gateway: string | null
+        rastreio: string | null
+        clientes: { nome: string } | null
+      } | null
+    }[]
+
+    const dia = 24 * 60 * 60 * 1000
+    const hoje = Date.now()
+
+    return linhas.map((o): Ocorrencia => ({
+      id: o.id,
+      pedidoId: o.pedido_id,
+      cliente: o.pedidos?.clientes?.nome ?? 'Cliente sem cadastro',
+      destino: o.pedidos?.destino ?? '—',
+      transportadora: 'Não informada',
+      gateway: o.pedidos?.gateway === 'frenet' ? 'Frenet' : 'Melhor Envio',
+      rastreio: o.pedidos?.rastreio ?? '',
+      tipo: o.tipo as Ocorrencia['tipo'],
+      dias: Math.max(0, Math.floor((hoje - Date.parse(o.aberta_em)) / dia)),
+      // Positivo = dias que ainda restam; negativo = dias além do combinado.
+      prazo: o.prazo ? Math.round((Date.parse(`${o.prazo}T12:00:00Z`) - hoje) / dia) : 0,
+      abertura: new Date(o.aberta_em).toLocaleDateString('pt-BR'),
+      estado: o.estado as Ocorrencia['estado'],
+      acao: o.acao,
+      valor: Number(o.pedidos?.valor ?? 0),
+    }))
+  },
   solicitacoes: repositorioFixtures.solicitacoes,
 
   async ordens() {

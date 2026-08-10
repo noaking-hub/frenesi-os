@@ -3,6 +3,7 @@ import { Badge, BotaoOuro, FaixaAlerta, TituloSecao, Valor } from '@/components/
 import { CelulaDupla, Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR, type Tom } from '@/components/erp/tokens'
 import { repositorio } from '@/data/repository'
+import { supabaseConfigurado } from '@/data/supabase'
 import {
   ROTULO_ESTADO_OCORRENCIA,
   ROTULO_OCORRENCIA,
@@ -14,6 +15,8 @@ import {
   resumirOcorrencias,
 } from '@/domain'
 import type { EstadoOcorrencia, Ocorrencia, TipoOcorrencia } from '@/domain'
+
+import { AcoesOcorrencias, MoverOcorrencia } from './Acoes'
 
 const TOM_TIPO: Record<TipoOcorrencia, Tom> = {
   extravio: 'erro',
@@ -31,8 +34,11 @@ const TOM_ESTADO: Record<EstadoOcorrencia, Tom> = {
   resolvida: 'ok',
 }
 
+export const dynamic = 'force-dynamic'
+
 export default async function OcorrenciasDeEntrega() {
   const ocorrencias = await repositorio().ocorrencias()
+  const ligado = supabaseConfigurado()
   const r = resumirOcorrencias(ocorrencias)
 
   const kpis: Kpi[] = [
@@ -197,10 +203,13 @@ export default async function OcorrenciasDeEntrega() {
     {
       chave: 'estado',
       titulo: 'Estado',
-      largura: '132px',
+      largura: '152px',
       render: (o) => (
         <span style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
           <Badge tom={TOM_ESTADO[o.estado]}>{ROTULO_ESTADO_OCORRENCIA[o.estado]}</Badge>
+          {/* Trocar o estado é a ação principal desta tela: quem acompanha
+              chamado de transportadora muda o estado o tempo todo. */}
+          <MoverOcorrencia id={o.id} estado={o.estado} ligado={ligado} />
         </span>
       ),
     },
@@ -214,33 +223,13 @@ export default async function OcorrenciasDeEntrega() {
         <FaixaAlerta
           tom="atencao"
           texto={`${plural(r.atrasadas, 'ocorrência está', 'ocorrências estão')} além do prazo da transportadora, com ${brl(r.valorParado)} em pedidos parados. A média de atraso é de ${plural(r.mediaAtraso, 'dia', 'dias')}.`}
-          acao={
-            <button
-              type="button"
-              className="font-sans hover:bg-[rgba(239,209,140,.16)]"
-              style={{
-                height: 32,
-                padding: '0 14px',
-                border: '1px solid rgba(239,209,140,.3)',
-                background: 'rgba(239,209,140,.07)',
-                color: 'var(--color-ouro)',
-                fontWeight: 600,
-                fontSize: 11,
-                borderRadius: 8,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              Abrir reclamações
-            </button>
-          }
         />
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <TituloSecao tamanho={16}>Ocorrências abertas com a transportadora</TituloSecao>
         <div style={{ flex: 1 }} />
-        <BotaoOuro altura={34}>+ Registrar ocorrência</BotaoOuro>
+        <AcoesOcorrencias ligado={ligado} />
       </div>
 
       <Tabela
@@ -269,8 +258,10 @@ export default async function OcorrenciasDeEntrega() {
               className="font-sans"
               style={{ fontSize: 11, lineHeight: 1.4, color: 'var(--color-terciario)', textWrap: 'pretty' }}
             >
-              Ocorrências abrem sozinhas quando o rastreio da Yampi indica falha de entrega,
-              extravio ou parada de movimentação. Cada uma vira um ticket em Atendimento.
+              A varredura abre ocorrência para pedido em trânsito há mais de 15 dias sem entrega
+              confirmada, dentro dos últimos 90 dias — é o que dá para afirmar sem a transportadora
+              integrada. Extravio e avaria continuam sendo registro manual, porque só quem falou com
+              a transportadora sabe.
             </span>
           </div>
         }
