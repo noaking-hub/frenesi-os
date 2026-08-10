@@ -414,11 +414,15 @@ export function produtosDoJsonLd(html: string): { nome: string; ofertas: OfertaL
 function desescapar(texto: string): string {
   return texto
     .replace(/&quot;/g, '"')
-    .replace(/&#34;/g, '"')
-    .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
+    // Entidade numérica em qualquer base: &#34; e &#x22; são a mesma aspa, e
+    // temas diferentes escolhem formas diferentes.
+    .replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n: string) => String.fromCodePoint(parseInt(n, 16)))
+    // O &amp; sai por último: antes, ele reintroduziria um & que viraria
+    // entidade de novo na etapa seguinte.
     .replace(/&amp;/g, '&')
 }
 
@@ -472,16 +476,28 @@ export interface VarianteLida {
  * temas, então a leitura tenta os conhecidos em vez de assumir um.
  */
 export function variantesDoHtml(html: string): VarianteLida[] {
-  // A aspa que fecha tem que ser a MESMA que abriu. Sem a retrovisão, um
-  // atributo delimitado por aspa simples — `data-variants='[{"id":1}]'` —
-  // terminava na primeira aspa dupla do JSON, capturava `[{` e morria no
-  // parse. A loja inteira saía com quatro preços em vez de mil.
-  const bruto =
-    html.match(/data-variants=(["'])([\s\S]*?)\1/)?.[2] ??
-    html.match(/LS\.product\s*=\s*(\{[\s\S]*?\});/)?.[1] ??
-    null
-  if (!bruto) return []
+  // TODAS as ocorrências, não a primeira.
+  //
+  // A aspa que fecha tem que ser a MESMA que abriu — sem a retrovisão, um
+  // atributo delimitado por aspa simples terminava na primeira aspa dupla do
+  // JSON e morria no parse. E a página costuma trazer o atributo mais de uma
+  // vez: um template vazio, os cards do carrossel, e só então o produto de
+  // verdade. Pegar o primeiro devolvia vazio e a loja saía sem preço nenhum.
+  const candidatos = [
+    ...[...html.matchAll(/data-variants=(["'])([\s\S]*?)\1/gi)].map((m) => m[2]),
+    ...[...html.matchAll(/LS\.product\s*=\s*(\{[\s\S]*?\});/gi)].map((m) => m[1]),
+  ].filter((t) => t.trim().length > 2)
 
+  // Vale o payload que rende mais variações: é o do produto principal.
+  let melhor: VarianteLida[] = []
+  for (const bruto of candidatos) {
+    const lidas = lerPayload(bruto)
+    if (lidas.length > melhor.length) melhor = lidas
+  }
+  return melhor
+}
+
+function lerPayload(bruto: string): VarianteLida[] {
   let dado: unknown
   try {
     dado = JSON.parse(desescapar(bruto))

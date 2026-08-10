@@ -435,18 +435,24 @@ export async function diagnosticarLoja(
     }))
     .slice(0, 8)
 
+  // Quantas VEZES cada formato aparece, não só se aparece. Uma página com
+  // três `data-variants` — template vazio, card do carrossel e o produto —
+  // se lida só na primeira volta vazia, e "existe" não contava essa história.
   const pistas = [
-    ['LS.product', /LS\.product\s*=\s*(\{[\s\S]{0,4000}?\});/],
-    ['window.__st', /window\.__st\s*=\s*(\{[\s\S]{0,2000}?\});/],
-    ['variants', /"variants"\s*:\s*(\[[\s\S]{0,3000}?\])/],
-    ['data-variants', /data-variants=(?:'|")([\s\S]{0,2000}?)(?:'|")/],
+    ['data-variants', /data-variants=(["'])([\s\S]*?)\1/gi, 2],
+    ['LS.product', /LS\.product\s*=\s*(\{[\s\S]{0,4000}?\});/gi, 1],
+    ['window.__st', /window\.__st\s*=\s*(\{[\s\S]{0,2000}?\});/gi, 1],
   ] as const
-  const achada = pistas.map(([nome, re]) => [nome, html.match(re)?.[1] ?? null] as const)
-  const comPayload = achada.filter(([, v]) => v !== null)
+  const achada = pistas.map(([nome, re, grupo]) => {
+    const todos = [...html.matchAll(re)].map((m) => m[grupo] ?? '')
+    const maior = todos.reduce((a, t) => Math.max(a, t.trim().length), 0)
+    return { nome, vezes: todos.length, maior }
+  })
+  const comPayload = achada.filter((a) => a.vezes > 0)
   passos.push({
     passo: 'payload de variações',
     resultado: comPayload.length
-      ? comPayload.map(([nome]) => nome).join(', ')
+      ? comPayload.map((a) => `${a.nome} ×${a.vezes} (maior: ${a.maior} chars)`).join(', ')
       : 'nenhum dos formatos conhecidos encontrado',
   })
 
@@ -463,7 +469,16 @@ export async function diagnosticarLoja(
     amostra: amostraVariacoes.length ? amostraVariacoes : amostra.slice(0, 8),
     // Primeiro o payload de variações, se houver: é ele que tem o ml. Sem ele,
     // o bloco Product — nunca a Organization, que não diz nada sobre preço.
-    bruto: (comPayload[0]?.[1] ?? blocoProduto ?? html).trim().slice(0, 1800),
+    // O maior payload é o do produto principal: é ele que explica a leitura.
+    bruto: (
+      [...html.matchAll(/data-variants=(["'])([\s\S]*?)\1/gi)]
+        .map((m) => m[2])
+        .sort((a, b) => b.length - a.length)[0] ??
+      blocoProduto ??
+      html
+    )
+      .trim()
+      .slice(0, 1800),
   }
 }
 

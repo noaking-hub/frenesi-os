@@ -145,3 +145,35 @@ describe('delimitador do atributo', () => {
     expect(variantesDoHtml(html)).toHaveLength(1)
   })
 })
+
+describe('a página traz o atributo mais de uma vez', () => {
+  const bons = [
+    { option0: '5ml', price: '69.90' },
+    { option0: '10ml', price: '119.90' },
+  ]
+
+  it('ignora o template vazio que vem antes do produto', () => {
+    // É o caso de uma das lojas: um atributo vazio aparece primeiro, e pegar
+    // a primeira ocorrência devolvia nada para a página inteira.
+    const html = `
+      <div data-variants=""></div>
+      <div data-variants='${JSON.stringify(bons)}'></div>`
+    expect(variantesDoHtml(html)).toHaveLength(2)
+  })
+
+  it('fica com o payload do produto, não com o do card do carrossel', () => {
+    const card = [{ option0: '3ml', price: '39.90' }]
+    const html = `
+      <article data-variants='${JSON.stringify(card)}'></article>
+      <form data-variants='${JSON.stringify(bons)}'></form>`
+    // O principal é o que rende mais variações.
+    expect(variantesDoHtml(html).map((v) => v.rotulo)).toEqual(['5ml', '10ml'])
+  })
+
+  it('desescapa entidade numérica, decimal e hexadecimal', () => {
+    const dec = JSON.stringify(bons).replace(/"/g, '&#34;')
+    const hex = JSON.stringify(bons).replace(/"/g, '&#x22;')
+    expect(variantesDoHtml(`<div data-variants="${dec}"></div>`)).toHaveLength(2)
+    expect(variantesDoHtml(`<div data-variants="${hex}"></div>`)).toHaveLength(2)
+  })
+})
