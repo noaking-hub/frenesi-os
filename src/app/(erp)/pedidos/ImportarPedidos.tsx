@@ -26,6 +26,10 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
   const [resumo, setResumo] = useState<string | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
   const [diagnostico, setDiagnostico] = useState<string | null>(null)
+  // Quanto histórico trazer. Passou a ser escolha porque o extrato do gateway
+  // alcança meses que a importação de 90 dias não cobria, e o pagamento sem
+  // pedido correspondente fica órfão na conciliação.
+  const [dias, setDias] = useState(90)
   const [pendente, iniciarTransicao] = useTransition()
 
   const conferirYampiAgora = () =>
@@ -70,7 +74,7 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
       setResumo(null)
       setAviso(null)
       setDiagnostico(null)
-      const r = await importarDaYampi(90)
+      const r = await importarDaYampi(dias)
       if (!r.ok) {
         setErro(r.erro)
         return
@@ -276,6 +280,30 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
       >
         {pendente ? 'Importando…' : 'Importar da Yampi'}
       </button>
+
+      <select
+        value={dias}
+        onChange={(e) => setDias(Number(e.target.value))}
+        disabled={pendente}
+        aria-label="Quanto histórico importar"
+        style={{
+          height: 36,
+          padding: '0 10px',
+          flex: 'none',
+          border: '1px solid rgba(255,255,255,.11)',
+          background: 'rgba(255,255,255,.03)',
+          borderRadius: 9,
+          color: 'var(--color-corrente)',
+          fontSize: 11.5,
+          outline: 0,
+        }}
+      >
+        {[90, 180, 270, 365].map((d) => (
+          <option key={d} value={d}>
+            {`últimos ${d} dias`}
+          </option>
+        ))}
+      </select>
 
       <button
         type="button"
