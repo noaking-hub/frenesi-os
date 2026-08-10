@@ -209,3 +209,28 @@ export async function ignorarLinha(
   revalidatePath('/', 'layout')
   return { ok: true }
 }
+
+/**
+ * Classifica em lote os créditos de venda já casados com pedido.
+ *
+ * O que sobra na fila é o que precisa de decisão humana: entrada sem pedido
+ * casado — dinheiro que entrou sem venda registrada — e as saídas, que têm
+ * categoria e sustentam o DRE.
+ */
+export async function classificarRecebimentos(contaId: string): Promise<Resposta<{ feitas: number }>> {
+  const bloqueio = exigeSupabase('classificar o extrato')
+  if (bloqueio) return bloqueio
+
+  const { data, error } = await supabaseServer().rpc('classificar_recebimentos', {
+    p_origem: 'mercadopago',
+    p_conta_id: contaId,
+    p_operador: OPERADOR,
+  })
+  if (error) {
+    console.error('[extrato] classificar_recebimentos falhou:', error)
+    return { ok: false, erro: mensagemDe(error) }
+  }
+
+  revalidatePath('/', 'layout')
+  return { ok: true, feitas: Number(data) }
+}

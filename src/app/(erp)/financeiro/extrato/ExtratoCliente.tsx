@@ -20,6 +20,7 @@ import type { ConferenciaConta } from '@/data/extrato'
 
 import {
   classificarLinha,
+  classificarRecebimentos,
   diagnosticarBanco,
   diagnosticarGateway,
   ignorarLinha,
@@ -99,6 +100,14 @@ export function ExtratoCliente({
     escolhas[chaveDe(l)] ?? sugerirCategoria(l.descricao, l.tipo) ?? ''
 
   const pendentes = useMemo(() => linhas.filter((l) => !l.lancamentoId && !l.ignorado), [linhas])
+  // Entrada já casada com um pedido é o crédito daquela venda: não há
+  // categoria a escolher, porque a receita do DRE vem do pedido. Clicar 141
+  // vezes para dizer "sim, é venda" não é conferência, é digitação — e depois
+  // de vinte linhas ninguém lê mais o que está aprovando.
+  const recebimentosDeVenda = useMemo(
+    () => pendentes.filter((l) => l.tipo === 'entrada' && l.pedidoId),
+    [pendentes],
+  )
   const entradas = pendentes.filter((l) => l.tipo === 'entrada').reduce((a, l) => a + l.valor, 0)
   const saidas = pendentes.filter((l) => l.tipo === 'saida').reduce((a, l) => a + l.valor, 0)
 
@@ -478,7 +487,7 @@ export function ExtratoCliente({
                   key={c.id}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'minmax(0,1fr) 120px 120px 132px',
+                    gridTemplateColumns: 'minmax(0,1fr) 120px 120px minmax(200px,auto)',
                     alignItems: 'center',
                     gap: 12,
                     padding: '10px 12px',
@@ -499,7 +508,7 @@ export function ExtratoCliente({
                   <Valor tamanho={12} peso={400} tom="rgba(242,237,227,.7)">
                     {brl(c.saldoExtrato)}
                   </Valor>
-                  <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <span style={{ display: 'flex', justifyContent: 'flex-end', minWidth: 0 }}>
                     {c.aClassificar > 0 ? (
                       <Badge tom="atencao">{`${c.aClassificar} a classificar · ${brl(Math.abs(diferenca))}`}</Badge>
                     ) : (
@@ -514,11 +523,30 @@ export function ExtratoCliente({
       )}
 
       {/* ── Fila ─────────────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <TituloSecao tamanho={16}>A classificar</TituloSecao>
         <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
           {`${brl(entradas)} de entradas e ${brl(saidas)} de saídas esperando virar lançamento`}
         </span>
+        <div style={{ flex: 1 }} />
+        {recebimentosDeVenda.length > 0 && (
+          <BotaoOuro
+            altura={32}
+            desabilitado={pendente}
+            onClick={() =>
+              rodar(async () => {
+                const r = await classificarRecebimentos(recebimentosDeVenda[0].contaId)
+                if (!r.ok) throw new Error(r.erro)
+                return [
+                  `${r.feitas} crédito(s) de venda viraram lançamento.`,
+                  'Ficaram na fila as entradas sem pedido casado e todas as saídas — são as que precisam de decisão.',
+                ]
+              })
+            }
+          >
+            {`Classificar ${recebimentosDeVenda.length} crédito(s) de venda`}
+          </BotaoOuro>
+        )}
       </div>
 
       {pendentes.length === 0 ? (
