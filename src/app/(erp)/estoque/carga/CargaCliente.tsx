@@ -51,13 +51,24 @@ export function CargaCliente({ bases }: { bases: PerfumeBase[] }) {
   const termo = busca.trim().toLowerCase()
   const filtradas = useMemo(
     () =>
-      bases.filter((b) => {
-        if (soZeradas && b.volumeMl > 0) return false
-        if (!termo) return true
-        return `${b.nome} ${b.marca}`.toLowerCase().includes(termo)
-      }),
+      bases
+        .filter((b) => {
+          if (soZeradas && b.volumeMl > 0) return false
+          if (!termo) return true
+          return `${b.nome} ${b.marca}`.toLowerCase().includes(termo)
+        })
+        // Mais vendido primeiro. Carregar 412 bases em ordem alfabética é
+        // trabalho sem retorno até o fim: em ordem de venda, as primeiras
+        // dezenas já respondem pela maior parte do faturamento, e o ERP passa
+        // a funcionar de verdade para elas antes de a lista acabar.
+        .slice()
+        .sort((a, b) => b.consumoDiarioMl - a.consumoDiarioMl || a.nome.localeCompare(b.nome, 'pt-BR')),
     [bases, soZeradas, termo],
   )
+
+  // Bases que vendem E estão zeradas: é o alvo real da carga. O resto da
+  // lista é cauda longa — perfume que não sai não trava nada.
+  const vendemEFaltam = bases.filter((b) => b.volumeMl === 0 && b.consumoDiarioMl > 0).length
 
   // O que será gravado. Sai daqui em vez de sair da lista filtrada, senão o
   // filtro decidiria o que entra na carga.
@@ -153,6 +164,9 @@ export function CargaCliente({ bases }: { bases: PerfumeBase[] }) {
           >
             Perfume que você não tem fica em branco e continua zerado — o que é a verdade, não uma
             lacuna. Repetir a carga do mesmo perfume soma ao que já existe.
+            {vendemEFaltam > 0
+              ? ` A lista começa pelo que mais vende: ${vendemEFaltam} das bases zeradas tiveram venda nos últimos 30 dias, e são elas que travam preço, produção e sincronia. As que nunca venderam podem esperar.`
+              : ''}
           </span>
         </span>
       </section>
@@ -193,7 +207,7 @@ export function CargaCliente({ bases }: { bases: PerfumeBase[] }) {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'minmax(0,1fr) 96px 116px 116px 110px',
+            gridTemplateColumns: 'minmax(0,1fr) 104px 96px 116px 116px 110px',
             gap: 12,
             padding: '10px 16px',
             borderBottom: '1px solid rgba(255,255,255,.07)',
@@ -201,6 +215,7 @@ export function CargaCliente({ bases }: { bases: PerfumeBase[] }) {
           }}
         >
           <Rotulo>Perfume base</Rotulo>
+          <Rotulo style={{ display: 'block', textAlign: 'right' }}>Vende / 30d</Rotulo>
           <Rotulo style={{ display: 'block', textAlign: 'right' }}>Hoje</Rotulo>
           <Rotulo style={{ display: 'block', textAlign: 'right' }}>Volume (ml)</Rotulo>
           <Rotulo style={{ display: 'block', textAlign: 'right' }}>Custo (R$/ml)</Rotulo>
@@ -227,7 +242,7 @@ export function CargaCliente({ bases }: { bases: PerfumeBase[] }) {
               key={b.id}
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'minmax(0,1fr) 96px 116px 116px 110px',
+                gridTemplateColumns: 'minmax(0,1fr) 104px 96px 116px 116px 110px',
                 gap: 12,
                 alignItems: 'center',
                 padding: '7px 16px',
@@ -265,6 +280,17 @@ export function CargaCliente({ bases }: { bases: PerfumeBase[] }) {
                   {b.marca}
                 </span>
               </span>
+
+              {/* Quanto esta base vendeu por mês. É o que diz por onde
+                  começar: perfume que não vende pode ficar em branco. */}
+              <Valor
+                tamanho={11}
+                peso={400}
+                tom={b.consumoDiarioMl > 0 ? 'ouro' : 'var(--color-apagado)'}
+                style={{ display: 'block', textAlign: 'right' }}
+              >
+                {b.consumoDiarioMl > 0 ? volume(b.consumoDiarioMl * 30) : 'não vendeu'}
+              </Valor>
 
               <Valor
                 tamanho={11}
