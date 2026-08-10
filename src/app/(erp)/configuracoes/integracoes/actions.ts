@@ -2,7 +2,6 @@
 
 import { diagnosticarMercadoPago } from '@/data/mercadopago'
 import { mensagemDe, escoposDoToken } from '@/data/shopify'
-import { diagnosticarSicoob } from '@/data/sicoob'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { diagnosticarYampi } from '@/data/yampi'
 
@@ -72,11 +71,6 @@ export async function testarIntegracao(id: string): Promise<Resposta<{ linhas: s
         return { ok: true, linhas: [...d.passos, ...d.amostra] }
       }
 
-      case 'sicoob': {
-        const agora = new Date()
-        const d = await diagnosticarSicoob(agora.getMonth() + 1, agora.getFullYear())
-        return { ok: true, linhas: [...d.passos, ...d.amostra] }
-      }
 
       default:
         return { ok: false, erro: 'Esta integração não tem teste próprio.' }

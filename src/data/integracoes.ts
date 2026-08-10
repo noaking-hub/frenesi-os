@@ -2,7 +2,6 @@ import 'server-only'
 
 import { emailConfigurado } from './email'
 import { mercadoPagoConfigurado } from './mercadopago'
-import { faltaParaSicoob, sicoobConfigurado } from './sicoob'
 import { shopifyConfigurada } from './shopify'
 import { supabaseConfigurado, supabaseServer } from './supabase'
 import { yampiConfigurada } from './yampi'
@@ -25,7 +24,6 @@ export type PapelIntegracao =
   | 'Loja e catálogo'
   | 'Checkout e frete'
   | 'Pagamento'
-  | 'Banco'
   | 'Comunicação'
   | 'Dados'
   | 'Preço de mercado'
@@ -109,19 +107,6 @@ export async function estadoDasIntegracoes(): Promise<EstadoIntegracao[]> {
       testavel: true,
     },
     {
-      id: 'sicoob',
-      sigla: 'SC',
-      nome: 'Sicoob',
-      papel: 'Banco',
-      configurada: sicoobConfigurado(),
-      faltando: faltaParaSicoob(),
-      detalhe:
-        'Extrato da conta. A API exige certificado da cooperativa; até lá, o OFX do internet banking traz os mesmos lançamentos.',
-      ultimaAtividade: atividades.banco,
-      atividade: 'última linha de extrato lida',
-      testavel: true,
-    },
-    {
       id: 'resend',
       sigla: 'EM',
       nome: 'E-mail transacional',
@@ -168,7 +153,6 @@ interface Atividades {
   pedido: string | null
   shopify: string | null
   mercadopago: string | null
-  banco: string | null
   concorrentes: string | null
 }
 
@@ -178,13 +162,12 @@ async function ultimasAtividades(): Promise<Atividades> {
     pedido: null,
     shopify: null,
     mercadopago: null,
-    banco: null,
     concorrentes: null,
   }
   if (!supabaseConfigurado()) return vazio
 
   const sb = supabaseServer()
-  const [pedido, sincronia, extratoMp, extratoBanco, concorrente] = await Promise.all([
+  const [pedido, sincronia, extratoMp, concorrente] = await Promise.all([
     sb.from('pedidos').select('comprado_em').order('comprado_em', { ascending: false }).limit(1),
     sb
       .from('sincronizacoes')
@@ -195,12 +178,6 @@ async function ultimasAtividades(): Promise<Atividades> {
       .from('extrato_linhas')
       .select('lido_em')
       .eq('origem', 'mercadopago')
-      .order('lido_em', { ascending: false })
-      .limit(1),
-    sb
-      .from('extrato_linhas')
-      .select('lido_em')
-      .in('origem', ['sicoob', 'ofx'])
       .order('lido_em', { ascending: false })
       .limit(1),
     sb
@@ -215,7 +192,6 @@ async function ultimasAtividades(): Promise<Atividades> {
     pedido: pedido.data?.[0]?.comprado_em ?? null,
     shopify: sincronia.data?.[0]?.executada_em ?? null,
     mercadopago: extratoMp.data?.[0]?.lido_em ?? null,
-    banco: extratoBanco.data?.[0]?.lido_em ?? null,
     concorrentes: concorrente.data?.[0]?.ultima_leitura ?? null,
   }
 }

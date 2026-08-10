@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, useTransition } from 'react'
+import { useState, useTransition } from 'react'
 
 import {
   Badge,
@@ -20,13 +20,11 @@ import type { ConferenciaConta } from '@/data/extrato'
 
 import {
   classificarLinha,
-  diagnosticarBanco,
   diagnosticarGateway,
   ignorarLinha,
-  importarOfx,
+  lerSaldo,
   recasarExtrato,
   relerGateway,
-  sincronizarBanco,
   sincronizarGateway,
 } from './actions'
 
@@ -63,8 +61,6 @@ interface Props {
   contas: ConferenciaConta[]
   categorias: { nome: string; natureza: string }[]
   gatewayLigado: boolean
-  bancoLigado: boolean
-  faltaNoBanco: string[]
 }
 
 /**
@@ -75,21 +71,12 @@ interface Props {
  * ERP está atrasado —, e só então a fila de classificação. Quem abre a tela
  * pela primeira vez lê nessa ordem e entende o módulo.
  */
-export function ExtratoCliente({
-  linhas,
-  contas,
-  categorias,
-  gatewayLigado,
-  bancoLigado,
-  faltaNoBanco,
-}: Props) {
+export function ExtratoCliente({ linhas, contas, categorias, gatewayLigado }: Props) {
   const [de, setDe] = useState(diasAtras(30))
   const [ate, setAte] = useState(hoje())
-  const [contaOfx, setContaOfx] = useState(contas[0]?.id ?? 'sicoob')
   const [relatorio, setRelatorio] = useState<string[] | null>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [pendente, iniciar] = useTransition()
-  const arquivoRef = useRef<HTMLInputElement>(null)
 
   // Categoria escolhida por linha. A sugestão entra como valor inicial e o
   // operador troca quando o palpite erra — palpite que não dá para corrigir
@@ -344,6 +331,23 @@ export function ExtratoCliente({
           >
             Reler do zero
           </BotaoSecundario>
+          <BotaoOuro
+            altura={32}
+            desabilitado={pendente || !gatewayLigado}
+            onClick={() =>
+              rodar(async () => {
+                const r = await lerSaldo()
+                if (!r.ok) throw new Error(r.erro)
+                return [
+                  `Saldo disponível: ${brl(r.disponivel)}.`,
+                  r.aLiberar > 0 ? `A liberar: ${brl(r.aLiberar)}.` : '',
+                  'É este número que passa a valer nas Contas — a nossa soma de pagamentos vira só "movimento lido".',
+                ].filter(Boolean)
+              })
+            }
+          >
+            Ler saldo da conta
+          </BotaoOuro>
           <BotaoSecundario
             altura={32}
             desabilitado={pendente}
@@ -369,111 +373,6 @@ export function ExtratoCliente({
           )}
         </div>
 
-        {/* Banco */}
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
-          <span style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <Rotulo>Banco · arquivo OFX</Rotulo>
-            <input
-              ref={arquivoRef}
-              type="file"
-              accept=".ofx,.OFX,text/plain,application/x-ofx"
-              style={{ ...campo, height: 32, paddingTop: 6, fontSize: 11 }}
-            />
-          </span>
-          <span style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <Rotulo>na conta</Rotulo>
-            <select value={contaOfx} onChange={(e) => setContaOfx(e.target.value)} style={campo}>
-              {contas.length === 0 && <option value="sicoob">Sicoob (será criada)</option>}
-              {contas.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nome}
-                </option>
-              ))}
-            </select>
-          </span>
-          <BotaoOuro
-            altura={32}
-            desabilitado={pendente}
-            onClick={() =>
-              rodar(async () => {
-                const arquivo = arquivoRef.current?.files?.[0]
-                if (!arquivo) throw new Error('Escolha o arquivo .ofx exportado do internet banking.')
-                const dados = new FormData()
-                dados.set('arquivo', arquivo)
-                dados.set('conta', contaOfx)
-                const r = await importarOfx(dados)
-                if (!r.ok) throw new Error(r.erro)
-                const x = r.resultado
-                return [
-                  `${x.lidas} lançamento(s) lidos do arquivo (banco ${x.banco || '—'}, conta ${x.conta || '—'}).`,
-                  `${x.novas} nova(s), ${x.repetidas} já estavam no extrato.`,
-                  ...x.avisos.map((a) => `Atenção: ${a}`),
-                ]
-              })
-            }
-          >
-            Importar OFX
-          </BotaoOuro>
-          {bancoLigado && (
-            <BotaoSecundario
-              altura={32}
-              desabilitado={pendente}
-              onClick={() =>
-                rodar(async () => {
-                  const agora = new Date()
-                  const r = await sincronizarBanco(agora.getMonth() + 1, agora.getFullYear())
-                  if (!r.ok) throw new Error(r.erro)
-                  return [`${r.lidas} lançamento(s) lidos da API do Sicoob: ${r.novas} novo(s), ${r.repetidas} repetido(s).`]
-                })
-              }
-            >
-              Sincronizar Sicoob
-            </BotaoSecundario>
-          )}
-          <BotaoSecundario
-            altura={32}
-            desabilitado={pendente}
-            onClick={() =>
-              rodar(async () => {
-                const agora = new Date()
-                const r = await diagnosticarBanco(agora.getMonth() + 1, agora.getFullYear())
-                if (!r.ok) throw new Error(r.erro)
-                return [...r.passos, ...(r.amostra.length ? ['', 'Amostra:', ...r.amostra] : [])]
-              })
-            }
-          >
-            Diagnosticar banco
-          </BotaoSecundario>
-        </div>
-
-        {faltaNoBanco.length > 0 && (
-          <div
-            className="font-sans"
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 4,
-              fontSize: 10.5,
-              lineHeight: 1.6,
-              color: 'var(--color-terciario)',
-              textWrap: 'pretty',
-            }}
-          >
-            <span>
-              A API do Sicoob exige certificado digital emitido pela cooperativa e liberação dos escopos
-              — o que ainda falta no ambiente:
-            </span>
-            {faltaNoBanco.map((f) => (
-              <span key={f} className="font-mono" style={{ fontSize: 10, paddingLeft: 10 }}>
-                {`· ${f}`}
-              </span>
-            ))}
-            <span>
-              Até o certificado sair, o OFX do internet banking traz exatamente os mesmos lançamentos,
-              com identificador próprio, e cai nesta mesma tabela.
-            </span>
-          </div>
-        )}
       </section>
 
       {erro && <FaixaAlerta tom="erro" texto={erro} />}

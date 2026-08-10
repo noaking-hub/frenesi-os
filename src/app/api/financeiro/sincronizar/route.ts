@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server'
 
 import { mercadoPagoConfigurado, sincronizarMercadoPago } from '@/data/mercadopago'
 import { mensagemDe } from '@/data/shopify'
-import { sicoobConfigurado, sincronizarSicoob } from '@/data/sicoob'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 
 /**
@@ -70,15 +69,6 @@ export async function POST(req: Request) {
     relatorio.mercadopago = { pulado: 'MERCADOPAGO_ACCESS_TOKEN não está definido' }
   }
 
-  if (sicoobConfigurado()) {
-    try {
-      relatorio.sicoob = await sincronizarSicoob(agora.getMonth() + 1, agora.getFullYear())
-    } catch (e) {
-      relatorio.sicoob = { erro: mensagemDe(e) }
-    }
-  } else {
-    relatorio.sicoob = { pulado: 'a API do Sicoob exige certificado; use a importação de OFX' }
-  }
 
   try {
     const { data, error } = await supabaseServer().rpc('varrer_ocorrencias', {
@@ -101,6 +91,5 @@ export async function GET() {
     como: 'POST com Authorization: Bearer $CRON_SEGREDO',
     configurado: Boolean(process.env.CRON_SEGREDO),
     gateway: mercadoPagoConfigurado(),
-    banco: sicoobConfigurado(),
   })
 }

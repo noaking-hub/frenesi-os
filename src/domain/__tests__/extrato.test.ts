@@ -4,7 +4,6 @@ import {
   casarPagamento,
   dataEmSaoPaulo,
   indexarPedidos,
-  lerOfx,
   linhasDoPagamentoMp,
   normalizarPagamentoMp,
   resumirExtrato,
@@ -159,82 +158,6 @@ describe('casar o pagamento com o pedido', () => {
   })
 })
 
-/** Extrato OFX 1.x em SGML, como o internet banking exporta. */
-const OFX_SGML = `OFXHEADER:100
-DATA:OFXSGML
-VERSION:102
-CHARSET:1252
-
-<OFX>
-<BANKMSGSRSV1><STMTTRNRS><STMTRS>
-<CURDEF>BRL
-<BANKACCTFROM><BANKID>756<ACCTID>12345-6<ACCTTYPE>CHECKING</BANKACCTFROM>
-<BANKTRANLIST>
-<STMTTRN><TRNTYPE>CREDIT<DTPOSTED>20260801120000[-3:BRT]<TRNAMT>1.234,56<FITID>AAA1<MEMO>PIX RECEBIDO CLIENTE</STMTTRN>
-<STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20260802<TRNAMT>-89.90<FITID>AAA2<MEMO>CORREIOS POSTAGEM</STMTTRN>
-<STMTTRN><TRNTYPE>FEE<DTPOSTED>20260803<TRNAMT>12.50<FITID>AAA3<MEMO>TARIFA CESTA</STMTTRN>
-<STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20260804<TRNAMT>-50.00<MEMO>SEM IDENTIFICADOR</STMTTRN>
-</BANKTRANLIST>
-<LEDGERBAL><BALAMT>1082.16<DTASOF>20260804</LEDGERBAL>
-</STMTRS></STMTTRNRS></BANKMSGSRSV1>
-</OFX>`
-
-describe('ler o OFX do internet banking', () => {
-  const r = lerOfx(OFX_SGML)
-
-  it('identifica banco, conta e saldo', () => {
-    expect(r.banco).toBe('756')
-    expect(r.conta).toBe('12345-6')
-    expect(r.saldoFinal).toBe(1082.16)
-  })
-
-  it('entende milhar com ponto e decimal com vírgula', () => {
-    // "1.234,56" lido como ponto decimal viraria R$ 1,23 — mil reais que
-    // somem do extrato sem ninguém notar.
-    const credito = r.linhas.find((l) => l.chave.endsWith('AAA1'))!
-    expect(credito.valor).toBe(1234.56)
-    expect(credito.tipo).toBe('entrada')
-  })
-
-  it('entende ponto decimal quando não há vírgula', () => {
-    expect(r.linhas.find((l) => l.chave.endsWith('AAA2'))!.valor).toBe(89.9)
-  })
-
-  it('trata como saída a tarifa que veio com valor positivo', () => {
-    // Nem todo banco manda o sinal. Confiar só nele transformaria tarifa em
-    // receita, e o mês fecharia melhor do que foi.
-    const tarifa = r.linhas.find((l) => l.chave.endsWith('AAA3'))!
-    expect(tarifa.tipo).toBe('saida')
-    expect(tarifa.valor).toBe(12.5)
-  })
-
-  it('prefixa a chave com a conta', () => {
-    // O FITID é único dentro da conta, não entre contas. Sem prefixo, duas
-    // contas do mesmo banco se sobreporiam.
-    expect(r.linhas[0].chave.startsWith('12345-6:')).toBe(true)
-  })
-
-  it('avisa em vez de descartar em silêncio a linha sem FITID', () => {
-    expect(r.linhas).toHaveLength(3)
-    expect(r.avisos.join(' ')).toContain('FITID')
-  })
-
-  it('avisa quando o arquivo não é um extrato', () => {
-    const vazio = lerOfx('<OFX><SIGNONMSGSRSV1></SIGNONMSGSRSV1></OFX>')
-    expect(vazio.linhas).toEqual([])
-    expect(vazio.avisos.join(' ')).toContain('STMTTRN')
-  })
-
-  it('lê também o OFX 2.x, que fecha as tags', () => {
-    const xml = `<OFX><BANKACCTFROM><ACCTID>999</ACCTID></BANKACCTFROM>
-      <STMTTRN><TRNTYPE>DEBIT</TRNTYPE><DTPOSTED>20260801</DTPOSTED>
-      <TRNAMT>-10.00</TRNAMT><FITID>X1</FITID><MEMO>TESTE</MEMO></STMTTRN></OFX>`
-    const lido = lerOfx(xml)
-    expect(lido.linhas).toHaveLength(1)
-    expect(lido.linhas[0]).toMatchObject({ chave: '999:X1', valor: 10, tipo: 'saida' })
-  })
-})
-
 describe('sugerir a categoria pela descrição', () => {
   it('reconhece os gastos que se repetem todo mês', () => {
     expect(sugerirCategoria('CORREIOS POSTAGEM', 'saida')).toBe('Frete')
@@ -260,7 +183,7 @@ describe('sugerir a categoria pela descrição', () => {
 
 describe('resumo do extrato', () => {
   const linha = (over: Partial<LinhaExtrato>): LinhaExtrato => ({
-    origem: 'ofx',
+    origem: 'mercadopago',
     chave: 'k',
     contaId: 'c',
     contaNome: 'Conta',

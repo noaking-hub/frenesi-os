@@ -2,16 +2,16 @@
  * Extrato: o dinheiro que de fato entrou e saiu, lido do banco e do gateway.
  *
  * Tudo aqui é puro — nenhuma chamada de rede, nenhum acesso a banco. O leitor
- * do Mercado Pago e o leitor de OFX entregam texto ou JSON cru; quem decide o
- * que aquilo significa é este arquivo, e é por isso que dá para testar cada
- * decisão sem um centavo real envolvido.
+ * do Mercado Pago entrega JSON cru; quem decide o que aquilo significa é este
+ * arquivo, e é por isso que dá para testar cada decisão sem um centavo real
+ * envolvido.
  *
  * A regra que governa o módulo inteiro: **a chave da linha é o id do fato na
  * origem**. Reimportar o mesmo arquivo ou ressincronizar o mesmo período não
  * pode criar dinheiro do nada.
  */
 
-export type OrigemExtrato = 'mercadopago' | 'sicoob' | 'ofx' | 'manual'
+export type OrigemExtrato = 'mercadopago' | 'manual'
 
 /** Linha pronta para a função `importar_extrato` do banco. */
 export interface LinhaExtratoBruta {
@@ -350,150 +350,6 @@ export function casarObservacao(
   if (perto.length === 1) return { pedidoId: perto[0].id, criterio: 'valor-e-data' }
 
   return null
-}
-
-// ── OFX ────────────────────────────────────────────────────────────────────
-
-export interface ExtratoOfx {
-  banco: string
-  conta: string
-  moeda: string
-  /** Saldo informado pelo arquivo, quando existe. */
-  saldoFinal: number | null
-  linhas: LinhaExtratoBruta[]
-  /** O que o arquivo não trouxe e o operador precisa saber. */
-  avisos: string[]
-}
-
-/**
- * Decodifica o arquivo respeitando o que ele diz sobre si mesmo.
- *
- * Banco brasileiro ainda emite OFX em Windows-1252. Ler como UTF-8 não falha
- * ruidosamente: entrega "TARIFA DE MANUTEN�ÃO", e o operador passa a
- * desconfiar do extrato inteiro por causa de um acento.
- */
-export function decodificarOfx(bytes: Uint8Array): string {
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-  } catch {
-    try {
-      return new TextDecoder('windows-1252').decode(bytes)
-    } catch {
-      return new TextDecoder('latin1').decode(bytes)
-    }
-  }
-}
-
-/** Valor de uma tag folha do OFX, que no formato SGML não tem fechamento. */
-function tag(bloco: string, nome: string): string {
-  const m = bloco.match(new RegExp(`<${nome}>([^<\\r\\n]*)`, 'i'))
-  return m ? m[1].trim() : ''
-}
-
-/**
- * Número do OFX, com os dois formatos que os bancos usam.
- *
- * "1.234,56" tem ponto de milhar e vírgula decimal; "1234.56" tem ponto
- * decimal e nenhum milhar. Tratar os dois igual transformaria mil reais em um
- * real e vinte e três — no sentido de esconder dinheiro, não de mostrá-lo.
- */
-function numeroOfx(bruto: string): number {
-  const t = bruto.trim()
-  const normal = t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t
-  return Number(normal)
-}
-
-/** `20260801120000[-3:BRT]` e `20260801` viram `2026-08-01`. */
-function dataOfx(valor: string): string | null {
-  const m = valor.match(/^(\d{4})(\d{2})(\d{2})/)
-  return m ? `${m[1]}-${m[2]}-${m[3]}` : null
-}
-
-/**
- * Tipos que significam saída mesmo quando o banco manda o valor sem sinal.
- *
- * O sinal do `TRNAMT` manda; isto é rede de proteção para o arquivo que vem
- * com tudo positivo — caso em que confiar só no sinal transformaria toda
- * tarifa em receita.
- */
-const SAIDA_OFX = new Set(['DEBIT', 'ATM', 'FEE', 'SRVCHG', 'DIRECTDEBIT', 'CHECK', 'PAYMENT'])
-
-/**
- * Lê o OFX exportado do internet banking.
- *
- * Serve para qualquer banco: o formato é o mesmo. É o caminho que funciona
- * hoje, sem depender de habilitação de API, e por isso ele não é um plano B
- * envergonhado — é a porta da frente do Sicoob enquanto o certificado não sai.
- */
-export function lerOfx(texto: string): ExtratoOfx {
-  const avisos: string[] = []
-  const corpo = texto.replace(/\r/g, '')
-
-  const banco = tag(corpo, 'BANKID') || tag(corpo, 'ORG') || ''
-  const conta = tag(corpo, 'ACCTID') || tag(corpo, 'CCACCTID') || ''
-  const moeda = tag(corpo, 'CURDEF') || 'BRL'
-  const saldoBruto = tag(corpo, 'BALAMT')
-  const saldoFinal = saldoBruto ? Number(saldoBruto.replace(',', '.')) : null
-
-  if (!conta) avisos.push('O arquivo não informa o número da conta (ACCTID).')
-  if (moeda && moeda !== 'BRL') avisos.push(`O extrato está em ${moeda}, não em reais.`)
-
-  const blocos = corpo.match(/<STMTTRN>[\s\S]*?<\/STMTTRN>/gi) ?? []
-  if (blocos.length === 0) {
-    avisos.push('Nenhuma transação (STMTTRN) foi encontrada — confira se o arquivo é um extrato OFX.')
-  }
-
-  const linhas: LinhaExtratoBruta[] = []
-  let semId = 0
-  let semData = 0
-
-  for (const bloco of blocos) {
-    const valor = numeroOfx(tag(bloco, 'TRNAMT'))
-    const data = dataOfx(tag(bloco, 'DTPOSTED') || tag(bloco, 'DTUSER'))
-    const fitid = tag(bloco, 'FITID')
-    const tipoOfx = tag(bloco, 'TRNTYPE').toUpperCase()
-    const memo = tag(bloco, 'MEMO')
-    const nome = tag(bloco, 'NAME')
-
-    if (!data) {
-      semData += 1
-      continue
-    }
-    if (!fitid) {
-      semId += 1
-      continue
-    }
-    if (!Number.isFinite(valor) || valor === 0) continue
-
-    const negativo = valor < 0 || (valor > 0 && SAIDA_OFX.has(tipoOfx))
-
-    linhas.push({
-      // O FITID é único dentro da conta, não entre contas. Sem o prefixo, o
-      // extrato de duas contas do mesmo banco se sobreporia.
-      chave: `${conta || 'sem-conta'}:${fitid}`,
-      ocorrido_em: data,
-      descricao: memo || nome || tipoOfx || 'Movimento sem descrição',
-      contraparte: nome,
-      documento: tag(bloco, 'CHECKNUM') || tag(bloco, 'REFNUM'),
-      tipo: negativo ? 'saida' : 'entrada',
-      valor: Math.abs(valor),
-      pedido_id: null,
-      bruto: { fitid, trntype: tipoOfx, memo, name: nome },
-    })
-  }
-
-  // Transação descartada é dinheiro que some do extrato. Se acontecer, tem de
-  // aparecer na tela — não num console que ninguém lê.
-  if (semData > 0) {
-    avisos.push(`${semData} transação(ões) sem data foram deixadas de fora.`)
-  }
-  if (semId > 0) {
-    avisos.push(
-      `${semId} transação(ões) sem identificador (FITID) foram deixadas de fora — sem ele, reimportar o arquivo duplicaria o valor.`,
-    )
-  }
-
-  return { banco, conta, moeda, saldoFinal, linhas, avisos }
 }
 
 // ── Classificação ──────────────────────────────────────────────────────────

@@ -1,7 +1,6 @@
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
 import { conferenciaDeContas, lerExtrato, resumoDoExtrato } from '@/data/extrato'
 import { mercadoPagoConfigurado } from '@/data/mercadopago'
-import { faltaParaSicoob, sicoobConfigurado } from '@/data/sicoob'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { brl, pad2, plural } from '@/domain'
 
@@ -27,8 +26,6 @@ export default async function Extrato() {
     lerCategorias(),
     resumoDoExtrato(),
   ])
-
-  const faltaNoBanco = faltaParaSicoob()
 
   const kpis: Kpi[] = [
     {
@@ -71,14 +68,6 @@ export default async function Extrato() {
         : 'Falta MERCADOPAGO_ACCESS_TOKEN',
       tom: mercadoPagoConfigurado() ? 'ok' : 'atencao',
     },
-    {
-      label: 'Banco',
-      valor: sicoobConfigurado() ? 'API' : 'OFX',
-      hint: sicoobConfigurado()
-        ? 'API do Sicoob configurada'
-        : 'A API exige certificado digital; o OFX do internet banking funciona hoje',
-      tom: sicoobConfigurado() ? 'ok' : 'info',
-    },
   ]
 
   return (
@@ -89,8 +78,6 @@ export default async function Extrato() {
         contas={contas}
         categorias={categorias}
         gatewayLigado={mercadoPagoConfigurado()}
-        bancoLigado={sicoobConfigurado()}
-        faltaNoBanco={faltaNoBanco}
       />
     </div>
   )
