@@ -115,6 +115,7 @@ export interface ParametrosPrecificacao {
   etiqueta: number
   caixa: number
   plasticoBolha: number
+  sacolaAntifraude: number
   freteSubsidio: number
   antifraude: number
   /** Estimativa de perda no envase. A perda real só é medida ao encerrar o lote. */

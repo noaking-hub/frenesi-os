@@ -254,6 +254,7 @@ const repositorioSupabase: Repositorio = {
       etiqueta: Number(data.etiqueta ?? 0),
       caixa: Number(data.caixa ?? 0),
       plasticoBolha: Number(data.plastico_bolha ?? 0),
+      sacolaAntifraude: Number(data.sacola_antifraude ?? 0),
       freteSubsidio: Number(data.frete_subsidio),
       antifraude: Number(data.antifraude),
       perdaPct: Number(data.perda_pct),

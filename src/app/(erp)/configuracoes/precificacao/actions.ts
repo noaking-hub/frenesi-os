@@ -44,6 +44,7 @@ export async function salvarParametros(v: ParametrosPrecificacao): Promise<Respo
     p_etiqueta: v.etiqueta,
     p_caixa: v.caixa,
     p_plastico_bolha: v.plasticoBolha,
+    p_sacola_antifraude: v.sacolaAntifraude,
     p_frete_subsidio: v.freteSubsidio,
     p_antifraude: v.antifraude,
     p_perda_pct: v.perdaPct,

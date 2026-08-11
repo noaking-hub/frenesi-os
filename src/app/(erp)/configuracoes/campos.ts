@@ -43,6 +43,7 @@ export const CAMPOS_PARAMETROS: CampoParametro[] = [
   { chave: 'etiqueta', label: 'Etiqueta', unidade: 'R$', hint: 'Rótulo impresso', secao: 'Custos fixos por pedido' },
   { chave: 'caixa', label: 'Caixa', unidade: 'R$', hint: 'Embalagem de envio', secao: 'Custos fixos por pedido' },
   { chave: 'plasticoBolha', label: 'Plástico bolha', unidade: 'R$', hint: 'Proteção do frasco no transporte', secao: 'Custos fixos por pedido' },
+  { chave: 'sacolaAntifraude', label: 'Sacola antifraude', unidade: 'R$', hint: 'Sacola lacrada de segurança do envio', secao: 'Custos fixos por pedido' },
   { chave: 'freteSubsidio', label: 'Frete subsidiado', unidade: 'R$', hint: 'Média do que a loja absorve', secao: 'Custos fixos por pedido' },
   { chave: 'perdaPct', label: 'Perda técnica no fracionamento', unidade: '%', hint: 'Sobre o volume envasado', secao: 'Produção' },
   { chave: 'margemAlvo', label: 'Margem líquida alvo', unidade: '%', hint: 'Base do preço ideal sugerido', secao: 'Produção' },
