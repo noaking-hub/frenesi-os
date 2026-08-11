@@ -82,6 +82,8 @@ async function paginas<T>(caminho: string, parametros: Record<string, string>): 
 // ── Cupons ─────────────────────────────────────────────────────────────────
 
 export interface CupomYampi {
+  /** Id na Yampi — é por ele que edição e exclusão acontecem. */
+  id: string | null
   codigo: string
   descricao: string | null
   /** Percentual ou valor fixo — como a Yampi descrever. */
@@ -135,6 +137,7 @@ export async function lerCuponsYampi(): Promise<LeituraCupons> {
 
     return [
       {
+        id: texto(campo(c, ['id'])),
         codigo,
         descricao: texto(campo(c, ['description', 'title'])),
         regra: partes.join(' + ') || 'Regra não informada pela Yampi',
@@ -254,6 +257,8 @@ export interface NovoCupom {
   expiraEm?: string
   /** Quantidade máxima de usos. Sem limite, vale para sempre. */
   limite?: number
+  /** Impede o uso junto de outras promoções ativas. */
+  naoAcumula?: boolean
 }
 
 /**
@@ -286,7 +291,51 @@ export async function criarCupomYampi(cupom: NovoCupom): Promise<void> {
         active: true,
         ...(cupom.limite && cupom.limite > 0 ? { quantity: cupom.limite } : {}),
         ...(cupom.expiraEm ? { expires_at: `${cupom.expiraEm} 23:59:59` } : {}),
+        // "Não acumular" muda de nome conforme a versão da API; mandar os
+        // dois cobre as duas grafias e campo desconhecido é ignorado.
+        ...(cupom.naoAcumula ? { accumulate: false, cumulative: false } : {}),
       },
     },
   )
+}
+
+/**
+ * Edita um cupom existente (`PUT /pricing/promocodes/{id}`).
+ *
+ * Só os campos presentes mudam; a mensagem de recusa da Yampi sobe inteira
+ * para a tela — ela nomeia o campo, e isso vale mais que traduzir.
+ */
+export async function atualizarCupomYampi(
+  id: string,
+  mudancas: {
+    valor?: number
+    percentual?: boolean
+    expiraEm?: string | null
+    limite?: number | null
+    ativo?: boolean
+  },
+): Promise<void> {
+  await chamarYampi(
+    `/pricing/promocodes/${encodeURIComponent(id)}`,
+    {},
+    {
+      metodo: 'PUT',
+      corpo: {
+        ...(mudancas.valor !== undefined ? { value: mudancas.valor } : {}),
+        ...(mudancas.percentual !== undefined
+          ? { type: mudancas.percentual ? 'percent' : 'fixed' }
+          : {}),
+        ...(mudancas.expiraEm !== undefined
+          ? { expires_at: mudancas.expiraEm ? `${mudancas.expiraEm} 23:59:59` : null }
+          : {}),
+        ...(mudancas.limite !== undefined ? { quantity: mudancas.limite ?? 0 } : {}),
+        ...(mudancas.ativo !== undefined ? { active: mudancas.ativo } : {}),
+      },
+    },
+  )
+}
+
+/** Remove o cupom do checkout (`DELETE /pricing/promocodes/{id}`). */
+export async function excluirCupomYampi(id: string): Promise<void> {
+  await chamarYampi(`/pricing/promocodes/${encodeURIComponent(id)}`, {}, { metodo: 'DELETE' })
 }

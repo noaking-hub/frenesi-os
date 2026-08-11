@@ -22,6 +22,7 @@ export function NovoCupom() {
   const [percentual, setPercentual] = useState(true)
   const [expiraEm, setExpiraEm] = useState('')
   const [limite, setLimite] = useState('')
+  const [naoAcumula, setNaoAcumula] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
   const [pendente, iniciarTransicao] = useTransition()
 
@@ -34,6 +35,7 @@ export function NovoCupom() {
         percentual,
         expiraEm: expiraEm || undefined,
         limite: limite ? Math.max(0, Math.round(parseNum(limite))) : undefined,
+        naoAcumula,
       })
       if (!r.ok) {
         setErro(r.erro)
@@ -125,6 +127,11 @@ export function NovoCupom() {
                 />
               </div>
             </div>
+
+            <label className="font-sans" style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12, color: 'var(--color-corrente)', cursor: 'pointer' }}>
+              <input type="checkbox" checked={naoAcumula} onChange={(e) => setNaoAcumula(e.target.checked)} />
+              Não acumular com outras promoções ativas
+            </label>
 
             {erro && (
               <span className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.5, color: COR.erro, textWrap: 'pretty' }}>

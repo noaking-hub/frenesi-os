@@ -6,6 +6,7 @@ import { lerCuponsYampi, type CupomYampi } from '@/data/yampi-crm'
 import { yampiConfigurada } from '@/data/yampi'
 import { plural } from '@/domain'
 
+import { AcoesCupom, LoteCupons } from './GerirCupons'
 import { NovoCupom } from './NovoCupom'
 
 export const dynamic = 'force-dynamic'
@@ -204,6 +205,12 @@ export default async function Cupons() {
       largura: '96px',
       render: (c) => <Badge tom={TOM_SITUACAO[c.situacao]}>{c.situacao}</Badge>,
     },
+    {
+      chave: 'acoes',
+      titulo: 'Ações',
+      largura: '108px',
+      render: (c) => <AcoesCupom cupom={c} />,
+    },
   ]
 
   const semRegra = cupons.filter((c) => c.regra === 'Regra não informada pela Yampi')
@@ -218,6 +225,7 @@ export default async function Cupons() {
           Lidos ao vivo da Yampi — o que está aqui é o que o checkout aceita agora
         </span>
         <div style={{ flex: 1 }} />
+        <LoteCupons />
         <NovoCupom />
       </div>
 
