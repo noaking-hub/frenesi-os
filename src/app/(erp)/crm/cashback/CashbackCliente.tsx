@@ -11,7 +11,7 @@ import { COR } from '@/components/erp/tokens'
 import type { CarteiraYampi, MovimentoCashback } from '@/data/cashback'
 import { brl, plural } from '@/domain'
 
-import { extratoDoCliente } from './actions'
+import { diagnosticoCarteira, extratoDoCliente } from './actions'
 
 const dataHoraBr = (iso: string | null) =>
   iso
@@ -117,6 +117,7 @@ export function CashbackCliente({
     let pagina: number | null = 1
     let lidos = 0
     let comSaldoLidos = 0
+    const amostra: string[] = []
     try {
       let rodadas = 0
       while (pagina !== null && rodadas < 60) {
@@ -130,7 +131,7 @@ export function CashbackCliente({
           body: JSON.stringify({ pagina }),
         })
         const r = (await resposta.json()) as
-          | { ok: true; proximaPagina: number | null; lidos: number; comSaldo: number }
+          | { ok: true; proximaPagina: number | null; lidos: number; comSaldo: number; amostraCrua?: string[] }
           | { ok: false; erro: string }
         if (!r.ok) {
           setAviso({ tom: 'erro', texto: r.erro })
@@ -139,11 +140,21 @@ export function CashbackCliente({
         lidos += r.lidos
         comSaldoLidos += r.comSaldo
         pagina = r.proximaPagina
+        if (r.amostraCrua?.length && amostra.length === 0) amostra.push(...r.amostraCrua)
       }
-      setAviso({
-        tom: 'ok',
-        texto: `${plural(lidos, 'carteira sincronizada', 'carteiras sincronizadas')} · ${plural(comSaldoLidos, 'cliente com saldo', 'clientes com saldo')}.`,
-      })
+      setAviso(
+        lidos > 0 && comSaldoLidos === 0
+          ? {
+              tom: 'erro',
+              texto:
+                `${plural(lidos, 'carteira lida', 'carteiras lidas')} e TODAS zeradas. Ou o cashback ainda não está ativo no painel da Yampi, ou a resposta vem num formato que o leitor não conhece. ` +
+                `Resposta crua da Yampi para diagnóstico: ${amostra.slice(0, 2).join(' ||| ') || '(vazia)'} — me mande este texto que eu ajusto a leitura em cima do fato.`,
+            }
+          : {
+              tom: 'ok',
+              texto: `${plural(lidos, 'carteira sincronizada', 'carteiras sincronizadas')} · ${plural(comSaldoLidos, 'cliente com saldo', 'clientes com saldo')}.`,
+            },
+      )
     } catch (e) {
       setAviso({
         tom: 'erro',
@@ -161,6 +172,24 @@ export function CashbackCliente({
    * mais de 6 horas (ou nunca rodou) — e roda todo dia no cron. Não há
    * botão: espelho que depende de clique vive desatualizado.
    */
+  // Espelho cheio de zeros: mostra a resposta crua da Yampi sozinho, para o
+  // problema (cashback desligado × formato desconhecido) se resolver em cima
+  // do fato — sem esperar a próxima varredura.
+  const [diag, setDiag] = useState<string | null>(null)
+  const diagRodou = useRef(false)
+  useEffect(() => {
+    if (diagRodou.current) return
+    if (carteiras.length === 0 || carteiras.some((c) => c.saldo > 0)) return
+    diagRodou.current = true
+    void diagnosticoCarteira().then((r) => {
+      setDiag(
+        r.ok
+          ? `Todas as ${carteiras.length} carteiras espelhadas estão zeradas. Diagnóstico ao vivo — resposta crua da Yampi para a carteira de um cliente: SALDO → ${r.saldoCru} · EXTRATO → ${r.extratoCru}. Se o cashback está ativo no painel da Yampi e mesmo assim aparece zero aqui, me mande este texto que eu ajusto a leitura em cima do fato.`
+          : `Todas as carteiras estão zeradas e o diagnóstico falhou: ${r.erro}`,
+      )
+    })
+  }, [carteiras])
+
   const jaDisparou = useRef(false)
   useEffect(() => {
     if (jaDisparou.current) return
@@ -233,6 +262,11 @@ export function CashbackCliente({
             </span>
           )}
         </div>
+        {diag && (
+          <span className="font-mono" style={{ fontSize: 10.5, lineHeight: 1.6, color: COR.atencao, textWrap: 'pretty', wordBreak: 'break-all' }}>
+            {diag}
+          </span>
+        )}
         {progresso && (
           <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.5, color: COR.ouro, textWrap: 'pretty' }}>
             {progresso}

@@ -1,6 +1,6 @@
 'use server'
 
-import { extratoCashbackYampi, type MovimentoCashback } from '@/data/cashback'
+import { amostraCarteiraCrua, extratoCashbackYampi, type MovimentoCashback } from '@/data/cashback'
 
 export type RespostaExtrato =
   | { ok: true; movimentos: MovimentoCashback[]; camposCrus: string[] }
@@ -10,6 +10,18 @@ export type RespostaExtrato =
 export async function extratoDoCliente(customerId: string): Promise<RespostaExtrato> {
   try {
     const r = await extratoCashbackYampi(customerId)
+    return { ok: true, ...r }
+  } catch (e) {
+    return { ok: false, erro: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/** A carteira do primeiro cliente, crua — para diagnosticar formato de resposta. */
+export async function diagnosticoCarteira(): Promise<
+  { ok: true; saldoCru: string; extratoCru: string } | { ok: false; erro: string }
+> {
+  try {
+    const r = await amostraCarteiraCrua()
     return { ok: true, ...r }
   } catch (e) {
     return { ok: false, erro: e instanceof Error ? e.message : String(e) }

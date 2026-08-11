@@ -102,9 +102,42 @@ export function BuscaPrecos({ atualizadoEm }: { atualizadoEm: string | null }) {
       )}
 
       {buscou && resultado && !resultado.semBanco && resultado.linhas.length === 0 && (
-        <Aviso
-          texto={`Nada encontrado para “${resultado.termo}”. O nome precisa aparecer como o concorrente escreve — tente só a palavra distintiva, como “Idôle” em vez do nome inteiro.`}
-        />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+          <Aviso
+            texto={
+              resultado.parecidos.length
+                ? `Nada casa com todas as palavras de “${resultado.termo}”. Parecidos na base — clique para buscar:`
+                : `Nada encontrado para “${resultado.termo}” na base coletada. Se o concorrente tem o perfume no site, a próxima vasculhada alcança — a coleta roda todo dia e agora cobre até 900 produtos por loja (era 400); vale também clicar em Vasculhar na fonte.`
+            }
+          />
+          {resultado.parecidos.length > 0 && (
+            <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+              {resultado.parecidos.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTermo(t)}
+                  className="hover:border-ouro/40 font-sans"
+                  style={{
+                    height: 30,
+                    padding: '0 12px',
+                    border: '1px solid rgba(239,209,140,.3)',
+                    background: 'rgba(239,209,140,.06)',
+                    color: 'var(--color-ouro)',
+                    fontWeight: 600,
+                    fontSize: 10.5,
+                    lineHeight: 1,
+                    borderRadius: 'var(--radius-pill)',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {resultado && resultado.linhas.length > 0 && (

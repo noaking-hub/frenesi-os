@@ -40,12 +40,25 @@ function numero(valor: unknown): number {
   return 0
 }
 
-/** O saldo pode vir como número cru, `{ balance }`, `{ amount }` ou embrulhado. */
-function saldoDe(resposta: unknown): number {
+/**
+ * O saldo pode vir como número cru, `{ balance }`, `{ amount }`, embrulhado
+ * ou aninhado mais fundo — a leitura desce até dois níveis atrás do primeiro
+ * campo com cara de dinheiro.
+ */
+function saldoDe(resposta: unknown, nivel = 0): number {
   const cru = miolo(resposta)
   if (typeof cru === 'number' || typeof cru === 'string') return numero(cru)
-  if (cru && typeof cru === 'object') {
-    return numero(campo(cru as Record<string, unknown>, ['balance', 'amount', 'value', 'total', 'saldo']))
+  if (cru && typeof cru === 'object' && !Array.isArray(cru) && nivel < 3) {
+    const o = cru as Record<string, unknown>
+    const direto = campo(o, ['balance', 'amount', 'value', 'total', 'saldo', 'available'])
+    if (direto !== undefined) {
+      const n = saldoDe(direto, nivel + 1)
+      if (n !== 0) return n
+      return numero(direto)
+    }
+    // Sem campo conhecido: desce em wallet/cashback, se existirem.
+    const dentro = campo(o, ['wallet', 'cashback'])
+    if (dentro !== undefined) return saldoDe(dentro, nivel + 1)
   }
   return 0
 }
@@ -57,6 +70,12 @@ export interface RodadaCashback {
   proximaPagina: number | null
   lidos: number
   comSaldo: number
+  /**
+   * Respostas CRUAS de carteira, para diagnóstico: quando tudo vem zerado,
+   * a diferença entre "a loja não tem cashback" e "o leitor não entendeu o
+   * formato" está aqui — e se conserta em cima do fato, não de palpite.
+   */
+  amostraCrua: string[]
 }
 
 /**
@@ -77,6 +96,7 @@ export async function sincronizarCashbackYampi(
   const inicio = Date.now()
   let lidos = 0
   let comSaldo = 0
+  const amostraCrua: string[] = []
 
   for (let pagina = Math.max(1, paginaInicial); ; pagina++) {
     const r = await chamarYampi<{
@@ -107,7 +127,15 @@ export async function sincronizarCashbackYampi(
       let tentativas = 0
       for (;;) {
         try {
-          saldo = saldoDe(await chamarYampi(`/pricing/wallet/${String(id)}/balance`))
+          const cru = await chamarYampi(`/pricing/wallet/${String(id)}/balance`)
+          if (amostraCrua.length < 3) {
+            try {
+              amostraCrua.push(JSON.stringify(cru).slice(0, 320))
+            } catch {
+              /* amostra é diagnóstico, não pode derrubar a leitura */
+            }
+          }
+          saldo = saldoDe(cru)
           break
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
@@ -141,9 +169,40 @@ export async function sincronizarCashbackYampi(
 
     const p = r.meta?.pagination
     const acabou = !p || p.current_page >= p.total_pages
-    if (acabou) return { proximaPagina: null, lidos, comSaldo }
-    if (Date.now() - inicio > prazoMs) return { proximaPagina: pagina + 1, lidos, comSaldo }
+    if (acabou) return { proximaPagina: null, lidos, comSaldo, amostraCrua }
+    if (Date.now() - inicio > prazoMs) return { proximaPagina: pagina + 1, lidos, comSaldo, amostraCrua }
   }
+}
+
+/**
+ * Diagnóstico instantâneo: a resposta CRUA da carteira do primeiro cliente.
+ * É o que separa "a loja não tem cashback" de "o leitor não entendeu o
+ * formato" sem esperar uma varredura inteira.
+ */
+export async function amostraCarteiraCrua(): Promise<{ saldoCru: string; extratoCru: string }> {
+  const r = await chamarYampi<{ data?: Record<string, unknown>[] }>('/customers', { limit: '1', page: '1' })
+  const id = r.data?.[0] ? campo(r.data[0], ['id']) : undefined
+  if (id === undefined) throw new Error('A Yampi não devolveu nenhum cliente para diagnosticar.')
+  const json = (v: unknown) => {
+    try {
+      return JSON.stringify(v).slice(0, 500)
+    } catch {
+      return '(resposta não serializável)'
+    }
+  }
+  let saldoCru = ''
+  try {
+    saldoCru = json(await chamarYampi(`/pricing/wallet/${String(id)}/balance`))
+  } catch (e) {
+    saldoCru = `ERRO: ${e instanceof Error ? e.message : String(e)}`
+  }
+  let extratoCru = ''
+  try {
+    extratoCru = json(await chamarYampi(`/pricing/wallet/statement/${String(id)}`))
+  } catch (e) {
+    extratoCru = `ERRO: ${e instanceof Error ? e.message : String(e)}`
+  }
+  return { saldoCru, extratoCru }
 }
 
 export interface CarteiraYampi {

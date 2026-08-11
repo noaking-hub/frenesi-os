@@ -188,7 +188,10 @@ export async function lerLojaShopify(dominio: string): Promise<PrecoObservado[]>
  * O custo é uma requisição por produto. Daí o teto e o passo: a coleta é
  * lenta de propósito, para não parecer ataque a quem está do outro lado.
  */
-const MAX_PRODUTOS_NUVEMSHOP = 400
+// Teto por vasculhada. Era 400 e ficava AQUÉM do catálogo das lojas — perfume
+// que o concorrente vende não aparecia na busca porque a coleta parava antes
+// de chegar nele. 900 cobre as quatro lojas de hoje com folga.
+const MAX_PRODUTOS_NUVEMSHOP = 900
 const PARALELAS = 4
 
 async function texto(url: string, oQue: string): Promise<string> {

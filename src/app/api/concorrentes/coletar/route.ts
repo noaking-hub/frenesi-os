@@ -45,15 +45,23 @@ export async function POST(req: Request) {
   }
 
   const sb = supabaseServer()
+  // A mais velha primeiro: com o teto de produtos maior, nem toda loja cabe
+  // numa execução — o rodízio garante que nenhuma fica para trás.
   const { data, error } = await sb
     .from('concorrentes')
-    .select('id, nome')
+    .select('id, nome, ultima_leitura')
     .eq('ativo', true)
     .neq('coleta', 'manual')
+    .order('ultima_leitura', { ascending: true, nullsFirst: true })
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 })
 
+  const inicio = Date.now()
   const resultado: { fonte: string; lidos: number; casados: number; erro: string | null }[] = []
   for (const f of data ?? []) {
+    if (Date.now() - inicio > 230_000) {
+      resultado.push({ fonte: f.nome, lidos: 0, casados: 0, erro: 'sem tempo nesta rodada — fica para a próxima (rodízio pela leitura mais velha)' })
+      continue
+    }
     try {
       const r = await coletarConcorrente(f.id)
       resultado.push({ fonte: f.nome, lidos: r.lidos, casados: r.casados, erro: null })

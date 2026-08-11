@@ -44,6 +44,8 @@ export interface ResultadoBusca {
   encontrados: number
   /** Sem Supabase não há preço guardado — e isso não é "nada encontrado". */
   semBanco: boolean
+  /** Quando nada casa com TODAS as palavras: títulos que casam com alguma. */
+  parecidos: string[]
 }
 
 export async function buscarPrecos(termo: string): Promise<ResultadoBusca | null> {
@@ -58,6 +60,7 @@ export async function buscarPrecos(termo: string): Promise<ResultadoBusca | null
       linhas: [],
       encontrados: 0,
       semBanco: true,
+      parecidos: [],
     }
   }
 
@@ -123,6 +126,23 @@ export async function buscarPrecos(termo: string): Promise<ResultadoBusca | null
     )
   }
 
+  // Nada casou com todas as palavras? Oferece o que casa com ALGUMA — é o
+  // que transforma "nada encontrado" em "você quis dizer".
+  let parecidos: string[] = []
+  if (observados.length === 0) {
+    const vistos = new Set<string>()
+    for (const p of (precos ?? []) as unknown as { titulo: string }[]) {
+      const alvo = normaliza(p.titulo)
+      if ((grupos.length ? grupos : [[limpo]]).some((formas) => formas.some((f) => alvo.includes(normaliza(f))))) {
+        const curto = p.titulo.replace(/\s*\d+\s*ml\b.*$/i, '').trim()
+        if (!vistos.has(curto)) {
+          vistos.add(curto)
+          if (vistos.size <= 10) parecidos.push(curto)
+        }
+      }
+    }
+  }
+
   const fontes = [...new Set(observados.map((o) => o.fonte))].sort()
 
   const linhas: LinhaComparativo[] = VARIANTES.map((v) => {
@@ -156,6 +176,7 @@ export async function buscarPrecos(termo: string): Promise<ResultadoBusca | null
     linhas,
     encontrados: observados.length,
     semBanco: false,
+    parecidos,
   }
 }
 
