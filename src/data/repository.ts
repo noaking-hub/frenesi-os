@@ -1,6 +1,7 @@
 import 'server-only'
 
 import {
+  INICIO_DA_OPERACAO,
   PARAMETROS_PADRAO,
   aferirItem,
   iniciaisDe,
@@ -875,20 +876,32 @@ const repositorioSupabase: Repositorio = {
   async repasses() {
     const { data, error } = await supabaseServer()
       .from('repasses')
-      .select('pedido_id, origem, taxa_pct, recebido, pedidos!inner(valor, pagamento)')
-      .limit(500)
+      .select(
+        'pedido_id, origem, taxa_pct, taxa_real, meio, recebido, ' +
+          'pedidos!inner(valor, pagamento, comprado_em)',
+      )
+      .order('comprado_em', { ascending: false, referencedTable: 'pedidos' })
+      .limit(1000)
     if (error) throw error
     const linhas = (data ?? []) as unknown as LinhaRepasse[]
-    return linhas.map(
-      (r): Repasse => ({
+    return linhas.map((r): Repasse => {
+      const compradoEm = String(r.pedidos.comprado_em ?? '').slice(0, 10)
+      return {
         pedidoId: r.pedido_id,
-        origem: r.origem,
+        // A origem gravada carregava o status do pedido na época da previsão
+        // ("Yampi · Divergente"), que colidia com o status da conciliação na
+        // mesma tabela. O meio real do gateway diz mais.
+        origem: [r.origem.split(' · ')[0] || 'Yampi', r.meio].filter(Boolean).join(' · '),
         esperado: Number(r.pedidos.valor),
         taxaPct: Number(r.taxa_pct),
+        taxaReal: r.taxa_real === null || r.taxa_real === undefined ? null : Number(r.taxa_real),
+        meio: r.meio ?? null,
         recebido: r.recebido === null ? null : Number(r.recebido),
         pagamentoConfirmado: r.pedidos.pagamento === 'pago',
-      }),
-    )
+        compradoEm,
+        foraDaJanela: Boolean(compradoEm && compradoEm < INICIO_DA_OPERACAO),
+      }
+    })
   },
 
   async categorias() {
@@ -1102,11 +1115,13 @@ interface LinhaLancamento {
 }
 
 interface LinhaRepasse {
+  taxa_real: number | string | null
+  meio: string | null
   pedido_id: string
   origem: string
   taxa_pct: number | string
   recebido: number | string | null
-  pedidos: { valor: number | string; pagamento: string }
+  pedidos: { valor: number | string; pagamento: string; comprado_em: string | null }
 }
 
 interface LinhaOrdem {

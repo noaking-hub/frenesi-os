@@ -761,14 +761,50 @@ export interface PassoAtualizacao {
   /** `pronto`: importou. `aguardando`: o Mercado Pago ainda está montando. */
   estado: 'pronto' | 'aguardando'
   linhas: string[]
-  /**
-   * Os relatórios que já existiam no instante em que pedimos um novo.
-   *
-   * É a única forma confiável de reconhecer o relatório recém-gerado: o nome
-   * do arquivo é único, e comparar nomes não depende de relógio nenhum — nem
-   * do nosso, nem do fuso da conta do Mercado Pago.
-   */
+}
+
+/**
+ * O pedido de relatório em andamento, guardado no banco.
+ *
+ * No banco, e não na memória da tela: recarregar a página perdia a lista de
+ * arquivos anteriores ao pedido, e o clique seguinte pedia OUTRO relatório —
+ * a conta enchia de arquivos idênticos e a espera recomeçava do zero. Com o
+ * estado persistido, a tela, o F5 e a rotina de hora em hora esperam o MESMO
+ * pedido.
+ *
+ * O relatório novo é reconhecido pelo nome do arquivo, comparado com a lista
+ * de antes do pedido — nome é único e não depende de relógio nenhum, nem do
+ * nosso nem do fuso da conta.
+ */
+interface PedidoPendente {
+  pedidoEm: string
   jaExistiam: string[]
+}
+
+/** Depois disso, o pedido é dado por perdido e outro pode ser feito. */
+const VALIDADE_PEDIDO_MIN = 30
+
+async function pedidoPendente(): Promise<PedidoPendente | null> {
+  const { data } = await supabaseServer()
+    .from('mp_pedido_relatorio')
+    .select('pedido_em, ja_existiam')
+    .maybeSingle()
+  if (!data) return null
+  const idadeMin = (Date.now() - Date.parse(data.pedido_em as string)) / 60_000
+  // Pedido velho não bloqueia um novo: o Mercado Pago pode ter falhado do
+  // lado dele, e prender a tela num pedido morto seria pior que repetir.
+  if (!Number.isFinite(idadeMin) || idadeMin > VALIDADE_PEDIDO_MIN) return null
+  return { pedidoEm: data.pedido_em as string, jaExistiam: (data.ja_existiam as string[]) ?? [] }
+}
+
+async function gravarPedido(jaExistiam: string[]): Promise<void> {
+  await supabaseServer()
+    .from('mp_pedido_relatorio')
+    .upsert({ id: true, pedido_em: new Date().toISOString(), ja_existiam: jaExistiam })
+}
+
+async function limparPedido(): Promise<void> {
+  await supabaseServer().from('mp_pedido_relatorio').delete().eq('id', true)
 }
 
 /**
@@ -787,13 +823,28 @@ export interface PassoAtualizacao {
 export async function atualizarExtratoMp(
   de: string,
   deAte: string,
-  opcoes: { pedir: boolean; jaExistiam?: string[] },
+  opcoes: { pedir: boolean },
 ): Promise<PassoAtualizacao> {
   // Recortado logo na entrada para que TODO o resto — o teste de janela
   // aberta, o recorte das linhas, a mensagem na tela — fale da mesma data.
   const ate = ateNoMaximoHoje(deAte)
   const lista = await relatoriosDisponiveis()
-  const nomes = lista.map((r) => r.arquivo)
+
+  // Há um pedido em andamento? Então a única pergunta é se o arquivo dele já
+  // apareceu. Pedir outro aqui encheria a conta de relatórios idênticos.
+  const pendente = await pedidoPendente()
+  if (pendente) {
+    const conhecidos = new Set(pendente.jaExistiam)
+    const novo = lista.find((r) => !conhecidos.has(r.arquivo) && relatorioServe(r, de, ate))
+    if (!novo) {
+      return {
+        estado: 'aguardando',
+        linhas: ['O Mercado Pago ainda está montando o extrato. O pedido continua valendo.'],
+      }
+    }
+    await limparPedido()
+    return importarEComplementar(novo.arquivo, de, ate)
+  }
 
   // O período declarado não é o mesmo que o conteúdo. Um relatório pedido às
   // 10h para a janela "22/07 até hoje" declara fim = hoje e serve pelo
@@ -805,56 +856,30 @@ export async function atualizarExtratoMp(
   // aceita um arquivo que não existia antes do pedido.
   const janelaAberta = ate >= hojeEmSaoPaulo()
 
-  // Volta automática: serve o que apareceu depois do nosso pedido.
-  if (opcoes.jaExistiam) {
-    const conhecidos = new Set(opcoes.jaExistiam)
-    const novo = lista.find((r) => !conhecidos.has(r.arquivo) && relatorioServe(r, de, ate))
-    if (!novo) {
-      return {
-        estado: 'aguardando',
-        jaExistiam: opcoes.jaExistiam,
-        linhas: ['O Mercado Pago ainda está montando o extrato.'],
-      }
-    }
-    return importarEComplementar(novo.arquivo, de, ate)
+  // Janela fechada no passado aproveita relatório existente: o conteúdo não
+  // muda mais, e pedir outro só faria esperar por um arquivo idêntico.
+  if (!janelaAberta) {
+    const alvo = lista.find((r) => relatorioServe(r, de, ate))
+    if (alvo) return importarEComplementar(alvo.arquivo, de, ate)
   }
 
-  if (janelaAberta) {
-    await pedirRelatorio(de, ate)
+  if (!opcoes.pedir) {
+    // Sem pedido em andamento e sem ordem de pedir: não há o que esperar.
     return {
       estado: 'aguardando',
-      jaExistiam: nomes,
-      linhas: [
-        `Extrato de ${de} a ${ate} pedido ao Mercado Pago.`,
-        'Como a janela alcança hoje, um relatório novo é obrigatório: o que já existe é a foto do instante em que foi gerado e não tem o movimento das últimas horas.',
-        'Leva de alguns segundos a poucos minutos. Pode deixar a tela aberta: ela importa sozinha quando ficar pronto.',
-      ],
+      linhas: ['Nenhum pedido de extrato em andamento. Clique em Atualizar extrato.'],
     }
   }
 
-  // Janela fechada no passado: um relatório que a cubra já está completo, e
-  // pedir outro só faria esperar por um arquivo idêntico.
-  const alvo = lista.find((r) => relatorioServe(r, de, ate))
-  if (!alvo) {
-    if (!opcoes.pedir) {
-      return {
-        estado: 'aguardando',
-        jaExistiam: nomes,
-        linhas: ['O Mercado Pago ainda está montando o extrato.'],
-      }
-    }
-    await pedirRelatorio(de, ate)
-    return {
-      estado: 'aguardando',
-      jaExistiam: nomes,
-      linhas: [
-        `Extrato de ${de} a ${ate} pedido ao Mercado Pago.`,
-        'Leva de alguns segundos a poucos minutos. Pode deixar a tela aberta: ela importa sozinha quando ficar pronto.',
-      ],
-    }
+  await pedirRelatorio(de, ate)
+  await gravarPedido(lista.map((r) => r.arquivo))
+  return {
+    estado: 'aguardando',
+    linhas: [
+      `Extrato de ${de} a ${ate} pedido ao Mercado Pago.`,
+      'Costuma levar menos de um minuto, mas pode passar disso quando a fila deles está cheia. O pedido fica registrado: mesmo fechando esta tela, a próxima atualização importa sem pedir de novo.',
+    ],
   }
-
-  return importarEComplementar(alvo.arquivo, de, ate)
 }
 
 /**
@@ -882,19 +907,15 @@ export async function atualizarExtratoEsperando(
 
   for (let i = 0; i < tentativas; i += 1) {
     await new Promise((r) => setTimeout(r, intervalo))
-    const passo = await atualizarExtratoMp(de, ate, {
-      pedir: false,
-      jaExistiam: primeiro.jaExistiam,
-    })
+    const passo = await atualizarExtratoMp(de, ate, { pedir: false })
     if (passo.estado === 'pronto') return passo
   }
 
   return {
     estado: 'aguardando',
-    jaExistiam: primeiro.jaExistiam,
     linhas: [
       `O relatório de ${de} a ${ate} foi pedido e não ficou pronto a tempo desta rodada.`,
-      'O pedido continua valendo: a próxima rodada encontra o arquivo e importa.',
+      'O pedido fica registrado: a próxima rodada encontra o arquivo e importa sem pedir de novo.',
     ],
   }
 }
@@ -949,7 +970,7 @@ async function importarEComplementar(
     linhas.push(`As tarifas das vendas não puderam ser lidas agora: ${mensagemDe(e)}`)
   }
 
-  return { estado: 'pronto', jaExistiam: [], linhas }
+  return { estado: 'pronto', linhas }
 }
 
 async function listarRelatorios(): Promise<ArquivoRelatorio[]> {

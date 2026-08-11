@@ -160,6 +160,24 @@ export interface Repasse {
   recebido: number | null
   /** O pagamento em si foi confirmado (Pix pago, cartão aprovado). */
   pagamentoConfirmado: boolean
+  /**
+   * Tarifa REAL que o gateway cobrou, em reais. Quando existe, manda mais que
+   * `taxaPct`: a taxa em % é o parâmetro de pior caso (cartão 6x), e comparar
+   * um Pix recebido contra ela fabricava divergência de +14% em toda venda
+   * Pix — alarme que grita em tudo não avisa de nada.
+   */
+  taxaReal?: number | null
+  /** Meio de pagamento informado pelo gateway: Pix, Cartão de crédito 6x… */
+  meio?: string | null
+  /** AAAA-MM-DD da compra. */
+  compradoEm?: string
+  /**
+   * Pedido anterior a 22/07, quando esta conta do Mercado Pago passou a
+   * receber a Yampi. O crédito dele caiu em outra operação e NUNCA vai
+   * aparecer neste extrato — cobrar ação eterna sobre ele é a diferença entre
+   * uma fila de 27 itens e uma de 427.
+   */
+  foraDaJanela?: boolean
 }
 
 export type StatusConciliacao =
@@ -168,6 +186,7 @@ export type StatusConciliacao =
   | 'confirmado'
   | 'conciliado'
   | 'divergente'
+  | 'fora_da_janela'
 
 export interface ResultadoConciliacao {
   repasse: Repasse
@@ -192,8 +211,25 @@ const TOLERANCIA_CONCILIACAO = 0.05
  *   caiu outra coisa                  → divergente (a diferença diz quanto)
  */
 export function conciliarRepasse(r: Repasse): ResultadoConciliacao {
-  const liquidoEsperado = Math.round(r.esperado * (1 - r.taxaPct / 100) * 100) / 100
+  // A régua: com a tarifa real do gateway em mãos, é ela que define o líquido
+  // esperado — exata, por venda. Sem ela, sobra o parâmetro em %, que é o
+  // pior caso e serve só de previsão.
+  const liquidoEsperado =
+    r.taxaReal !== null && r.taxaReal !== undefined
+      ? Math.round((r.esperado - r.taxaReal) * 100) / 100
+      : Math.round(r.esperado * (1 - r.taxaPct / 100) * 100) / 100
 
+  if (r.recebido === null && r.foraDaJanela) {
+    // Sem crédito e anterior à janela do extrato: não há o que esperar nem o
+    // que cobrar. Fora da fila de ação, sem fingir que está "pendente".
+    return {
+      repasse: r,
+      liquidoEsperado,
+      diferenca: null,
+      status: 'fora_da_janela',
+      precisaAcao: false,
+    }
+  }
   if (!r.pagamentoConfirmado) {
     return { repasse: r, liquidoEsperado, diferenca: null, status: 'previsto', precisaAcao: false }
   }

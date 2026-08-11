@@ -89,7 +89,9 @@ export const NAV: GrupoNav[] = [
       { id: 'cupons', label: 'Cupons e campanhas', href: '/promocoes', pronta: true },
       { id: 'ofertas', label: 'Rodízio de ofertas', href: '/promocoes/ofertas', pronta: true },
       { id: 'avaliacoes', label: 'Cupons de avaliação', href: '/promocoes/avaliacoes', pronta: true },
-      { id: 'giftback-p', label: 'Giftback e cashback', href: '/crm/giftback', pronta: true },
+      // Giftback mora no CRM: é régua de relacionamento com quem já comprou,
+      // não campanha de aquisição. Aparecer nos dois grupos fazia parecer
+      // duas telas diferentes — e era a mesma.
     ],
   },
   { id: 'atendimento', label: 'Atendimento', href: '/atendimento', pronta: true },

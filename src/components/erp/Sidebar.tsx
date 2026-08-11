@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
+import { ICONES } from './Icones'
 import { NAV, grupoAberto, rotaAtiva, type GrupoNav } from './navegacao'
 
 export function Sidebar({ origem }: { origem: 'supabase' | 'fixtures' }) {
@@ -139,9 +140,12 @@ function Grupo({
     letterSpacing: '.01em',
     textAlign: 'left' as const,
     cursor: 'pointer',
+    transition: 'background-color .16s, color .16s',
   }
 
-  const marcador = (
+  // O ícone acompanha o estado pelo `currentColor`: apagado no repouso,
+  // dourado no ativo. O ponto genérico fica de reserva para grupo sem ícone.
+  const marcador = ICONES[grupo.id] ?? (
     <span
       aria-hidden
       style={{
@@ -211,6 +215,7 @@ function Grupo({
                   lineHeight: 1,
                   padding: '7px 10px',
                   borderRadius: 7,
+                  transition: 'background-color .16s, color .16s',
                 }}
               >
                 {tela.label}

@@ -261,3 +261,41 @@ describe('receita de mais de uma origem', () => {
     expect(dre.linhas.some((l) => l.linha === 'Receita bruta' && l.valor === 1250)).toBe(true)
   })
 })
+
+describe('conciliação com a tarifa real', () => {
+  const base = {
+    pedidoId: 'YP-1',
+    origem: 'Yampi · Pix',
+    esperado: 100,
+    taxaPct: 14.94,
+    pagamentoConfirmado: true,
+  }
+
+  it('usa a tarifa real do gateway quando ela existe', () => {
+    // Comparar um Pix contra a taxa de pior caso (cartão 6x) fabricava
+    // divergência de +14% em toda venda Pix — alarme que grita em tudo não
+    // avisa de nada.
+    const r = conciliarRepasse({ ...base, taxaReal: 0.48, recebido: 99.52 })
+    expect(r.status).toBe('conciliado')
+    expect(r.diferenca).toBeNull()
+  })
+
+  it('sem tarifa real, o parâmetro em % continua sendo a previsão', () => {
+    const r = conciliarRepasse({ ...base, recebido: null })
+    expect(r.liquidoEsperado).toBeCloseTo(85.06, 2)
+    expect(r.status).toBe('pendente')
+  })
+
+  it('venda anterior à janela não pede ação eterna', () => {
+    // O crédito dela caiu na conta antiga e nunca vai aparecer neste
+    // extrato. É a diferença entre uma fila de 27 e uma de 427.
+    const r = conciliarRepasse({ ...base, recebido: null, foraDaJanela: true })
+    expect(r.status).toBe('fora_da_janela')
+    expect(r.precisaAcao).toBe(false)
+  })
+
+  it('venda antiga que MESMO ASSIM creditou é conciliada normalmente', () => {
+    const r = conciliarRepasse({ ...base, foraDaJanela: true, taxaReal: 0.48, recebido: 99.52 })
+    expect(r.status).toBe('conciliado')
+  })
+})

@@ -272,10 +272,6 @@ export function ExtratoCliente({
   // Zero é "não está esperando". Acima disso, é a vez da espera — e mudar o
   // número é o que faz o efeito abaixo agendar a próxima consulta.
   const [espera, setEspera] = useState(0)
-  // Os relatórios que já existiam quando pedimos. A volta automática só
-  // aceita um arquivo que NÃO esteja nesta lista — é assim que se distingue o
-  // relatório novo do que já estava lá, sem depender de relógio nenhum.
-  const [jaExistiam, setJaExistiam] = useState<string[]>([])
   const [atualizando, setAtualizando] = useState(false)
   const [ferramentas, setFerramentas] = useState(false)
   const [editandoPeriodo, setEditandoPeriodo] = useState(false)
@@ -309,7 +305,7 @@ export function ExtratoCliente({
       setErro(null)
       setAtualizando(true)
       try {
-        const r = await atualizarExtrato(de, ate, pedir, pedir ? undefined : jaExistiam)
+        const r = await atualizarExtrato(de, ate, pedir)
         if (!r.ok) {
           setErro(r.erro)
           setEspera(0)
@@ -318,9 +314,7 @@ export function ExtratoCliente({
         setRelatorio(r.linhas)
         if (r.estado === 'pronto') {
           setEspera(0)
-          setJaExistiam([])
         } else {
-          setJaExistiam(r.jaExistiam)
           setEspera((n) => (n === 0 ? 1 : n + 1))
         }
       } catch (e) {
@@ -330,7 +324,7 @@ export function ExtratoCliente({
         setAtualizando(false)
       }
     },
-    [de, ate, jaExistiam],
+    [de, ate],
   )
 
   // Atualiza sozinho ao abrir a tela, quando o extrato está velho.
@@ -350,9 +344,14 @@ export function ExtratoCliente({
   useEffect(() => {
     if (espera === 0) return
     if (espera > MAX_ESPERAS) {
-      setErro(
-        'O Mercado Pago passou de seis minutos para montar o extrato. O pedido continua valendo do lado deles — clique em Atualizar extrato daqui a pouco e ele será importado sem pedir de novo.',
-      )
+      // Demora não é erro: o pedido está registrado no banco e a PRÓXIMA
+      // atualização — desta tela, de outra aba ou da rotina de hora em hora —
+      // importa o arquivo sem pedir outro. Pintar isso de vermelho ensinaria
+      // a pessoa a ignorar a cor que avisa de problema de verdade.
+      setRelatorio([
+        'O Mercado Pago está demorando mais que o comum para montar o extrato.',
+        'O pedido fica registrado: a próxima atualização importa o arquivo sem pedir de novo — pode continuar usando o ERP normalmente.',
+      ])
       setEspera(0)
       return
     }
