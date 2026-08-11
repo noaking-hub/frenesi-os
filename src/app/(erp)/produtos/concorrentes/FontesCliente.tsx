@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 
 import { Modal } from '@/components/erp/Modal'
 import { BotaoOuro, BotaoSecundario, EstadoVazio, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
@@ -79,6 +79,20 @@ export function FontesCliente({ fontes, bases, semDono, variantes }: Props) {
   const [pendente, iniciarTransicao] = useTransition()
 
   const automaticas = fontes.filter((f) => f.coleta !== 'manual')
+
+  // Coleta com mais de 24 h dispara sozinha ao abrir: a rotina agendada só
+  // roda no deploy, e rodando local ninguém deveria precisar lembrar do botão.
+  const jaTentou = useRef(false)
+  useEffect(() => {
+    if (jaTentou.current || automaticas.length === 0) return
+    const ultima = automaticas
+      .map((f) => (f.lidaEm ? new Date(f.lidaEm).getTime() : 0))
+      .reduce((a, b) => Math.max(a, b), 0)
+    if (Date.now() - ultima < 24 * 3_600_000) return
+    jaTentou.current = true
+    vascular()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- roda uma vez, ao abrir
+  }, [])
 
   const vascular = () =>
     iniciarTransicao(async () => {

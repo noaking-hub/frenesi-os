@@ -7,7 +7,11 @@ export const PARAMETROS_PADRAO: ParametrosPrecificacao = {
   checkoutPct: 1.99,
   impostoPct: 6.0,
   adsPct: 12.0,
-  insumos: 4.8,
+  frasco: 2.2,
+  valvula: 0.9,
+  etiqueta: 0.6,
+  caixa: 0.9,
+  plasticoBolha: 0.2,
   freteSubsidio: 8.0,
   antifraude: 0.49,
   perdaPct: 3.0,
@@ -39,9 +43,14 @@ export function taxasPct(p: ParametrosPrecificacao): number {
   return p.intermediadorPct + p.checkoutPct + p.impostoPct + p.adsPct + descontoPixPct(p)
 }
 
+/** Embalagem por pedido: frasco, válvula, etiqueta, caixa e plástico bolha. */
+export function insumosDe(p: ParametrosPrecificacao): number {
+  return p.frasco + p.valvula + p.etiqueta + p.caixa + p.plasticoBolha
+}
+
 /** Soma dos custos fixos por pedido. */
 export function custosFixos(p: ParametrosPrecificacao): number {
-  return p.insumos + p.freteSubsidio + p.antifraude + p.intermediadorFixo
+  return insumosDe(p) + p.freteSubsidio + p.antifraude + p.intermediadorFixo
 }
 
 /** O que sobra do preço para pagar o produto, depois de taxas e margem alvo. */
@@ -149,7 +158,7 @@ export function composicaoPreco(
   const checkoutImposto = preco * ((p.checkoutPct + p.impostoPct) / 100)
   const ads = preco * (p.adsPct / 100)
   const pix = preco * (descontoPixPct(p) / 100)
-  const embalagem = p.insumos + p.freteSubsidio
+  const embalagem = insumosDe(p) + p.freteSubsidio
   const lucro = lucroDe(preco, custoProduto, p)
 
   const fatia = (v: number) => (preco > 0 ? (v / preco) * 100 : 0)

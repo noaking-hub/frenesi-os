@@ -108,7 +108,12 @@ export interface ParametrosPrecificacao {
   checkoutPct: number
   impostoPct: number
   adsPct: number
-  insumos: number
+  /** Embalagem por pedido, item a item — `insumosDe` soma os cinco. */
+  frasco: number
+  valvula: number
+  etiqueta: number
+  caixa: number
+  plasticoBolha: number
   freteSubsidio: number
   antifraude: number
   /** Estimativa de perda no envase. A perda real só é medida ao encerrar o lote. */

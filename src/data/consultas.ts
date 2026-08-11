@@ -148,7 +148,6 @@ export async function carregarDashboard() {
   const bases = await repo.perfumesBase()
   // Volume zero tem dois significados opostos e o Dashboard precisa separá-los:
   // sem carga é "o ERP não sabe", esgotada é "acabou". Só a segunda é risco.
-  const semCarga = bases.filter((b) => b.volumeMl === 0 && !b.sobControle)
   const esgotadas = bases.filter((b) => b.volumeMl === 0 && b.sobControle)
   const emRisco = estoque.criticos + esgotadas.length
 
@@ -217,19 +216,6 @@ export async function carregarDashboard() {
       etiqueta: 'Preço',
       tom: 'atencao',
       href: '/configuracoes/precificacao',
-      origem: 'banco',
-    },
-    {
-      // NÃO é alarme: o estoque entra frasco a frasco, conforme cada um é
-      // deslacrado, e a maior parte do catálogo fica fora por muito tempo.
-      // Uma pendência vermelha permanente com 400 no contador ensina a
-      // ignorar o painel — que é o oposto do que ele existe para fazer.
-      contagem: semCarga.length,
-      titulo: 'Perfumes fora do controle de estoque',
-      hint: 'Cada um entra ao registrar a compra do frasco · até lá, a sincronia não mexe neles na loja',
-      etiqueta: 'Cadastro',
-      tom: 'neutro',
-      href: '/estoque',
       origem: 'banco',
     },
     {

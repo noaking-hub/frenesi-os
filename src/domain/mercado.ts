@@ -150,6 +150,8 @@ export interface FonteConcorrente {
   coleta: 'shopify' | 'nuvemshop' | 'manual'
   /** Quando foi a última tentativa. Vazio enquanto não houve nenhuma. */
   quando: string
+  /** A mesma leitura, em ISO — decide se a coleta está velha. */
+  lidaEm?: string | null
   itensLidos: number
   /** Motivo cru da última falha. É o que evita adivinhar por que não leu. */
   erro: string | null

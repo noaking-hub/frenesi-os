@@ -245,7 +245,13 @@ const repositorioSupabase: Repositorio = {
       checkoutPct: Number(data.checkout_pct),
       impostoPct: Number(data.imposto_pct),
       adsPct: Number(data.ads_pct),
-      insumos: Number(data.insumos),
+      // Vigências de antes do detalhamento têm só o total: ele entra como
+      // frasco até o operador abrir o valor item a item.
+      frasco: Number(data.frasco ?? 0) || Number(data.insumos ?? 0),
+      valvula: Number(data.valvula ?? 0),
+      etiqueta: Number(data.etiqueta ?? 0),
+      caixa: Number(data.caixa ?? 0),
+      plasticoBolha: Number(data.plastico_bolha ?? 0),
       freteSubsidio: Number(data.frete_subsidio),
       antifraude: Number(data.antifraude),
       perdaPct: Number(data.perda_pct),
@@ -835,6 +841,7 @@ const repositorioSupabase: Repositorio = {
         coleta: c.coleta as 'shopify' | 'manual',
         status: c.ultimo_status as FonteConcorrente['status'],
         quando: c.ultima_leitura ? dataCurta(c.ultima_leitura as string) : '',
+        lidaEm: (c.ultima_leitura as string | null) ?? null,
         itensLidos: Number(c.precos_lidos ?? 0),
         erro: (c.ultimo_erro as string | null) ?? null,
       }),

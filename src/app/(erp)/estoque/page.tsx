@@ -36,10 +36,10 @@ export default async function PerfumesBase() {
     {
       // Esgotado e sem carga davam o mesmo zero e pediam coisas opostas: um
       // pede recompra, o outro pede que alguém diga quanto tem na gaveta.
-      label: 'Sem carga inicial',
+      label: 'Fora do controle de estoque',
       valor: pad2(semCarga),
-      hint: semCarga ? 'O ERP não sabe se você tem estes' : 'Todas as bases foram declaradas',
-      tom: semCarga ? 'atencao' : 'ok',
+      hint: 'Entram um a um, quando a compra do frasco novo for registrada',
+      tom: 'neutro',
     },
     {
       label: 'Valor em estoque',
@@ -56,12 +56,9 @@ export default async function PerfumesBase() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <TituloSecao tamanho={16}>Perfumes base · quando o estoque acaba</TituloSecao>
         <div style={{ flex: 1 }} />
-        {/* Esta tela é leitura: quem move estoque é a carga, a compra, a
-            produção e o inventário. Os atalhos levam até quem executa, em vez
-            de fingir que a ação acontece aqui. */}
-        <LinkSecundario href="/estoque/carga" altura={34}>
-          Carga inicial
-        </LinkSecundario>
+        {/* Esta tela é leitura: quem move estoque é a compra, a produção e o
+            inventário. Os atalhos levam até quem executa, em vez de fingir
+            que a ação acontece aqui. */}
         <LinkSecundario href="/estoque/lotes" altura={34}>
           Registrar compra de frasco
         </LinkSecundario>

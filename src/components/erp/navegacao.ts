@@ -48,7 +48,6 @@ export const NAV: GrupoNav[] = [
     label: 'Estoque',
     telas: [
       { id: 'base', label: 'Perfumes base', href: '/estoque', pronta: true },
-      { id: 'carga', label: 'Carga inicial', href: '/estoque/carga', pronta: true },
       { id: 'derivados', label: 'Produtos derivados', href: '/estoque/derivados', pronta: true },
       { id: 'movimentacoes', label: 'Movimentações', href: '/estoque/movimentacoes', pronta: true },
       { id: 'lotes', label: 'Lotes e perda real', href: '/estoque/lotes', pronta: true },
@@ -83,7 +82,6 @@ export const NAV: GrupoNav[] = [
     id: 'config',
     label: 'Configurações',
     telas: [
-      { id: 'cfg', label: 'Visão geral', href: '/configuracoes', pronta: true },
       { id: 'cfgpreco', label: 'Parâmetros de precificação', href: '/configuracoes/precificacao', pronta: true },
       { id: 'integracoes', label: 'Integrações', href: '/configuracoes/integracoes', pronta: true },
     ],
