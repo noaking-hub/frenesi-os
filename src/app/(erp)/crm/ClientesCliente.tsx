@@ -6,8 +6,7 @@ import { BotaoSecundario } from '@/components/erp/primitivos'
 import { Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR, FUNDO, type Tom } from '@/components/erp/tokens'
 import type { ClienteCrm } from '@/data/fixtures'
-import { brl, saldoDe } from '@/domain'
-import type { SaldoCashback } from '@/domain'
+import { brl } from '@/domain'
 
 const TOM_STATUS: Record<ClienteCrm['status'], Tom> = {
   VIP: 'ouro',
@@ -18,22 +17,37 @@ const TOM_STATUS: Record<ClienteCrm['status'], Tom> = {
 
 const FILTROS = ['Todos', 'VIP', 'Recorrente', 'Novo', 'Inativo'] as const
 
-export function ClientesCliente({
-  clientes,
-  saldos,
-}: {
-  clientes: ClienteCrm[]
-  saldos: SaldoCashback[]
-}) {
+/**
+ * Baixa a lista VISÍVEL — o operador filtra primeiro, exporta depois.
+ * O ; como separador é o que o Excel brasileiro espera.
+ */
+function exportarCsv(clientes: ClienteCrm[]) {
+  const escapa = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`
+  const linhas = [
+    ['Nome', 'E-mail', 'Telefone', 'Cidade', 'Total comprado', 'Pedidos', 'Última compra', 'Status'],
+    ...clientes.map((c) => [
+      c.nome,
+      c.email,
+      c.telefone,
+      c.cidade,
+      String(c.total).replace('.', ','),
+      c.pedidos,
+      c.ultimaCompra,
+      c.status,
+    ]),
+  ]
+  const csv = linhas.map((l) => l.map(escapa).join(';')).join('\r\n')
+  const url = URL.createObjectURL(new Blob([`﻿${csv}`], { type: 'text/csv;charset=utf-8' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `clientes-frenesi-${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+export function ClientesCliente({ clientes }: { clientes: ClienteCrm[] }) {
   const [busca, setBusca] = useState('')
   const [filtro, setFiltro] = useState<(typeof FILTROS)[number]>('Todos')
-
-  // O cashback da tabela é o MESMO saldo da tela de Giftback — derivado de
-  // gerado − usado, nunca uma coluna própria que pudesse divergir.
-  const cashbackDe = (nome: string) => {
-    const s = saldos.find((x) => x.cliente === nome)
-    return s ? saldoDe(s) : 0
-  }
 
   const termo = busca.trim().toLowerCase()
   const visiveis = clientes.filter((c) => {
@@ -162,29 +176,6 @@ export function ClientesCliente({
       ),
     },
     {
-      chave: 'cashback',
-      titulo: 'Cashback',
-      largura: '104px',
-      alinhamento: 'right',
-      render: (c) => {
-        const saldo = cashbackDe(c.nome)
-        return (
-          <span
-            className="font-mono"
-            style={{
-              fontWeight: 500,
-              fontSize: 12,
-              lineHeight: 1,
-              color: saldo ? COR.ouro : 'rgba(242,237,227,.35)',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {saldo ? brl(saldo) : '—'}
-          </span>
-        )
-      },
-    },
-    {
       chave: 'status',
       titulo: 'Status',
       largura: '104px',
@@ -241,7 +232,9 @@ export function ClientesCliente({
           />
         </label>
         <div style={{ flex: 1 }} />
-        <BotaoSecundario altura={38}>Exportar</BotaoSecundario>
+        <BotaoSecundario altura={38} onClick={() => exportarCsv(visiveis)}>
+          Exportar CSV
+        </BotaoSecundario>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>

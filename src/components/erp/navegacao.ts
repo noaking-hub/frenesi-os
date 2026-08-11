@@ -1,9 +1,9 @@
 /**
- * Navegação do ERP: 12 grupos, 44 telas.
+ * Navegação do ERP: 9 grupos, 30 telas — todas reais.
  *
- * `href` é a rota real. Telas ainda não construídas apontam para a rota
- * marcada e caem no placeholder — o menu é a especificação completa,
- * não só o que já existe.
+ * O menu já foi a especificação completa, com telas de demonstração
+ * esperando vez. Elas saíram: menu que promete o que não existe ensina o
+ * operador a desconfiar do que existe. O que está aqui lê a operação.
  */
 
 export interface Tela {
@@ -41,7 +41,6 @@ export const NAV: GrupoNav[] = [
       { id: 'catalogo', label: 'Catálogo', href: '/produtos', pronta: true },
       { id: 'precificacao', label: 'Precificação', href: '/produtos/precificacao', pronta: true },
       { id: 'concorrentes', label: 'Concorrentes', href: '/produtos/concorrentes', pronta: true },
-      { id: 'kits', label: 'Kits e combos', href: '/produtos/kits', pronta: true },
     ],
   },
   {
@@ -77,35 +76,9 @@ export const NAV: GrupoNav[] = [
     telas: [
       { id: 'clientes', label: 'Clientes', href: '/crm', pronta: true },
       { id: 'carrinhos', label: 'Carrinhos abandonados', href: '/crm/carrinhos', pronta: true },
-      { id: 'campanhas', label: 'Campanhas', href: '/crm/campanhas', pronta: true },
-      { id: 'giftback', label: 'Giftback e cashback', href: '/crm/giftback', pronta: true },
-      { id: 'emails', label: 'E-mails e fluxos', href: '/crm/emails', pronta: true },
     ],
   },
-  {
-    id: 'promocoes',
-    label: 'Promoções',
-    telas: [
-      { id: 'cupons', label: 'Cupons e campanhas', href: '/promocoes', pronta: true },
-      { id: 'ofertas', label: 'Rodízio de ofertas', href: '/promocoes/ofertas', pronta: true },
-      { id: 'avaliacoes', label: 'Cupons de avaliação', href: '/promocoes/avaliacoes', pronta: true },
-      // Giftback mora no CRM: é régua de relacionamento com quem já comprou,
-      // não campanha de aquisição. Aparecer nos dois grupos fazia parecer
-      // duas telas diferentes — e era a mesma.
-    ],
-  },
-  { id: 'atendimento', label: 'Atendimento', href: '/atendimento', pronta: true },
-  {
-    id: 'ia',
-    label: 'Meu Assessor IA',
-    telas: [
-      { id: 'conversas', label: 'Conversas', href: '/assessor', pronta: true },
-      { id: 'iaemail', label: 'Criar e-mail com IA', href: '/assessor/email', pronta: true },
-      { id: 'iaregras', label: 'Regras e limites', href: '/assessor/regras', pronta: true },
-      { id: 'iaautorizados', label: 'Usuários autorizados', href: '/assessor/autorizados', pronta: true },
-      { id: 'ialogs', label: 'Logs de comandos', href: '/assessor/logs', pronta: true },
-    ],
-  },
+  { id: 'promocoes', label: 'Cupons', href: '/promocoes', pronta: true },
   { id: 'relatorios', label: 'Relatórios', href: '/relatorios', pronta: true },
   {
     id: 'config',
@@ -113,11 +86,7 @@ export const NAV: GrupoNav[] = [
     telas: [
       { id: 'cfg', label: 'Visão geral', href: '/configuracoes', pronta: true },
       { id: 'cfgpreco', label: 'Parâmetros de precificação', href: '/configuracoes/precificacao', pronta: true },
-      { id: 'usuarios', label: 'Usuários e permissões', href: '/configuracoes/usuarios', pronta: true },
-      { id: 'empresa', label: 'Dados da empresa', href: '/configuracoes/empresa', pronta: true },
       { id: 'integracoes', label: 'Integrações', href: '/configuracoes/integracoes', pronta: true },
-      { id: 'notificacoes', label: 'Notificações', href: '/configuracoes/notificacoes', pronta: true },
-      { id: 'logs', label: 'Logs e auditoria', href: '/configuracoes/logs', pronta: true },
     ],
   },
 ]

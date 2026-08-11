@@ -2,11 +2,11 @@ import Link from 'next/link'
 
 import { Losango } from '@/components/erp/primitivos'
 import { COR, type Tom } from '@/components/erp/tokens'
-import { EMPRESA } from '@/data/fixtures'
-import { repositorio } from '@/data/repository'
-import { plural } from '@/domain'
+import { mercadoPagoConfigurado } from '@/data/mercadopago'
+import { shopifyConfigurada } from '@/data/shopify'
+import { yampiConfigurada } from '@/data/yampi'
 
-import { CAMPOS_PARAMETROS, diasParaVencer } from './campos'
+import { CAMPOS_PARAMETROS } from './campos'
 
 interface CartaoConfig {
   href: string
@@ -22,20 +22,13 @@ interface CartaoConfig {
  * nunca diz "tudo certo" enquanto a tela interna acusa pendência.
  */
 export default async function ConfiguracoesHub() {
-  const repo = repositorio()
-  const [usuarios, perfis, integracoes, notificacoes] = await Promise.all([
-    repo.usuarios(),
-    repo.perfis(),
-    repo.integracoes(),
-    repo.notificacoes(),
-  ])
-
-  const diasCertificado = diasParaVencer(EMPRESA.certificado.validade)
-  const conectadas = integracoes.filter((i) => i.estado === 'Conectada').length
-  const viaYampi = integracoes.filter((i) => i.estado === 'Via Yampi').length
-  const pendentes = integracoes.filter((i) => i.estado === 'Domínio pendente').length
-  const ativas = notificacoes.filter((n) => n.ativa).length
-  const pausadas = notificacoes.length - ativas
+  const conexoes = [
+    ['Shopify', shopifyConfigurada()],
+    ['Yampi', yampiConfigurada()],
+    ['Mercado Pago', mercadoPagoConfigurado()],
+  ] as const
+  const configuradas = conexoes.filter(([, ok]) => ok)
+  const faltando = conexoes.filter(([, ok]) => !ok).map(([nome]) => nome)
 
   const cartoes: CartaoConfig[] = [
     {
@@ -46,39 +39,13 @@ export default async function ConfiguracoesHub() {
       tom: 'ok',
     },
     {
-      href: '/configuracoes/usuarios',
-      titulo: 'Usuários e permissões',
-      descricao: 'Quem acessa o ERP e o que cada um pode fazer',
-      nota: `${plural(usuarios.length, 'usuário', 'usuários')} · ${plural(perfis.length, 'perfil', 'perfis')}`,
-      tom: 'ok',
-    },
-    {
-      href: '/configuracoes/empresa',
-      titulo: 'Dados da empresa',
-      descricao: 'CNPJ, endereço fiscal, regime tributário e certificado',
-      nota: `Certificado vence em ${plural(diasCertificado, 'dia', 'dias')}`,
-      tom: diasCertificado <= 90 ? 'atencao' : 'ok',
-    },
-    {
       href: '/configuracoes/integracoes',
       titulo: 'Integrações',
-      descricao: 'Shopify, Yampi, Judge.me, Klaviyo e WhatsApp',
-      nota: `${conectadas} conectadas · ${viaYampi} via Yampi · ${pendentes} com pendência`,
-      tom: pendentes ? 'atencao' : 'ok',
-    },
-    {
-      href: '/configuracoes/notificacoes',
-      titulo: 'Notificações',
-      descricao: 'Alertas de estoque, esgotamento, devoluções e caixa',
-      nota: `${plural(ativas, 'regra ativa', 'regras ativas')} · ${pausadas} pausadas`,
-      tom: 'ok',
-    },
-    {
-      href: '/configuracoes/logs',
-      titulo: 'Logs e auditoria',
-      descricao: 'Histórico de alterações por usuário e por registro',
-      nota: 'Retenção de 180 dias',
-      tom: 'ok',
+      descricao: 'Credenciais e diagnóstico de Shopify, Yampi e Mercado Pago',
+      nota: faltando.length
+        ? `${configuradas.length} de 3 configuradas · falta ${faltando.join(' e ')}`
+        : '3 de 3 configuradas',
+      tom: faltando.length ? 'atencao' : 'ok',
     },
   ]
 
