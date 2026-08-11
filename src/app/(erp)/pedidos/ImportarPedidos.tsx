@@ -1,5 +1,7 @@
 'use client'
 
+import { useRouter } from 'next/navigation'
+
 import { useEffect, useRef, useState, useTransition } from 'react'
 
 import { COR } from '@/components/erp/tokens'
@@ -46,6 +48,30 @@ export function ImportarPedidos({
   // passou de 30 minutos. Trinta, e não dez como no extrato, porque a
   // importação da Yampi percorre páginas de pedidos — mais pesada que baixar
   // um CSV — e a rotina de hora em hora já cobre o pano de fundo.
+  const router = useRouter()
+
+  /**
+   * Importa pela ROTA, não por Server Action: o Next enfileira actions por
+   * aba e segura toda navegação enquanto uma está no ar — uma importação
+   * lenta travava o clique em qualquer outro menu.
+   */
+  const importarPelaRota = async (
+    diasJanela: number,
+    espelhar = false,
+  ): Promise<{
+    importacao: Awaited<ReturnType<typeof importarDaYampi>> | null
+    envios: Awaited<ReturnType<typeof sincronizarEnvios>> | null
+  }> => {
+    const resposta = await fetch('/api/tela/pedidos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dias: diasJanela, espelhar }),
+    })
+    const r = await resposta.json()
+    router.refresh()
+    return r
+  }
+
   const jaTentou = useRef(false)
   useEffect(() => {
     if (jaTentou.current) return
@@ -56,10 +82,10 @@ export function ImportarPedidos({
     jaTentou.current = true
     // Janela curta: o automático busca o que é novo; histórico é manual.
     iniciarTransicao(async () => {
-      const r = await importarDaYampi(10)
-      if (r.ok) {
+      const { importacao } = await importarPelaRota(10)
+      if (importacao?.ok) {
         setResumo(
-          `Sincronizado agora: ${plural(r.resultado.pedidos, 'pedido', 'pedidos')} conferidos, ${r.resultado.extratoLigado} movimento(s) do extrato ligados à venda.`,
+          `Sincronizado agora: ${plural(importacao.resultado.pedidos, 'pedido', 'pedidos')} conferidos, ${importacao.resultado.extratoLigado} movimento(s) do extrato ligados à venda.`,
         )
       }
     })
@@ -112,9 +138,10 @@ export function ImportarPedidos({
       setResumo(null)
       setAviso(null)
       setDiagnostico(null)
-      const r = await importarDaYampi(dias)
-      if (!r.ok) {
-        setErro(r.erro)
+      const { importacao } = await importarPelaRota(dias)
+      const r = importacao
+      if (!r || !r.ok) {
+        setErro(r ? r.erro : 'A importação não respondeu.')
         return
       }
       const {
@@ -173,12 +200,13 @@ export function ImportarPedidos({
       setResumo(null)
       setAviso(null)
       setDiagnostico(null)
-      const r = await importarDaYampi(10)
-      if (!r.ok) {
-        setErro(r.erro)
+      const { importacao, envios } = await importarPelaRota(10, true)
+      const r = importacao
+      if (!r || !r.ok) {
+        setErro(r ? r.erro : 'A importação não respondeu.')
         return
       }
-      const e = await sincronizarEnvios()
+      const e = envios ?? { ok: false as const, erro: 'sem resposta' }
       setResumo(
         `${plural(r.resultado.pedidos, 'pedido conferido', 'pedidos conferidos')} na Yampi` +
           (r.resultado.extratoLigado

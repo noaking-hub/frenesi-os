@@ -259,6 +259,7 @@ export function ExtratoCliente({
   gatewayLigado,
   atualizadoEm,
 }: Props) {
+  const router = useRouter()
   const [de, setDe] = useState(INICIO_DA_OPERACAO)
   const [ate, setAte] = useState(hoje())
   const [relatorio, setRelatorio] = useState<string[] | null>(null)
@@ -305,7 +306,14 @@ export function ExtratoCliente({
       setErro(null)
       setAtualizando(true)
       try {
-        const r = await atualizarExtrato(de, ate, pedir)
+        // Rota, e não Server Action: a importação pode levar minutos e uma
+        // action pendente segura toda navegação da aba (fila do Next).
+        const resposta = await fetch('/api/tela/extrato', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ de, ate, pedir }),
+        })
+        const r = (await resposta.json()) as Awaited<ReturnType<typeof atualizarExtrato>>
         if (!r.ok) {
           setErro(r.erro)
           setEspera(0)
@@ -314,6 +322,9 @@ export function ExtratoCliente({
         setRelatorio(r.linhas)
         if (r.estado === 'pronto') {
           setEspera(0)
+          // A rota não revalida a árvore como a action fazia; o refresh traz
+          // as linhas recém-importadas para a tabela.
+          router.refresh()
         } else {
           setEspera((n) => (n === 0 ? 1 : n + 1))
         }

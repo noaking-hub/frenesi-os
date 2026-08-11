@@ -987,6 +987,7 @@ async function importarEComplementar(
     if (Number(estornados ?? 0) > 0) {
       linhas.push(`${estornados} venda(s) estornadas saíram da receita.`)
     }
+    await supabaseServer().rpc('limpar_nao_vendas')
   } catch {
     /* marcação é derivada, não pré-requisito */
   }

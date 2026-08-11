@@ -1,12 +1,13 @@
 'use client'
 
+import { useRouter } from 'next/navigation'
+
 import { useEffect, useRef, useState, useTransition } from 'react'
 
 import { Losango, Rotulo, TituloSecao } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
 import { plural } from '@/domain'
 
-import { importarCatalogo } from './actions'
 import type { RespostaImportacao } from './actions'
 
 interface Props {
@@ -29,10 +30,15 @@ const VALIDADE_CATALOGO_H = 12
 export function ImportarShopify({ configurada, ultima }: Props) {
   const [pendente, iniciarTransicao] = useTransition()
   const [resposta, setResposta] = useState<RespostaImportacao | null>(null)
+  const router = useRouter()
 
   const executar = () =>
     iniciarTransicao(async () => {
-      setResposta(await importarCatalogo())
+      // Rota, não Server Action: a importação percorre o catálogo inteiro e
+      // uma action pendente seguraria toda navegação da aba.
+      const r = await fetch('/api/tela/catalogo', { method: 'POST' })
+      setResposta((await r.json()) as RespostaImportacao)
+      router.refresh()
     })
 
   // O ref impede o loop: a importação revalida a rota, o server component

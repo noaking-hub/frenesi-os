@@ -285,6 +285,33 @@ function telefoneDe(c: ClienteYampi): string {
 }
 
 /**
+ * Situação de pagamento de um pedido, com a TRANSAÇÃO como autoridade.
+ *
+ * O campo `authorized` do pedido mente: uma autorização anulada antes da
+ * captura o deixa true para sempre, e o status do pedido às vezes nem
+ * registra o cancelamento. Quem sabe a verdade é a transação — `cancelled`,
+ * `refused` e `waiting_payment` não são venda, por mais que o pedido diga
+ * que sim. O status do pedido só decide quando não há transação nenhuma.
+ */
+function situacaoDoPedido(
+  p: PedidoYampi,
+): 'pago' | 'pendente' | 'divergente' | 'cancelado' {
+  const transacoes = transacoesDoPedido(p as unknown as Record<string, unknown>)
+  const situacoes = transacoes.map((t) => t.status.toLowerCase())
+  const temEstorno = situacoes.some((s) => /refund|estorn|chargeback|devolv/.test(s))
+  const temPagamento = situacoes.some((s) => /paid|approv|authoriz|captur|settl/.test(s))
+  if (temEstorno) return 'divergente'
+  if (temPagamento) return 'pago'
+  // Transações existem e nenhuma pagou: recusada, anulada ou esperando.
+  if (situacoes.length > 0) return 'cancelado'
+  return pagamentoYampi(
+    p.status?.data?.alias ?? '',
+    p.status?.data?.name ?? '',
+    Boolean(p.authorized),
+  )
+}
+
+/**
  * Situação de pagamento a partir do status da Yampi.
  *
  * Estorno vira `divergente` e não `pago`: o dinheiro entrou e voltou, e a
@@ -400,11 +427,7 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
   // amanhã entra na próxima rodada, já como pago.
   const lidos = await lerPedidosYampi(dias)
   const eVenda = (p: PedidoYampi) => {
-    const situacao = pagamentoYampi(
-      p.status?.data?.alias ?? '',
-      p.status?.data?.name ?? '',
-      Boolean(p.authorized),
-    )
+    const situacao = situacaoDoPedido(p)
     return situacao === 'pago' || situacao === 'divergente'
   }
   const pedidos = lidos.filter(eVenda)
@@ -471,7 +494,6 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
   const linhasPedidos = pedidos.map((p) => {
     const alias = p.status?.data?.alias ?? ''
     const nome = p.status?.data?.name ?? ''
-    const autorizado = Boolean(p.authorized)
     const entregue = Boolean(p.delivered)
     const endereco = enderecoDe(p)
     const entregueEm = entregue ? dataYampi(p.date_delivery) : null
@@ -485,7 +507,7 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
       valor: numero(p.value_total),
       frete: numero(p.value_shipment),
       cashback: 0,
-      pagamento: pagamentoYampi(alias, nome, autorizado),
+      pagamento: situacaoDoPedido(p),
       envio: envioYampi(alias, nome, entregue, p.track_code),
       comprado_em: dataYampi(p.created_at) ?? new Date().toISOString(),
       // Sem esta data o Portal de Devoluções não funciona: o prazo de 7 dias
@@ -591,9 +613,12 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
   if (erroLigar) throw erroLigar
 
   // Pago e depois estornado não é venda: quem tem rastro de estorno (linha
-  // de saída no extrato ou status de transação) vira divergente agora.
+  // de saída no extrato ou status de transação) vira divergente agora. E
+  // quem só tem transação recusada/anulada nunca foi venda — sai do banco.
   const { error: erroEstornos } = await sb.rpc('marcar_estornados')
   if (erroEstornos) throw erroEstornos
+  const { error: erroNaoVendas } = await sb.rpc('limpar_nao_vendas')
+  if (erroNaoVendas) throw erroNaoVendas
 
   // Venda que ainda não saiu é volume comprometido. Sem este passo a próxima
   // sincronia devolveria à Shopify o número de antes da venda, e a loja

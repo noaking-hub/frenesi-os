@@ -1,5 +1,7 @@
 'use client'
 
+import { useRouter } from 'next/navigation'
+
 import { useEffect, useRef, useState, useTransition } from 'react'
 
 import { Modal } from '@/components/erp/Modal'
@@ -94,17 +96,22 @@ export function FontesCliente({ fontes, bases, semDono, variantes }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- roda uma vez, ao abrir
   }, [])
 
+  const router = useRouter()
   const vascular = () =>
     iniciarTransicao(async () => {
       setErro(null)
       setResumo(null)
       setDiagnostico(null)
-      const r = await vascularPrecos()
+      // Rota, não Server Action: a varredura abre dezenas de requisições e
+      // uma action pendente seguraria toda navegação da aba.
+      const resposta = await fetch('/api/tela/concorrentes', { method: 'POST' })
+      const r = (await resposta.json()) as Awaited<ReturnType<typeof vascularPrecos>>
       if (!r.ok) {
         setErro(r.erro)
         return
       }
       setResumo(r.resumo)
+      router.refresh()
     })
 
   const vascularUma = (f: FonteConcorrente) =>
