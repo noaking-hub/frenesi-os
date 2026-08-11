@@ -151,7 +151,7 @@ export function normalizarPagamentoMp(cru: Record<string, unknown>): PagamentoMp
   const tarifas = Array.isArray(cru.fee_details) ? (cru.fee_details as Record<string, unknown>[]) : []
   // Só entram as tarifas que NÓS pagamos. `fee_payer: payer` é dinheiro que
   // sai do cliente e nunca passou por nós.
-  const tarifa =
+  const tarifaDasFees =
     Math.round(
       tarifas
         .filter((f) => s(f.fee_payer) !== 'payer')
@@ -160,7 +160,17 @@ export function normalizarPagamentoMp(cru: Record<string, unknown>): PagamentoMp
 
   const bruto = n(cru.transaction_amount)
   const liquidoInformado = n(detalhes.net_received_amount)
-  const liquido = liquidoInformado > 0 ? liquidoInformado : Math.round((bruto - tarifa) * 100) / 100
+  const liquido = liquidoInformado > 0 ? liquidoInformado : Math.round((bruto - tarifaDasFees) * 100) / 100
+
+  // A tarifa REAL é bruto menos líquido — aritmética, não inventário de taxas.
+  //
+  // Somar `fee_details` subestimava o cartão parcelado: o custo de
+  // parcelamento vem em `charges_details`, fora da lista, e cada venda 3x
+  // aparecia "divergente" na conciliação por EXATAMENTE uma tarifa a menos.
+  // O líquido informado já desconta tudo que o MP cobrou, seja qual for o
+  // nome da cobrança — inclusive as que ainda não existem hoje.
+  const tarifa =
+    liquidoInformado > 0 ? Math.round((bruto - liquidoInformado) * 100) / 100 : tarifaDasFees
 
   const tipo = s(cru.payment_type_id)
   const parcelas = n(cru.installments)

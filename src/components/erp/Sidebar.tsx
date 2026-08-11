@@ -165,7 +165,7 @@ function Grupo({
           type="button"
           onClick={alternar}
           aria-expanded={aberto}
-          className="font-sans hover:bg-[rgba(239,209,140,.07)]"
+          className="nav-grupo font-sans hover:bg-[rgba(239,209,140,.07)]"
           style={estiloBotao}
         >
           {marcador}
@@ -183,7 +183,7 @@ function Grupo({
           </span>
         </button>
       ) : (
-        <Link href={grupo.href!} className="font-sans hover:bg-[rgba(239,209,140,.07)]" style={estiloBotao}>
+        <Link href={grupo.href!} className="nav-grupo font-sans hover:bg-[rgba(239,209,140,.07)]" style={estiloBotao}>
           {marcador}
           <span style={{ flex: 1 }}>{grupo.label}</span>
         </Link>

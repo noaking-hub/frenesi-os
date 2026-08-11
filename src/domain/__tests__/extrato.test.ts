@@ -52,6 +52,21 @@ describe('pagamento do Mercado Pago', () => {
     expect(p.liquido).toBe(123.31)
   })
 
+  it('deriva a tarifa de bruto menos líquido, não da lista de taxas', () => {
+    // O custo do parcelamento vem em `charges_details`, fora de
+    // `fee_details`. Somar a lista deixava cada venda 3x "divergente" na
+    // conciliação por exatamente uma tarifa a menos. Bruto menos líquido
+    // captura toda cobrança, tenha o nome que tiver.
+    const p = normalizarPagamentoMp({
+      ...PAGAMENTO_CRU,
+      transaction_details: { net_received_amount: 117.43 },
+      transaction_amount: 123.59,
+      fee_details: [{ type: 'mercadopago_fee', amount: 3.08, fee_payer: 'collector' }],
+    })!
+    expect(p.tarifa).toBe(6.16)
+    expect(p.liquido).toBe(117.43)
+  })
+
   it('não conta como nossa a tarifa que o cliente pagou', () => {
     const p = normalizarPagamentoMp({
       ...PAGAMENTO_CRU,

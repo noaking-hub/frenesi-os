@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 
 import { COR } from '@/components/erp/tokens'
 import { plural } from '@/domain'
@@ -21,7 +21,16 @@ import {
  * mais antigo, e volta vazio sem erro. Pedir 90 dias pareceria "loja sem
  * vendas" em vez de "permissão faltando".
  */
-export function ImportarPedidos({ configurada, total }: { configurada: boolean; total: number }) {
+export function ImportarPedidos({
+  configurada,
+  total,
+  sincronizadoEm,
+}: {
+  configurada: boolean
+  total: number
+  /** Última importação da Yampi registrada. Null = nunca. */
+  sincronizadoEm: string | null
+}) {
   const [erro, setErro] = useState<string | null>(null)
   const [resumo, setResumo] = useState<string | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
@@ -30,7 +39,32 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
   // alcança meses que a importação de 90 dias não cobria, e o pagamento sem
   // pedido correspondente fica órfão na conciliação.
   const [dias, setDias] = useState(90)
+  const [ferramentas, setFerramentas] = useState(false)
   const [pendente, iniciarTransicao] = useTransition()
+
+  // A sincronia dispara sozinha ao abrir a tela quando a última importação
+  // passou de 30 minutos. Trinta, e não dez como no extrato, porque a
+  // importação da Yampi percorre páginas de pedidos — mais pesada que baixar
+  // um CSV — e a rotina de hora em hora já cobre o pano de fundo.
+  const jaTentou = useRef(false)
+  useEffect(() => {
+    if (jaTentou.current) return
+    const min = sincronizadoEm
+      ? (Date.now() - Date.parse(sincronizadoEm)) / 60_000
+      : Infinity
+    if (min < 30) return
+    jaTentou.current = true
+    // Janela curta: o automático busca o que é novo; histórico é manual.
+    iniciarTransicao(async () => {
+      const r = await importarDaYampi(10)
+      if (r.ok) {
+        setResumo(
+          `Sincronizado agora: ${plural(r.resultado.pedidos, 'pedido', 'pedidos')} conferidos, ${r.resultado.extratoLigado} movimento(s) do extrato ligados à venda.`,
+        )
+      }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sincronizadoEm])
 
   const conferirYampiAgora = () =>
     iniciarTransicao(async () => {
@@ -122,6 +156,42 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
         setAviso(
           `${plural(itensSemVariante, 'item não casou', 'itens não casaram')} com nenhuma variante pelo SKU. ` +
             'Reimporte o catálogo da Shopify primeiro: é ele que grava o SKU de cada variante, e sem isso não há por onde ligar.',
+        )
+      }
+    })
+
+  /**
+   * O botão único: importa os pedidos novos e espelha os envios, nessa ordem.
+   *
+   * Um clique, duas pontas — e no dia a dia nem ele é preciso: a tela
+   * sincroniza sozinha ao abrir e a rotina roda de hora em hora. O botão
+   * existe para quem acabou de fechar uma venda e quer ver agora.
+   */
+  const sincronizarTudo = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      setResumo(null)
+      setAviso(null)
+      setDiagnostico(null)
+      const r = await importarDaYampi(10)
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      const e = await sincronizarEnvios()
+      setResumo(
+        `${plural(r.resultado.pedidos, 'pedido conferido', 'pedidos conferidos')} na Yampi` +
+          (r.resultado.extratoLigado
+            ? ` · ${r.resultado.extratoLigado} movimento(s) do extrato ligados à venda`
+            : '') +
+          (e.ok && e.enviados
+            ? ` · ${plural(e.enviados, 'envio espelhado', 'envios espelhados')} na Shopify`
+            : '') +
+          '.',
+      )
+      if (r.resultado.pedidosSemTransacao) {
+        setAviso(
+          `${plural(r.resultado.pedidosSemTransacao, 'pedido pago sem transação', 'pedidos pagos sem transação')} de pagamento — esses créditos não acham a venda sozinhos.`,
         )
       }
     })
@@ -280,144 +350,111 @@ export function ImportarPedidos({ configurada, total }: { configurada: boolean; 
         )}
       </span>
 
-      <button
-        type="button"
-        onClick={importarYampi}
-        disabled={pendente}
-        className="botao-ouro font-sans hover:brightness-[1.07]"
-        style={{
-          height: 36,
-          padding: '0 18px',
-          flex: 'none',
-          fontWeight: 700,
-          fontSize: 11.5,
-          lineHeight: 1,
-          borderRadius: 9,
-          whiteSpace: 'nowrap',
-          cursor: pendente ? 'wait' : 'pointer',
-          opacity: pendente ? 0.6 : 1,
-        }}
-      >
-        {pendente ? 'Importando…' : 'Importar da Yampi'}
-      </button>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end', flex: 'none' }}>
+        <button
+          type="button"
+          onClick={sincronizarTudo}
+          disabled={pendente}
+          className="botao-ouro font-sans hover:brightness-[1.07]"
+          style={{
+            height: 36,
+            padding: '0 18px',
+            fontWeight: 700,
+            fontSize: 11.5,
+            lineHeight: 1,
+            borderRadius: 9,
+            whiteSpace: 'nowrap',
+            cursor: pendente ? 'wait' : 'pointer',
+            opacity: pendente ? 0.6 : 1,
+          }}
+        >
+          {pendente ? 'Sincronizando…' : 'Sincronizar agora'}
+        </button>
+        <button
+          type="button"
+          onClick={() => setFerramentas((v) => !v)}
+          className="font-sans"
+          style={{
+            border: 0,
+            background: 'transparent',
+            padding: 0,
+            fontSize: 10,
+            letterSpacing: '.06em',
+            textTransform: 'uppercase',
+            color: 'rgba(242,237,227,.4)',
+            cursor: 'pointer',
+          }}
+        >
+          {ferramentas ? '− Ferramentas' : '+ Ferramentas'}
+        </button>
 
-      <select
-        value={dias}
-        onChange={(e) => setDias(Number(e.target.value))}
-        disabled={pendente}
-        aria-label="Quanto histórico importar"
-        style={{
-          height: 36,
-          padding: '0 10px',
-          flex: 'none',
-          border: '1px solid rgba(255,255,255,.11)',
-          background: 'rgba(255,255,255,.03)',
-          borderRadius: 9,
-          color: 'var(--color-corrente)',
-          fontSize: 11.5,
-          outline: 0,
-        }}
-      >
-        {[90, 180, 270, 365].map((d) => (
-          <option key={d} value={d}>
-            {`últimos ${d} dias`}
-          </option>
-        ))}
-      </select>
-
-      <button
-        type="button"
-        onClick={sincronizar}
-        disabled={pendente}
-        title="Fecha o pedido na Shopify com o rastreio da Yampi. Não envia e-mail: quem avisa é a Yampi"
-        className="font-sans hover:border-ouro/40 hover:text-ouro"
-        style={{
-          height: 36,
-          padding: '0 14px',
-          flex: 'none',
-          border: '1px solid rgba(239,209,140,.3)',
-          background: 'rgba(239,209,140,.07)',
-          color: 'var(--color-ouro)',
-          fontWeight: 600,
-          fontSize: 11,
-          lineHeight: 1,
-          borderRadius: 9,
-          whiteSpace: 'nowrap',
-          cursor: pendente ? 'wait' : 'pointer',
-        }}
-      >
-        Espelhar envios na Shopify
-      </button>
-
-      <button
-        type="button"
-        onClick={conferirYampiAgora}
-        disabled={pendente}
-        className="font-sans hover:border-ouro/40 hover:text-ouro"
-        style={{
-          height: 36,
-          padding: '0 14px',
-          flex: 'none',
-          border: '1px solid rgba(255,255,255,.11)',
-          background: 'transparent',
-          color: 'var(--color-secundario)',
-          fontWeight: 600,
-          fontSize: 11,
-          lineHeight: 1,
-          borderRadius: 9,
-          whiteSpace: 'nowrap',
-          cursor: pendente ? 'wait' : 'pointer',
-        }}
-      >
-        Conferir Yampi
-      </button>
-
-      <button
-        type="button"
-        onClick={diagnosticar}
-        disabled={pendente}
-        className="font-sans hover:border-ouro/40 hover:text-ouro"
-        style={{
-          height: 36,
-          padding: '0 14px',
-          flex: 'none',
-          border: '1px solid rgba(255,255,255,.11)',
-          background: 'transparent',
-          color: 'var(--color-secundario)',
-          fontWeight: 600,
-          fontSize: 11,
-          lineHeight: 1,
-          borderRadius: 9,
-          whiteSpace: 'nowrap',
-          cursor: pendente ? 'wait' : 'pointer',
-        }}
-      >
-        Conferir permissões
-      </button>
-
-      <button
-        type="button"
-        onClick={importar}
-        disabled={pendente}
-        title="Espelho da Shopify: sem CPF e sem data de entrega. A Yampi é a origem."
-        className="font-sans hover:border-ouro/40 hover:text-ouro"
-        style={{
-          height: 36,
-          padding: '0 14px',
-          flex: 'none',
-          border: '1px solid rgba(255,255,255,.11)',
-          background: 'transparent',
-          color: 'var(--color-secundario)',
-          fontWeight: 600,
-          fontSize: 11,
-          lineHeight: 1,
-          borderRadius: 9,
-          whiteSpace: 'nowrap',
-          cursor: pendente ? 'wait' : 'pointer',
-        }}
-      >
-        Importar da Shopify
-      </button>
+        {ferramentas && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <select
+              value={dias}
+              onChange={(e) => setDias(Number(e.target.value))}
+              disabled={pendente}
+              aria-label="Quanto histórico importar"
+              style={{
+                height: 32,
+                padding: '0 10px',
+                border: '1px solid rgba(255,255,255,.11)',
+                background: 'rgba(255,255,255,.03)',
+                borderRadius: 9,
+                color: 'var(--color-corrente)',
+                fontSize: 11,
+                outline: 0,
+              }}
+            >
+              {[90, 180, 270, 365].map((d) => (
+                <option key={d} value={d}>
+                  {`últimos ${d} dias`}
+                </option>
+              ))}
+            </select>
+            <BotaoFerramenta rotulo="Importar histórico" onClick={importarYampi} pendente={pendente} />
+            <BotaoFerramenta rotulo="Espelhar envios" onClick={sincronizar} pendente={pendente} />
+            <BotaoFerramenta rotulo="Conferir Yampi" onClick={conferirYampiAgora} pendente={pendente} />
+            <BotaoFerramenta rotulo="Conferir permissões" onClick={diagnosticar} pendente={pendente} />
+            <BotaoFerramenta rotulo="Importar da Shopify" onClick={importar} pendente={pendente} />
+          </div>
+        )}
+      </div>
     </div>
+  )
+}
+
+
+function BotaoFerramenta({
+  rotulo,
+  onClick,
+  pendente,
+}: {
+  rotulo: string
+  onClick: () => void
+  pendente: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={pendente}
+      className="font-sans hover:border-ouro/40 hover:text-ouro"
+      style={{
+        height: 32,
+        padding: '0 12px',
+        border: '1px solid rgba(255,255,255,.11)',
+        background: 'transparent',
+        color: 'var(--color-secundario)',
+        fontWeight: 600,
+        fontSize: 11,
+        lineHeight: 1,
+        borderRadius: 9,
+        whiteSpace: 'nowrap',
+        cursor: pendente ? 'wait' : 'pointer',
+      }}
+    >
+      {rotulo}
+    </button>
   )
 }

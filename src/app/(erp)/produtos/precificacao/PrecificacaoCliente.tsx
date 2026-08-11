@@ -272,6 +272,7 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
                 color: l.manual ? 'var(--color-ouro)' : 'var(--color-corrente)',
                 fontWeight: 500,
                 fontSize: 12.5,
+                textAlign: 'right',
               }}
             />
           </span>
@@ -294,7 +295,7 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
                 fontSize: 9.5,
                 color: 'var(--color-ouro)',
                 cursor: 'pointer',
-                textAlign: 'left',
+                textAlign: 'right',
               }}
             >
               {`voltar para ${brl(l.sugerido)}`}
@@ -307,10 +308,20 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
       chave: 'publicado',
       titulo: 'Publicado hoje',
       largura: 'minmax(120px,1fr)',
+      alinhamento: 'right',
       render: (l) => {
         const dif = l.praticado === null ? null : l.praticado - l.ideal
         return (
-          <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+          <span
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 3,
+              minWidth: 0,
+              alignItems: 'flex-end',
+              textAlign: 'right',
+            }}
+          >
             <span
               className="font-mono"
               style={{ fontSize: 12, lineHeight: 1.25, color: 'rgba(242,237,227,.7)' }}

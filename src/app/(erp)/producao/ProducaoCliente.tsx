@@ -276,14 +276,24 @@ export function ProducaoCliente({
         </BotaoOuro>
       </div>
 
-      <Tabela
-        colunas={colunas}
-        itens={ordens}
-        chaveDe={(o) => o.id}
-        bandeiraDe={(o) =>
-          o.status === 'Bloqueada' ? 'erro' : o.status === 'Aguardando conferência' ? 'ouro' : null
-        }
-      />
+      {ordens.length === 0 ? (
+        // Vazia, a tela precisa explicar seu papel — uma tabela em branco
+        // parece módulo inútil, e este é justamente o que transforma ml em
+        // unidades vendáveis.
+        <EstadoVazio
+          titulo="É aqui que o decant nasce"
+          instrucao="Uma ordem de produção converte mililitros do perfume base em unidades envasadas — é ela que cria estoque vendável, baixa o volume da base e mede a perda real de cada lote. Sem registrar o envase aqui, o estoque de decants do ERP não existe e a Shopify não sabe quantas unidades pode vender. Clique em Nova ordem de produção quando envasar."
+        />
+      ) : (
+        <Tabela
+          colunas={colunas}
+          itens={ordens}
+          chaveDe={(o) => o.id}
+          bandeiraDe={(o) =>
+            o.status === 'Bloqueada' ? 'erro' : o.status === 'Aguardando conferência' ? 'ouro' : null
+          }
+        />
+      )}
 
       {modalAberto && (
         <ModalNovaOrdem

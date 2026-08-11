@@ -6,7 +6,6 @@ import { Tabela, type Coluna } from '@/components/erp/Tabela'
 import type { Tom } from '@/components/erp/tokens'
 import { repositorio } from '@/data/repository'
 
-import { ConciliarRepasse, PreverRepasses } from './Widgets'
 import { brl, conciliarRepasse, pad2, plural } from '@/domain'
 import type { ResultadoConciliacao, StatusConciliacao } from '@/domain'
 
@@ -31,7 +30,7 @@ const ROTULO: Record<StatusConciliacao, string> = {
 /** O que cada status significa — na tela, não na cabeça de quem escreveu. */
 const LEGENDA: [string, string][] = [
   ['Conciliado', 'o crédito no extrato bate com o pedido menos a tarifa real do gateway'],
-  ['Divergente', 'caiu um valor diferente do esperado — a coluna Diferença diz quanto'],
+  ['Divergente', 'caiu um valor diferente do pedido menos a tarifa — investigue: estorno parcial, cupom ou desconto que o pedido não registra'],
   ['Pago, sem crédito', 'o cliente pagou e o dinheiro ainda não apareceu no extrato'],
   ['Aguardando pagamento', 'pedido sem pagamento confirmado — nada a conciliar ainda'],
   ['Antes de 22/07', 'venda anterior à conta atual do Mercado Pago; o crédito caiu na operação antiga e não vai aparecer aqui'],
@@ -221,18 +220,12 @@ export default async function Conciliacao({
       largura: '150px',
       render: (r) => <Badge tom={TOM_STATUS[r.status]}>{ROTULO[r.status]}</Badge>,
     },
-    {
-      // Coluna própria: espremido junto do status, o botão saía da tela.
-      chave: 'acao',
-      titulo: '',
-      largura: '104px',
-      alinhamento: 'right',
-      render: (r) =>
-        r.precisaAcao ? (
-          <ConciliarRepasse pedidoId={r.repasse.pedidoId} esperado={r.liquidoEsperado} />
-        ) : null,
-    },
   ]
+
+  // O botão "Conciliar" morreu de causa natural: a conciliação é automática a
+  // cada atualização do extrato, e quando o crédito caiu, a tarifa e a
+  // diferença já estão calculadas. O que sobra divergente é informação para
+  // investigar (estorno parcial, desconto que não bate), não um clique.
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -247,8 +240,6 @@ export default async function Conciliacao({
           A conciliação acontece sozinha a cada atualização do extrato. O que aparece aqui é o
           resultado — e a visão padrão mostra só o que sobrou para alguém decidir.
         </span>
-        <div style={{ flex: 1 }} />
-        <PreverRepasses />
       </div>
 
       {/* Visões como links: o filtro fica na URL e sobrevive ao F5. */}
