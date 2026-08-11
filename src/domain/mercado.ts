@@ -403,6 +403,9 @@ export function ehPaginaDeProduto(url: string): boolean {
 export interface OfertaLd {
   price?: number | string
   priceSpecification?: { price?: number | string }
+  /** AggregateOffer: a faixa de preço quando a página resume as variações. */
+  lowPrice?: number | string
+  highPrice?: number | string
   name?: string
   sku?: string
 }
@@ -419,7 +422,7 @@ function ehProduto(no: ProdutoLd): boolean {
 }
 
 export function precoDe(o: OfertaLd): number {
-  const bruto = o.price ?? o.priceSpecification?.price
+  const bruto = o.price ?? o.priceSpecification?.price ?? o.lowPrice
   // "1.234,56" e "1234.56" convivem no mesmo padrão; o separador de milhar sai.
   const n =
     typeof bruto === 'string'
@@ -514,6 +517,51 @@ export interface VarianteLida {
   preco: number
 }
 
+/** Centavos iguais são o mesmo preço, venha ele de string ou número. */
+const emCentavos = (n: number) => Math.round(n * 100)
+
+/**
+ * Preços que o JSON-LD declara para o produto PRINCIPAL da página.
+ *
+ * É a referência que separa o payload do produto do payload de um widget.
+ * O principal é o Product cujo nome mais se parece com o da página — nunca
+ * um relacionado do carrossel, que tem JSON-LD próprio.
+ */
+export function precosDeReferencia(html: string): number[] {
+  const produtos = produtosDoJsonLd(html).filter((p) => p.ofertas.length > 0)
+  if (produtos.length === 0) return []
+
+  let principal = produtos[0]
+  const nome = nomeDaPagina(html)
+  if (produtos.length > 1) {
+    if (nome) {
+      const alvo = tokensDe(nome)
+      let melhorScore = -1
+      for (const p of produtos) {
+        const meus = tokensDe(p.nome)
+        if (meus.size === 0) continue
+        let acertos = 0
+        for (const t of meus) if (alvo.has(t)) acertos++
+        const score = acertos / meus.size
+        if (score > melhorScore) {
+          melhorScore = score
+          principal = p
+        }
+      }
+    } else {
+      principal = produtos.slice().sort((a, b) => b.ofertas.length - a.ofertas.length)[0]
+    }
+  }
+
+  const precos = new Set<number>()
+  for (const o of principal.ofertas) {
+    for (const n of [precoDe(o), numeroDe(o.highPrice)]) {
+      if (n > 0 && n <= 100_000) precos.add(emCentavos(n))
+    }
+  }
+  return [...precos].map((c) => c / 100)
+}
+
 /**
  * Variações do produto, como o tema da Nuvemshop as publica.
  *
@@ -534,31 +582,61 @@ export function variantesDoHtml(html: string): VarianteLida[] {
     ...[...html.matchAll(/LS\.product\s*=\s*(\{[\s\S]*?\});/gi)].map((m) => m[1]),
   ].filter((t) => t.trim().length > 2)
 
-  // Vale o payload que rende mais variações: é o do produto principal.
+  const payloads = candidatos.map(lerPayload).filter((p) => p.lidas.length > 0)
+  if (payloads.length === 0) return []
+
+  // O payload precisa FALAR DA PÁGINA para valer. Numa loja, o payload com
+  // mais variações era um widget presente em toda página — e 510 preços de
+  // outro produto entraram com o nome do produto da página. Quando o JSON-LD
+  // declara o preço do produto principal, só aceita payload que compartilhe
+  // ao menos um preço com ele; sem interseção nenhuma, melhor devolver vazio
+  // e deixar a leitura cair no próprio JSON-LD do que gravar preço alheio.
+  const referencia = new Set(precosDeReferencia(html).map(emCentavos))
+  const validos = referencia.size
+    ? payloads.filter((p) => p.possiveis.some((n) => referencia.has(emCentavos(n))))
+    : payloads
+  if (referencia.size && validos.length === 0) return []
+
+  // Entre os que falam da página, vale o que rende mais variações.
   let melhor: VarianteLida[] = []
-  for (const bruto of candidatos) {
-    const lidas = lerPayload(bruto)
-    if (lidas.length > melhor.length) melhor = lidas
+  for (const p of validos) {
+    if (p.lidas.length > melhor.length) melhor = p.lidas
   }
   return melhor
 }
 
-function lerPayload(bruto: string): VarianteLida[] {
+interface Payload {
+  lidas: VarianteLida[]
+  /** Todo número com cara de preço no payload — é contra ele que se valida. */
+  possiveis: number[]
+}
+
+function lerPayload(bruto: string): Payload {
+  const vazio: Payload = { lidas: [], possiveis: [] }
   let dado: unknown
   try {
     dado = JSON.parse(desescapar(bruto))
   } catch {
-    return []
+    return vazio
   }
 
   const lista = Array.isArray(dado)
     ? dado
     : ((dado as { variants?: unknown[] }).variants ?? [])
-  if (!Array.isArray(lista)) return []
+  if (!Array.isArray(lista)) return vazio
 
   const lidas: VarianteLida[] = []
+  const possiveis: number[] = []
   for (const v of lista as Record<string, unknown>[]) {
     if (!v || typeof v !== 'object') continue
+
+    // Para a validação valem TODOS os campos de preço: o JSON-LD pode
+    // publicar o promocional enquanto a leitura usa o cheio, e a diferença
+    // não pode reprovar o payload legítimo.
+    for (const campo of [v.price, v.promotional_price, v.price_number]) {
+      const n = numeroDe(campo)
+      if (n > 0 && n <= 100_000) possiveis.push(n)
+    }
 
     // O rótulo pode estar em option0/1/2, em `name`, ou numa lista de valores.
     const partes = [v.option0, v.option1, v.option2, v.name, v.title]
@@ -576,7 +654,7 @@ function lerPayload(bruto: string): VarianteLida[] {
 
     lidas.push({ rotulo, preco })
   }
-  return lidas
+  return { lidas, possiveis }
 }
 
 

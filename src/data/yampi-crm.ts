@@ -278,10 +278,24 @@ function hojeSp(): string {
  * o erro final IMPRIME o valor cru do exemplo: a próxima correção parte de
  * um fato visível, não de outro chute.
  */
+/**
+ * O valor de discount_type que ESTA loja aceitou, descoberto uma vez.
+ *
+ * Sem o cache, um lote de 100 cupons faria 100 sondagens + tentativas — foi
+ * exatamente o que derrubou a conta no limite de requisições (429).
+ */
+let discountTypeAceito: unknown = null
+
 async function comDiscountType(
   enviar: (discountType: unknown) => Promise<unknown>,
   percentual: boolean,
 ): Promise<void> {
+  // O valor já provado não se rediscute — um POST só, sem sondagem.
+  if (discountTypeAceito !== null) {
+    await enviar(discountTypeAceito)
+    return
+  }
+
   // Um cupom real da loja, cru — o molde.
   let amostra: Record<string, unknown> | null = null
   try {
@@ -322,6 +336,7 @@ async function comDiscountType(
   for (const candidato of candidatos.slice(0, 8)) {
     try {
       await enviar(candidato)
+      discountTypeAceito = candidato
       return
     } catch (e) {
       ultimoErro = e

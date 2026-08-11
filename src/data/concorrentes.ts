@@ -6,6 +6,7 @@ import {
   nomeDaPagina,
   parseVarianteMl,
   precoDe,
+  precosDeReferencia,
   produtosDoJsonLd,
   variantesDoHtml,
 } from '@/domain'
@@ -410,6 +411,20 @@ export async function diagnosticarLoja(
         : 'NENHUM item traz o ml — o tamanho deve ser variação do produto',
   })
 
+  // A validação que separa o payload do produto do payload de um widget:
+  // sem preço em comum com o JSON-LD do produto principal, o payload é
+  // rejeitado — foi um widget assim que gravou 510 preços de outro produto.
+  const referencia = precosDeReferencia(html)
+  passos.push({
+    passo: 'preço de referência (JSON-LD do principal)',
+    resultado: referencia.length
+      ? referencia
+          .slice(0, 6)
+          .map((n) => n.toFixed(2))
+          .join(' | ')
+      : 'nenhum — payloads de variação serão aceitos sem validação',
+  })
+
   // Quando o ml não está no JSON-LD, ele costuma estar num payload de
   // variantes que o tema publica. Procurar por ele aqui é o que permite
   // escrever a leitura certa em vez de tentar às cegas.
@@ -424,7 +439,7 @@ export async function diagnosticarLoja(
           .slice(0, 5)
           .map((v) => `${v.rotulo} = ${v.preco}`)
           .join(' | ')}`
-      : 'nenhuma — é por aqui que o ml entra, e ele não entrou',
+      : 'nenhuma aceita — ou a página não publica payload de variações, ou nenhum compartilha preço com a referência acima (widget, não produto)',
   })
 
   const amostraVariacoes = variacoes

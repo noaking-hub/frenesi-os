@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { ehPaginaDeProduto, nomeDaPagina, variantesDoHtml } from '..'
+import { ehPaginaDeProduto, nomeDaPagina, precosDeReferencia, variantesDoHtml } from '..'
 
 describe('quais URLs do sitemap são produto', () => {
   it('recusa a vitrine, que é o que quebrou a primeira coleta', () => {
@@ -175,5 +175,77 @@ describe('a página traz o atributo mais de uma vez', () => {
     const hex = JSON.stringify(bons).replace(/"/g, '&#x22;')
     expect(variantesDoHtml(`<div data-variants="${dec}"></div>`)).toHaveLength(2)
     expect(variantesDoHtml(`<div data-variants="${hex}"></div>`)).toHaveLength(2)
+  })
+})
+
+describe('validação do payload contra o JSON-LD do produto principal', () => {
+  const ld = (nome: string, preco: string) =>
+    `<script type="application/ld+json">${JSON.stringify({
+      '@type': 'Product',
+      name: nome,
+      offers: { price: preco },
+    })}</script>`
+  const attr = (variantes: unknown) =>
+    `<div data-variants="${JSON.stringify(variantes).replace(/"/g, '&quot;')}"></div>`
+
+  const doProduto = [
+    { option0: '2ml', price: '34.90' },
+    { option0: '5ml', price: '84.90' },
+  ]
+  const doWidget = [
+    { option0: '5ml', price: '50.90' },
+    { option0: '10ml', price: '99.90' },
+    { option0: '15ml', price: '139.90' },
+  ]
+
+  it('rejeita o payload do widget mesmo quando ele tem mais variações', () => {
+    // O caso real: um widget presente em TODA página da loja vencia por
+    // quantidade, e 510 preços de outro produto entraram com o nome do
+    // produto da página — Erba Pura 5 ml saiu por R$ 50,90 no lugar de
+    // R$ 84,90.
+    const html = `
+      <meta property="og:title" content="Xerjoff - Erba Pura Eau de Parfum (decant)">
+      ${ld('Xerjoff - Erba Pura Eau de Parfum (decant)', '34.90')}
+      ${attr(doWidget)}
+      ${attr(doProduto)}`
+    expect(variantesDoHtml(html)).toEqual([
+      { rotulo: '2ml', preco: 34.9 },
+      { rotulo: '5ml', preco: 84.9 },
+    ])
+  })
+
+  it('devolve vazio quando NENHUM payload compartilha preço com a referência', () => {
+    // Melhor cair no JSON-LD do que gravar o preço de um widget.
+    const html = `
+      ${ld('Erba Pura', '84.90')}
+      ${attr(doWidget)}`
+    expect(variantesDoHtml(html)).toEqual([])
+  })
+
+  it('sem preço no JSON-LD, mantém o payload de mais variações', () => {
+    expect(variantesDoHtml(attr(doWidget))).toHaveLength(3)
+  })
+
+  it('o promocional também valida: JSON-LD publica o preço em promoção', () => {
+    const emPromocao = [{ option0: '5ml', price: '99.90', promotional_price: '84.90' }]
+    const html = `${ld('Erba Pura', '84.90')}${attr(emPromocao)}`
+    expect(variantesDoHtml(html)).toEqual([{ rotulo: '5ml', preco: 99.9 }])
+  })
+
+  it('a referência vem do Product cujo nome é o da página, não do carrossel', () => {
+    const html = `
+      <meta property="og:title" content="Erba Pura (decant)">
+      ${ld('Coco Mademoiselle (decant)', '39.90')}
+      ${ld('Erba Pura (decant)', '84.90')}`
+    expect(precosDeReferencia(html)).toEqual([84.9])
+  })
+
+  it('lê lowPrice de AggregateOffer como referência', () => {
+    const html = `<script type="application/ld+json">${JSON.stringify({
+      '@type': 'Product',
+      name: 'Erba Pura',
+      offers: { '@type': 'AggregateOffer', lowPrice: '34.90', highPrice: '139.90' },
+    })}</script>`
+    expect(precosDeReferencia(html)).toEqual([34.9, 139.9])
   })
 })

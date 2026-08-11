@@ -138,6 +138,8 @@ export function LoteCupons() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <span className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.5, color: COR.ok }}>
                   {`${plural(resultado.criados.length, 'cupom publicado', 'cupons publicados')} no checkout.`}
+                  {resultado.jaExistiam.length > 0 &&
+                    ` ${resultado.jaExistiam.length} já existiam e foram pulados.`}
                 </span>
                 {resultado.falhas.slice(0, 6).map((f) => (
                   <span key={f.codigo} className="font-sans" style={{ fontSize: 11, lineHeight: 1.5, color: COR.erro, textWrap: 'pretty' }}>
@@ -158,7 +160,7 @@ export function LoteCupons() {
               </BotaoSecundario>
               <BotaoOuro altura={36} onClick={criar} desabilitado={pendente || codigos.length === 0}>
                 {pendente
-                  ? 'Publicando…'
+                  ? 'Publicando… (meio segundo por cupom, pode demorar)'
                   : `Publicar ${plural(codigos.length, 'cupom', 'cupons')}`}
               </BotaoOuro>
             </div>

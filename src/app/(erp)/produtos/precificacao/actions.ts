@@ -121,14 +121,56 @@ export interface PrecoDeMercado {
 /**
  * O menor preço do mercado para este perfume, por variante.
  *
- * Reaproveita a busca da tela de Concorrentes — a mesma que entende que "EDT"
- * e "Eau de Toilette" são o mesmo produto. Duas implementações de busca
- * divergiriam, e aí o preço mostrado aqui não seria o mesmo que aparece lá.
+ * O caminho principal é o vínculo que a COLETA já gravou: `base_id` em cada
+ * preço lido, casado por título ou ensinado à mão. A busca textual não serve
+ * aqui — ela exige que TODA palavra do nosso nome apareça no título do
+ * concorrente, e nomes como "Erba Pura Unissex Eau de Parfum" nunca casam
+ * porque loja nenhuma escreve "unissex". Era isso que deixava a coluna
+ * inteira em "sem leitura". O texto fica de reserva, para base que a coleta
+ * ainda não casou.
  */
 export async function mercadoDaBase(baseId: string): Promise<PrecoDeMercado[]> {
   if (!supabaseConfigurado()) return []
+  const sb = supabaseServer()
 
-  const { data: base } = await supabaseServer()
+  const { data: casados } = await sb
+    .from('concorrente_precos')
+    .select('variante, preco, concorrentes(nome)')
+    .eq('base_id', baseId)
+    .not('variante', 'is', null)
+
+  const observados = ((casados ?? []) as unknown as {
+    variante: number
+    preco: number | string
+    concorrentes: { nome: string } | null
+  }[]).map((p) => ({
+    variante: p.variante as VarianteMl,
+    preco: Number(p.preco),
+    fonte: p.concorrentes?.nome ?? '—',
+  }))
+
+  if (observados.length > 0) {
+    const porVariante = new Map<VarianteMl, Map<string, number>>()
+    for (const o of observados) {
+      if (!(o.preco > 0)) continue
+      const fontes = porVariante.get(o.variante) ?? new Map<string, number>()
+      const atual = fontes.get(o.fonte)
+      // Mesma loja com dois preços para o tamanho: vale o menor, que é o que
+      // o cliente pagaria lá.
+      if (atual === undefined || o.preco < atual) fontes.set(o.fonte, o.preco)
+      porVariante.set(o.variante, fontes)
+    }
+    return [...porVariante.entries()]
+      .map(([variante, fontes]) => {
+        const [fonte, menor] = [...fontes.entries()].sort((a, b) => a[1] - b[1])[0]
+        return { variante, menor, fonte, lojas: fontes.size }
+      })
+      .sort((a, b) => a.variante - b.variante)
+  }
+
+  // Nenhum preço casado com esta base: tenta pelo nome, do jeito da tela de
+  // Concorrentes. Acha menos, mas acha algo para base recém-cadastrada.
+  const { data: base } = await sb
     .from('perfumes_base')
     .select('nome')
     .eq('id', baseId)
