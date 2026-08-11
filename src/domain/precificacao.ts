@@ -9,6 +9,7 @@ export const PARAMETROS_PADRAO: ParametrosPrecificacao = {
   adsPct: 12.0,
   frasco: 2.2,
   valvula: 0.9,
+  tampa: 0,
   etiqueta: 0.6,
   caixa: 0.9,
   plasticoBolha: 0.2,
@@ -45,7 +46,7 @@ export function taxasPct(p: ParametrosPrecificacao): number {
 
 /** Embalagem por pedido: frasco, válvula, etiqueta, caixa e plástico bolha. */
 export function insumosDe(p: ParametrosPrecificacao): number {
-  return p.frasco + p.valvula + p.etiqueta + p.caixa + p.plasticoBolha
+  return p.frasco + p.valvula + p.tampa + p.etiqueta + p.caixa + p.plasticoBolha
 }
 
 /** Soma dos custos fixos por pedido. */

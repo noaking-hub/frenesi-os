@@ -40,6 +40,7 @@ export async function salvarParametros(v: ParametrosPrecificacao): Promise<Respo
     p_ads_pct: v.adsPct,
     p_frasco: v.frasco,
     p_valvula: v.valvula,
+    p_tampa: v.tampa,
     p_etiqueta: v.etiqueta,
     p_caixa: v.caixa,
     p_plastico_bolha: v.plasticoBolha,

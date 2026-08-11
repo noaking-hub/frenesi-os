@@ -250,6 +250,7 @@ const repositorioSupabase: Repositorio = {
       // frasco até o operador abrir o valor item a item.
       frasco: Number(data.frasco ?? 0) || Number(data.insumos ?? 0),
       valvula: Number(data.valvula ?? 0),
+      tampa: Number(data.tampa ?? 0),
       etiqueta: Number(data.etiqueta ?? 0),
       caixa: Number(data.caixa ?? 0),
       plasticoBolha: Number(data.plastico_bolha ?? 0),

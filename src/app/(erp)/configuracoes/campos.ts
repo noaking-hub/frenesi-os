@@ -39,6 +39,7 @@ export const CAMPOS_PARAMETROS: CampoParametro[] = [
   { chave: 'antifraude', label: 'Antifraude', unidade: 'R$', hint: 'Análise por transação', secao: 'Custos fixos por pedido' },
   { chave: 'frasco', label: 'Frasco', unidade: 'R$', hint: 'Vidro do decant · custo por pedido', secao: 'Custos fixos por pedido' },
   { chave: 'valvula', label: 'Válvula', unidade: 'R$', hint: 'Válvula spray do decant', secao: 'Custos fixos por pedido' },
+  { chave: 'tampa', label: 'Tampas', unidade: 'R$', hint: 'Tampa do decant', secao: 'Custos fixos por pedido' },
   { chave: 'etiqueta', label: 'Etiqueta', unidade: 'R$', hint: 'Rótulo impresso', secao: 'Custos fixos por pedido' },
   { chave: 'caixa', label: 'Caixa', unidade: 'R$', hint: 'Embalagem de envio', secao: 'Custos fixos por pedido' },
   { chave: 'plasticoBolha', label: 'Plástico bolha', unidade: 'R$', hint: 'Proteção do frasco no transporte', secao: 'Custos fixos por pedido' },

@@ -111,6 +111,7 @@ export interface ParametrosPrecificacao {
   /** Embalagem por pedido, item a item — `insumosDe` soma os cinco. */
   frasco: number
   valvula: number
+  tampa: number
   etiqueta: number
   caixa: number
   plasticoBolha: number
