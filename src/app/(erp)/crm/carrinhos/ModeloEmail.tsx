@@ -7,7 +7,7 @@ import { useMemo, useState, useTransition } from 'react'
 import { Modal } from '@/components/erp/Modal'
 import { BotaoOuro, BotaoSecundario, Rotulo } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
-import { emailRecuperacao, type ModeloEmailRecuperacao } from '@/domain'
+import { HTML_BASE_RECUPERACAO, emailRecuperacao, type ModeloEmailRecuperacao } from '@/domain'
 
 import { salvarModeloEmail } from './actions'
 
@@ -45,10 +45,20 @@ export function ModeloEmail({
   const [titulo, setTitulo] = useState(inicial.titulo)
   const [mensagem, setMensagem] = useState(inicial.mensagem)
   const [textoBotao, setTextoBotao] = useState(inicial.textoBotao)
+  // Modo HTML do zero: o documento inteiro é da operação. Entrar no modo com
+  // o campo vazio preenche com a base pronta — melhor editar em cima de algo
+  // que funciona no Gmail do que descobrir depois o que quebrou.
+  const [modoHtml, setModoHtml] = useState(Boolean(inicial.html?.trim()))
+  const [htmlProprio, setHtmlProprio] = useState(inicial.html ?? '')
   const [erro, setErro] = useState<string | null>(null)
   const [salvo, setSalvo] = useState(false)
   const [pendente, iniciarTransicao] = useTransition()
   const router = useRouter()
+
+  const abrirModoHtml = () => {
+    if (!htmlProprio.trim()) setHtmlProprio(HTML_BASE_RECUPERACAO)
+    setModoHtml(true)
+  }
 
   const previa = useMemo(
     () =>
@@ -60,16 +70,22 @@ export function ModeloEmail({
           linkCheckout: '#',
           cupom,
         },
-        { assunto, titulo, mensagem, textoBotao },
+        { assunto, titulo, mensagem, textoBotao, html: modoHtml ? htmlProprio : null },
       ),
-    [assunto, titulo, mensagem, textoBotao, cupom],
+    [assunto, titulo, mensagem, textoBotao, cupom, modoHtml, htmlProprio],
   )
 
   const salvar = () =>
     iniciarTransicao(async () => {
       setErro(null)
       setSalvo(false)
-      const r = await salvarModeloEmail({ assunto, titulo, mensagem, textoBotao })
+      const r = await salvarModeloEmail({
+        assunto,
+        titulo,
+        mensagem,
+        textoBotao,
+        html: modoHtml ? htmlProprio : null,
+      })
       if (!r.ok) {
         setErro(r.erro)
         return
@@ -78,6 +94,20 @@ export function ModeloEmail({
       router.refresh()
     })
 
+  const abaModo = (ativo: boolean): React.CSSProperties => ({
+    height: 30,
+    padding: '0 13px',
+    border: `1px solid ${ativo ? 'rgba(239,209,140,.45)' : 'rgba(255,255,255,.1)'}`,
+    background: ativo ? 'rgba(239,209,140,.09)' : 'transparent',
+    color: ativo ? COR.ouro : 'rgba(242,237,227,.6)',
+    fontWeight: 600,
+    fontSize: 11,
+    lineHeight: 1,
+    borderRadius: 'var(--radius-pill)',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  })
+
   return (
     <Modal titulo="Modelo do e-mail de recuperação" largura={980} aoFechar={aoFechar}>
       <div
@@ -85,42 +115,82 @@ export function ModeloEmail({
         style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.1fr)', gap: 18, alignItems: 'start' }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
-          <span
-            className="font-sans"
-            style={{ fontSize: 11, lineHeight: 1.55, color: 'var(--color-terciario)', textWrap: 'pretty' }}
-          >
-            {'Escreva como a marca fala. '}
-            <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{nome}'}</span>
-            {' vira o primeiro nome do cliente (e some quando o checkout não trouxe nome); '}
-            <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{total}'}</span>
-            {' vira o valor do carrinho. A lista de itens, o cupom e o rodapé entram sozinhos.'}
-          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" onClick={() => setModoHtml(false)} className="hover:border-ouro/40 font-sans" style={abaModo(!modoHtml)}>
+              Moldura da marca
+            </button>
+            <button type="button" onClick={abrirModoHtml} className="hover:border-ouro/40 font-sans" style={abaModo(modoHtml)}>
+              HTML do zero
+            </button>
+          </div>
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <Rotulo>Assunto</Rotulo>
             <input value={assunto} onChange={(e) => setAssunto(e.target.value)} className="font-sans focus:border-ouro/45" style={campo} />
           </label>
 
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <Rotulo>Título dentro do e-mail</Rotulo>
-            <input value={titulo} onChange={(e) => setTitulo(e.target.value)} className="font-sans focus:border-ouro/45" style={campo} />
-          </label>
+          {modoHtml ? (
+            <>
+              <span
+                className="font-sans"
+                style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+              >
+                {'O documento inteiro é seu — o campo abre com a base da marca para editar. Campos vivos: '}
+                <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{nome}'}</span>
+                {', '}
+                <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{total}'}</span>
+                {', '}
+                <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{itens}'}</span>
+                {' (tabela pronta com produtos e total, obrigatório), '}
+                <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{link}'}</span>
+                {' (URL do carrinho) e o bloco '}
+                <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'[[cupom]] … {cupom} … {desconto} … [[/cupom]]'}</span>
+                {', que some inteiro quando o envio não leva cupom. Use tabela e estilo inline — Gmail ignora CSS de cabeçalho.'}
+              </span>
+              <textarea
+                value={htmlProprio}
+                onChange={(e) => setHtmlProprio(e.target.value)}
+                rows={19}
+                spellCheck={false}
+                className="font-mono focus:border-ouro/45"
+                style={{ ...campo, fontSize: 11, lineHeight: 1.55, resize: 'vertical', whiteSpace: 'pre', overflowX: 'auto' }}
+              />
+            </>
+          ) : (
+            <>
+              <span
+                className="font-sans"
+                style={{ fontSize: 11, lineHeight: 1.55, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+              >
+                {'Escreva como a marca fala. '}
+                <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{nome}'}</span>
+                {' vira o primeiro nome do cliente (e some quando o checkout não trouxe nome); '}
+                <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{total}'}</span>
+                {' vira o valor do carrinho. A lista de itens, o cupom e o rodapé entram sozinhos.'}
+              </span>
 
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <Rotulo>Mensagem (linha em branco separa parágrafos)</Rotulo>
-            <textarea
-              value={mensagem}
-              onChange={(e) => setMensagem(e.target.value)}
-              rows={6}
-              className="font-sans focus:border-ouro/45"
-              style={{ ...campo, resize: 'vertical' }}
-            />
-          </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <Rotulo>Título dentro do e-mail</Rotulo>
+                <input value={titulo} onChange={(e) => setTitulo(e.target.value)} className="font-sans focus:border-ouro/45" style={campo} />
+              </label>
 
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <Rotulo>Texto do botão</Rotulo>
-            <input value={textoBotao} onChange={(e) => setTextoBotao(e.target.value)} className="font-sans focus:border-ouro/45" style={campo} />
-          </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <Rotulo>Mensagem (linha em branco separa parágrafos)</Rotulo>
+                <textarea
+                  value={mensagem}
+                  onChange={(e) => setMensagem(e.target.value)}
+                  rows={6}
+                  className="font-sans focus:border-ouro/45"
+                  style={{ ...campo, resize: 'vertical' }}
+                />
+              </label>
+
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <Rotulo>Texto do botão</Rotulo>
+                <input value={textoBotao} onChange={(e) => setTextoBotao(e.target.value)} className="font-sans focus:border-ouro/45" style={campo} />
+              </label>
+            </>
+          )}
 
           {erro && (
             <span className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.5, color: COR.erro, textWrap: 'pretty' }}>

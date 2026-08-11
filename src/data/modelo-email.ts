@@ -14,7 +14,7 @@ export async function lerModeloEmail(): Promise<ModeloEmailRecuperacao> {
   if (!supabaseConfigurado()) return MODELO_PADRAO
   const { data } = await supabaseServer()
     .from('modelo_email_recuperacao')
-    .select('assunto, titulo, mensagem, texto_botao')
+    .select('assunto, titulo, mensagem, texto_botao, html')
     .maybeSingle()
   if (!data) return MODELO_PADRAO
   return {
@@ -22,6 +22,7 @@ export async function lerModeloEmail(): Promise<ModeloEmailRecuperacao> {
     titulo: data.titulo,
     mensagem: data.mensagem,
     textoBotao: data.texto_botao,
+    html: data.html ?? null,
   }
 }
 
@@ -35,6 +36,7 @@ export async function gravarModeloEmail(m: ModeloEmailRecuperacao): Promise<void
     titulo: m.titulo,
     mensagem: m.mensagem,
     texto_botao: m.textoBotao,
+    html: m.html?.trim() ? m.html : null,
     atualizado_em: new Date().toISOString(),
   })
   if (error) throw error

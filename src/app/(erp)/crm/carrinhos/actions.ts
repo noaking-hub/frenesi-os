@@ -5,8 +5,19 @@ import { revalidatePath } from 'next/cache'
 import { emailConfigurado, entregar } from '@/data/email'
 import { gravarModeloEmail, lerModeloEmail } from '@/data/modelo-email'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
-import { lerCarrinhosYampi } from '@/data/yampi-crm'
+import { criarCupomYampi, lerCarrinhosYampi } from '@/data/yampi-crm'
 import { emailRecuperacao, type ModeloEmailRecuperacao } from '@/domain'
+
+/**
+ * Como o cupom entra no envio: um código fixo já publicado, ou um código
+ * ÚNICO por cliente, criado na Yampi na hora do envio — uso único, uma vez
+ * por CPF, sem acumular, com validade curta. O único é o que faz o desconto
+ * ser rastreável (o código diz de qual carrinho veio) e não vazar para
+ * grupos de promoção.
+ */
+export type CupomEnvio =
+  | { tipo: 'fixo'; codigo: string; pct: number }
+  | { tipo: 'unico'; pct: number; validadeDias: number }
 
 export interface ResultadoRecuperacao {
   /** E-mails que saíram, pelo nome (ou e-mail) de quem recebeu. */
@@ -27,9 +38,17 @@ const SETE_DIAS = 7 * 24 * 60 * 60 * 1000
  * segunda mensagem em cima da primeira, e spam queima o remetente inteiro.
  * `forcar` existe para o reenvio deliberado de UM carrinho.
  */
+/** Sufixo legível para o cupom único: sem 0/O/1/I/L, que se confundem. */
+function sufixoCupom(): string {
+  const alfabeto = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+  let s = ''
+  for (let i = 0; i < 6; i++) s += alfabeto[Math.floor(Math.random() * alfabeto.length)]
+  return s
+}
+
 export async function enviarEmailsCarrinho(
   ids: string[],
-  cupom: { codigo: string; pct: number } | null,
+  cupom: CupomEnvio | null,
   forcar = false,
 ): Promise<{ ok: true; resultado: ResultadoRecuperacao } | { ok: false; erro: string }> {
   if (!emailConfigurado()) {
@@ -87,13 +106,58 @@ export async function enviarEmailsCarrinho(
       continue
     }
 
+    // O cupom deste e-mail: o fixo vai como está; o único nasce na Yampi
+    // AGORA — e se a Yampi recusar, o e-mail não sai, porque prometer um
+    // código que não existe é pior que não enviar.
+    let cupomDoEmail: { codigo: string; pct: number } | null = null
+    if (cupom?.tipo === 'fixo') {
+      cupomDoEmail = { codigo: cupom.codigo, pct: cupom.pct }
+    } else if (cupom?.tipo === 'unico') {
+      const codigo = `VOLTA${Math.round(cupom.pct)}-${sufixoCupom()}`
+      const expiraEm = new Date(agora + cupom.validadeDias * 86_400_000).toLocaleDateString('sv', {
+        timeZone: 'America/Sao_Paulo',
+      })
+      let tentativas = 0
+      for (;;) {
+        try {
+          await criarCupomYampi({
+            codigo,
+            valor: cupom.pct,
+            percentual: true,
+            limite: 1,
+            usoUnicoPorCliente: true,
+            naoAcumula: true,
+            expiraEm,
+          })
+          cupomDoEmail = { codigo, pct: cupom.pct }
+          break
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          if (/429|Too Many/i.test(msg) && tentativas < 2) {
+            tentativas++
+            await pausa(30_000)
+            continue
+          }
+          resultado.falhas.push({
+            quem: carrinho.cliente ?? carrinho.email,
+            erro: `cupom único não criado na Yampi (${msg}) — e-mail não enviado`,
+          })
+          break
+        }
+      }
+      if (!cupomDoEmail) {
+        await pausa(600)
+        continue
+      }
+    }
+
     const { assunto, html } = emailRecuperacao(
       {
         nome: carrinho.cliente,
         itens: carrinho.itens,
         valor: carrinho.valor,
         linkCheckout: carrinho.link ?? process.env.LOJA_URL ?? null,
-        cupom,
+        cupom: cupomDoEmail,
       },
       modelo,
     )
@@ -106,7 +170,7 @@ export async function enviarEmailsCarrinho(
           carrinho_id: id,
           email: carrinho.email,
           assunto,
-          cupom: cupom?.codigo ?? null,
+          cupom: cupomDoEmail?.codigo ?? null,
         })
       }
     } catch (e) {
@@ -128,9 +192,16 @@ export async function enviarEmailsCarrinho(
 export async function salvarModeloEmail(
   m: ModeloEmailRecuperacao,
 ): Promise<{ ok: true } | { ok: false; erro: string }> {
-  const campos = [m.assunto, m.titulo, m.mensagem, m.textoBotao]
-  if (campos.some((c) => !c || !c.trim())) {
-    return { ok: false, erro: 'Assunto, título, mensagem e texto do botão não podem ficar vazios.' }
+  if (!m.assunto?.trim()) return { ok: false, erro: 'O assunto não pode ficar vazio.' }
+  const html = m.html?.trim() ?? ''
+  if (!html && [m.titulo, m.mensagem, m.textoBotao].some((c) => !c || !c.trim())) {
+    return { ok: false, erro: 'Título, mensagem e texto do botão não podem ficar vazios na moldura da marca.' }
+  }
+  if (html && !/\{itens\}/.test(html)) {
+    return {
+      ok: false,
+      erro: 'O HTML precisa conter {itens} — sem ele o cliente recebe um e-mail de carrinho sem os produtos.',
+    }
   }
   try {
     await gravarModeloEmail({
@@ -138,6 +209,7 @@ export async function salvarModeloEmail(
       titulo: m.titulo.trim(),
       mensagem: m.mensagem.trim(),
       textoBotao: m.textoBotao.trim(),
+      html: html || null,
     })
   } catch (e) {
     return { ok: false, erro: e instanceof Error ? e.message : String(e) }

@@ -12,7 +12,7 @@ import type { CarrinhoYampi } from '@/data/yampi-crm'
 import { brl, parseNum, plural } from '@/domain'
 import type { ModeloEmailRecuperacao } from '@/domain'
 
-import { enviarEmailsCarrinho } from './actions'
+import { enviarEmailsCarrinho, type CupomEnvio } from './actions'
 import { ModeloEmail } from './ModeloEmail'
 
 type Carrinho = CarrinhoYampi & { whatsapp: string | null }
@@ -73,8 +73,10 @@ export function CarrinhosCliente({
   const [periodo, setPeriodo] = useState<Periodo>('Últimos 30 dias')
   const [ordem, setOrdem] = useState<Ordem>('Mais recentes')
   const [soComContato, setSoComContato] = useState(false)
+  const [modoCupom, setModoCupom] = useState<'sem' | 'fixo' | 'unico'>('sem')
   const [cupomCodigo, setCupomCodigo] = useState('')
   const [cupomPct, setCupomPct] = useState('10')
+  const [validadeDias, setValidadeDias] = useState('7')
   const [editandoModelo, setEditandoModelo] = useState(false)
   const [vendoHistorico, setVendoHistorico] = useState(false)
   const [aviso, setAviso] = useState<{ tom: 'ok' | 'erro'; texto: string } | null>(null)
@@ -82,9 +84,21 @@ export function CarrinhosCliente({
   const [enviando, iniciarTransicao] = useTransition()
   const router = useRouter()
 
-  const cupom = cupomCodigo.trim()
-    ? { codigo: cupomCodigo.trim().toUpperCase(), pct: Math.max(1, Math.round(parseNum(cupomPct) || 10)) }
-    : null
+  const pct = Math.max(1, Math.min(90, Math.round(parseNum(cupomPct) || 10)))
+  const cupom: CupomEnvio | null =
+    modoCupom === 'fixo' && cupomCodigo.trim()
+      ? { tipo: 'fixo', codigo: cupomCodigo.trim().toUpperCase(), pct }
+      : modoCupom === 'unico'
+        ? { tipo: 'unico', pct, validadeDias: Math.max(1, Math.round(parseNum(validadeDias) || 7)) }
+        : null
+
+  // O que o modal de prévia mostra no lugar do cupom deste envio.
+  const cupomPrevia =
+    cupom?.tipo === 'fixo'
+      ? { codigo: cupom.codigo, pct: cupom.pct }
+      : cupom?.tipo === 'unico'
+        ? { codigo: `VOLTA${cupom.pct}-A7K2MB`, pct: cupom.pct }
+        : null
 
   const enviar = (ids: string[], forcar = false) =>
     iniciarTransicao(async () => {
@@ -442,54 +456,120 @@ export function CarrinhosCliente({
 
         {emailPronto ? (
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: '1 1 190px', maxWidth: 240 }}>
-              <Rotulo>Cupom no e-mail (opcional)</Rotulo>
-              <input
-                value={cupomCodigo}
-                onChange={(e) => setCupomCodigo(e.target.value.toUpperCase())}
-                placeholder="ex.: VOLTA10"
-                className="font-mono focus:border-ouro/45"
-                style={{
-                  height: 34,
-                  padding: '0 11px',
-                  border: '1px solid rgba(255,255,255,.12)',
-                  background: 'rgba(255,255,255,.04)',
-                  color: 'var(--color-corrente)',
-                  fontSize: 12,
-                  borderRadius: 8,
-                  outline: 'none',
-                }}
-              />
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 86 }}>
-              <Rotulo>% do cupom</Rotulo>
-              <input
-                value={cupomPct}
-                onChange={(e) => setCupomPct(e.target.value.replace(/[^0-9]/g, ''))}
-                inputMode="numeric"
-                disabled={!cupomCodigo.trim()}
-                className="font-mono focus:border-ouro/45"
-                style={{
-                  height: 34,
-                  padding: '0 11px',
-                  border: '1px solid rgba(255,255,255,.12)',
-                  background: 'rgba(255,255,255,.04)',
-                  color: 'var(--color-corrente)',
-                  fontSize: 12,
-                  borderRadius: 8,
-                  outline: 'none',
-                  opacity: cupomCodigo.trim() ? 1 : 0.45,
-                }}
-              />
-            </label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              <Rotulo>Cupom no e-mail</Rotulo>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {(
+                  [
+                    ['sem', 'Sem cupom'],
+                    ['fixo', 'Código fixo'],
+                    ['unico', 'Único por cliente'],
+                  ] as const
+                ).map(([chave, rotulo]) => {
+                  const ativo = modoCupom === chave
+                  return (
+                    <button
+                      key={chave}
+                      type="button"
+                      onClick={() => setModoCupom(chave)}
+                      className="hover:border-ouro/40 font-sans"
+                      style={{
+                        height: 34,
+                        padding: '0 12px',
+                        border: `1px solid ${ativo ? 'rgba(239,209,140,.45)' : 'rgba(255,255,255,.1)'}`,
+                        background: ativo ? 'rgba(239,209,140,.09)' : 'transparent',
+                        color: ativo ? COR.ouro : 'rgba(242,237,227,.6)',
+                        fontWeight: 600,
+                        fontSize: 10.5,
+                        lineHeight: 1,
+                        borderRadius: 8,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {rotulo}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            {modoCupom === 'fixo' && (
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 170 }}>
+                <Rotulo>Código já publicado</Rotulo>
+                <input
+                  value={cupomCodigo}
+                  onChange={(e) => setCupomCodigo(e.target.value.toUpperCase())}
+                  placeholder="ex.: VOLTA10"
+                  className="font-mono focus:border-ouro/45"
+                  style={{
+                    height: 34,
+                    padding: '0 11px',
+                    border: '1px solid rgba(255,255,255,.12)',
+                    background: 'rgba(255,255,255,.04)',
+                    color: 'var(--color-corrente)',
+                    fontSize: 12,
+                    borderRadius: 8,
+                    outline: 'none',
+                  }}
+                />
+              </label>
+            )}
+            {modoCupom !== 'sem' && (
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 78 }}>
+                <Rotulo>%</Rotulo>
+                <input
+                  value={cupomPct}
+                  onChange={(e) => setCupomPct(e.target.value.replace(/[^0-9]/g, ''))}
+                  inputMode="numeric"
+                  className="font-mono focus:border-ouro/45"
+                  style={{
+                    height: 34,
+                    padding: '0 11px',
+                    border: '1px solid rgba(255,255,255,.12)',
+                    background: 'rgba(255,255,255,.04)',
+                    color: 'var(--color-corrente)',
+                    fontSize: 12,
+                    borderRadius: 8,
+                    outline: 'none',
+                  }}
+                />
+              </label>
+            )}
+            {modoCupom === 'unico' && (
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 110 }}>
+                <Rotulo>Validade (dias)</Rotulo>
+                <input
+                  value={validadeDias}
+                  onChange={(e) => setValidadeDias(e.target.value.replace(/[^0-9]/g, ''))}
+                  inputMode="numeric"
+                  className="font-mono focus:border-ouro/45"
+                  style={{
+                    height: 34,
+                    padding: '0 11px',
+                    border: '1px solid rgba(255,255,255,.12)',
+                    background: 'rgba(255,255,255,.04)',
+                    color: 'var(--color-corrente)',
+                    fontSize: 12,
+                    borderRadius: 8,
+                    outline: 'none',
+                  }}
+                />
+              </label>
+            )}
             <div style={{ flex: 1 }} />
             <button
               type="button"
               disabled={enviando || alvoEmMassa.length === 0}
               onClick={() => {
+                const descricaoCupom =
+                  cupom?.tipo === 'fixo'
+                    ? ` com o cupom ${cupom.codigo} (${cupom.pct}%)`
+                    : cupom?.tipo === 'unico'
+                      ? ` com cupom ÚNICO de ${cupom.pct}% por cliente (criado na Yampi, uso único, validade de ${plural(cupom.validadeDias, 'dia', 'dias')})`
+                      : ' sem cupom'
                 if (
                   window.confirm(
-                    `Enviar o e-mail de recuperação para ${plural(alvoEmMassa.length, 'carrinho', 'carrinhos')} do recorte atual${cupom ? ` com o cupom ${cupom.codigo} (${cupom.pct}%)` : ' sem cupom'}?`,
+                    `Enviar o e-mail de recuperação para ${plural(alvoEmMassa.length, 'carrinho', 'carrinhos')} do recorte atual${descricaoCupom}?`,
                   )
                 ) {
                   enviar(alvoEmMassa.map((c) => c.id))
@@ -585,7 +665,7 @@ export function CarrinhosCliente({
       </section>
 
       {editandoModelo && (
-        <ModeloEmail inicial={modelo} cupom={cupom} aoFechar={() => setEditandoModelo(false)} />
+        <ModeloEmail inicial={modelo} cupom={cupomPrevia} aoFechar={() => setEditandoModelo(false)} />
       )}
 
       <Tabela

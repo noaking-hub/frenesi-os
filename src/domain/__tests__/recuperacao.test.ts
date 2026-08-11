@@ -70,3 +70,52 @@ describe('e-mail de recuperação de carrinho', () => {
     expect(html).toContain('Ficou pronto.')
   })
 })
+
+describe('modo HTML do zero', () => {
+  const base = {
+    nome: 'Marina Fontes',
+    itens: ['1× Erba Pura · 5 ml'],
+    valor: 84.9,
+    linkCheckout: 'https://loja.com/carrinho/abc',
+  }
+  const modelo = {
+    assunto: 'Oi {nome}',
+    titulo: '',
+    mensagem: '',
+    textoBotao: '',
+    html: `<html><body>
+      <h1>Oi {nome}, faltou {total}</h1>
+      {itens}
+      [[cupom]]<p>Use {cupom} e ganhe {desconto}%</p>[[/cupom]]
+      <a href="{link}">Fechar pedido</a>
+    </body></html>`,
+  }
+
+  it('o documento é o da operação, com itens, nome, total e link no lugar', () => {
+    const { assunto, html } = emailRecuperacao({ ...base, cupom: null }, modelo)
+    expect(assunto).toBe('Oi Marina')
+    expect(html).toContain('Oi Marina, faltou R$')
+    expect(html).toContain('Erba Pura')
+    expect(html).toContain('href="https://loja.com/carrinho/abc"')
+    // A moldura padrão NÃO aparece: o HTML é só o escrito.
+    expect(html).not.toContain('decants de perfumaria')
+  })
+
+  it('o bloco [[cupom]] some inteiro sem cupom e abre com cupom', () => {
+    const sem = emailRecuperacao({ ...base, cupom: null }, modelo)
+    expect(sem.html).not.toContain('Use ')
+    expect(sem.html).not.toContain('[[cupom]]')
+    const com = emailRecuperacao({ ...base, cupom: { codigo: 'VOLTA10-ABC234', pct: 10 } }, modelo)
+    expect(com.html).toContain('Use VOLTA10-ABC234 e ganhe 10%')
+    expect(com.html).not.toContain('[[cupom]]')
+  })
+
+  it('escapa o título do produto também no HTML próprio', () => {
+    const { html } = emailRecuperacao(
+      { ...base, itens: ['<img src=x onerror=alert(1)>'], cupom: null },
+      modelo,
+    )
+    expect(html).not.toContain('<img src=x')
+    expect(html).toContain('&lt;img')
+  })
+})

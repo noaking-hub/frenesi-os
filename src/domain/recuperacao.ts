@@ -34,6 +34,15 @@ export interface ModeloEmailRecuperacao {
   /** Parágrafos separados por linha em branco. */
   mensagem: string
   textoBotao: string
+  /**
+   * Modo "HTML do zero": quando preenchido, este é o DOCUMENTO INTEIRO do
+   * e-mail, escrito pela operação. Placeholders: {nome}, {total}, {itens}
+   * (tabela pronta com os produtos e o total), {link} (URL do carrinho),
+   * e o bloco condicional [[cupom]] … {cupom} … {desconto} … [[/cupom]],
+   * que some inteiro quando o envio não leva cupom. Vazio ou nulo, vale a
+   * moldura da marca com os textos acima.
+   */
+  html?: string | null
 }
 
 export const MODELO_PADRAO: ModeloEmailRecuperacao = {
@@ -42,6 +51,7 @@ export const MODELO_PADRAO: ModeloEmailRecuperacao = {
   mensagem:
     'Você montou um carrinho na FRENESI e não finalizou — acontece. Seus decants continuam aqui, fracionados do frasco original e prontos para envio.',
   textoBotao: 'Concluir meu pedido',
+  html: null,
 }
 
 /** Aplica {nome} e {total}; sem nome, remove o placeholder sem deixar cicatriz. */
@@ -62,6 +72,15 @@ export function emailRecuperacao(
   const primeiroNome = d.nome?.trim().split(/\s+/)[0] || null
   const total = brl(d.valor)
   const assunto = preencherModelo(modelo.assunto, primeiroNome, total)
+
+  // Modo HTML do zero: o documento é da operação; o código só preenche.
+  if (modelo.html && modelo.html.trim()) {
+    return {
+      assunto,
+      html: renderHtmlProprio(modelo.html, d, primeiroNome, total),
+    }
+  }
+
   const titulo = preencherModelo(modelo.titulo, primeiroNome, total)
   const paragrafos = modelo.mensagem
     .split(/\n\s*\n|\n/)
@@ -178,3 +197,111 @@ export function emailRecuperacao(
 
   return { assunto, html }
 }
+
+/** A tabela de itens pronta para o modo HTML próprio — vale em qualquer lugar do documento. */
+function tabelaDeItens(itens: string[], totalFormatado: string): string {
+  const linhas = itens
+    .map(
+      (i) =>
+        `<tr><td style="padding:9px 0;border-bottom:1px solid #E5DFD2;font-family:Georgia,'Times New Roman',serif;font-size:14px;line-height:1.5;color:#1A1A1A;">${escapaHtml(i)}</td></tr>`,
+    )
+    .join('')
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${linhas}<tr><td style="padding:12px 0 0;text-align:right;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#4C463A;">Total: <strong style="color:#1A1A1A;font-size:15px;">${totalFormatado}</strong></td></tr></table>`
+}
+
+/**
+ * Preenche o HTML escrito pela operação.
+ *
+ * O bloco [[cupom]]…[[/cupom]] sai inteiro quando não há cupom — prometer
+ * desconto sem código seria pior que não prometer. Os valores substituídos
+ * são escapados; a estrutura é toda de quem escreveu o documento.
+ */
+function renderHtmlProprio(
+  htmlModelo: string,
+  d: DadosEmailCarrinho,
+  primeiroNome: string | null,
+  total: string,
+): string {
+  const comCupom = d.cupom
+    ? htmlModelo.replace(/\[\[\/?cupom\]\]/gi, '')
+    : htmlModelo.replace(/\[\[cupom\]\][\s\S]*?\[\[\/cupom\]\]/gi, '')
+
+  return preencherModelo(
+    comCupom
+      .split('{itens}')
+      .join(tabelaDeItens(d.itens, total))
+      .split('{link}')
+      .join(escapaHtml(d.linkCheckout ?? '#'))
+      .split('{cupom}')
+      .join(escapaHtml(d.cupom?.codigo ?? ''))
+      .split('{desconto}')
+      .join(String(d.cupom?.pct ?? '')),
+    primeiroNome,
+    total,
+  )
+}
+
+/**
+ * Ponto de partida do modo HTML do zero: um documento completo e testado em
+ * cliente de e-mail (tabelas + estilo inline), já com todos os placeholders
+ * no lugar. Melhor editar em cima de algo que funciona do que começar de uma
+ * página em branco e descobrir no Gmail o que quebrou.
+ */
+export const HTML_BASE_RECUPERACAO = `<!doctype html>
+<html lang="pt-BR">
+  <body style="margin:0;padding:0;background:#F6F1E7;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F6F1E7;padding:32px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+            <tr>
+              <td style="padding:0 0 22px;text-align:center;">
+                <p style="margin:0;font-family:Georgia,'Times New Roman',serif;font-size:26px;letter-spacing:.34em;color:#141414;">FRENESI</p>
+                <p style="margin:6px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:#8A7440;">decants de perfumaria</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="background:#FFFDF8;border:1px solid #EAE2CF;border-radius:14px;padding:34px 36px;">
+                <p style="margin:0 0 14px;font-family:Georgia,'Times New Roman',serif;font-size:21px;line-height:1.35;color:#1A1A1A;">
+                  {nome}, deixamos tudo separado.
+                </p>
+                <p style="margin:0 0 20px;font-family:Arial,Helvetica,sans-serif;font-size:13.5px;line-height:1.65;color:#4C463A;">
+                  Você montou um carrinho na FRENESI e não finalizou — acontece.
+                  Seus decants continuam aqui, fracionados do frasco original e prontos para envio.
+                </p>
+                <p style="margin:0 0 4px;font-family:Arial,Helvetica,sans-serif;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:#8A7440;">No seu carrinho</p>
+                {itens}
+                [[cupom]]
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:22px;border:1px dashed #B08D3E;border-radius:10px;">
+                  <tr>
+                    <td style="padding:16px 20px;text-align:center;">
+                      <p style="margin:0 0 6px;font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8A7440;">{desconto}% de desconto para fechar hoje</p>
+                      <p style="margin:0;font-family:'Courier New',Courier,monospace;font-weight:bold;font-size:20px;letter-spacing:.08em;color:#1A1A1A;">{cupom}</p>
+                      <p style="margin:6px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#8A8374;">É só aplicar no checkout · uso único</p>
+                    </td>
+                  </tr>
+                </table>
+                [[/cupom]]
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td style="padding:26px 0 6px;text-align:center;">
+                      <a href="{link}" style="display:inline-block;background:#141414;color:#EFD18C;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:bold;font-size:13px;letter-spacing:.08em;text-transform:uppercase;padding:15px 34px;border-radius:8px;">Concluir meu pedido</a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:20px 10px 0;text-align:center;">
+                <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.6;color:#9A927F;">
+                  Alguma dúvida sobre um perfume? É só responder este e-mail.<br>
+                  Você recebeu esta mensagem porque deixou itens no carrinho da FRENESI.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`
