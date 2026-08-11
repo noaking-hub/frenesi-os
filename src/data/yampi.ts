@@ -105,7 +105,16 @@ export async function chamarYampi<T>(
     )
   }
 
-  return (await resposta.json()) as T
+  // DELETE (e alguns POST) respondem 2xx com corpo vazio. Fazer .json()
+  // direto estourava "Unexpected end of JSON input" — e uma exclusão que DEU
+  // CERTO na Yampi era contada como falha na tela.
+  const cru = await resposta.text()
+  if (!cru.trim()) return undefined as T
+  try {
+    return JSON.parse(cru) as T
+  } catch {
+    throw new Error(`A Yampi respondeu algo que não é JSON em ${caminho} — ${cru.slice(0, 160)}`)
+  }
 }
 
 export interface DiagnosticoYampi {

@@ -123,6 +123,13 @@ export async function excluirCuponsEmLote(
           await pausa(30_000)
           continue
         }
+        // Excluir o que já não existe é o resultado desejado, não uma falha —
+        // acontece ao retentar um lote em que a exclusão valeu e a resposta
+        // não foi lida.
+        if (/404|não encontrou/i.test(msg)) {
+          resultado.excluidos.push(codigo)
+          break
+        }
         resultado.falhas.push({ codigo, erro: msg })
         break
       }
