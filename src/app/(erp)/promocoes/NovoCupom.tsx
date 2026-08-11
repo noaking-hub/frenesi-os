@@ -1,5 +1,7 @@
 'use client'
 
+import { useRouter } from 'next/navigation'
+
 import { useState, useTransition } from 'react'
 
 import { Modal } from '@/components/erp/Modal'
@@ -25,6 +27,7 @@ export function NovoCupom() {
   const [naoAcumula, setNaoAcumula] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
   const [pendente, iniciarTransicao] = useTransition()
+  const router = useRouter()
 
   const salvar = () =>
     iniciarTransicao(async () => {
@@ -45,6 +48,7 @@ export function NovoCupom() {
       setCodigo('')
       setExpiraEm('')
       setLimite('')
+      router.refresh()
     })
 
   const campo: React.CSSProperties = {

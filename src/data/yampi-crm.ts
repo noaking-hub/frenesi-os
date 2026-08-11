@@ -261,12 +261,40 @@ export interface NovoCupom {
   naoAcumula?: boolean
 }
 
+/** Hoje em São Paulo, no formato aaaa-mm-dd que a Yampi espera. */
+function hojeSp(): string {
+  return new Date().toLocaleDateString('sv', { timeZone: 'America/Sao_Paulo' })
+}
+
+/**
+ * Tenta publicar/alterar com `discount_type` na grafia mais comum e cai para
+ * a alternativa se a Yampi recusar exatamente esse campo. O 422 dela nomeia
+ * o campo — é o que permite o fallback ser cirúrgico.
+ */
+async function comDiscountType(
+  enviar: (discountType: string) => Promise<unknown>,
+  percentual: boolean,
+): Promise<void> {
+  const [primeira, segunda] = percentual ? ['percentage', 'percent'] : ['fixed', 'fixed_value']
+  try {
+    await enviar(primeira)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (/422/.test(msg) && /discount_type/i.test(msg) && primeira !== segunda) {
+      await enviar(segunda)
+      return
+    }
+    throw e
+  }
+}
+
 /**
  * Publica um cupom no checkout (`POST /pricing/promocodes`).
  *
- * O corpo segue o formato mais comum da Yampi; se a loja recusar, a mensagem
- * dela chega inteira à tela — ela nomeia o campo que faltou, e isso vale
- * mais que qualquer tradução nossa.
+ * O corpo segue o que o 422 da Yampi exigiu num teste real: `discount_type`
+ * (não `type`), `min_value`, `start_at` e `end_at` obrigatórios. Cupom "sem
+ * prazo" ganha end_at em 2099 — é o jeito de dizer "não expira" numa API
+ * que obriga data de fim.
  */
 export async function criarCupomYampi(cupom: NovoCupom): Promise<void> {
   const codigo = cupom.codigo.trim().toUpperCase()
@@ -278,24 +306,30 @@ export async function criarCupomYampi(cupom: NovoCupom): Promise<void> {
     throw new Error('Desconto percentual de 100% ou mais zeraria a venda.')
   }
 
-  await chamarYampi(
-    '/pricing/promocodes',
-    {},
-    {
-      metodo: 'POST',
-      corpo: {
-        name: codigo,
-        code: codigo,
-        value: cupom.valor,
-        type: cupom.percentual ? 'percent' : 'fixed',
-        active: true,
-        ...(cupom.limite && cupom.limite > 0 ? { quantity: cupom.limite } : {}),
-        ...(cupom.expiraEm ? { expires_at: `${cupom.expiraEm} 23:59:59` } : {}),
-        // "Não acumular" muda de nome conforme a versão da API; mandar os
-        // dois cobre as duas grafias e campo desconhecido é ignorado.
-        ...(cupom.naoAcumula ? { accumulate: false, cumulative: false } : {}),
-      },
-    },
+  await comDiscountType(
+    (discountType) =>
+      chamarYampi(
+        '/pricing/promocodes',
+        {},
+        {
+          metodo: 'POST',
+          corpo: {
+            name: codigo,
+            code: codigo,
+            value: cupom.valor,
+            discount_type: discountType,
+            min_value: 0,
+            start_at: `${hojeSp()} 00:00:00`,
+            end_at: cupom.expiraEm ? `${cupom.expiraEm} 23:59:59` : '2099-12-31 23:59:59',
+            active: true,
+            ...(cupom.limite && cupom.limite > 0 ? { quantity: cupom.limite } : {}),
+            // "Não acumular" muda de nome conforme a versão da API; mandar as
+            // duas grafias cobre ambas e campo desconhecido é ignorado.
+            ...(cupom.naoAcumula ? { accumulate: false, cumulative: false } : {}),
+          },
+        },
+      ),
+    cupom.percentual,
   )
 }
 
@@ -315,23 +349,26 @@ export async function atualizarCupomYampi(
     ativo?: boolean
   },
 ): Promise<void> {
-  await chamarYampi(
-    `/pricing/promocodes/${encodeURIComponent(id)}`,
-    {},
-    {
-      metodo: 'PUT',
-      corpo: {
-        ...(mudancas.valor !== undefined ? { value: mudancas.valor } : {}),
-        ...(mudancas.percentual !== undefined
-          ? { type: mudancas.percentual ? 'percent' : 'fixed' }
-          : {}),
-        ...(mudancas.expiraEm !== undefined
-          ? { expires_at: mudancas.expiraEm ? `${mudancas.expiraEm} 23:59:59` : null }
-          : {}),
-        ...(mudancas.limite !== undefined ? { quantity: mudancas.limite ?? 0 } : {}),
-        ...(mudancas.ativo !== undefined ? { active: mudancas.ativo } : {}),
-      },
-    },
+  await comDiscountType(
+    (discountType) =>
+      chamarYampi(
+        `/pricing/promocodes/${encodeURIComponent(id)}`,
+        {},
+        {
+          metodo: 'PUT',
+          corpo: {
+            ...(mudancas.valor !== undefined
+              ? { value: mudancas.valor, discount_type: discountType, min_value: 0 }
+              : {}),
+            ...(mudancas.expiraEm !== undefined
+              ? { end_at: mudancas.expiraEm ? `${mudancas.expiraEm} 23:59:59` : '2099-12-31 23:59:59' }
+              : {}),
+            ...(mudancas.limite !== undefined ? { quantity: mudancas.limite ?? 0 } : {}),
+            ...(mudancas.ativo !== undefined ? { active: mudancas.ativo } : {}),
+          },
+        },
+      ),
+    mudancas.percentual ?? true,
   )
 }
 

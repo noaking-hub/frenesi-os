@@ -1,5 +1,7 @@
 'use client'
 
+import { useRouter } from 'next/navigation'
+
 import { useState, useTransition } from 'react'
 
 import { Modal } from '@/components/erp/Modal'
@@ -39,6 +41,7 @@ export function LoteCupons() {
   const [resultado, setResultado] = useState<ResultadoLote | null>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [pendente, iniciarTransicao] = useTransition()
+  const router = useRouter()
 
   const codigos = [
     ...new Set(
@@ -66,6 +69,9 @@ export function LoteCupons() {
       }
       setResultado(r.resultado)
       if (r.resultado.falhas.length === 0) setTexto('')
+      // Sem o refresh a lista continuaria mostrando o estado de antes — a
+      // revalidação da action não alcança esta árvore já renderizada.
+      router.refresh()
     })
 
   return (
@@ -171,6 +177,7 @@ export function AcoesCupom({ cupom }: { cupom: CupomYampi }) {
   const [ativo, setAtivo] = useState(cupom.ativo)
   const [erro, setErro] = useState<string | null>(null)
   const [pendente, iniciarTransicao] = useTransition()
+  const router = useRouter()
 
   if (!cupom.id) {
     return (
@@ -195,6 +202,7 @@ export function AcoesCupom({ cupom }: { cupom: CupomYampi }) {
         return
       }
       setEditando(false)
+      router.refresh()
     })
 
   const excluir = () =>
@@ -202,7 +210,11 @@ export function AcoesCupom({ cupom }: { cupom: CupomYampi }) {
       if (!window.confirm(`Excluir o cupom ${cupom.codigo} do checkout da Yampi?`)) return
       setErro(null)
       const r = await excluirCupom(id)
-      if (!r.ok) setErro(r.erro)
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      router.refresh()
     })
 
   const botaozinho: React.CSSProperties = {
