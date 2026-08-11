@@ -37,11 +37,11 @@ na Shopify), Concorrentes (coleta de preços).
 Perfumes base, Derivados, Movimentações, Lotes e perda real, Sincronia
 Shopify, Inventário. A carga inicial saiu por decisão do operador: o
 controle de estoque nasce das compras novas, frasco a frasco — base sem
-compra registrada fica fora da sincronia (estado normal, não pendência). A sincronia agora é de mão dupla e automática:
-o catálogo reimporta sozinho ao abrir a tela (12 h de validade) e o estoque
-calculado é **aplicado na loja pela rotina de hora em hora** — o botão só
-existe para quem não quer esperar. Base sem carga inicial fica fora da
-escrita de propósito (zero ali significa "não sei", não "acabou").
+compra registrada fica fora da sincronia (estado normal, não pendência).
+A sincronia é de mão dupla e automática: o catálogo reimporta sozinho ao
+abrir a tela (12 h de validade) e o estoque calculado é **aplicado na loja
+pela rotina de hora em hora** — o botão só existe para quem não quer
+esperar.
 
 ### Produção
 Ordens de envase, conclusão com perda real por lote.
