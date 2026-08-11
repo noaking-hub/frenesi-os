@@ -242,6 +242,66 @@ function renderHtmlProprio(
 }
 
 /**
+ * E-mail de aniversário (Giftback): parabéns da marca com um cupom-presente
+ * de uso único. Mesma moldura visual da recuperação — é a mesma marca
+ * falando, em outra data.
+ */
+export function emailGiftback(d: {
+  nome: string | null
+  cupom: { codigo: string; pct: number }
+  validadeDias: number
+  lojaUrl: string | null
+}): { assunto: string; html: string } {
+  const primeiroNome = d.nome?.trim().split(/\s+/)[0] || null
+  const assunto = primeiroNome
+    ? `Feliz aniversário, ${primeiroNome} — um presente da FRENESI`
+    : 'Feliz aniversário — um presente da FRENESI'
+
+  const botao = d.lojaUrl
+    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:26px 0 6px;text-align:center;"><a href="${escapaHtml(d.lojaUrl)}" style="display:inline-block;background:#141414;color:#EFD18C;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:bold;font-size:13px;letter-spacing:.08em;text-transform:uppercase;padding:15px 34px;border-radius:8px;">Escolher meu decant</a></td></tr></table>`
+    : ''
+
+  const html = `<!doctype html>
+<html lang="pt-BR">
+  <body style="margin:0;padding:0;background:#F6F1E7;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F6F1E7;padding:32px 12px;">
+      <tr><td align="center">
+        <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+          <tr><td style="padding:0 0 22px;text-align:center;">
+            <p style="margin:0;font-family:Georgia,'Times New Roman',serif;font-size:26px;letter-spacing:.34em;color:#141414;">FRENESI</p>
+            <p style="margin:6px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:#8A7440;">decants de perfumaria</p>
+          </td></tr>
+          <tr><td style="background:#FFFDF8;border:1px solid #EAE2CF;border-radius:14px;padding:34px 36px;">
+            <p style="margin:0 0 14px;font-family:Georgia,'Times New Roman',serif;font-size:22px;line-height:1.35;color:#1A1A1A;">
+              ${primeiroNome ? `${escapaHtml(primeiroNome)}, hoje o dia é seu.` : 'Hoje o dia é seu.'}
+            </p>
+            <p style="margin:0 0 20px;font-family:Arial,Helvetica,sans-serif;font-size:13.5px;line-height:1.65;color:#4C463A;">
+              Feliz aniversário! Para celebrar com a fragrância que você ama — ou uma nova para
+              marcar o ano — deixamos um presente no seu nome.
+            </p>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px dashed #B08D3E;border-radius:10px;">
+              <tr><td style="padding:16px 20px;text-align:center;">
+                <p style="margin:0 0 6px;font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8A7440;">${d.cupom.pct}% de presente de aniversário</p>
+                <p style="margin:0;font-family:'Courier New',Courier,monospace;font-weight:bold;font-size:20px;letter-spacing:.08em;color:#1A1A1A;">${escapaHtml(d.cupom.codigo)}</p>
+                <p style="margin:6px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#8A8374;">só seu · uso único · vale por ${d.validadeDias} ${d.validadeDias === 1 ? 'dia' : 'dias'}</p>
+              </td></tr>
+            </table>
+            ${botao}
+          </td></tr>
+          <tr><td style="padding:20px 10px 0;text-align:center;">
+            <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.6;color:#9A927F;">
+              Com carinho, FRENESI. Você recebeu este e-mail porque é cliente da casa.
+            </p>
+          </td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </body>
+</html>`
+  return { assunto, html }
+}
+
+/**
  * Ponto de partida do modo HTML do zero: um documento completo e testado em
  * cliente de e-mail (tabelas + estilo inline), já com todos os placeholders
  * no lugar. Melhor editar em cima de algo que funciona do que começar de uma

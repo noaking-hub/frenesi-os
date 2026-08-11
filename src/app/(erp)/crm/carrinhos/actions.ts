@@ -26,6 +26,12 @@ export interface ResultadoRecuperacao {
   jaContatados: number
   semEmail: number
   falhas: { quem: string; erro: string }[]
+  /**
+   * Carrinhos que o prazo desta rodada não alcançou. Um lote de centenas
+   * não cabe numa execução só no servidor — a tela chama de novo com esta
+   * lista até ela vir vazia, mostrando o progresso.
+   */
+  naoProcessados: string[]
 }
 
 const pausa = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -50,6 +56,8 @@ export async function enviarEmailsCarrinho(
   ids: string[],
   cupom: CupomEnvio | null,
   forcar = false,
+  /** Tempo máximo de processamento desta chamada; o resto volta em naoProcessados. */
+  prazoMs?: number,
 ): Promise<{ ok: true; resultado: ResultadoRecuperacao } | { ok: false; erro: string }> {
   if (!emailConfigurado()) {
     return {
@@ -64,8 +72,8 @@ export async function enviarEmailsCarrinho(
   }
   const unicos = [...new Set(ids)].filter(Boolean)
   if (unicos.length === 0) return { ok: false, erro: 'Nenhum carrinho para contatar.' }
-  if (unicos.length > 200) {
-    return { ok: false, erro: 'Mais de 200 envios de uma vez — reduza o recorte.' }
+  if (unicos.length > 1000) {
+    return { ok: false, erro: 'Mais de 1.000 envios de uma vez — reduza o recorte.' }
   }
 
   let carrinhos
@@ -89,11 +97,24 @@ export async function enviarEmailsCarrinho(
     }
   }
 
-  const resultado: ResultadoRecuperacao = { enviados: [], jaContatados: 0, semEmail: 0, falhas: [] }
+  const resultado: ResultadoRecuperacao = {
+    enviados: [],
+    jaContatados: 0,
+    semEmail: 0,
+    falhas: [],
+    naoProcessados: [],
+  }
   const agora = Date.now()
+  const inicio = Date.now()
   const modelo = await lerModeloEmail()
 
-  for (const id of unicos) {
+  for (let i = 0; i < unicos.length; i++) {
+    // O prazo desta rodada acabou: devolve o resto para a tela continuar.
+    if (prazoMs && Date.now() - inicio > prazoMs) {
+      resultado.naoProcessados = unicos.slice(i)
+      break
+    }
+    const id = unicos[i]
     const carrinho = carrinhos.find((c) => c.id === id)
     if (!carrinho) continue
     if (!carrinho.email) {

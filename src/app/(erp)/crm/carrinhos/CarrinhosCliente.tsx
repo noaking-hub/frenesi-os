@@ -81,7 +81,10 @@ export function CarrinhosCliente({
   const [vendoHistorico, setVendoHistorico] = useState(false)
   const [aviso, setAviso] = useState<{ tom: 'ok' | 'erro'; texto: string } | null>(null)
   const [enviandoId, setEnviandoId] = useState<string | null>(null)
-  const [enviando, iniciarTransicao] = useTransition()
+  const [enviandoUm, iniciarTransicao] = useTransition()
+  const [progresso, setProgresso] = useState<string | null>(null)
+  const [enviandoMassa, setEnviandoMassa] = useState(false)
+  const enviando = enviandoUm || enviandoMassa
   const router = useRouter()
 
   const pct = Math.max(1, Math.min(90, Math.round(parseNum(cupomPct) || 10)))
@@ -100,6 +103,25 @@ export function CarrinhosCliente({
         ? { codigo: `VOLTA${cupom.pct}-A7K2MB`, pct: cupom.pct }
         : null
 
+  const resumoDoResultado = (r: {
+    enviados: number
+    jaContatados: number
+    semEmail: number
+    falhas: { quem: string; erro: string }[]
+  }) => {
+    const partes = [
+      `${plural(r.enviados, 'e-mail enviado', 'e-mails enviados')}`,
+      r.jaContatados ? `${r.jaContatados} já contatados nos últimos 7 dias (pulados)` : '',
+      r.semEmail ? `${r.semEmail} sem e-mail` : '',
+    ].filter(Boolean)
+    return r.falhas.length
+      ? {
+          tom: 'erro' as const,
+          texto: `${partes.join(' · ')} · falhas: ${r.falhas.slice(0, 3).map((f) => `${f.quem} (${f.erro})`).join(' · ')}${r.falhas.length > 3 ? ` e mais ${r.falhas.length - 3}` : ''}`,
+        }
+      : { tom: 'ok' as const, texto: partes.join(' · ') }
+  }
+
   const enviar = (ids: string[], forcar = false) =>
     iniciarTransicao(async () => {
       setAviso(null)
@@ -109,22 +131,66 @@ export function CarrinhosCliente({
         setAviso({ tom: 'erro', texto: r.erro })
         return
       }
-      const { enviados, jaContatados, semEmail, falhas } = r.resultado
-      const partes = [
-        `${plural(enviados.length, 'e-mail enviado', 'e-mails enviados')}`,
-        jaContatados ? `${jaContatados} já contatados nos últimos 7 dias (pulados)` : '',
-        semEmail ? `${semEmail} sem e-mail` : '',
-      ].filter(Boolean)
       setAviso(
-        falhas.length
-          ? {
-              tom: 'erro',
-              texto: `${partes.join(' · ')} · falhas: ${falhas.slice(0, 3).map((f) => `${f.quem} (${f.erro})`).join(' · ')}${falhas.length > 3 ? ` e mais ${falhas.length - 3}` : ''}`,
-            }
-          : { tom: 'ok', texto: partes.join(' · ') },
+        resumoDoResultado({
+          enviados: r.resultado.enviados.length,
+          jaContatados: r.resultado.jaContatados,
+          semEmail: r.resultado.semEmail,
+          falhas: r.resultado.falhas,
+        }),
       )
       router.refresh()
     })
+
+  /**
+   * O lote grande vai pela rota de API, em rodadas: cada chamada processa o
+   * que couber no tempo do servidor e devolve o resto — a tela repete com a
+   * fila restante e mostra o progresso. Uma Server Action aqui travaria a
+   * navegação da aba por minutos.
+   */
+  const enviarEmMassa = async (ids: string[]) => {
+    setAviso(null)
+    setEnviandoMassa(true)
+    const total = ids.length
+    const soma = { enviados: 0, jaContatados: 0, semEmail: 0, falhas: [] as { quem: string; erro: string }[] }
+    let fila = ids
+    try {
+      let rodadas = 0
+      while (fila.length > 0 && rodadas < 50) {
+        rodadas++
+        setProgresso(
+          `Enviando… ${soma.enviados} de ${total} já saíram · ${fila.length} na fila (meio segundo por e-mail — pode deixar a tela aberta)`,
+        )
+        const resposta = await fetch('/api/crm/recuperacao', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: fila, cupom }),
+        })
+        const r = (await resposta.json()) as
+          | { ok: true; resultado: { enviados: string[]; jaContatados: number; semEmail: number; falhas: { quem: string; erro: string }[]; naoProcessados: string[] } }
+          | { ok: false; erro: string }
+        if (!r.ok) {
+          setAviso({ tom: 'erro', texto: r.erro })
+          return
+        }
+        soma.enviados += r.resultado.enviados.length
+        soma.jaContatados += r.resultado.jaContatados
+        soma.semEmail += r.resultado.semEmail
+        soma.falhas.push(...r.resultado.falhas)
+        fila = r.resultado.naoProcessados ?? []
+      }
+      setAviso(resumoDoResultado(soma))
+    } catch (e) {
+      setAviso({
+        tom: 'erro',
+        texto: `O envio parou no meio (${e instanceof Error ? e.message : String(e)}). Pode clicar de novo: quem já recebeu é pulado automaticamente.`,
+      })
+    } finally {
+      setEnviandoMassa(false)
+      setProgresso(null)
+      router.refresh()
+    }
+  }
 
   // O instante de referência é fixado por render de lista, não por linha —
   // horas é derivado uma vez e reutilizado por filtro, ordenação e badge.
@@ -237,7 +303,7 @@ export function CarrinhosCliente({
     {
       chave: 'acao',
       titulo: 'Recuperar',
-      largura: '176px',
+      largura: '138px',
       render: (c) => {
         const enviadoEm = ultimoEnvio[c.id]
         const diasEnvio = enviadoEm
@@ -314,7 +380,7 @@ export function CarrinhosCliente({
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {enviando && enviandoId === c.id ? 'Enviando…' : 'E-mail da marca'}
+                  {enviando && enviandoId === c.id ? 'Enviando…' : 'E-mail'}
                 </button>
               )}
             </span>
@@ -567,12 +633,16 @@ export function CarrinhosCliente({
                     : cupom?.tipo === 'unico'
                       ? ` com cupom ÚNICO de ${cupom.pct}% por cliente (criado na Yampi, uso único, validade de ${plural(cupom.validadeDias, 'dia', 'dias')})`
                       : ' sem cupom'
+                const avisoVolume =
+                  alvoEmMassa.length > 90
+                    ? ' Atenção: o plano gratuito do Resend envia 100 e-mails por dia — acima disso é preciso o plano pago, senão o excedente falha.'
+                    : ''
                 if (
                   window.confirm(
-                    `Enviar o e-mail de recuperação para ${plural(alvoEmMassa.length, 'carrinho', 'carrinhos')} do recorte atual${descricaoCupom}?`,
+                    `Enviar o e-mail de recuperação para ${plural(alvoEmMassa.length, 'carrinho', 'carrinhos')} do recorte atual${descricaoCupom}? O envio roda em rodadas com progresso na tela.${avisoVolume}`,
                   )
                 ) {
-                  enviar(alvoEmMassa.map((c) => c.id))
+                  void enviarEmMassa(alvoEmMassa.map((c) => c.id))
                 }
               }}
               className="botao-ouro font-sans hover:brightness-[1.07]"
@@ -588,9 +658,11 @@ export function CarrinhosCliente({
                 opacity: enviando || alvoEmMassa.length === 0 ? 0.5 : 1,
               }}
             >
-              {enviando
-                ? 'Enviando… (um por vez, pode demorar)'
-                : `Enviar para ${alvoEmMassa.length} do recorte`}
+              {enviandoMassa
+                ? 'Enviando em rodadas…'
+                : enviando
+                  ? 'Enviando…'
+                  : `Enviar para ${alvoEmMassa.length} do recorte`}
             </button>
           </div>
         ) : (
@@ -606,6 +678,12 @@ export function CarrinhosCliente({
         {emailPronto && (
           <span className="font-sans" style={{ fontSize: 10, lineHeight: 1.5, color: 'rgba(242,237,227,.38)', textWrap: 'pretty' }}>
             {`Quem recebeu e-mail nos últimos 7 dias é pulado no envio em massa — insistir queima o remetente. ${alvoEmMassa.length} de ${visiveis.length} do recorte estão elegíveis agora.`}
+          </span>
+        )}
+
+        {progresso && (
+          <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.5, color: COR.ouro, textWrap: 'pretty' }}>
+            {progresso}
           </span>
         )}
 

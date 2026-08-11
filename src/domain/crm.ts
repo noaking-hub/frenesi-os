@@ -309,6 +309,25 @@ export function nomeCurtoPerfume(nome: string): string {
   return curto || nome
 }
 
+/**
+ * Dias até o PRÓXIMO aniversário (0 = hoje), a partir da data `hoje`.
+ *
+ * A conta é por mês/dia no calendário — o ano do nascimento não importa e
+ * pode nem existir no cadastro. 29/02 em ano não bissexto conta como 01/03.
+ */
+export function diasAteAniversario(aniversarioIso: string, hoje: Date): number | null {
+  const m = aniversarioIso.match(/^\d{4}-(\d{2})-(\d{2})/)
+  if (!m) return null
+  const mes = Number(m[1])
+  const dia = Number(m[2])
+  if (mes < 1 || mes > 12 || dia < 1 || dia > 31) return null
+
+  const base = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate()))
+  let proximo = new Date(Date.UTC(base.getUTCFullYear(), mes - 1, dia))
+  if (proximo < base) proximo = new Date(Date.UTC(base.getUTCFullYear() + 1, mes - 1, dia))
+  return Math.round((proximo.getTime() - base.getTime()) / 86_400_000)
+}
+
 /** `Camila Rocha` → `CR`. Duas letras no máximo, para caber no avatar. */
 export function iniciaisDe(nome: string): string {
   const partes = nome.trim().split(/\s+/).filter(Boolean)

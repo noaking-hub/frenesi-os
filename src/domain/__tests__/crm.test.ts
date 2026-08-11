@@ -11,6 +11,7 @@ import {
   saldoDe,
   statusCliente,
   TETO_VIP,
+  diasAteAniversario,
   iniciaisDe,
   nomeCurtoPerfume,
 } from '..'
@@ -209,6 +210,24 @@ describe('classificação de cliente', () => {
     expect(iniciaisDe('Camila Rocha')).toBe('CR')
     expect(iniciaisDe('Ana')).toBe('A')
     expect(iniciaisDe('  ')).toBe('—')
+  })
+})
+
+describe('dias até o aniversário', () => {
+  const hoje = new Date('2026-08-11T12:00:00Z')
+
+  it('conta pelo calendário, ignorando o ano de nascimento', () => {
+    expect(diasAteAniversario('1993-08-11', hoje)).toBe(0)
+    expect(diasAteAniversario('1993-08-14', hoje)).toBe(3)
+  })
+
+  it('aniversário que já passou este ano cai no ano que vem', () => {
+    expect(diasAteAniversario('1990-08-10', hoje)).toBe(364)
+    expect(diasAteAniversario('2000-01-05', hoje)).toBe(147)
+  })
+
+  it('data ilegível devolve nulo em vez de inventar', () => {
+    expect(diasAteAniversario('não sei', hoje)).toBeNull()
   })
 })
 
