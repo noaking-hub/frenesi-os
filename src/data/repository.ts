@@ -316,7 +316,7 @@ const repositorioSupabase: Repositorio = {
     const { data, error } = await supabaseServer()
       .from('lotes')
       .select(
-        'id, base_id, fornecedor, volume_ml, entrada_em, encerrado_em, ' +
+        'id, base_id, fornecedor, volume_ml, custo_total, entrada_em, encerrado_em, ' +
           'perfumes_base(nome), lote_saidas(ocorrida_em, ordem_id, ml, unidades, variante, motivo)',
       )
       .order('entrada_em', { ascending: false })
@@ -333,6 +333,7 @@ const repositorioSupabase: Repositorio = {
         perfume: base?.nome ?? l.base_id,
         fornecedor: l.fornecedor,
         volumeMl: Number(l.volume_ml),
+        custoTotal: Number(l.custo_total) || undefined,
         entrada: l.entrada_em,
         encerradoEm: l.encerrado_em,
         saidas: saidas.map((s) => ({
@@ -1018,6 +1019,7 @@ interface LinhaLote {
   base_id: string
   fornecedor: string
   volume_ml: number | string
+  custo_total: number | string | null
   entrada_em: string
   encerrado_em: string | null
   perfumes_base: { nome: string } | null

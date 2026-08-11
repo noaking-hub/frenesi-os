@@ -95,6 +95,8 @@ export interface Lote {
   fornecedor: string
   /** Volume comprado, em ml. */
   volumeMl: number
+  /** O que a compra custou — é o que o estorno tira da média de custo. */
+  custoTotal?: number
   entrada: string
   /** Data em que o operador declarou o frasco vazio. Vazio = lote aberto. */
   encerradoEm: string | null

@@ -19,7 +19,7 @@ import { COR, type Tom } from '@/components/erp/tokens'
 import { apurarLote, brl, pad2, parseNum, pct, plural, previaEncerramento, volume } from '@/domain'
 import type { Lote, ParametrosPrecificacao, PerdaReal, PerfumeBase } from '@/domain'
 
-import { ajustarPerdaParametro, encerrarLote, registrarSaidaLote } from './actions'
+import { ajustarPerdaParametro, encerrarLote, estornarCompra, registrarSaidaLote } from './actions'
 
 interface Props {
   lotes: Lote[]
@@ -33,6 +33,7 @@ export function LotesCliente({ lotes, bases, parametros, perda, conciliacao }: P
   const [selecionado, setSelecionado] = useState(lotes[0]?.id ?? '')
   const [encerrando, setEncerrando] = useState<Lote | null>(null)
   const [dandoSaida, setDandoSaida] = useState<Lote | null>(null)
+  const [estornando, setEstornando] = useState<Lote | null>(null)
 
   const abrirEncerramento = (l: Lote) => {
     setSelecionado(l.id)
@@ -445,6 +446,27 @@ export function LotesCliente({ lotes, bases, parametros, perda, conciliacao }: P
               <BotaoOuro altura={36} onClick={() => setEncerrando(loteSel)}>
                 Declarar frasco vazio
               </BotaoOuro>
+              {/* O estorno só aparece enquanto o lote está intacto: com saída
+                  lançada, apagar a compra falsificaria o histórico. */}
+              {apSel.consumidoMl === 0 && (
+                <button
+                  type="button"
+                  onClick={() => setEstornando(loteSel)}
+                  className="font-sans hover:brightness-125"
+                  style={{
+                    border: 0,
+                    background: 'transparent',
+                    padding: '2px 0',
+                    fontWeight: 600,
+                    fontSize: 10.5,
+                    color: COR.erro,
+                    opacity: 0.8,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Lancei errado — estornar esta compra
+                </button>
+              )}
             </div>
           )}
         </section>
@@ -466,7 +488,105 @@ export function LotesCliente({ lotes, bases, parametros, perda, conciliacao }: P
           aoFechar={() => setEncerrando(null)}
         />
       )}
+
+      {estornando && (
+        <ConfirmarEstorno
+          lote={estornando}
+          aoFechar={() => setEstornando(null)}
+          aoConcluir={() => {
+            setEstornando(null)
+            // O lote estornado deixa de existir; a seleção volta ao primeiro.
+            setSelecionado((id) => (id === estornando.id ? (lotes[0]?.id ?? '') : id))
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+/**
+ * Estornar apaga o lote e devolve estoque e custo médio ao que eram. A
+ * confirmação diz exatamente o que sai — compra errada se desfaz com número,
+ * não com "tem certeza?".
+ */
+function ConfirmarEstorno({
+  lote,
+  aoFechar,
+  aoConcluir,
+}: {
+  lote: Lote
+  aoFechar: () => void
+  aoConcluir: () => void
+}) {
+  const [erro, setErro] = useState<string | null>(null)
+  const [pendente, iniciarTransicao] = useTransition()
+
+  const confirmar = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      const r = await estornarCompra(lote.id)
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      aoConcluir()
+    })
+
+  return (
+    <Modal titulo={`Estornar a compra ${lote.id}`} largura={480} aoFechar={aoFechar}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <Rotulo>{`Desfazer o lançamento ${lote.id}`}</Rotulo>
+        <TituloSecao tamanho={15}>{lote.perfume}</TituloSecao>
+      </div>
+
+      <span
+        className="font-sans"
+        style={{ fontSize: 11.5, lineHeight: 1.6, color: 'var(--color-secundario)', textWrap: 'pretty' }}
+      >
+        {`Os ${volume(lote.volumeMl)} saem do estoque, ${lote.custoTotal ? `os ${brl(lote.custoTotal)} desta compra saem` : 'o dinheiro desta compra sai'} da média de custo por ml da base e o lote é apagado. O ajuste fica registrado em Movimentações — a trilha não some.`}
+      </span>
+
+      <span
+        className="font-sans"
+        style={{ fontSize: 10.5, lineHeight: 1.55, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+      >
+        Só é possível enquanto o lote não tem nenhuma saída lançada. Se este perfume também sincroniza
+        estoque com a Shopify, a próxima sincronia leva o volume corrigido.
+      </span>
+
+      {erro && (
+        <span className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.5, color: COR.erro, textWrap: 'pretty' }}>
+          {erro}
+        </span>
+      )}
+
+      <div style={{ display: 'flex', gap: 9, justifyContent: 'flex-end' }}>
+        <BotaoSecundario altura={36} onClick={aoFechar}>
+          Cancelar
+        </BotaoSecundario>
+        <button
+          type="button"
+          onClick={confirmar}
+          disabled={pendente}
+          className="font-sans hover:brightness-110"
+          style={{
+            height: 36,
+            padding: '0 18px',
+            border: '1px solid rgba(224,122,95,.5)',
+            background: 'rgba(224,122,95,.14)',
+            color: COR.erro,
+            fontWeight: 700,
+            fontSize: 11.5,
+            lineHeight: 1,
+            borderRadius: 9,
+            cursor: pendente ? 'wait' : 'pointer',
+            opacity: pendente ? 0.55 : 1,
+          }}
+        >
+          {pendente ? 'Estornando…' : 'Estornar compra'}
+        </button>
+      </div>
+    </Modal>
   )
 }
 

@@ -68,6 +68,33 @@ export async function encerrarLote(loteId: string): Promise<RespostaEncerramento
   return { ok: true, perdaMl: Number(data) }
 }
 
+export type RespostaEstorno = { ok: true } | { ok: false; erro: string }
+
+/**
+ * Desfaz uma compra lançada por engano chamando `estornar_compra()`: devolve
+ * volume e custo médio ao que eram e apaga o lote, deixando o ajuste na
+ * trilha de movimentações. O banco recusa lote encerrado ou com saídas —
+ * nesses o estorno falsificaria histórico de produção e venda.
+ */
+export async function estornarCompra(loteId: string): Promise<RespostaEstorno> {
+  if (!supabaseConfigurado()) {
+    return { ok: false, erro: 'O Supabase precisa estar configurado para estornar compras.' }
+  }
+  if (!loteId) return { ok: false, erro: 'Escolha o lote a estornar.' }
+
+  const { error } = await supabaseServer().rpc('estornar_compra', {
+    p_lote_id: loteId,
+    p_operador: OPERADOR,
+  })
+  if (error) {
+    console.error('[lotes] estornar_compra falhou:', error)
+    return { ok: false, erro: error.message || error.details || 'Falha ao estornar a compra.' }
+  }
+
+  revalidatePath('/', 'layout')
+  return { ok: true }
+}
+
 export type RespostaSaida = { ok: true; saldoMl: number } | { ok: false; erro: string }
 
 /**
