@@ -267,50 +267,57 @@ function hojeSp(): string {
 }
 
 /**
- * Descobre o vocabulário de `discount_type` desta loja e publica com ele.
+ * Publica/altera com o `discount_type` que a PRÓPRIA LOJA usa.
  *
- * "percentage" e "percent" foram recusados num teste real ("não contém um
- * valor válido") — o valor aceito varia por versão da API. Em vez de
- * adivinhar, a primeira fonte é a própria loja: os cupons já publicados
- * carregam o valor que ela usa. Só depois vêm os palpites conhecidos, um a
- * um, parando no primeiro que a Yampi aceitar.
+ * Três rodadas de 422 ensinaram: adivinhar o vocabulário deste campo não
+ * funciona. A fonte da verdade é um cupom existente, lido cru — o valor que
+ * ele carrega é, por definição, um valor que esta conta aceita. Os palpites
+ * ("p" da documentação oficial etc.) só entram depois dele. Se tudo falhar,
+ * o erro final IMPRIME o valor cru do exemplo: a próxima correção parte de
+ * um fato visível, não de outro chute.
  */
 async function comDiscountType(
   enviar: (discountType: unknown) => Promise<unknown>,
   percentual: boolean,
 ): Promise<void> {
-  const candidatos: unknown[] = []
-
-  // O que a loja já usa vale mais que qualquer documentação.
+  // Um cupom real da loja, cru — o molde.
+  let amostra: Record<string, unknown> | null = null
   try {
     const r = await chamarYampi<{ data?: Record<string, unknown>[] }>('/pricing/promocodes', {
-      limit: '50',
+      limit: '1',
     })
-    for (const c of r.data ?? []) {
-      const dt = c.discount_type ?? c.type
-      if (dt === undefined || dt === null) continue
-      const cru = String(dt).toLowerCase()
-      // "p" e "v" são as formas curtas da doc oficial — o regex anterior as
-      // descartava e jogava fora exatamente o valor que a loja usa.
-      const eDeste = percentual
-        ? /^p$|percent|porcent|^2$/.test(cru)
-        : /^v$|^f$|fix|valor|value|^1$/.test(cru)
-      if (eDeste && !candidatos.includes(dt)) candidatos.push(dt)
-    }
+    amostra = r.data?.[0] ?? null
   } catch {
-    /* sem leitura, seguem os palpites */
+    /* sem amostra, seguem os palpites */
   }
 
-  // A doc oficial (docs.yampi.com.br, criar-cupom) usa "p" para percentual;
-  // por simetria, "v" é o primeiro palpite do desconto fixo.
+  const candidatos: unknown[] = []
+  const anota = (v: unknown) => {
+    if (v !== undefined && v !== null && !candidatos.includes(v)) candidatos.push(v)
+  }
+
+  const cruDaAmostra = amostra?.discount_type ?? amostra?.type
+  if (cruDaAmostra !== undefined && cruDaAmostra !== null) {
+    if (typeof cruDaAmostra === 'object') {
+      // Relação embrulhada: o aceito no POST costuma ser o id ou o alias.
+      const o = miolo(cruDaAmostra) as Record<string, unknown>
+      anota(o?.id)
+      anota(o?.alias)
+      anota(o?.code)
+      anota(o?.name)
+    } else {
+      anota(cruDaAmostra)
+    }
+  }
+
   for (const palpite of percentual
-    ? ['p', 'percentage', 'percent', 2]
-    : ['v', 'f', 'fixed', 1]) {
-    if (!candidatos.includes(palpite)) candidatos.push(palpite)
+    ? ['p', 'P', 'percentage', 'percent', 'percentual', 2]
+    : ['v', 'V', 'f', 'fixed', 'valor', 1]) {
+    anota(palpite)
   }
 
   let ultimoErro: unknown = null
-  for (const candidato of candidatos.slice(0, 6)) {
+  for (const candidato of candidatos.slice(0, 8)) {
     try {
       await enviar(candidato)
       return
@@ -322,11 +329,16 @@ async function comDiscountType(
       if (!(/422/.test(msg) && /discount[_ ]?type/i.test(msg))) throw e
     }
   }
-  throw ultimoErro instanceof Error
-    ? new Error(
-        `${ultimoErro.message} — nenhum valor de discount_type foi aceito; abra um cupom existente no painel da Yampi e me diga como o tipo aparece lá.`,
-      )
-    : new Error('Nenhum valor de discount_type foi aceito pela Yampi.')
+
+  const fato = amostra
+    ? ` FATO da loja: o cupom existente "${String(amostra.code ?? amostra.name ?? '?')}" veio com discount_type = ${JSON.stringify(cruDaAmostra ?? '(campo ausente)')} e os campos ${Object.keys(amostra).sort().join(', ')}.`
+    : ' Não consegui ler nenhum cupom existente para usar de molde.'
+  throw new Error(
+    `${ultimoErro instanceof Error ? ultimoErro.message : 'Falha ao publicar.'} — tentei ${candidatos
+      .slice(0, 8)
+      .map((c) => JSON.stringify(c))
+      .join(', ')} e a Yampi recusou todos.${fato} Me mande esta mensagem completa que eu corrijo em cima dela.`,
+  )
 }
 
 /**
