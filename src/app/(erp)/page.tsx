@@ -3,38 +3,66 @@ import Link from 'next/link'
 import { CardKpi, type Kpi } from '@/components/erp/Kpi'
 import { Losango, Rotulo, TituloSecao } from '@/components/erp/primitivos'
 import { COR, FAIXA, type Tom } from '@/components/erp/tokens'
-import { carregarDashboard } from '@/data/consultas'
-import { AGOSTO, JULHO } from '@/data/fixtures'
-import { brl, pad2, pct, volume } from '@/domain'
+import { carregarDashboard, carregarDre } from '@/data/consultas'
+import { repositorio } from '@/data/repository'
+import { brl, montarDre, pad2, pct, plural, saldoConsolidado, volume } from '@/domain'
 
+/**
+ * Dashboard: o dia da operação numa tela.
+ *
+ * Tudo aqui é derivado dos mesmos dados das telas responsáveis — nenhum
+ * número nasce no dashboard. A versão anterior mostrava "Financeiro ainda
+ * não integrado" com o financeiro já integrado: o card foi escrito quando a
+ * frase era verdade e ninguém voltou nele. Números de exemplo não entram
+ * mais em lugar nenhum desta tela.
+ */
 export default async function Dashboard() {
-  const { estoque, lotes, sync, parametros, bases, pendencias, sincronizado } =
-    await carregarDashboard()
+  const [{ estoque, lotes, sync, parametros, bases, pendencias }, apuracao, contas, pedidos] =
+    await Promise.all([
+      carregarDashboard(),
+      carregarDre(),
+      repositorio().contas(),
+      repositorio().pedidos(),
+    ])
 
-  const esgotadas = bases.filter((b) => b.volumeMl === 0)
+  const dre = montarDre(
+    [apuracao.receitaBruta, ...apuracao.receitasExtras],
+    apuracao.deducoes,
+    apuracao.custos,
+    apuracao.despesas,
+  )
+
+  const caixa = saldoConsolidado(contas)
+  const esgotadas = bases.filter((b) => b.volumeMl === 0 && b.sobControle)
   const emRisco = estoque.criticos + estoque.esgotados
   const acionaveis = pendencias.filter((p) => p.contagem > 0)
   const total = acionaveis.reduce((a, p) => a + p.contagem, 0)
 
-  // Cada hint qualifica o próprio valor — nada de descrever outro evento.
-  // Com o Supabase ligado, os cards do Financeiro declaram que o módulo ainda
-  // não foi integrado em vez de exibir número de demonstração.
+  const mes = new Date().toLocaleDateString('pt-BR', { month: 'long' })
+  const pagosNoMes = pedidos.filter((p) => {
+    if (p.pagamento !== 'pago') return false
+    const [, m] = p.data.split('/')
+    return Number(m) === new Date().getMonth() + 1
+  })
+
   const kpis: Kpi[] = [
     {
-      label: 'Vendas em agosto',
-      valor: sincronizado ? '—' : brl(AGOSTO.entradas),
-      hint: sincronizado
-        ? 'Financeiro ainda não integrado'
-        : `${AGOSTO.dias} dias · julho fechou em ${brl(JULHO.receitaBruta)}`,
-      tom: sincronizado ? 'neutro' : 'ouro',
+      label: `Vendas em ${mes}`,
+      valor: brl(dre.receitaBruta),
+      hint: `${plural(pagosNoMes.length, 'pedido pago', 'pedidos pagos')} · loja e fora dela`,
+      tom: 'ouro',
     },
     {
-      label: 'Resultado em agosto',
-      valor: sincronizado ? '—' : brl(AGOSTO.resultado),
-      hint: sincronizado
-        ? 'Financeiro ainda não integrado'
-        : `Entradas menos saídas · julho fechou em ${brl(JULHO.resultado)}`,
-      tom: sincronizado ? 'neutro' : AGOSTO.resultado >= 0 ? 'ok' : 'erro',
+      label: `Resultado em ${mes}`,
+      valor: brl(dre.resultado),
+      hint: `Receita menos custos e despesas classificados · margem de ${pct(dre.margemLiquidaPct)}`,
+      tom: dre.resultado >= 0 ? 'ok' : 'erro',
+    },
+    {
+      label: 'Caixa hoje',
+      valor: brl(caixa),
+      hint: contas.map((c) => c.nome).join(' + ') || 'Nenhuma conta cadastrada',
+      tom: caixa >= 0 ? 'ok' : 'erro',
     },
     {
       label: 'Volume em estoque',
@@ -48,14 +76,6 @@ export default async function Dashboard() {
       tom: emRisco ? 'erro' : 'ok',
     },
     {
-      label: 'Perda real medida',
-      valor: pct(lotes.perda.mediaPct),
-      hint: lotes.perda.subestimado
-        ? `Parâmetro de ${pct(parametros.perdaPct)} subestima o custo em ${pct(lotes.perda.delta)}`
-        : `Dentro do parâmetro de ${pct(parametros.perdaPct)}`,
-      tom: lotes.perda.subestimado ? 'erro' : 'ok',
-    },
-    {
       label: 'Fora de sincronia',
       valor: pad2(sync.esgotar + sync.reduzir + sync.repor),
       hint: `de ${sync.total} variantes · ${sync.excesso} unidades sobrevendíveis`,
@@ -63,12 +83,24 @@ export default async function Dashboard() {
     },
   ]
 
-  // Alertas derivados do mesmo estado que alimenta as telas responsáveis.
+  // Alertas AGREGADOS. A versão anterior listava cada base zerada numa linha
+  // — uma parede de 30 avisos idênticos que ninguém lê é pior que nenhum
+  // aviso. Um alerta por assunto, com os primeiros nomes e a conta do resto.
   const alertas: { tom: Tom; texto: string }[] = [
-    ...esgotadas.map((b) => ({
-      tom: 'erro' as Tom,
-      texto: `${b.nome} base zerou. Nenhuma variante pode ser fracionada.`,
-    })),
+    ...(esgotadas.length
+      ? [
+          {
+            tom: 'erro' as Tom,
+            texto:
+              esgotadas.length === 1
+                ? `${esgotadas[0].nome} zerou — nenhuma variante pode ser fracionada.`
+                : `${esgotadas.length} bases com volume zerado (${esgotadas
+                    .slice(0, 3)
+                    .map((b) => b.nome.split(' ').slice(0, 3).join(' '))
+                    .join('; ')}${esgotadas.length > 3 ? ` e mais ${esgotadas.length - 3}` : ''}). Nenhuma variante delas pode ser fracionada.`,
+          },
+        ]
+      : []),
     ...estoque.coberturas
       .filter((c) => c.criticidade === 'urgente' || c.criticidade === 'atencao')
       .slice(0, 2)
@@ -94,11 +126,14 @@ export default async function Dashboard() {
       : []),
   ]
 
+  // Resumo financeiro do mês corrente, derivado do DRE — a mesma conta da
+  // tela de DRE, nunca uma versão paralela.
+  const saidas = dre.receitaBruta - dre.resultado
   const financeiro = [
-    { label: 'Receita bruta', valor: JULHO.receitaBruta, tom: 'ok' as Tom },
-    { label: 'Receita líquida', valor: JULHO.receitaLiquida, tom: 'ouro' as Tom },
-    { label: 'Custos e despesas', valor: JULHO.saidas, tom: 'erro' as Tom },
-    { label: 'Resultado', valor: JULHO.resultado, tom: 'ok' as Tom },
+    { label: 'Receita bruta', valor: dre.receitaBruta, tom: 'ok' as Tom },
+    { label: 'Receita líquida', valor: dre.receitaLiquida, tom: 'ouro' as Tom },
+    { label: 'Custos e despesas', valor: saidas, tom: 'erro' as Tom },
+    { label: 'Resultado', valor: dre.resultado, tom: dre.resultado >= 0 ? ('ok' as Tom) : ('erro' as Tom) },
   ]
 
   return (
@@ -156,8 +191,7 @@ export default async function Dashboard() {
                 className="font-sans"
                 style={{ padding: '18px 20px', fontSize: 11.5, lineHeight: 1.5, color: 'var(--color-terciario)' }}
               >
-                Nada pendente pelos dados do banco. Cadastre perfumes base e lotes — as ações
-                aparecem aqui conforme os dados entram.
+                Nada pendente: pedidos despachados, extrato classificado e estoque sob controle.
               </span>
             )}
             {acionaveis.map((p) => (
@@ -221,11 +255,86 @@ export default async function Dashboard() {
         </section>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <section
+            style={{
+              background: 'linear-gradient(170deg,#141315,#101011)',
+              border: '1px solid var(--color-borda)',
+              borderRadius: 16,
+              padding: '18px 19px',
+            }}
+          >
+            <div style={{ marginBottom: 15 }}>
+              <TituloSecao tamanho={14}>{`Financeiro de ${mes}`}</TituloSecao>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+              {financeiro.map((f) => (
+                <div key={f.label} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span
+                    className="font-sans"
+                    style={{ fontSize: 11.5, color: 'var(--color-secundario)', width: 108, flex: 'none' }}
+                  >
+                    {f.label}
+                  </span>
+                  <span
+                    style={{
+                      flex: 1,
+                      height: 5,
+                      borderRadius: 3,
+                      background: 'rgba(255,255,255,.05)',
+                      overflow: 'hidden',
+                      display: 'block',
+                    }}
+                  >
+                    <span
+                      style={{
+                        display: 'block',
+                        height: '100%',
+                        // Proporção sobre a receita bruta do mês — não é número solto.
+                        width: `${dre.receitaBruta > 0 ? Math.min(100, Math.round((Math.abs(f.valor) / dre.receitaBruta) * 100)) : 0}%`,
+                        background: COR[f.tom],
+                        borderRadius: 3,
+                        opacity: 0.75,
+                      }}
+                    />
+                  </span>
+                  <span
+                    className="font-mono"
+                    style={{
+                      fontWeight: 500,
+                      fontSize: 12,
+                      color: COR[f.tom],
+                      width: 104,
+                      textAlign: 'right',
+                      flex: 'none',
+                    }}
+                  >
+                    {brl(f.valor)}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Rotulo>
+                {dre.receitaBruta > 0
+                  ? `${pct(dre.margemLiquidaPct)} de margem sobre a receita bruta`
+                  : 'Sem venda paga no mês ainda'}
+              </Rotulo>
+              <div style={{ flex: 1 }} />
+              <Link
+                href="/financeiro/dre"
+                className="font-sans hover:text-ouro"
+                style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}
+              >
+                DRE completo →
+              </Link>
+            </div>
+          </section>
+
           <section className="card-ouro" style={{ borderRadius: 16, padding: '18px 19px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14 }}>
               <Losango />
               <TituloSecao tom="ouro" tamanho={14}>
-                Alertas inteligentes
+                Alertas
               </TituloSecao>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
@@ -264,84 +373,6 @@ export default async function Dashboard() {
                 </div>
               ))}
             </div>
-          </section>
-
-          <section
-            style={{
-              background: 'linear-gradient(170deg,#141315,#101011)',
-              border: '1px solid var(--color-borda)',
-              borderRadius: 16,
-              padding: '18px 19px',
-            }}
-          >
-            <div style={{ marginBottom: 15 }}>
-              <TituloSecao tamanho={14}>
-                {sincronizado ? 'Resumo financeiro' : 'Resumo financeiro · julho fechado'}
-              </TituloSecao>
-            </div>
-            {sincronizado && (
-              <span
-                className="font-sans"
-                style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
-              >
-                O módulo Financeiro ainda não foi integrado ao banco — o resumo aparece aqui
-                quando os lançamentos passarem a ser reais.
-              </span>
-            )}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-              {!sincronizado && financeiro.map((f) => (
-                <div key={f.label} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <span
-                    className="font-sans"
-                    style={{ fontSize: 11.5, color: 'var(--color-secundario)', width: 98, flex: 'none' }}
-                  >
-                    {f.label}
-                  </span>
-                  <span
-                    style={{
-                      flex: 1,
-                      height: 5,
-                      borderRadius: 3,
-                      background: 'rgba(255,255,255,.05)',
-                      overflow: 'hidden',
-                      display: 'block',
-                    }}
-                  >
-                    <span
-                      style={{
-                        display: 'block',
-                        height: '100%',
-                        // Proporção sobre a receita bruta do mês — não é número solto.
-                        width: `${Math.round((f.valor / JULHO.receitaBruta) * 100)}%`,
-                        background: COR[f.tom],
-                        borderRadius: 3,
-                        opacity: 0.75,
-                      }}
-                    />
-                  </span>
-                  <span
-                    className="font-mono"
-                    style={{
-                      fontWeight: 500,
-                      fontSize: 12,
-                      color: COR[f.tom],
-                      width: 104,
-                      textAlign: 'right',
-                      flex: 'none',
-                    }}
-                  >
-                    {brl(f.valor)}
-                  </span>
-                </div>
-              ))}
-            </div>
-            {!sincronizado && (
-              <div style={{ marginTop: 16 }}>
-                <Rotulo>
-                  {`${Math.round((JULHO.resultado / JULHO.receitaBruta) * 100)}% de margem sobre a receita bruta`}
-                </Rotulo>
-              </div>
-            )}
           </section>
         </div>
       </div>

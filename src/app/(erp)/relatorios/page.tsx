@@ -1,13 +1,21 @@
-import { Ponto, TituloSecao } from '@/components/erp/primitivos'
+import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
+import { EstadoVazio, TituloSecao } from '@/components/erp/primitivos'
 import { COR, FUNDO, type Tom } from '@/components/erp/tokens'
-import { CANAIS_JULHO, CURVA_ABC, RELATORIOS_LISTA } from '@/data/fixtures'
-import { repositorio } from '@/data/repository'
-import { brl, num, pct } from '@/domain'
+import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
+import { brl, num, pct, plural } from '@/domain'
+
+export const dynamic = 'force-dynamic'
 
 /**
- * A classe ABC não vem marcada: deriva da participação acumulada —
- * A até 80%, B até 95%, C o resto.
+ * Relatórios: curva ABC e canais, derivados dos pedidos importados.
+ *
+ * Nada aqui é digitado nem vem de exemplo — a versão anterior mostrava uma
+ * grade de "relatórios" que eram botões sem função e números de julho que
+ * nunca existiram. Cada linha desta tela sai de `pedido_itens` e `pedidos`,
+ * e muda sozinha quando a próxima sincronização trouxer vendas novas.
  */
+
+/** A classe deriva da participação acumulada: A até 80%, B até 95%, C o resto. */
 function classeDe(acumulado: number): 'A' | 'B' | 'C' {
   if (acumulado <= 80) return 'A'
   if (acumulado <= 95.5) return 'B'
@@ -16,71 +24,117 @@ function classeDe(acumulado: number): 'A' | 'B' | 'C' {
 
 const TOM_CLASSE: Record<'A' | 'B' | 'C', Tom> = { A: 'ouro', B: 'info', C: 'neutro' }
 
+interface ItemVendido {
+  descricao: string
+  receita: number
+  unidades: number
+}
+
+interface CanalVendas {
+  canal: string
+  pedidos: number
+  receita: number
+}
+
+async function vendasReais(): Promise<{ itens: ItemVendido[]; canais: CanalVendas[] }> {
+  if (!supabaseConfigurado()) return { itens: [], canais: [] }
+  const sb = supabaseServer()
+
+  const [{ data: itensCrus }, { data: pedidosCrus }] = await Promise.all([
+    sb
+      .from('pedido_itens')
+      .select('descricao, preco, quantidade, pedidos!inner(pagamento)')
+      .eq('pedidos.pagamento', 'pago')
+      .limit(10000),
+    sb.from('pedidos').select('canal, valor, pagamento').eq('pagamento', 'pago').limit(10000),
+  ])
+
+  // Agrupado pelo nome SEM o tamanho: "Perfume X 5ml" e "Perfume X 10ml" são
+  // o mesmo produto para a curva ABC — a pergunta é qual perfume sustenta o
+  // faturamento, não qual frasco.
+  const porProduto = new Map<string, ItemVendido>()
+  for (const i of (itensCrus ?? []) as unknown as {
+    descricao: string
+    preco: number | string
+    quantidade: number
+  }[]) {
+    const nome = i.descricao.replace(/\s*[-·]?\s*\d+\s*ml.*$/i, '').trim() || i.descricao
+    const atual = porProduto.get(nome) ?? { descricao: nome, receita: 0, unidades: 0 }
+    atual.receita += Number(i.preco) * (i.quantidade || 1)
+    atual.unidades += i.quantidade || 1
+    porProduto.set(nome, atual)
+  }
+
+  const porCanal = new Map<string, CanalVendas>()
+  for (const p of (pedidosCrus ?? []) as unknown as { canal: string; valor: number | string }[]) {
+    const nome = p.canal === 'yampi' ? 'Yampi (loja)' : p.canal || 'Sem canal'
+    const atual = porCanal.get(nome) ?? { canal: nome, pedidos: 0, receita: 0 }
+    atual.pedidos += 1
+    atual.receita += Number(p.valor)
+    porCanal.set(nome, atual)
+  }
+
+  return {
+    itens: [...porProduto.values()].sort((a, b) => b.receita - a.receita),
+    canais: [...porCanal.values()].sort((a, b) => b.receita - a.receita),
+  }
+}
+
 export default async function Relatorios() {
-  const parametros = await repositorio().parametros()
-  const receitaTotal = CANAIS_JULHO.reduce((a, c) => a + c.receita, 0)
-  const pedidosTotal = CANAIS_JULHO.reduce((a, c) => a + c.pedidos, 0)
+  const { itens, canais } = await vendasReais()
+
+  const receitaTotal = itens.reduce((a, i) => a + i.receita, 0)
+  const receitaCanais = canais.reduce((a, c) => a + c.receita, 0)
+  const pedidosTotal = canais.reduce((a, c) => a + c.pedidos, 0)
 
   let acumulado = 0
-  const abc = CURVA_ABC.map((linha) => {
-    acumulado = Math.round((acumulado + linha.partPct) * 10) / 10
-    return { ...linha, acumulado, classe: classeDe(acumulado) }
+  const abc = itens.slice(0, 25).map((i) => {
+    const partPct = receitaTotal > 0 ? (i.receita / receitaTotal) * 100 : 0
+    acumulado = Math.min(100, acumulado + partPct)
+    return { ...i, partPct, acumulado, classe: classeDe(acumulado) }
   })
   const classeA = abc.filter((l) => l.classe === 'A')
-  const acumuladoA = classeA[classeA.length - 1]?.acumulado ?? 0
-  // O protótipo dizia que a classe C vale menos que a diferença entre o 1º e o
-  // 2º — derivando, é falso (4,7 vs 2,5 p.p.). A frase abaixo sai dos dados.
-  const somaC = Math.round(abc.filter((l) => l.classe === 'C').reduce((a, l) => a + l.partPct, 0) * 10) / 10
   const lider = abc[0]
+
+  const kpis: Kpi[] = [
+    {
+      label: 'Receita dos pedidos pagos',
+      valor: brl(receitaCanais),
+      hint: plural(pedidosTotal, 'pedido importado', 'pedidos importados'),
+      tom: 'ouro',
+    },
+    {
+      label: 'Ticket médio',
+      valor: pedidosTotal ? brl(receitaCanais / pedidosTotal) : '—',
+      hint: 'Receita ÷ pedidos pagos',
+    },
+    {
+      label: 'Perfumes vendidos',
+      valor: String(itens.length),
+      hint: `${classeA.length} deles sustentam 80% do faturamento`,
+    },
+    {
+      label: 'Líder de vendas',
+      valor: lider ? pct(lider.partPct) : '—',
+      hint: lider ? `${lider.descricao} · ${plural(lider.unidades, 'unidade', 'unidades')}` : 'Sem vendas',
+      tom: 'ok',
+    },
+  ]
+
+  if (itens.length === 0) {
+    return (
+      <EstadoVazio
+        titulo="Sem vendas importadas ainda"
+        instrucao="Os relatórios derivam dos pedidos pagos. Importe os pedidos da Yampi em Pedidos e volte aqui."
+      />
+    )
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 13 }}>
-        {RELATORIOS_LISTA.map((r) => (
-          <button
-            key={r.titulo}
-            type="button"
-            className="hover:border-ouro/30"
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-              padding: '16px 17px',
-              border: '1px solid var(--color-borda)',
-              background: 'linear-gradient(170deg,#16151A,#101011)',
-              borderRadius: 13,
-              textAlign: 'left',
-              cursor: 'pointer',
-              transition: 'border-color .16s',
-            }}
-          >
-            <span style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%' }}>
-              <span
-                className="font-sans"
-                style={{ fontSize: 9.5, lineHeight: 1, letterSpacing: '.1em', textTransform: 'uppercase', color: 'rgba(239,209,140,.55)' }}
-              >
-                {r.area}
-              </span>
-              <span style={{ flex: 1 }} />
-              <Ponto tom={r.atencao ? 'atencao' : 'ok'} />
-            </span>
-            <span className="font-display" style={{ fontWeight: 600, fontSize: 13.5, lineHeight: 1.3, color: 'var(--color-tinta)' }}>
-              {r.titulo}
-            </span>
-            <span className="font-sans" style={{ fontSize: 10.5, lineHeight: 1.5, color: 'rgba(242,237,227,.48)', textWrap: 'pretty' }}>
-              {r.descricao}
-            </span>
-            <span
-              className="font-sans"
-              style={{ fontWeight: 500, fontSize: 10, lineHeight: 1.3, color: r.atencao ? COR.atencao : COR.ok }}
-            >
-              {r.atencao ? 'Requer atenção' : 'Atualizado hoje'}
-            </span>
-          </button>
-        ))}
-      </div>
+      <FaixaKpis kpis={kpis} />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 16, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,2fr) minmax(0,1fr)', gap: 16, alignItems: 'start' }}>
         <section
           style={{
             background: 'var(--color-mesa)',
@@ -90,122 +144,19 @@ export default async function Relatorios() {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '16px 18px', borderBottom: '1px solid rgba(255,255,255,.06)' }}>
-            <TituloSecao tamanho={14.5}>Vendas por canal · julho</TituloSecao>
+            <TituloSecao tamanho={14.5}>Curva ABC de perfumes</TituloSecao>
             <div style={{ flex: 1 }} />
             <span className="font-sans" style={{ fontSize: 10, lineHeight: 1, color: 'rgba(242,237,227,.35)' }}>
-              {`${pedidosTotal} pedidos · receita bruta`}
-            </span>
-          </div>
-          <div
-            className="font-sans"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(0,1fr) 68px 116px 96px 76px',
-              gap: 11,
-              padding: '10px 18px',
-              background: 'var(--color-cabecalho)',
-              borderBottom: '1px solid var(--color-borda)',
-              fontWeight: 600,
-              fontSize: 9,
-              lineHeight: 1,
-              letterSpacing: '.11em',
-              textTransform: 'uppercase',
-              color: 'var(--color-terciario)',
-            }}
-          >
-            <span>Canal</span>
-            <span style={{ textAlign: 'right' }}>Ped.</span>
-            <span style={{ textAlign: 'right' }}>Receita</span>
-            <span style={{ textAlign: 'right' }}>Ticket</span>
-            <span style={{ textAlign: 'right' }}>Margem</span>
-          </div>
-          {CANAIS_JULHO.map((c) => (
-            <div
-              key={c.canal}
-              className="hover:bg-[rgba(239,209,140,.035)]"
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'minmax(0,1fr) 68px 116px 96px 76px',
-                gap: 11,
-                alignItems: 'center',
-                padding: '12px 18px',
-                borderTop: '1px solid var(--color-borda-sutil)',
-              }}
-            >
-              <span style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
-                <span className="font-sans" style={{ fontWeight: 600, fontSize: 12, lineHeight: 1.25, color: 'var(--color-corrente)' }}>
-                  {c.canal}
-                </span>
-                <span style={{ height: 4, borderRadius: 2, background: 'rgba(255,255,255,.06)', overflow: 'hidden', display: 'block' }}>
-                  <span
-                    style={{
-                      display: 'block',
-                      height: '100%',
-                      width: `${Math.round((c.receita / receitaTotal) * 100)}%`,
-                      background: 'rgba(239,209,140,.55)',
-                      borderRadius: 2,
-                    }}
-                  />
-                </span>
-              </span>
-              <span className="font-mono" style={{ fontSize: 11.5, lineHeight: 1, color: 'rgba(242,237,227,.6)', textAlign: 'right' }}>
-                {c.pedidos}
-              </span>
-              <span style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-end' }}>
-                <span className="font-mono" style={{ fontWeight: 500, fontSize: 12, lineHeight: 1, color: 'var(--color-corrente)', whiteSpace: 'nowrap' }}>
-                  {brl(c.receita)}
-                </span>
-                <span className="font-sans" style={{ fontSize: 9.5, lineHeight: 1, color: 'rgba(242,237,227,.35)' }}>
-                  {`${num(Math.round((c.receita / receitaTotal) * 1000) / 10)}%`}
-                </span>
-              </span>
-              <span className="font-mono" style={{ fontSize: 11.5, lineHeight: 1, color: 'rgba(242,237,227,.6)', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                {/* Ticket derivado: receita ÷ pedidos do próprio canal. */}
-                {brl(Math.round((c.receita / c.pedidos) * 10) / 10)}
-              </span>
-              <span
-                className="font-mono"
-                style={{
-                  fontWeight: 500,
-                  fontSize: 11.5,
-                  lineHeight: 1,
-                  color:
-                    c.margem >= parametros.margemAlvo - 0.5
-                      ? COR.ok
-                      : c.margem >= parametros.margemAlvo - 5
-                        ? COR.atencao
-                        : COR.erro,
-                  textAlign: 'right',
-                }}
-              >
-                {pct(c.margem)}
-              </span>
-            </div>
-          ))}
-        </section>
-
-        <section
-          style={{
-            background: 'var(--color-mesa)',
-            border: '1px solid var(--color-borda)',
-            borderRadius: 'var(--radius-card)',
-            overflow: 'hidden',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '16px 18px', borderBottom: '1px solid rgba(255,255,255,.06)' }}>
-            <TituloSecao tamanho={14.5}>Curva ABC de produtos</TituloSecao>
-            <div style={{ flex: 1 }} />
-            <span className="font-sans" style={{ fontSize: 10, lineHeight: 1, color: 'rgba(242,237,227,.35)' }}>
-              participação acumulada
+              receita dos pedidos pagos · participação acumulada
             </span>
           </div>
           {abc.map((l) => (
             <div
-              key={l.produto}
+              key={l.descricao}
               className="hover:bg-[rgba(239,209,140,.035)]"
               style={{
                 display: 'grid',
-                gridTemplateColumns: '26px minmax(0,1fr) 124px 68px 72px',
+                gridTemplateColumns: '26px minmax(0,1fr) 124px 88px 68px 72px',
                 gap: 11,
                 alignItems: 'center',
                 padding: '11px 18px',
@@ -239,7 +190,7 @@ export default async function Relatorios() {
                   whiteSpace: 'nowrap',
                 }}
               >
-                {l.produto}
+                {l.descricao}
               </span>
               <span style={{ height: 5, borderRadius: 3, background: 'rgba(255,255,255,.06)', overflow: 'hidden', display: 'block' }}>
                 <span
@@ -252,20 +203,78 @@ export default async function Relatorios() {
                   }}
                 />
               </span>
+              <span className="font-mono" style={{ fontSize: 11.5, lineHeight: 1, color: 'rgba(242,237,227,.6)', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                {brl(l.receita)}
+              </span>
               <span className="font-mono" style={{ fontWeight: 500, fontSize: 11.5, lineHeight: 1, color: 'var(--color-corrente)', textAlign: 'right' }}>
-                {pct(l.partPct)}
+                {pct(Math.round(l.partPct * 10) / 10)}
               </span>
               <span className="font-mono" style={{ fontSize: 11, lineHeight: 1, color: 'rgba(242,237,227,.45)', textAlign: 'right' }}>
-                {pct(l.acumulado)}
+                {pct(Math.round(l.acumulado * 10) / 10)}
               </span>
             </div>
           ))}
           <div style={{ padding: '13px 18px', borderTop: '1px solid rgba(255,255,255,.06)' }}>
             <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.5, color: 'rgba(242,237,227,.45)', textWrap: 'pretty' }}>
-              {/* O resumo sai da própria curva, não de um texto fixo. */}
-              {`${classeA.length} perfumes respondem por ${num(acumuladoA)}% do faturamento. A classe C inteira soma ${num(somaC)}% — menos de um quinto do que ${lider.produto} vende sozinho.`}
+              {`${plural(classeA.length, 'perfume responde', 'perfumes respondem')} por 80% do faturamento. Reposição e destaque na loja começam por eles.`}
             </span>
           </div>
+        </section>
+
+        <section
+          style={{
+            background: 'var(--color-mesa)',
+            border: '1px solid var(--color-borda)',
+            borderRadius: 'var(--radius-card)',
+            overflow: 'hidden',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '16px 18px', borderBottom: '1px solid rgba(255,255,255,.06)' }}>
+            <TituloSecao tamanho={14.5}>Vendas por canal</TituloSecao>
+            <div style={{ flex: 1 }} />
+            <span className="font-sans" style={{ fontSize: 10, lineHeight: 1, color: 'rgba(242,237,227,.35)' }}>
+              {`${pedidosTotal} pedidos pagos`}
+            </span>
+          </div>
+          {canais.map((c) => (
+            <div
+              key={c.canal}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 7,
+                padding: '13px 18px',
+                borderTop: '1px solid var(--color-borda-sutil)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                <span className="font-sans" style={{ fontWeight: 600, fontSize: 12, color: 'var(--color-corrente)' }}>
+                  {c.canal}
+                </span>
+                <span className="font-sans" style={{ fontSize: 10, color: 'rgba(242,237,227,.4)' }}>
+                  {`${c.pedidos} pedidos · ticket ${brl(c.receita / c.pedidos)}`}
+                </span>
+                <div style={{ flex: 1 }} />
+                <span className="font-mono" style={{ fontWeight: 500, fontSize: 12, color: 'var(--color-corrente)', whiteSpace: 'nowrap' }}>
+                  {brl(c.receita)}
+                </span>
+              </div>
+              <span style={{ height: 4, borderRadius: 2, background: 'rgba(255,255,255,.06)', overflow: 'hidden', display: 'block' }}>
+                <span
+                  style={{
+                    display: 'block',
+                    height: '100%',
+                    width: `${receitaCanais > 0 ? Math.round((c.receita / receitaCanais) * 100) : 0}%`,
+                    background: 'rgba(239,209,140,.55)',
+                    borderRadius: 2,
+                  }}
+                />
+              </span>
+              <span className="font-sans" style={{ fontSize: 9.5, color: 'rgba(242,237,227,.35)' }}>
+                {`${num(Math.round((c.receita / Math.max(1, receitaCanais)) * 1000) / 10)}% da receita`}
+              </span>
+            </div>
+          ))}
         </section>
       </div>
     </div>

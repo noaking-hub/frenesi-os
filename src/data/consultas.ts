@@ -19,6 +19,7 @@ import {
 } from '@/domain'
 import type { ApuracaoLote, CoberturaBase, PerdaReal, ResumoSync } from '@/domain'
 
+import { resumoDoExtrato } from './extrato'
 import { origemDados, repositorio } from './repository'
 
 /**
@@ -151,8 +152,6 @@ export async function carregarDashboard() {
   const esgotadas = bases.filter((b) => b.volumeMl === 0 && b.sobControle)
   const emRisco = estoque.criticos + esgotadas.length
 
-  const { PEDIDOS_A_SEPARAR, CARRINHOS_PRIORIDADE_ALTA, COMANDOS_IA_AGUARDANDO } =
-    await import('./fixtures')
 
   // As contas a pagar do dashboard são os MESMOS lançamentos da tela de
   // Lançamentos — derivados, nunca uma lista paralela.
@@ -160,15 +159,34 @@ export async function carregarDashboard() {
   const fin = resumirLancamentos(lancamentos)
   const pendentesFin = lancamentos.filter(lancamentoPendente)
 
+  // Pedidos e extrato: as duas filas de trabalho de verdade da operação.
+  const pedidos = await repo.pedidos()
+  const aSeparar = pedidos.filter(
+    (p) =>
+      p.pagamento === 'pago' && (p.envio === 'Não iniciado' || p.envio === 'Aguardando envio'),
+  )
+  const extrato = await resumoDoExtrato().catch(() => null)
+
   const pendencias: Pendencia[] = [
     {
-      contagem: PEDIDOS_A_SEPARAR,
-      titulo: 'Pedidos para separar',
-      hint: 'Pagos e aguardando envio',
+      contagem: aSeparar.length,
+      titulo: 'Pedidos pagos aguardando envio',
+      hint: aSeparar.length
+        ? `${brlSimples(aSeparar.reduce((a, p) => a + p.valor, 0))} vendidos e ainda não despachados`
+        : 'Nenhum pedido parado',
       etiqueta: 'Urgente',
       tom: 'atencao',
       href: '/pedidos',
-      origem: 'demonstracao',
+      origem: 'banco',
+    },
+    {
+      contagem: extrato?.aDecidir ?? 0,
+      titulo: 'Extrato precisa de você',
+      hint: 'Despesas a categorizar e entradas sem pedido correspondente',
+      etiqueta: 'Financeiro',
+      tom: 'atencao',
+      href: '/financeiro/extrato',
+      origem: 'banco',
     },
     {
       contagem: lotes.perda.subestimado ? 1 : 0,
@@ -242,7 +260,7 @@ export async function carregarDashboard() {
       etiqueta: 'Devoluções',
       tom: 'ouro',
       href: '/pedidos/devolucoes',
-      origem: 'demonstracao',
+      origem: 'banco',
     },
     {
       contagem: filaBaixa.length,
@@ -252,7 +270,7 @@ export async function carregarDashboard() {
       etiqueta: 'Entregas',
       tom: 'info',
       href: '/pedidos/envios',
-      origem: 'demonstracao',
+      origem: 'banco',
     },
     {
       contagem: resumoOe.abertas,
@@ -261,7 +279,7 @@ export async function carregarDashboard() {
       etiqueta: 'Transporte',
       tom: 'erro',
       href: '/pedidos/ocorrencias',
-      origem: 'demonstracao',
+      origem: 'banco',
     },
     {
       contagem: pendentesFin.length,
@@ -270,25 +288,7 @@ export async function carregarDashboard() {
       etiqueta: 'Financeiro',
       tom: fin.vencidoQtd ? 'erro' : 'atencao',
       href: '/financeiro/lancamentos',
-      origem: 'demonstracao',
-    },
-    {
-      contagem: CARRINHOS_PRIORIDADE_ALTA,
-      titulo: 'Carrinhos com prioridade alta',
-      hint: 'Acima de R$ 400,00 · abandonados há menos de 6h',
-      etiqueta: 'CRM',
-      tom: 'ouro',
-      href: '/crm/carrinhos',
-      origem: 'demonstracao',
-    },
-    {
-      contagem: COMANDOS_IA_AGUARDANDO,
-      titulo: 'Comandos da IA aguardando confirmação',
-      hint: 'Lançamento financeiro e criação de cupom',
-      etiqueta: 'Assessor IA',
-      tom: 'ouro',
-      href: '/assessor',
-      origem: 'demonstracao',
+      origem: 'banco',
     },
   ]
 
