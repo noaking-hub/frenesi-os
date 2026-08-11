@@ -25,6 +25,7 @@ import type {
   PerfumeBase,
   ProdutoDerivado,
   Repasse,
+  StatusCliente,
   StatusSolicitacao,
   TipoSolicitacao,
   VarianteMl,
@@ -685,7 +686,7 @@ export interface ClienteCrm {
   total: number
   pedidos: number
   ultimaCompra: string
-  status: 'VIP' | 'Recorrente' | 'Novo' | 'Inativo'
+  status: StatusCliente
 }
 
 export const CLIENTES: ClienteCrm[] = [

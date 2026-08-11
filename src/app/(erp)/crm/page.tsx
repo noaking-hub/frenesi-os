@@ -1,8 +1,10 @@
-import { repositorio } from '@/data/repository'
+import { carregarPerfisClientes } from '@/data/perfis-clientes'
 
 import { ClientesCliente } from './ClientesCliente'
 
+export const dynamic = 'force-dynamic'
+
 export default async function Clientes() {
-  const clientes = await repositorio().clientes()
-  return <ClientesCliente clientes={clientes} />
+  const perfis = await carregarPerfisClientes()
+  return <ClientesCliente perfis={perfis} />
 }

@@ -238,7 +238,7 @@ export function resumirFila(tickets: TicketAtendimento[]): ResumoFila {
 
 // ── Clientes ───────────────────────────────────────────────────────────────
 
-export type StatusCliente = 'VIP' | 'Recorrente' | 'Novo' | 'Inativo'
+export type StatusCliente = 'VIP' | 'Recorrente' | 'Novo' | 'Em risco' | 'Inativo'
 
 export interface ResumoCliente {
   nome: string
@@ -255,6 +255,8 @@ export interface ResumoCliente {
 
 /** Dias desde a última compra a partir dos quais o cliente é dado por inativo. */
 export const DIAS_INATIVO = 90
+/** Sumiu há mais que isto (e menos que inativo): hora de reconquistar. */
+export const DIAS_EM_RISCO = 45
 /** Total comprado que qualifica um cliente como VIP. */
 export const TETO_VIP = 3000
 
@@ -263,7 +265,9 @@ export const TETO_VIP = 3000
  *
  * Inatividade vem primeiro de propósito: um VIP que sumiu há quatro meses é
  * um problema de retenção, e chamá-lo de VIP esconderia exatamente o caso que
- * a tela existe para mostrar.
+ * a tela existe para mostrar. "Em risco" é o degrau antes: passou de 45 dias
+ * sem comprar, ainda dá tempo de reconquistar antes dos 90 que marcam o
+ * inativo — é a lista de quem uma mensagem ainda traz de volta.
  */
 export function statusCliente(
   total: number,
@@ -271,6 +275,9 @@ export function statusCliente(
   diasDesdeUltimaCompra: number | null,
 ): StatusCliente {
   if (diasDesdeUltimaCompra !== null && diasDesdeUltimaCompra > DIAS_INATIVO) return 'Inativo'
+  if (diasDesdeUltimaCompra !== null && diasDesdeUltimaCompra > DIAS_EM_RISCO && pedidos >= 1) {
+    return 'Em risco'
+  }
   if (total >= TETO_VIP) return 'VIP'
   if (pedidos >= 2) return 'Recorrente'
   return 'Novo'

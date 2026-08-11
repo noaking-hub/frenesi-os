@@ -196,6 +196,14 @@ describe('classificação de cliente', () => {
     expect(statusCliente(0, 0, null)).toBe('Novo')
   })
 
+  it('em risco: sumiu depois de 45 dias, antes dos 90 do inativo', () => {
+    // É a lista de reconquista — inclusive VIP que esfriou.
+    expect(statusCliente(500, 3, 46)).toBe('Em risco')
+    expect(statusCliente(9000, 12, 60)).toBe('Em risco')
+    expect(statusCliente(500, 3, 45)).toBe('Recorrente')
+    expect(statusCliente(500, 3, 91)).toBe('Inativo')
+  })
+
   it('iniciais pegam primeiro e último nome', () => {
     expect(iniciaisDe('Camila Rocha')).toBe('CR')
     expect(iniciaisDe('Ana')).toBe('A')
