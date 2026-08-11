@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { atualizarExtratoEsperando, mercadoPagoConfigurado } from '@/data/mercadopago'
-import { mensagemDe } from '@/data/shopify'
+import { aplicarEstoqueCalculado, mensagemDe, shopifyConfigurada } from '@/data/shopify'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { importarPedidosYampi, yampiConfigurada } from '@/data/yampi'
 import { INICIO_DA_OPERACAO, dataEmSaoPaulo } from '@/domain'
@@ -96,6 +96,25 @@ export async function POST(req: Request) {
     }
   } else {
     relatorio.yampi = { pulado: 'credenciais da Yampi não estão definidas' }
+  }
+
+  // O estoque publicado na Shopify vem logo depois dos pedidos: a importação
+  // acabou de recalcular as reservas, e é agora que a loja pode estar
+  // oferecendo decants que a venda de hoje comprometeu. Escrever aqui é o que
+  // dispensa alguém de abrir a tela de Sincronia e clicar em "Aplicar".
+  if (shopifyConfigurada()) {
+    try {
+      const s = await aplicarEstoqueCalculado()
+      relatorio.shopifyEstoque = {
+        aplicadas: s.aplicadas,
+        recusadas: s.ignoradas.length,
+        semIdDaLoja: s.pulados,
+      }
+    } catch (e) {
+      relatorio.shopifyEstoque = { erro: mensagemDe(e) }
+    }
+  } else {
+    relatorio.shopifyEstoque = { pulado: 'credenciais da Shopify não estão definidas' }
   }
 
   // Cada etapa é isolada: uma falha de rede no gateway não pode impedir a

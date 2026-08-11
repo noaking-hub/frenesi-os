@@ -23,35 +23,25 @@ export default async function SincroniaShopify() {
 
   const kpis: Kpi[] = [
     {
-      label: 'Variantes a esgotar',
-      valor: pad2(sync.esgotar),
-      hint: 'Vendáveis na Shopify sem volume para fracionar',
-      tom: sync.esgotar ? 'erro' : 'ok',
-    },
-    {
-      label: 'Variantes a reduzir',
-      valor: pad2(sync.reduzir),
-      hint: 'Publicado acima do que o estoque permite',
-      tom: sync.reduzir ? 'atencao' : 'ok',
+      label: 'Fora de sincronia',
+      valor: pad2(foraDeSincronia),
+      hint: foraDeSincronia
+        ? `${sync.esgotar} a esgotar · ${sync.reduzir} a reduzir · ${sync.repor} a repor`
+        : 'A loja publica exatamente o que o estoque sustenta',
+      tom: sync.esgotar ? 'erro' : sync.reduzir ? 'atencao' : sync.repor ? 'info' : 'ok',
     },
     {
       label: 'Unidades sobrevendíveis',
       valor: String(sync.excesso),
-      hint: 'Pedidos que você não conseguiria atender',
+      hint: sync.excesso
+        ? 'Pedidos que você não conseguiria atender'
+        : 'Nenhuma venda sem lastro possível',
       tom: sync.excesso ? 'erro' : 'ok',
-    },
-    {
-      label: 'Variantes a repor',
-      valor: pad2(sync.repor),
-      hint: sync.repor
-        ? `Abaixo do teto de ${TETO_SHOPIFY} mesmo com volume sobrando`
-        : 'Nenhuma variante abaixo do teto',
-      tom: sync.repor ? 'info' : 'ok',
     },
     {
       label: 'Em dia',
       valor: `${sync.emDia} de ${sync.total}`,
-      hint: `${sync.noTeto} no teto de ${TETO_SHOPIFY} · sincronia a cada venda e a cada 15 min`,
+      hint: `${sync.noTeto} no teto de ${TETO_SHOPIFY} unidades`,
       tom: 'ok',
     },
     {
@@ -72,6 +62,12 @@ export default async function SincroniaShopify() {
     .slice()
     .sort((a, b) => b.pendentes - a.pendentes)[0]
   const varExemplo = exemplo?.variantes.filter((v) => v.acao !== 'ok').slice(0, 2) ?? []
+
+  // Quem precisa de decisão vem primeiro e aberto; quem está em dia vira uma
+  // linha de resumo que expande — a tela era uma parede de cartões iguais, e
+  // o que exigia ação se perdia no meio do que estava certo.
+  const pendentes = sync.bases.filter((b) => b.pendentes > 0)
+  const emDia = sync.bases.filter((b) => b.pendentes === 0)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -96,60 +92,113 @@ export default async function SincroniaShopify() {
       )}
 
       {sync.excesso === 0 && foraDeSincronia > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'flex-end' }}>
+          <span className="font-sans" style={{ fontSize: 10.5, lineHeight: 1.4, color: 'var(--color-terciario)' }}>
+            A rotina de hora em hora aplica sozinha — o botão é para quem não quer esperar
+          </span>
           <AplicarShopify foraDeSincronia={foraDeSincronia} />
         </div>
       )}
 
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: 16,
-          padding: '15px 17px',
-          borderRadius: 13,
-          background: 'rgba(239,209,140,.045)',
-          border: '1px solid var(--color-borda-ouro)',
-        }}
-      >
-        <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <Rotulo style={{ color: 'rgba(239,209,140,.6)' }}>Como o cálculo funciona</Rotulo>
-          <span
-            className="font-sans"
-            style={{ fontSize: 11, lineHeight: 1.55, color: 'rgba(242,237,227,.68)', textWrap: 'pretty' }}
-          >
-            {`O ERP converte ml em unidades: divide o volume disponível pela variante e soma os decants já envasados. Se o resultado for zero, a variante é esgotada na Shopify, mesmo que você tenha deixado ${TETO_SHOPIFY} unidades lá. Quando o volume permite mais que ${TETO_SHOPIFY}, a Shopify continua com o seu teto de ${TETO_SHOPIFY}.`}
+      {pendentes.length > 0 ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
+          {pendentes.map((b) => (
+            <CardBase key={b.base.id} base={b} />
+          ))}
+        </div>
+      ) : (
+        <div
+          style={{
+            padding: '15px 17px',
+            borderRadius: 13,
+            background: 'rgba(92,158,112,.06)',
+            border: '1px solid rgba(92,158,112,.25)',
+          }}
+        >
+          <span className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.5, color: 'rgba(242,237,227,.75)' }}>
+            Nenhuma variante fora de sincronia — a loja está publicando exatamente o que o estoque
+            sustenta.
           </span>
-        </span>
-        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--color-borda)' }} />
-        <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <Rotulo style={{ color: 'rgba(239,209,140,.6)' }}>No seu caso</Rotulo>
-          <span
-            className="font-sans"
-            style={{ fontSize: 11, lineHeight: 1.55, color: 'rgba(242,237,227,.68)', textWrap: 'pretty' }}
-          >
-            {exemplo && varExemplo.length
-              ? `${exemplo.base.nome} tem ${volume(exemplo.base.volumeMl)} em estoque. A variante de ${varExemplo[0].variante} ml permite ${plural(varExemplo[0].possivel, 'unidade', 'unidades')}${
-                  varExemplo[1]
-                    ? `, a de ${varExemplo[1].variante} ml permite ${varExemplo[1].possivel}`
-                    : ''
-                } — e não as ${varExemplo[0].publicado} publicadas em cada uma.`
-              : 'Todas as variantes refletem o volume disponível no ERP.'}
-          </span>
-        </span>
-      </div>
+        </div>
+      )}
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-          gap: 14,
-        }}
-      >
-        {sync.bases.map((b) => (
-          <CardBase key={b.base.id} base={b} />
-        ))}
-      </div>
+      {emDia.length > 0 && (
+        <details>
+          <summary
+            className="font-sans"
+            style={{
+              cursor: 'pointer',
+              fontWeight: 600,
+              fontSize: 11.5,
+              lineHeight: 1,
+              color: 'rgba(242,237,227,.55)',
+              padding: '10px 0',
+              listStyle: 'none',
+            }}
+          >
+            {`▸ ${plural(emDia.length, 'base em dia', 'bases em dia')} — abrir para conferir`}
+          </summary>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14, paddingTop: 10 }}>
+            {emDia.map((b) => (
+              <CardBase key={b.base.id} base={b} />
+            ))}
+          </div>
+        </details>
+      )}
+
+      <details>
+        <summary
+          className="font-sans"
+          style={{
+            cursor: 'pointer',
+            fontWeight: 600,
+            fontSize: 11.5,
+            lineHeight: 1,
+            color: 'rgba(239,209,140,.6)',
+            padding: '10px 0',
+            listStyle: 'none',
+          }}
+        >
+          ▸ Como o cálculo funciona
+        </summary>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 16,
+            padding: '15px 17px',
+            borderRadius: 13,
+            background: 'rgba(239,209,140,.045)',
+            border: '1px solid var(--color-borda-ouro)',
+          }}
+        >
+          <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <Rotulo style={{ color: 'rgba(239,209,140,.6)' }}>A regra</Rotulo>
+            <span
+              className="font-sans"
+              style={{ fontSize: 11, lineHeight: 1.55, color: 'rgba(242,237,227,.68)', textWrap: 'pretty' }}
+            >
+              {`O ERP converte ml em unidades: divide o volume disponível pela variante e soma os decants já envasados. Se o resultado for zero, a variante é esgotada na Shopify, mesmo que você tenha deixado ${TETO_SHOPIFY} unidades lá. Quando o volume permite mais que ${TETO_SHOPIFY}, a Shopify continua com o seu teto de ${TETO_SHOPIFY}.`}
+            </span>
+          </span>
+          <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--color-borda)' }} />
+          <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <Rotulo style={{ color: 'rgba(239,209,140,.6)' }}>No seu caso</Rotulo>
+            <span
+              className="font-sans"
+              style={{ fontSize: 11, lineHeight: 1.55, color: 'rgba(242,237,227,.68)', textWrap: 'pretty' }}
+            >
+              {exemplo && varExemplo.length
+                ? `${exemplo.base.nome} tem ${volume(exemplo.base.volumeMl)} em estoque. A variante de ${varExemplo[0].variante} ml permite ${plural(varExemplo[0].possivel, 'unidade', 'unidades')}${
+                    varExemplo[1]
+                      ? `, a de ${varExemplo[1].variante} ml permite ${varExemplo[1].possivel}`
+                      : ''
+                  } — e não as ${varExemplo[0].publicado} publicadas em cada uma.`
+                : 'Todas as variantes refletem o volume disponível no ERP.'}
+            </span>
+          </span>
+        </div>
+      </details>
     </div>
   )
 }
