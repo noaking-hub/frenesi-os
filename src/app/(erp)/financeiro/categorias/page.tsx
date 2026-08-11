@@ -119,6 +119,7 @@ export default async function Categorias() {
       chave: 'lanc',
       titulo: 'Lançamentos',
       largura: '132px',
+      alinhamento: 'right',
       render: (c) => (
         <span
           className="font-sans"

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 
 import { Losango, Rotulo, TituloSecao } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
@@ -15,9 +15,16 @@ interface Props {
   ultima: { executadaEm: string; perfumes: number; variantes: number; ignorados: number } | null
 }
 
+/** Catálogo com mais de 12 h é importado de novo ao abrir a tela. */
+const VALIDADE_CATALOGO_H = 12
+
 /**
  * Painel de importação do catálogo da Shopify. Quando as credenciais não
  * estão no ambiente, explica exatamente o que configurar — sem botão morto.
+ *
+ * Ao abrir com o catálogo velho, importa sozinho: nome, preço e variante
+ * mudam na loja sem avisar o ERP, e quem esquece de clicar não descobre que
+ * esqueceu.
  */
 export function ImportarShopify({ configurada, ultima }: Props) {
   const [pendente, iniciarTransicao] = useTransition()
@@ -27,6 +34,20 @@ export function ImportarShopify({ configurada, ultima }: Props) {
     iniciarTransicao(async () => {
       setResposta(await importarCatalogo())
     })
+
+  // O ref impede o loop: a importação revalida a rota, o server component
+  // renderiza de novo com props novas, e sem a trava o efeito rodaria de novo.
+  const jaTentou = useRef(false)
+  useEffect(() => {
+    if (jaTentou.current || !configurada) return
+    const idadeH = ultima
+      ? (Date.now() - new Date(ultima.executadaEm).getTime()) / 3_600_000
+      : Infinity
+    if (idadeH < VALIDADE_CATALOGO_H) return
+    jaTentou.current = true
+    executar()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- roda uma vez, ao abrir
+  }, [])
 
   const quandoUltima = ultima
     ? new Date(ultima.executadaEm).toLocaleString('pt-BR', {

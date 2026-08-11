@@ -130,6 +130,7 @@ export function PerfumesBaseCliente({ coberturas }: { coberturas: CoberturaBase[
       chave: 'acaba',
       titulo: 'Acaba em',
       largura: '140px',
+      alinhamento: 'right',
       render: (c) => (
         <span style={{ display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'flex-end' }}>
           <Valor tamanho={11.5} tom={TOM[c.criticidade]}>

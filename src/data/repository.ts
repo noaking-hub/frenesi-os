@@ -10,38 +10,16 @@ import {
   statusDevolucao,
   statusDoLancamento,
 } from '@/domain'
+import type { ClienteCrm, SolicitacaoErp } from './fixtures'
 import type {
-  AutorizadoIa,
-  AvaliacaoCupom,
-  CarrinhoAbandonado,
-  ClienteCrm,
-  ComandoIa,
-  EnvioContabil,
-  Integracao,
-  PerfilAcesso,
-  RegistroAuditoria,
-  RegraIa,
-  RegraNotificacao,
-  SolicitacaoErp,
-  UsuarioErp,
-} from './fixtures'
-import type {
-  CampanhaMkt,
   CategoriaFinanceira,
   ContaBancaria,
-  CupomPromo,
-  EtapaFluxo,
-  FluxoEmail,
   FonteConcorrente,
-  GiftbackEmitido,
-  ItemVitrine,
-  Kit,
   ContagemInventario,
   Envio,
   Lancamento,
   Ocorrencia,
   OrdemProducao,
-  RegraCashback,
   Repasse,
   Lote,
   Movimentacao,
@@ -50,9 +28,7 @@ import type {
   PerfumeBase,
   ProdutoDerivado,
   ReceitaMensal,
-  SaldoCashback,
   StatusOrdem,
-  TicketAtendimento,
   TipoMovimentacao,
   VarianteMl,
 } from '@/domain'
@@ -88,30 +64,8 @@ export interface Repositorio {
   contas(): Promise<ContaBancaria[]>
   repasses(): Promise<Repasse[]>
   categorias(): Promise<CategoriaFinanceira[]>
-  enviosContabeis(): Promise<EnvioContabil[]>
   concorrentesFontes(): Promise<FonteConcorrente[]>
-  mercado(): Promise<Record<string, Partial<Record<VarianteMl, number[]>>>>
-  kits(): Promise<Kit[]>
-  usuarios(): Promise<UsuarioErp[]>
-  perfis(): Promise<PerfilAcesso[]>
-  integracoes(): Promise<Integracao[]>
-  notificacoes(): Promise<RegraNotificacao[]>
-  auditoria(): Promise<RegistroAuditoria[]>
   clientes(): Promise<ClienteCrm[]>
-  carrinhos(): Promise<CarrinhoAbandonado[]>
-  campanhasMkt(): Promise<CampanhaMkt[]>
-  fluxos(): Promise<FluxoEmail[]>
-  etapasFluxo(): Promise<Record<string, EtapaFluxo[]>>
-  cupons(): Promise<CupomPromo[]>
-  vitrine(): Promise<ItemVitrine[]>
-  avaliacoesCupons(): Promise<AvaliacaoCupom[]>
-  regrasCashback(): Promise<RegraCashback[]>
-  saldosCashback(): Promise<SaldoCashback[]>
-  giftbacks(): Promise<GiftbackEmitido[]>
-  atendimento(): Promise<TicketAtendimento[]>
-  iaRegras(): Promise<RegraIa[]>
-  iaAutorizados(): Promise<AutorizadoIa[]>
-  iaComandos(): Promise<ComandoIa[]>
 }
 
 const repositorioFixtures: Repositorio = {
@@ -181,77 +135,11 @@ const repositorioFixtures: Repositorio = {
   async categorias() {
     return fixtures.CATEGORIAS
   },
-  async enviosContabeis() {
-    return fixtures.ENVIOS_CONTABEIS
-  },
   async concorrentesFontes() {
     return fixtures.CONCORRENTES_FONTES
   },
-  async mercado() {
-    return fixtures.MERCADO
-  },
-  async kits() {
-    return fixtures.KITS
-  },
-  async usuarios() {
-    return fixtures.USUARIOS
-  },
-  async perfis() {
-    return fixtures.PERFIS
-  },
-  async integracoes() {
-    return fixtures.INTEGRACOES
-  },
-  async notificacoes() {
-    return fixtures.NOTIFICACOES
-  },
-  async auditoria() {
-    return fixtures.LOGS_AUDITORIA
-  },
   async clientes() {
     return fixtures.CLIENTES
-  },
-  async carrinhos() {
-    return fixtures.CARRINHOS
-  },
-  async campanhasMkt() {
-    return fixtures.CAMPANHAS_MKT
-  },
-  async fluxos() {
-    return fixtures.FLUXOS
-  },
-  async etapasFluxo() {
-    return fixtures.ETAPAS_FLUXO
-  },
-  async cupons() {
-    return fixtures.CUPONS
-  },
-  async vitrine() {
-    return fixtures.VITRINE
-  },
-  async avaliacoesCupons() {
-    return fixtures.AVALIACOES_CUPONS
-  },
-  async regrasCashback() {
-    return fixtures.REGRAS_CASHBACK
-  },
-  async saldosCashback() {
-    return fixtures.SALDOS_CASHBACK
-  },
-  async giftbacks() {
-    return fixtures.GIFTBACKS
-  },
-  async atendimento() {
-    return fixtures.ATENDIMENTO
-  },
-  async iaRegras() {
-    return fixtures.IA_REGRAS
-  },
-  async iaAutorizados() {
-    return fixtures.IA_AUTORIZADOS
-  },
-  async iaComandos() {
-    return fixtures.IA_COMANDOS
   },
 }
 
@@ -933,23 +821,6 @@ const repositorioSupabase: Repositorio = {
     })
   },
 
-  async enviosContabeis() {
-    const { data, error } = await supabaseServer()
-      .from('envios_contabeis')
-      .select('arquivo, conteudo, registros, bytes, estado, nota, enviado_em')
-      .order('enviado_em', { ascending: false })
-      .limit(50)
-    if (error) throw error
-    return (data ?? []).map((e) => ({
-      quando: dataCurta(e.enviado_em as string),
-      arquivo: e.arquivo as string,
-      conteudo: e.conteudo as string,
-      registros: e.registros as number,
-      tamanho: tamanhoLegivel(Number(e.bytes)),
-      estado: e.estado as 'Aceito' | 'Processando' | 'Recusado',
-      nota: e.nota as string,
-    }))
-  },
   async concorrentesFontes() {
     const { data, error } = await supabaseServer()
       .from('concorrentes')
@@ -970,42 +841,6 @@ const repositorioSupabase: Repositorio = {
     )
   },
 
-  /**
-   * Preços de mercado por base e variante.
-   *
-   * Só entra observação casada com o catálogo: preço sem dono não sabe de qual
-   * perfume fala, e entrar na comparação como se soubesse decidiria o preço de
-   * venda de um produto pelo preço de outro.
-   */
-  async mercado() {
-    const linhas = await tudoDe<{ base_id: string; variante: number; preco: number | string }>(
-      'concorrente_precos',
-      (de, ate) =>
-        supabaseServer()
-          .from('concorrente_precos')
-          .select('base_id, variante, preco')
-          .not('base_id', 'is', null)
-          .not('variante', 'is', null)
-          .range(de, ate) as unknown as PromiseLike<{
-          data: { base_id: string; variante: number; preco: number | string }[] | null
-          error: unknown
-        }>,
-    )
-
-    const mapa: Record<string, Partial<Record<VarianteMl, number[]>>> = {}
-    for (const l of linhas) {
-      const v = l.variante as VarianteMl
-      const daBase = (mapa[l.base_id] ??= {})
-      ;(daBase[v] ??= []).push(Number(l.preco))
-    }
-    return mapa
-  },
-  kits: repositorioFixtures.kits,
-  usuarios: repositorioFixtures.usuarios,
-  perfis: repositorioFixtures.perfis,
-  integracoes: repositorioFixtures.integracoes,
-  notificacoes: repositorioFixtures.notificacoes,
-  auditoria: repositorioFixtures.auditoria,
   /**
    * O cliente do CRM é DERIVADO dos pedidos, não uma tabela paralela.
    *
@@ -1074,22 +909,6 @@ const repositorioSupabase: Repositorio = {
       })
       .sort((a, b) => b.total - a.total)
   },
-
-  // Promoções, atendimento e Assessor IA aguardam migrations.
-  carrinhos: repositorioFixtures.carrinhos,
-  campanhasMkt: repositorioFixtures.campanhasMkt,
-  fluxos: repositorioFixtures.fluxos,
-  etapasFluxo: repositorioFixtures.etapasFluxo,
-  cupons: repositorioFixtures.cupons,
-  vitrine: repositorioFixtures.vitrine,
-  avaliacoesCupons: repositorioFixtures.avaliacoesCupons,
-  regrasCashback: repositorioFixtures.regrasCashback,
-  saldosCashback: repositorioFixtures.saldosCashback,
-  giftbacks: repositorioFixtures.giftbacks,
-  atendimento: repositorioFixtures.atendimento,
-  iaRegras: repositorioFixtures.iaRegras,
-  iaAutorizados: repositorioFixtures.iaAutorizados,
-  iaComandos: repositorioFixtures.iaComandos,
 }
 
 /**
@@ -1143,19 +962,6 @@ interface LinhaOrdem {
 function dataBr(iso: string): string {
   const [a, m, d] = iso.slice(0, 10).split('-')
   return d ? `${d}/${m}/${a}` : iso
-}
-
-/** Bytes em algo que cabe numa célula: `2,4 MB`. */
-function tamanhoLegivel(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '—'
-  const unidades = ['B', 'KB', 'MB', 'GB']
-  let valor = bytes
-  let i = 0
-  while (valor >= 1024 && i < unidades.length - 1) {
-    valor /= 1024
-    i++
-  }
-  return `${valor.toFixed(valor < 10 && i > 0 ? 1 : 0).replace('.', ',')} ${unidades[i]}`
 }
 
 /** `2026-08-09T14:22:00Z` → `09/08 14:22`, que é como as telas mostram. */

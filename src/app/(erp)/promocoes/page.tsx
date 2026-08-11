@@ -152,6 +152,7 @@ export default async function Cupons() {
       chave: 'usos',
       titulo: 'Usos',
       largura: '132px',
+      alinhamento: 'right',
       render: (c) => {
         const pctUsos = c.limite ? Math.min(100, Math.round((c.usos / c.limite) * 100)) : null
         return (

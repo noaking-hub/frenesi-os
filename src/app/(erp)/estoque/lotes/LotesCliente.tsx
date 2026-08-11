@@ -136,6 +136,7 @@ export function LotesCliente({ lotes, bases, parametros, perda, conciliacao }: P
       chave: 'perda',
       titulo: 'Perda / saldo',
       largura: '108px',
+      alinhamento: 'right',
       render: (l) => {
         const ap = apurarLote(l, parametros)
         const tom: Tom = ap.aberto ? 'neutro' : ap.acimaDoParametro ? 'erro' : 'ok'
