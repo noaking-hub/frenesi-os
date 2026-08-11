@@ -47,8 +47,20 @@ export interface Envio {
   eventos: EventoRastreio[]
 }
 
+/**
+ * Entrega feita em mãos, na cidade da operação.
+ *
+ * Muriaé não passa por transportadora: o operador entrega e dá a baixa
+ * manualmente na Shopify. Sem esta separação, todo pedido local viraria
+ * "sem movimentação" — uma exceção eterna que ninguém tem como resolver.
+ */
+export function entregaLocal(envio: Envio): boolean {
+  return /muria[eé]/i.test(envio.destino)
+}
+
 /** Status que indicam problema com a transportadora. */
 export function ehExcecao(envio: Envio): boolean {
+  if (entregaLocal(envio)) return false
   return envio.status === 'sem-movimentacao' || envio.status === 'entrega-nao-efetuada'
 }
 

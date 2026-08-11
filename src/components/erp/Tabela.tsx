@@ -54,6 +54,10 @@ export function Tabela<T>({
     >
       {cabecalho}
 
+      {/* Em tela estreita a tabela rola na horizontal dentro do card, em vez
+          de esmagar as colunas até virarem ruído. */}
+      <div style={{ overflowX: 'auto' }}>
+      <div style={{ minWidth: 660 }}>
       <div
         role="row"
         style={{
@@ -140,6 +144,8 @@ export function Tabela<T>({
           </div>
         )
       })}
+      </div>
+      </div>
 
       {rodape}
     </section>

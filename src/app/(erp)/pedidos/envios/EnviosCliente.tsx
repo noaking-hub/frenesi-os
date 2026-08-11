@@ -7,7 +7,7 @@ import { BotaoOuro, FaixaAlerta, Ponto, Rotulo, TituloSecao, Valor } from '@/com
 import { CelulaDupla, Tabela, type Coluna } from '@/components/erp/Tabela'
 import { Modal } from '@/components/erp/Modal'
 import { COR, type Tom } from '@/components/erp/tokens'
-import {
+import { entregaLocal,
   ROTULO_RASTREIO,
   ROTULO_SHOPIFY,
   aguardaBaixaShopify,
@@ -36,7 +36,7 @@ const TOM_SHOPIFY: Record<EstadoShopify, Tom> = {
   entregue: 'ok',
 }
 
-type Filtro = 'Todos' | 'Em trânsito' | 'Entregues' | 'Aguardando baixa' | 'Exceções' | 'Aguardando postagem'
+type Filtro = 'Todos' | 'Em trânsito' | 'Entregues' | 'Aguardando baixa' | 'Exceções' | 'Aguardando postagem' | 'Entregas locais'
 
 export function EnviosCliente({
   envios,
@@ -48,6 +48,7 @@ export function EnviosCliente({
   shopifyLigada: boolean
 }) {
   const [filtro, setFiltro] = useState<Filtro>('Todos')
+  const [busca, setBusca] = useState('')
   // Baixas que a Shopify JÁ confirmou nesta sessão. A revalidação da rota
   // traz o estado do banco em seguida; isto só evita a linha piscar de volta
   // para "aguardando baixa" no intervalo.
@@ -110,12 +111,24 @@ export function EnviosCliente({
       'Aguardando baixa': aguardaBaixaShopify,
       Exceções: ehExcecao,
       'Aguardando postagem': (e) => e.status === 'aguardando-postagem',
+      // Muriaé: o operador entrega em mãos e dá a baixa na Shopify — a fila
+      // dele é outra, e misturada com exceção de transportadora ela sumia.
+      'Entregas locais': entregaLocal,
     }),
     [],
   )
 
   const filtros = Object.keys(predicados) as Filtro[]
-  const visiveis = atuais.filter(predicados[filtro])
+  const termo = busca.trim().toLowerCase()
+  const visiveis = atuais
+    .filter(predicados[filtro])
+    .filter(
+      (e) =>
+        !termo ||
+        [e.pedidoId, e.cliente, e.destino, e.rastreio, e.transportadora].some((v) =>
+          v.toLowerCase().includes(termo),
+        ),
+    )
   const r = resumirEnvios(atuais)
   const fila = atuais.filter(aguardaBaixaShopify)
 
@@ -137,7 +150,7 @@ export function EnviosCliente({
     {
       label: 'Exceções',
       valor: String(r.excecoes),
-      hint: 'Sem movimentação ou entrega falha',
+      hint: 'Sem movimentação ou entrega falha · entregas locais não contam',
       tom: r.excecoes ? 'erro' : 'ok',
     },
   ]
@@ -163,9 +176,12 @@ export function EnviosCliente({
       chave: 'transportadora',
       titulo: 'Transportadora',
       largura: '136px',
-      render: (e) => (
-        <CelulaDupla principal={e.transportadora} secundaria={`Yampi · ${e.gateway}`} />
-      ),
+      render: (e) =>
+        entregaLocal(e) ? (
+          <CelulaDupla principal="Entrega local" secundaria="Você entrega e baixa na Shopify" />
+        ) : (
+          <CelulaDupla principal={e.transportadora} secundaria={`Yampi · ${e.gateway}`} />
+        ),
     },
     {
       chave: 'rastreio',
@@ -336,6 +352,33 @@ export function EnviosCliente({
           </BotaoOuro>
         </div>
       )}
+
+      <label
+        className="focus-within:border-ouro/45"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 9,
+          maxWidth: 520,
+          height: 38,
+          padding: '0 14px',
+          border: '1px solid rgba(255,255,255,.09)',
+          background: 'rgba(255,255,255,.03)',
+          borderRadius: 9,
+        }}
+      >
+        <span
+          aria-hidden
+          style={{ width: 11, height: 11, border: '1.4px solid rgba(242,237,227,.4)', borderRadius: '50%', flex: 'none' }}
+        />
+        <input
+          value={busca}
+          onChange={(e) => setBusca(e.target.value)}
+          placeholder="Buscar por pedido, cliente, cidade, rastreio ou transportadora"
+          className="font-sans"
+          style={{ flex: 1, border: 0, outline: 0, background: 'transparent', color: 'var(--color-corrente)', fontSize: 12.5, lineHeight: 1 }}
+        />
+      </label>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
         {filtros.map((f) => {
@@ -552,6 +595,17 @@ function ModalRastreio({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
             <Rotulo>{`Rastreio · ${envio.transportadora} · Yampi / ${envio.gateway}`}</Rotulo>
             <TituloSecao tamanho={18}>{envio.rastreio}</TituloSecao>
+            {envio.rastreio && (
+              <a
+                href={`https://melhorrastreio.com.br/rastreio/${encodeURIComponent(envio.rastreio)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="font-sans hover:brightness-110"
+                style={{ fontWeight: 600, fontSize: 11, color: 'var(--color-ouro)', textDecoration: 'none' }}
+              >
+                Histórico completo na transportadora →
+              </a>
+            )}
             <span
               className="font-sans"
               style={{ fontSize: 11, lineHeight: 1.4, color: 'var(--color-terciario)' }}

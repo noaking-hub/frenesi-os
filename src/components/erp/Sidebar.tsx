@@ -8,9 +8,25 @@ import { useEffect, useState } from 'react'
 import { ICONES } from './Icones'
 import { NAV, grupoAberto, rotaAtiva, type GrupoNav } from './navegacao'
 
+const CHAVE_MENU = 'frenesi:menu-recolhido'
+
 export function Sidebar({ origem }: { origem: 'supabase' | 'fixtures' }) {
   const pathname = usePathname()
   const [abertos, setAbertos] = useState<Record<string, boolean>>({})
+  // O menu abre expandido no servidor e recolhe no cliente se foi a última
+  // escolha — ler localStorage no primeiro render divergiria da hidratação.
+  const [recolhida, setRecolhida] = useState(false)
+
+  useEffect(() => {
+    setRecolhida(localStorage.getItem(CHAVE_MENU) === '1')
+  }, [])
+
+  const alternarMenu = () => {
+    setRecolhida((v) => {
+      localStorage.setItem(CHAVE_MENU, v ? '0' : '1')
+      return !v
+    })
+  }
 
   // O grupo da tela atual abre sozinho — inclusive em navegação direta por URL.
   useEffect(() => {
@@ -21,7 +37,7 @@ export function Sidebar({ origem }: { origem: 'supabase' | 'fixtures' }) {
   return (
     <aside
       style={{
-        width: 244,
+        width: recolhida ? 62 : 244,
         flex: 'none',
         position: 'sticky',
         top: 0,
@@ -31,6 +47,7 @@ export function Sidebar({ origem }: { origem: 'supabase' | 'fixtures' }) {
         flexDirection: 'column',
         background: 'linear-gradient(180deg,#0E0D0C,#0A0A09)',
         borderRight: '1px solid rgba(239,209,140,.10)',
+        transition: 'width .2s ease',
       }}
     >
       <div
@@ -40,20 +57,31 @@ export function Sidebar({ origem }: { origem: 'supabase' | 'fixtures' }) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: '0 22px',
+          padding: recolhida ? 0 : '0 22px',
           borderBottom: '1px solid rgba(255,255,255,.06)',
         }}
       >
         <Link href="/" aria-label="FRENESI · início">
-          {/* Logomarca oficial: vertical, sempre inteira, sem tagline. */}
-          <Image
-            src="/assets/frenesi-logo.png"
-            alt="FRENESI"
-            width={164}
-            height={52}
-            priority
-            style={{ width: 164, height: 'auto', display: 'block' }}
-          />
+          {/* Logomarca oficial: vertical, sempre inteira, sem tagline.
+              Recolhida, sobra o monograma — a própria logo, cortada não: um F. */}
+          {recolhida ? (
+            <span
+              className="font-display"
+              aria-hidden
+              style={{ fontWeight: 700, fontSize: 21, color: 'var(--color-ouro)', lineHeight: 1 }}
+            >
+              F
+            </span>
+          ) : (
+            <Image
+              src="/assets/frenesi-logo.png"
+              alt="FRENESI"
+              width={164}
+              height={52}
+              priority
+              style={{ width: 164, height: 'auto', display: 'block' }}
+            />
+          )}
         </Link>
       </div>
 
@@ -72,18 +100,55 @@ export function Sidebar({ origem }: { origem: 'supabase' | 'fixtures' }) {
             key={grupo.id}
             grupo={grupo}
             pathname={pathname}
-            aberto={abertos[grupo.id] ?? false}
-            alternar={() => setAbertos((s) => ({ ...s, [grupo.id]: !s[grupo.id] }))}
+            recolhida={recolhida}
+            aberto={!recolhida && (abertos[grupo.id] ?? false)}
+            alternar={() => {
+              // Clicar num grupo com o menu recolhido reabre o menu já no
+              // grupo certo — recolhido não dá para mostrar as telas.
+              if (recolhida) {
+                alternarMenu()
+                setAbertos((s) => ({ ...s, [grupo.id]: true }))
+                return
+              }
+              setAbertos((s) => ({ ...s, [grupo.id]: !s[grupo.id] }))
+            }}
           />
         ))}
       </nav>
 
+      <button
+        type="button"
+        onClick={alternarMenu}
+        aria-label={recolhida ? 'Expandir o menu' : 'Recolher o menu'}
+        className="font-sans hover:bg-[rgba(239,209,140,.07)]"
+        style={{
+          margin: '0 12px 8px',
+          height: 32,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          border: '1px solid rgba(255,255,255,.07)',
+          borderRadius: 8,
+          background: 'transparent',
+          color: 'rgba(242,237,227,.5)',
+          fontWeight: 600,
+          fontSize: 10.5,
+          lineHeight: 1,
+          cursor: 'pointer',
+        }}
+      >
+        <span aria-hidden style={{ fontSize: 11 }}>{recolhida ? '»' : '«'}</span>
+        {!recolhida && 'Recolher menu'}
+      </button>
+
       <div
         style={{
-          padding: '14px 18px 18px',
+          padding: recolhida ? '14px 0 18px' : '14px 18px 18px',
           borderTop: '1px solid rgba(255,255,255,.05)',
           display: 'flex',
           alignItems: 'center',
+          justifyContent: recolhida ? 'center' : 'flex-start',
           gap: 9,
         }}
       >
@@ -97,12 +162,14 @@ export function Sidebar({ origem }: { origem: 'supabase' | 'fixtures' }) {
             background: origem === 'supabase' ? 'var(--color-ok)' : 'var(--color-info)',
           }}
         />
-        <span
-          className="font-sans"
-          style={{ fontWeight: 500, fontSize: 10.5, lineHeight: 1.3, color: 'var(--color-terciario)' }}
-        >
-          {origem === 'supabase' ? 'Sincronizado agora' : 'Dados de demonstração'}
-        </span>
+        {!recolhida && (
+          <span
+            className="font-sans"
+            style={{ fontWeight: 500, fontSize: 10.5, lineHeight: 1.3, color: 'var(--color-terciario)' }}
+          >
+            {origem === 'supabase' ? 'Sincronizado agora' : 'Dados de demonstração'}
+          </span>
+        )}
       </div>
     </aside>
   )
@@ -113,11 +180,13 @@ function Grupo({
   pathname,
   aberto,
   alternar,
+  recolhida = false,
 }: {
   grupo: GrupoNav
   pathname: string
   aberto: boolean
   alternar: () => void
+  recolhida?: boolean
 }) {
   const temSubs = Boolean(grupo.telas?.length)
   const ativo = grupo.href
@@ -127,9 +196,10 @@ function Grupo({
   const estiloBotao = {
     display: 'flex',
     alignItems: 'center',
+    justifyContent: recolhida ? ('center' as const) : ('flex-start' as const),
     gap: 10,
     width: '100%',
-    padding: '9px 12px 9px 13px',
+    padding: recolhida ? '10px 0' : '9px 12px 9px 13px',
     border: 0,
     borderRadius: 9,
     background: ativo && !temSubs ? 'rgba(239,209,140,.1)' : 'transparent',
@@ -165,27 +235,35 @@ function Grupo({
           type="button"
           onClick={alternar}
           aria-expanded={aberto}
+          title={recolhida ? grupo.label : undefined}
           className="nav-grupo font-sans hover:bg-[rgba(239,209,140,.07)]"
           style={estiloBotao}
         >
           {marcador}
-          <span style={{ flex: 1 }}>{grupo.label}</span>
-          <span
-            aria-hidden
-            style={{
-              fontSize: 9,
-              color: 'rgba(242,237,227,.35)',
-              transform: `rotate(${aberto ? 90 : 0}deg)`,
-              transition: 'transform .2s',
-            }}
-          >
-            ▸
-          </span>
+          {!recolhida && <span style={{ flex: 1 }}>{grupo.label}</span>}
+          {!recolhida && (
+            <span
+              aria-hidden
+              style={{
+                fontSize: 9,
+                color: 'rgba(242,237,227,.35)',
+                transform: `rotate(${aberto ? 90 : 0}deg)`,
+                transition: 'transform .2s',
+              }}
+            >
+              ▸
+            </span>
+          )}
         </button>
       ) : (
-        <Link href={grupo.href!} className="nav-grupo font-sans hover:bg-[rgba(239,209,140,.07)]" style={estiloBotao}>
+        <Link
+          href={grupo.href!}
+          title={recolhida ? grupo.label : undefined}
+          className="nav-grupo font-sans hover:bg-[rgba(239,209,140,.07)]"
+          style={estiloBotao}
+        >
           {marcador}
-          <span style={{ flex: 1 }}>{grupo.label}</span>
+          {!recolhida && <span style={{ flex: 1 }}>{grupo.label}</span>}
         </Link>
       )}
 

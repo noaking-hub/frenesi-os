@@ -91,7 +91,7 @@ export default async function SincroniaShopify() {
       )}
 
       {pendentes.length > 0 ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
+        <div className="empilha-900" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
           {pendentes.map((b) => (
             <CardBase key={b.base.id} base={b} />
           ))}
@@ -128,7 +128,7 @@ export default async function SincroniaShopify() {
           >
             {`▸ ${plural(emDia.length, 'base em dia', 'bases em dia')} — abrir para conferir`}
           </summary>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14, paddingTop: 10 }}>
+          <div className="empilha-900" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14, paddingTop: 10 }}>
             {emDia.map((b) => (
               <CardBase key={b.base.id} base={b} />
             ))}

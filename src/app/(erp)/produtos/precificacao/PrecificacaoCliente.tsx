@@ -351,6 +351,7 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
 
   return (
     <div
+        className="empilha-1180"
       style={{
         display: 'grid',
         gridTemplateColumns: 'minmax(0,1fr) 340px',

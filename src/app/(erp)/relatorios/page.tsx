@@ -235,7 +235,10 @@ export default async function Relatorios({
       {filtros}
       <FaixaKpis kpis={kpis} />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,2fr) minmax(0,1fr)', gap: 16, alignItems: 'start' }}>
+      <div
+        className="empilha-1180"
+        style={{ display: 'grid', gridTemplateColumns: 'minmax(0,2fr) minmax(0,1fr)', gap: 16, alignItems: 'start' }}
+      >
         <section
           style={{
             background: 'var(--color-mesa)',

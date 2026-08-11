@@ -246,3 +246,24 @@
 .portal textarea::placeholder {
   color: rgba(36, 31, 24, 0.34);
 }
+
+/* ── Responsividade do ERP ──────────────────────────────────────────────────
+   As telas foram desenhadas para 1440+; estas classes fazem os arranjos de
+   duas colunas empilharem em notebook e o conteúdo respirar em tela menor.
+   São !important de propósito: os arranjos usam style inline, e a media
+   query precisa vencer exatamente nesses pontos. */
+@media (max-width: 1180px) {
+  .erp .empilha-1180 {
+    grid-template-columns: 1fr !important;
+  }
+}
+@media (max-width: 900px) {
+  .erp .empilha-900 {
+    grid-template-columns: 1fr !important;
+  }
+}
+@media (max-width: 1280px) {
+  .erp .conteudo-erp {
+    padding: 20px 18px 40px !important;
+  }
+}

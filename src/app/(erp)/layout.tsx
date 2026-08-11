@@ -12,13 +12,13 @@ export default async function ErpLayout({ children }: { children: React.ReactNod
   return (
     <div
       className="erp superficie-erp"
-      style={{ display: 'flex', minHeight: '100vh', minWidth: 1366 }}
+      style={{ display: 'flex', minHeight: '100vh' }}
     >
       <Sidebar origem={origemDados()} />
       <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <Topbar alertas={alertas} />
         <div
-          className="animate-[fr-in_.32s_ease_both]"
+          className="animate-[fr-in_.32s_ease_both] conteudo-erp"
           style={{ flex: 1, padding: '26px 30px 46px' }}
         >
           {children}

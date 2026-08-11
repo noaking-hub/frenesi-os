@@ -6,6 +6,8 @@ import { lerCuponsYampi, type CupomYampi } from '@/data/yampi-crm'
 import { yampiConfigurada } from '@/data/yampi'
 import { plural } from '@/domain'
 
+import { NovoCupom } from './NovoCupom'
+
 export const dynamic = 'force-dynamic'
 
 /**
@@ -85,10 +87,15 @@ export default async function Cupons() {
 
   if (cupons.length === 0) {
     return (
-      <EstadoVazio
-        titulo="Nenhum cupom publicado"
-        instrucao="A Yampi respondeu, mas não há cupons cadastrados no checkout. Crie no painel da Yampi e eles aparecem aqui."
-      />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <NovoCupom />
+        </div>
+        <EstadoVazio
+          titulo="Nenhum cupom publicado"
+          instrucao="A Yampi respondeu, mas não há cupons no checkout. Crie o primeiro aqui em cima — o ERP publica direto lá."
+        />
+      </div>
     )
   }
 
@@ -205,11 +212,13 @@ export default async function Cupons() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <FaixaKpis kpis={kpis} />
 
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <TituloSecao tamanho={16}>Cupons do checkout</TituloSecao>
         <span className="font-sans" style={{ fontSize: 10.5, lineHeight: 1.4, color: 'var(--color-terciario)' }}>
-          Lidos ao vivo da Yampi — criar e pausar é no painel dela, aqui é o retrato fiel
+          Lidos ao vivo da Yampi — o que está aqui é o que o checkout aceita agora
         </span>
+        <div style={{ flex: 1 }} />
+        <NovoCupom />
       </div>
 
       {expirando.length > 0 && (

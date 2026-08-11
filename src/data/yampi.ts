@@ -62,6 +62,7 @@ export class AcessoNegadoYampi extends Error {
 export async function chamarYampi<T>(
   caminho: string,
   parametros: Record<string, string> = {},
+  opcoes: { metodo?: 'GET' | 'POST' | 'PUT' | 'DELETE'; corpo?: unknown } = {},
 ): Promise<T> {
   const { alias, token, secret } = credenciaisYampi()
   if (!alias || !token || !secret) {
@@ -75,11 +76,13 @@ export async function chamarYampi<T>(
   for (const [chave, valor] of Object.entries(parametros)) url.searchParams.set(chave, valor)
 
   const resposta = await fetch(url, {
+    method: opcoes.metodo ?? 'GET',
     headers: {
       'Content-Type': 'application/json',
       'User-Token': token,
       'User-Secret-Key': secret,
     },
+    body: opcoes.corpo === undefined ? undefined : JSON.stringify(opcoes.corpo),
     cache: 'no-store',
   })
 

@@ -242,3 +242,51 @@ export async function lerCarrinhosYampi(): Promise<LeituraCarrinhos> {
     camposCrus: crus[0] ? Object.keys(crus[0]).sort() : [],
   }
 }
+
+// ── Criação de cupom ───────────────────────────────────────────────────────
+
+export interface NovoCupom {
+  codigo: string
+  /** Valor do desconto — em % quando `percentual`, em R$ quando não. */
+  valor: number
+  percentual: boolean
+  /** Data limite (aaaa-mm-dd). Sem data, o cupom não expira. */
+  expiraEm?: string
+  /** Quantidade máxima de usos. Sem limite, vale para sempre. */
+  limite?: number
+}
+
+/**
+ * Publica um cupom no checkout (`POST /pricing/promocodes`).
+ *
+ * O corpo segue o formato mais comum da Yampi; se a loja recusar, a mensagem
+ * dela chega inteira à tela — ela nomeia o campo que faltou, e isso vale
+ * mais que qualquer tradução nossa.
+ */
+export async function criarCupomYampi(cupom: NovoCupom): Promise<void> {
+  const codigo = cupom.codigo.trim().toUpperCase()
+  if (!/^[A-Z0-9_-]{3,32}$/.test(codigo)) {
+    throw new Error('O código do cupom deve ter de 3 a 32 letras, números, hífen ou sublinhado.')
+  }
+  if (!(cupom.valor > 0)) throw new Error('O desconto precisa ser maior que zero.')
+  if (cupom.percentual && cupom.valor >= 100) {
+    throw new Error('Desconto percentual de 100% ou mais zeraria a venda.')
+  }
+
+  await chamarYampi(
+    '/pricing/promocodes',
+    {},
+    {
+      metodo: 'POST',
+      corpo: {
+        name: codigo,
+        code: codigo,
+        value: cupom.valor,
+        type: cupom.percentual ? 'percent' : 'fixed',
+        active: true,
+        ...(cupom.limite && cupom.limite > 0 ? { quantity: cupom.limite } : {}),
+        ...(cupom.expiraEm ? { expires_at: `${cupom.expiraEm} 23:59:59` } : {}),
+      },
+    },
+  )
+}

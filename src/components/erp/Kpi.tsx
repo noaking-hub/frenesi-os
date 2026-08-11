@@ -58,7 +58,9 @@ export function FaixaKpis({ kpis }: { kpis: Kpi[] }) {
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: `repeat(${kpis.length}, minmax(0, 1fr))`,
+        // auto-fit: em notebook os cartões quebram em duas linhas em vez de
+        // espremer seis colunas até o número não caber.
+        gridTemplateColumns: `repeat(auto-fit, minmax(196px, 1fr))`,
         gap: 13,
       }}
     >
