@@ -1518,3 +1518,75 @@ export async function aplicarEstoqueCalculado(): Promise<AplicacaoCalculada> {
 
   return { ...resultado, pulados }
 }
+
+// ── Anulados na Shopify ────────────────────────────────────────────────────
+
+const CONSULTA_ANULADOS = /* GraphQL */ `
+  query ($cursor: String, $filtro: String) {
+    orders(first: 100, after: $cursor, query: $filtro) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        name
+        displayFinancialStatus
+      }
+    }
+  }
+`
+
+/**
+ * Marca como divergente o pedido anulado/estornado na Shopify.
+ *
+ * O operador cancela venda pela Shopify, e a Yampi às vezes segue dizendo
+ * "paid" — o pedido continuava contando como receita, cliente e relatório.
+ * O estorno pelo Mercado Pago também marca (via extrato), mas chega com
+ * horas de atraso; a Shopify diz na hora.
+ */
+export async function marcarAnuladosDaShopify(
+  dias = 45,
+): Promise<{ anulados: number; marcados: number }> {
+  const { loja } = credenciais()
+  if (!loja) return { anulados: 0, marcados: 0 }
+  const token = await tokenDeAcesso(loja)
+
+  const desde = new Date(Date.now() - dias * 86_400_000).toISOString().slice(0, 10)
+  const filtro = `created_at:>=${desde} AND (financial_status:refunded OR financial_status:partially_refunded OR financial_status:voided OR status:cancelled)`
+
+  const numeros: string[] = []
+  let cursor: string | null = null
+  for (let pagina = 0; pagina < 20; pagina++) {
+    const dados: {
+      orders: {
+        pageInfo: { hasNextPage: boolean; endCursor: string | null }
+        nodes: { name: string }[]
+      }
+    } = await chamarShopify(
+      loja,
+      token,
+      CONSULTA_ANULADOS,
+      { cursor, filtro },
+      'ler os pedidos anulados',
+      'read_orders',
+    )
+    for (const n of dados.orders.nodes) {
+      const digitos = n.name.replace(/\D/g, '')
+      if (digitos) numeros.push(digitos)
+    }
+    if (!dados.orders.pageInfo.hasNextPage) break
+    cursor = dados.orders.pageInfo.endCursor
+  }
+
+  if (numeros.length === 0 || !supabaseConfigurado()) {
+    return { anulados: numeros.length, marcados: 0 }
+  }
+
+  // O número da Shopify chega da Yampi com prefixo variável — compara só os
+  // dígitos, dos dois lados.
+  const { data, error } = await supabaseServer().rpc('marcar_divergentes_por_numero_shopify', {
+    p_numeros: numeros,
+  })
+  if (error) throw error
+  return { anulados: numeros.length, marcados: Number(data ?? 0) }
+}

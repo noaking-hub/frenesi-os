@@ -4,6 +4,7 @@ import {
   INICIO_DA_OPERACAO,
   PARAMETROS_PADRAO,
   aferirItem,
+  identificarFrete,
   iniciaisDe,
   montarEnvio,
   statusCliente,
@@ -495,8 +496,8 @@ const repositorioSupabase: Repositorio = {
     const { data, error } = await supabaseServer()
       .from('pedidos')
       .select(
-        'id, destino, pagamento, envio, comprado_em, entregue_em, gateway, rastreio, ' +
-          'enviado_shopify_em, entrega_shopify_em, clientes(nome)',
+        'id, destino, pagamento, envio, comprado_em, entregue_em, gateway, servico_frete, ' +
+          'rastreio, enviado_shopify_em, entrega_shopify_em, clientes(nome)',
       )
       .order('comprado_em', { ascending: false })
       .limit(500)
@@ -510,23 +511,21 @@ const repositorioSupabase: Repositorio = {
       comprado_em: string
       entregue_em: string | null
       gateway: string | null
+      servico_frete: string | null
       rastreio: string | null
       enviado_shopify_em: string | null
       entrega_shopify_em: string | null
       clientes: { nome: string } | null
     }[]
 
-    return linhas.map((p) =>
-      montarEnvio({
+    return linhas.map((p) => {
+      const frete = identificarFrete(p.servico_frete, p.rastreio)
+      return montarEnvio({
         id: p.id,
         cliente: p.clientes?.nome ?? 'Cliente sem cadastro',
         destino: p.destino ?? '—',
-        // A Yampi manda o serviço no pedido, mas o ERP ainda não o guarda em
-        // coluna própria. Deixar vazio faz o domínio escrever "Não informada",
-        // que é a verdade — melhor que repetir o gateway como se fosse a
-        // transportadora.
-        transportadora: '',
-        gateway: p.gateway === 'frenet' ? 'Frenet' : 'Melhor Envio',
+        transportadora: frete.transportadora,
+        gateway: frete.gateway,
         rastreio: p.rastreio ?? '',
         envio: rotuloEnvio(p.envio),
         pago: p.pagamento === 'pago',
@@ -534,8 +533,8 @@ const repositorioSupabase: Repositorio = {
         entregueEm: p.entregue_em,
         enviadoShopifyEm: p.enviado_shopify_em,
         entregaShopifyEm: p.entrega_shopify_em,
-      }),
-    )
+      })
+    })
   },
   /**
    * Ocorrências com o pedido e o cliente juntos.
@@ -548,7 +547,7 @@ const repositorioSupabase: Repositorio = {
       .from('ocorrencias')
       .select(
         'id, pedido_id, tipo, estado, aberta_em, prazo, acao, ' +
-          'pedidos(valor, destino, gateway, rastreio, clientes(nome))',
+          'pedidos(valor, destino, gateway, servico_frete, rastreio, clientes(nome))',
       )
       .order('aberta_em', { ascending: false })
       .limit(300)
@@ -566,6 +565,7 @@ const repositorioSupabase: Repositorio = {
         valor: number | string
         destino: string | null
         gateway: string | null
+        servico_frete: string | null
         rastreio: string | null
         clientes: { nome: string } | null
       } | null
@@ -579,8 +579,7 @@ const repositorioSupabase: Repositorio = {
       pedidoId: o.pedido_id,
       cliente: o.pedidos?.clientes?.nome ?? 'Cliente sem cadastro',
       destino: o.pedidos?.destino ?? '—',
-      transportadora: 'Não informada',
-      gateway: o.pedidos?.gateway === 'frenet' ? 'Frenet' : 'Melhor Envio',
+      ...identificarFrete(o.pedidos?.servico_frete ?? null, o.pedidos?.rastreio ?? null),
       rastreio: o.pedidos?.rastreio ?? '',
       tipo: o.tipo as Ocorrencia['tipo'],
       dias: Math.max(0, Math.floor((hoje - Date.parse(o.aberta_em)) / dia)),
@@ -992,8 +991,17 @@ function dataBr(iso: string): string {
 function dataCurta(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  const p2 = (n: number) => String(n).padStart(2, '0')
-  return `${p2(d.getDate())}/${p2(d.getMonth() + 1)} ${p2(d.getHours())}:${p2(d.getMinutes())}`
+  // Sempre no fuso da operação: no deploy o servidor roda em UTC, e usar a
+  // hora local dele mostraria todo pedido 3 horas adiantado.
+  return d
+    .toLocaleString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'America/Sao_Paulo',
+    })
+    .replace(',', '')
 }
 
 const STATUS_ORDEM: Record<LinhaOrdem['status'], StatusOrdem> = {

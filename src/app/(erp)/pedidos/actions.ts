@@ -9,7 +9,9 @@ import {
   escoposDoToken,
   esquecerToken,
   importarPedidosShopify,
+  marcarAnuladosDaShopify,
   mensagemDe,
+  shopifyConfigurada,
   sincronizarEnviosShopify,
 } from '@/data/shopify'
 import type { ResultadoPedidos } from '@/data/shopify'
@@ -135,6 +137,15 @@ export async function importarDaYampi(dias = 90): Promise<RespostaImportYampi> {
   try {
     const resultado = await importarPedidosYampi(dias)
     const { removidos } = await limparPedidosShopify()
+    // Venda anulada pela Shopify sai da receita na mesma rodada — o estorno
+    // pelo Mercado Pago também marca, mas chega com horas de atraso.
+    if (shopifyConfigurada()) {
+      try {
+        await marcarAnuladosDaShopify(Math.min(dias, 60))
+      } catch (e) {
+        console.error('[shopify] leitura de anulados falhou:', e)
+      }
+    }
     const { bases } = await derivarConsumoDiario(30)
     revalidatePath('/', 'layout')
     return {

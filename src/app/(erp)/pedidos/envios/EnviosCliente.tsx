@@ -1,5 +1,7 @@
 'use client'
 
+import Link from 'next/link'
+
 import { useMemo, useState, useTransition } from 'react'
 
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
@@ -37,6 +39,24 @@ const TOM_SHOPIFY: Record<EstadoShopify, Tom> = {
 }
 
 type Filtro = 'Todos' | 'Em trânsito' | 'Entregues' | 'Aguardando baixa' | 'Exceções' | 'Aguardando postagem' | 'Entregas locais'
+
+/**
+ * Página de rastreio de cada transportadora.
+ *
+ * Correios e Jadlog são emitidos pela Frenet; J&T, Total e Buslog pelo
+ * Melhor Envio — o rastreio público de cada um vive em lugar diferente, e o
+ * Melhor Rastreio cobre o que sai pelo Melhor Envio.
+ */
+function linkTransportadora(e: Envio): string {
+  const codigo = encodeURIComponent(e.rastreio)
+  if (e.transportadora === 'Correios') {
+    return `https://rastreamento.correios.com.br/app/index.php?objeto=${codigo}`
+  }
+  if (e.transportadora === 'Jadlog') {
+    return `https://www.jadlog.com.br/siteInstitucional/tracking.jad?cte=${codigo}`
+  }
+  return `https://melhorrastreio.com.br/rastreio/${codigo}`
+}
 
 export function EnviosCliente({
   envios,
@@ -596,15 +616,24 @@ function ModalRastreio({
             <Rotulo>{`Rastreio · ${envio.transportadora} · Yampi / ${envio.gateway}`}</Rotulo>
             <TituloSecao tamanho={18}>{envio.rastreio}</TituloSecao>
             {envio.rastreio && (
-              <a
-                href={`https://melhorrastreio.com.br/rastreio/${encodeURIComponent(envio.rastreio)}`}
-                target="_blank"
-                rel="noreferrer"
-                className="font-sans hover:brightness-110"
-                style={{ fontWeight: 600, fontSize: 11, color: 'var(--color-ouro)', textDecoration: 'none' }}
-              >
-                Histórico completo na transportadora →
-              </a>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                <a
+                  href={linkTransportadora(envio)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-sans hover:brightness-110"
+                  style={{ fontWeight: 600, fontSize: 11, color: 'var(--color-ouro)', textDecoration: 'none' }}
+                >
+                  {`Rastrear na ${envio.transportadora === 'Não informada' ? 'plataforma de envio' : envio.transportadora} →`}
+                </a>
+                <Link
+                  href="/pedidos/envios/rastreio"
+                  className="font-sans hover:brightness-110"
+                  style={{ fontWeight: 600, fontSize: 11, color: 'rgba(242,237,227,.55)', textDecoration: 'none' }}
+                >
+                  Rastreio.net (todos os envios) →
+                </Link>
+              </span>
             )}
             <span
               className="font-sans"

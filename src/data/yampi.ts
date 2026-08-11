@@ -257,8 +257,11 @@ function dataYampi(valor: { date?: string } | string | null | undefined): string
   if (!valor) return null
   const bruto = typeof valor === 'string' ? valor : valor.date
   if (!bruto) return null
-  // `2026-08-09 14:55:00.000000` não é ISO; o T e o Z fazem dele um instante.
-  const iso = bruto.includes('T') ? bruto : `${bruto.replace(' ', 'T').slice(0, 19)}Z`
+  // `2026-08-09 14:55:00.000000` não é ISO — e é hora DE SÃO PAULO, não UTC.
+  // O `Z` que ficava aqui empurrava todo pedido 3 horas para trás: a compra
+  // das 21h aparecia no dia seguinte e a venda do dia caía no dia errado.
+  // O Brasil não tem mais horário de verão, então o deslocamento é fixo.
+  const iso = bruto.includes('T') ? bruto : `${bruto.replace(' ', 'T').slice(0, 19)}-03:00`
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? null : d.toISOString()
 }
@@ -489,6 +492,9 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
       // conta a partir dela, e é a única plataforma que a marca.
       entregue_em: entregueEm,
       rastreio: p.track_code,
+      // O serviço diz por qual plataforma o envio foi emitido (Frenet ou
+      // Melhor Envio) — a Yampi não informa a plataforma diretamente.
+      servico_frete: p.shipment_service ?? null,
       gateway: null,
       destino: endereco
         ? [endereco.city, endereco.state].filter(Boolean).join(' · ') || null
@@ -583,6 +589,11 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
     p_origem: 'mercadopago',
   })
   if (erroLigar) throw erroLigar
+
+  // Pago e depois estornado não é venda: quem tem rastro de estorno (linha
+  // de saída no extrato ou status de transação) vira divergente agora.
+  const { error: erroEstornos } = await sb.rpc('marcar_estornados')
+  if (erroEstornos) throw erroEstornos
 
   // Venda que ainda não saiu é volume comprometido. Sem este passo a próxima
   // sincronia devolveria à Shopify o número de antes da venda, e a loja

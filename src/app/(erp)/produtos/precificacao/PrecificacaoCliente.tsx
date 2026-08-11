@@ -147,7 +147,7 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
     {
       chave: 'sugerido',
       titulo: 'Sugerido',
-      largura: '104px',
+      largura: '96px',
       alinhamento: 'right',
       render: (l) => (
         <Valor tamanho={14} tom="ouro">
@@ -191,7 +191,7 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
     {
       chave: 'mercado',
       titulo: 'Menor do mercado',
-      largura: '132px',
+      largura: '118px',
       alinhamento: 'right',
       render: (l) => {
         if (!l.mercado) {
@@ -236,7 +236,7 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
     {
       chave: 'aPublicar',
       titulo: 'Preço a publicar',
-      largura: '148px',
+      largura: '134px',
       render: (l) => (
         <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span
@@ -307,7 +307,7 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
     {
       chave: 'publicado',
       titulo: 'Publicado hoje',
-      largura: 'minmax(120px,1fr)',
+      largura: 'minmax(110px,1fr)',
       alinhamento: 'right',
       render: (l) => {
         const dif = l.praticado === null ? null : l.praticado - l.ideal
@@ -351,7 +351,7 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
 
   return (
     <div
-        className="empilha-1180"
+        className="empilha-1320"
       style={{
         display: 'grid',
         gridTemplateColumns: 'minmax(0,1fr) 340px',

@@ -48,6 +48,33 @@ export interface Envio {
 }
 
 /**
+ * Em qual plataforma o envio foi emitido — e por qual transportadora.
+ *
+ * A operação usa dois gateways: Correios e Jadlog saem pela Frenet; J&T,
+ * Total Express e Buslog pelo Melhor Envio. A Yampi devolve o serviço
+ * (`shipment_service`), e quando ele falta o formato do código desempata:
+ * `AA123456789BR` é padrão dos Correios.
+ */
+export function identificarFrete(
+  servico: string | null | undefined,
+  rastreio: string | null | undefined,
+): { transportadora: string; gateway: GatewayFrete } {
+  const s = (servico ?? '').toLowerCase()
+  if (/correio|sedex|pac\b|mini envios/.test(s)) return { transportadora: 'Correios', gateway: 'Frenet' }
+  if (/jadlog|\.package|\.com\b/.test(s)) return { transportadora: 'Jadlog', gateway: 'Frenet' }
+  if (/j&t|jet|j&amp;t/.test(s)) return { transportadora: 'J&T Express', gateway: 'Melhor Envio' }
+  if (/total/.test(s)) return { transportadora: 'Total Express', gateway: 'Melhor Envio' }
+  if (/buslog/.test(s)) return { transportadora: 'Buslog', gateway: 'Melhor Envio' }
+  if (/^[A-Z]{2}\d{9}BR$/i.test((rastreio ?? '').trim())) {
+    return { transportadora: 'Correios', gateway: 'Frenet' }
+  }
+  return {
+    transportadora: servico?.trim() || 'Não informada',
+    gateway: 'Melhor Envio',
+  }
+}
+
+/**
  * Entrega feita em mãos, na cidade da operação.
  *
  * Muriaé não passa por transportadora: o operador entrega e dá a baixa

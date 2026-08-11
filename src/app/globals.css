@@ -257,6 +257,11 @@
     grid-template-columns: 1fr !important;
   }
 }
+@media (max-width: 1320px) {
+  .erp .empilha-1320 {
+    grid-template-columns: 1fr !important;
+  }
+}
 @media (max-width: 900px) {
   .erp .empilha-900 {
     grid-template-columns: 1fr !important;

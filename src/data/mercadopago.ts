@@ -980,6 +980,17 @@ async function importarEComplementar(
     /* enriquecer é melhoria, não pré-requisito */
   }
 
+  // O estorno chega pelo extrato: é agora que o pedido pago-e-devolvido
+  // ganha o carimbo de divergente e sai da receita.
+  try {
+    const { data: estornados } = await supabaseServer().rpc('marcar_estornados')
+    if (Number(estornados ?? 0) > 0) {
+      linhas.push(`${estornados} venda(s) estornadas saíram da receita.`)
+    }
+  } catch {
+    /* marcação é derivada, não pré-requisito */
+  }
+
   try {
     const { data: regras } = await supabaseServer().rpc('aplicar_regras_categoria')
     const aplicadas = Number((regras as { aplicadas?: number } | null)?.aplicadas ?? 0)

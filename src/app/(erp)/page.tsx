@@ -26,23 +26,26 @@ export default async function Dashboard() {
   const acionaveis = pendencias.filter((p) => p.contagem > 0)
   const total = acionaveis.reduce((a, p) => a + p.contagem, 0)
 
-  const mes = new Date().toLocaleDateString('pt-BR', { month: 'long' })
+  // Tudo no fuso da operação: no deploy o servidor roda em UTC, e "hoje" em
+  // UTC começa 3 horas antes — a venda das 22h cairia no dia seguinte.
+  const SP = { timeZone: 'America/Sao_Paulo' } as const
+  const mes = new Date().toLocaleDateString('pt-BR', { month: 'long', ...SP })
+  const mesNumero = Number(new Date().toLocaleDateString('pt-BR', { month: 'numeric', ...SP }))
   const pagos = pedidos.filter((p) => p.pagamento === 'pago')
   const pagosNoMes = pagos.filter((p) => {
     const [, m] = p.data.split('/')
-    return Number(m.slice(0, 2)) === new Date().getMonth() + 1
+    return Number(m.slice(0, 2)) === mesNumero
   })
   const vendasNoMes = pagosNoMes.reduce((a, p) => a + p.valor, 0)
 
   // Vendas por dia dos últimos 7 dias. `data` vem como dd/mm — os rótulos de
   // comparação são gerados pelo mesmo formato, então a virada de ano não
   // desalinha (os 7 dias são sempre recentes).
-  const p2 = (n: number) => String(n).padStart(2, '0')
   const dias = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(Date.now() - (6 - i) * 86_400_000)
     return {
-      rotulo: `${p2(d.getDate())}/${p2(d.getMonth() + 1)}`,
-      diaSemana: d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', ''),
+      rotulo: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', ...SP }),
+      diaSemana: d.toLocaleDateString('pt-BR', { weekday: 'short', ...SP }).replace('.', ''),
       valor: 0,
       pedidos: 0,
     }

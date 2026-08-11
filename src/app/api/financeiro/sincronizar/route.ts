@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server'
 
 import { atualizarExtratoEsperando, mercadoPagoConfigurado } from '@/data/mercadopago'
-import { aplicarEstoqueCalculado, mensagemDe, shopifyConfigurada } from '@/data/shopify'
+import {
+  aplicarEstoqueCalculado,
+  marcarAnuladosDaShopify,
+  mensagemDe,
+  shopifyConfigurada,
+} from '@/data/shopify'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { importarPedidosYampi, yampiConfigurada } from '@/data/yampi'
 import { INICIO_DA_OPERACAO, dataEmSaoPaulo } from '@/domain'
@@ -103,6 +108,12 @@ export async function POST(req: Request) {
   // oferecendo decants que a venda de hoje comprometeu. Escrever aqui é o que
   // dispensa alguém de abrir a tela de Sincronia e clicar em "Aplicar".
   if (shopifyConfigurada()) {
+    // Venda anulada pela Shopify sai da receita nesta mesma rodada.
+    try {
+      relatorio.anulados = await marcarAnuladosDaShopify()
+    } catch (e) {
+      relatorio.anulados = { erro: mensagemDe(e) }
+    }
     try {
       const s = await aplicarEstoqueCalculado()
       relatorio.shopifyEstoque = {
