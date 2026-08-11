@@ -267,25 +267,61 @@ function hojeSp(): string {
 }
 
 /**
- * Tenta publicar/alterar com `discount_type` na grafia mais comum e cai para
- * a alternativa se a Yampi recusar exatamente esse campo. O 422 dela nomeia
- * o campo — é o que permite o fallback ser cirúrgico.
+ * Descobre o vocabulário de `discount_type` desta loja e publica com ele.
+ *
+ * "percentage" e "percent" foram recusados num teste real ("não contém um
+ * valor válido") — o valor aceito varia por versão da API. Em vez de
+ * adivinhar, a primeira fonte é a própria loja: os cupons já publicados
+ * carregam o valor que ela usa. Só depois vêm os palpites conhecidos, um a
+ * um, parando no primeiro que a Yampi aceitar.
  */
 async function comDiscountType(
-  enviar: (discountType: string) => Promise<unknown>,
+  enviar: (discountType: unknown) => Promise<unknown>,
   percentual: boolean,
 ): Promise<void> {
-  const [primeira, segunda] = percentual ? ['percentage', 'percent'] : ['fixed', 'fixed_value']
+  const candidatos: unknown[] = []
+
+  // O que a loja já usa vale mais que qualquer documentação.
   try {
-    await enviar(primeira)
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    if (/422/.test(msg) && /discount_type/i.test(msg) && primeira !== segunda) {
-      await enviar(segunda)
-      return
+    const r = await chamarYampi<{ data?: Record<string, unknown>[] }>('/pricing/promocodes', {
+      limit: '50',
+    })
+    for (const c of r.data ?? []) {
+      const dt = c.discount_type ?? c.type
+      if (dt === undefined || dt === null) continue
+      const eDeste = percentual
+        ? /percent|porcent|2/.test(String(dt).toLowerCase())
+        : /fix|valor|value|1/.test(String(dt).toLowerCase())
+      if (eDeste && !candidatos.includes(dt)) candidatos.push(dt)
     }
-    throw e
+  } catch {
+    /* sem leitura, seguem os palpites */
   }
+
+  for (const palpite of percentual
+    ? ['percentage', 'percent', 2, '2', 'porcentagem', 'P']
+    : ['fixed', 'value', 1, '1', 'valor', 'F']) {
+    if (!candidatos.includes(palpite)) candidatos.push(palpite)
+  }
+
+  let ultimoErro: unknown = null
+  for (const candidato of candidatos.slice(0, 6)) {
+    try {
+      await enviar(candidato)
+      return
+    } catch (e) {
+      ultimoErro = e
+      const msg = e instanceof Error ? e.message : String(e)
+      // Só continua tentando quando a recusa é exatamente sobre este campo;
+      // qualquer outro erro é real e precisa subir.
+      if (!(/422/.test(msg) && /discount[_ ]?type/i.test(msg))) throw e
+    }
+  }
+  throw ultimoErro instanceof Error
+    ? new Error(
+        `${ultimoErro.message} — nenhum valor de discount_type foi aceito; abra um cupom existente no painel da Yampi e me diga como o tipo aparece lá.`,
+      )
+    : new Error('Nenhum valor de discount_type foi aceito pela Yampi.')
 }
 
 /**
