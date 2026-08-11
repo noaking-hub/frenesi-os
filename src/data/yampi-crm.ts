@@ -259,6 +259,8 @@ export interface NovoCupom {
   limite?: number
   /** Impede o uso junto de outras promoções ativas. */
   naoAcumula?: boolean
+  /** Marca a regra "Uso único (1 vez) por cliente" do painel (por CPF). */
+  usoUnicoPorCliente?: boolean
 }
 
 /** Hoje em São Paulo, no formato aaaa-mm-dd que a Yampi espera. */
@@ -379,6 +381,8 @@ export async function criarCupomYampi(cupom: NovoCupom): Promise<void> {
             // "Não acumular" muda de nome conforme a versão da API; mandar as
             // duas grafias cobre ambas e campo desconhecido é ignorado.
             ...(cupom.naoAcumula ? { accumulate: false, cumulative: false } : {}),
+            // A regra do painel "Uso único (1 vez) por cliente" — por CPF.
+            ...(cupom.usoUnicoPorCliente ? { once_per_customer: true } : {}),
           },
         },
       ),

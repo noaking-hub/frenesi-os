@@ -60,6 +60,7 @@ export function LoteCupons() {
         valor: parseNum(valor),
         percentual: true,
         limite: usoUnico ? 1 : undefined,
+        usoUnicoPorCliente: usoUnico,
         naoAcumula,
         expiraEm: expiraEm || undefined,
       })
@@ -120,7 +121,7 @@ export function LoteCupons() {
 
             <label className="font-sans" style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12, color: 'var(--color-corrente)', cursor: 'pointer' }}>
               <input type="checkbox" checked={usoUnico} onChange={(e) => setUsoUnico(e.target.checked)} />
-              Uso único — cada código vale uma compra
+              Uso único — 1 uso no total e 1 por cliente (CPF)
             </label>
             <label className="font-sans" style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12, color: 'var(--color-corrente)', cursor: 'pointer' }}>
               <input type="checkbox" checked={naoAcumula} onChange={(e) => setNaoAcumula(e.target.checked)} />

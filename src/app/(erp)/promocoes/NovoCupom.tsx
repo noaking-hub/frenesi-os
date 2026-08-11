@@ -25,6 +25,7 @@ export function NovoCupom() {
   const [expiraEm, setExpiraEm] = useState('')
   const [limite, setLimite] = useState('')
   const [naoAcumula, setNaoAcumula] = useState(true)
+  const [porCliente, setPorCliente] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
   const [pendente, iniciarTransicao] = useTransition()
   const router = useRouter()
@@ -39,6 +40,7 @@ export function NovoCupom() {
         expiraEm: expiraEm || undefined,
         limite: limite ? Math.max(0, Math.round(parseNum(limite))) : undefined,
         naoAcumula,
+        usoUnicoPorCliente: porCliente,
       })
       if (!r.ok) {
         setErro(r.erro)
@@ -135,6 +137,10 @@ export function NovoCupom() {
             <label className="font-sans" style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12, color: 'var(--color-corrente)', cursor: 'pointer' }}>
               <input type="checkbox" checked={naoAcumula} onChange={(e) => setNaoAcumula(e.target.checked)} />
               Não acumular com outras promoções ativas
+            </label>
+            <label className="font-sans" style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12, color: 'var(--color-corrente)', cursor: 'pointer' }}>
+              <input type="checkbox" checked={porCliente} onChange={(e) => setPorCliente(e.target.checked)} />
+              Uso único (1 vez) por cliente
             </label>
 
             {erro && (
