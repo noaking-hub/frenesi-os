@@ -15,7 +15,7 @@ import {
 } from '@/components/erp/primitivos'
 import { Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR } from '@/components/erp/tokens'
-import { INICIO_DA_OPERACAO, brl, sugerirCategoria } from '@/domain'
+import { INICIO_DA_OPERACAO, brl, dataEmSaoPaulo, sugerirCategoria } from '@/domain'
 import type { LinhaExtrato } from '@/domain'
 
 import type { ConferenciaConta } from '@/data/extrato'
@@ -55,8 +55,16 @@ const mono = {
   textWrap: 'pretty',
 } as const
 
+/**
+ * Hoje em São Paulo, não em UTC.
+ *
+ * Das 21h à meia-noite, `toISOString()` já devolve o dia seguinte — e o
+ * Mercado Pago recusa relatório que termina amanhã. O extrato deixava de
+ * atualizar toda noite, e só toda noite, que é o tipo de defeito que some
+ * quando alguém vai conferir de manhã.
+ */
 function hoje(): string {
-  return new Date().toISOString().slice(0, 10)
+  return dataEmSaoPaulo(new Date().toISOString()) ?? new Date().toISOString().slice(0, 10)
 }
 
 const dataBr = (iso: string) => iso.split('-').reverse().join('/')
@@ -975,7 +983,13 @@ export function ExtratoCliente({
                   </span>
 
                   <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    {naoLido !== null && Math.abs(naoLido) > 1 ? (
+                    {/* Conta sem nenhuma linha lida não tem diferença a
+                        explicar: o saldo foi digitado e não há leitura para
+                        comparar. Dizer "R$ 986,93 saíram sem virar linha" ali
+                        inventa um movimento que nunca existiu. */}
+                    {c.linhasLidas === 0 ? (
+                      <Badge tom="neutro">saldo digitado · sem extrato ligado</Badge>
+                    ) : naoLido !== null && Math.abs(naoLido) > 1 ? (
                       <Badge tom="info">{`${brl(naoLido)} saíram sem virar linha`}</Badge>
                     ) : c.aClassificar > 0 ? (
                       <Badge tom="atencao">{`${c.aClassificar} precisam de você`}</Badge>

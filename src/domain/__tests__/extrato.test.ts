@@ -102,6 +102,16 @@ describe('pagamento do Mercado Pago', () => {
     // O mesmo instante escrito em UTC não pode virar dia 2.
     expect(dataEmSaoPaulo('2026-08-02T02:50:00.000Z')).toBe('2026-08-01')
   })
+
+  it('é o que impede pedir relatório que termina amanhã', () => {
+    // Às 22h de São Paulo, `toISOString()` já devolve o dia seguinte. Pedir
+    // ao Mercado Pago um relatório com fim amanhã é recusado
+    // (`max_date_end_exceeded`), e o extrato deixa de atualizar toda noite —
+    // e só toda noite, que é quando ninguém está conferindo.
+    const noite = '2026-08-11T01:30:00.000Z'
+    expect(noite.slice(0, 10)).toBe('2026-08-11')
+    expect(dataEmSaoPaulo(noite)).toBe('2026-08-10')
+  })
 })
 
 describe('casar o pagamento com o pedido', () => {

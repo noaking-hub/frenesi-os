@@ -4,7 +4,7 @@ import { atualizarExtratoEsperando, mercadoPagoConfigurado } from '@/data/mercad
 import { mensagemDe } from '@/data/shopify'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { importarPedidosYampi, yampiConfigurada } from '@/data/yampi'
-import { INICIO_DA_OPERACAO } from '@/domain'
+import { INICIO_DA_OPERACAO, dataEmSaoPaulo } from '@/domain'
 
 /**
  * Sincronia do financeiro, de hora em hora.
@@ -64,8 +64,11 @@ export async function POST(req: Request) {
   }
 
   const agora = new Date()
-  const ate = agora.toISOString().slice(0, 10)
-  const janela = new Date(agora.getTime() - JANELA_DIAS * 86_400_000).toISOString().slice(0, 10)
+  // Data em São Paulo, não em UTC: depois das 21h daqui, `toISOString` já
+  // devolve amanhã, e o Mercado Pago recusa relatório que termina amanhã.
+  const ate = dataEmSaoPaulo(agora.toISOString()) ?? agora.toISOString().slice(0, 10)
+  const janela =
+    dataEmSaoPaulo(new Date(agora.getTime() - JANELA_DIAS * 86_400_000).toISOString()) ?? ate
   // Nunca antes do dia em que esta conta passou a receber as vendas desta
   // loja: o movimento anterior é de outra operação.
   const de = janela < INICIO_DA_OPERACAO ? INICIO_DA_OPERACAO : janela

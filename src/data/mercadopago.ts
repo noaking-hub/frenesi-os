@@ -113,8 +113,8 @@ async function sondar(caminho: string, metodo = 'GET', corpo?: string): Promise<
  */
 export async function sondarRelatorios(): Promise<RespostaCrua[]> {
   const id = await idDaConta()
-  const hoje = new Date().toISOString().slice(0, 10)
-  const mesPassado = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10)
+  const hoje = hojeEmSaoPaulo()
+  const mesPassado = recuar(hoje, 30)
 
   const alvos: [string, string, string?][] = [
     ['/users/me', 'GET'],
@@ -132,7 +132,10 @@ export async function sondarRelatorios(): Promise<RespostaCrua[]> {
     [
       '/v1/account/release_report',
       'POST',
-      JSON.stringify({ begin_date: `${mesPassado}T00:00:00Z`, end_date: `${hoje}T23:59:59Z` }),
+      JSON.stringify({
+        begin_date: `${mesPassado}T00:00:00.000-03:00`,
+        end_date: `${hoje}T23:59:59.000-03:00`,
+      }),
     ],
   ]
 
@@ -141,6 +144,31 @@ export async function sondarRelatorios(): Promise<RespostaCrua[]> {
     respostas.push(await sondar(caminho, metodo, corpo))
   }
   return respostas
+}
+
+
+/**
+ * Hoje em São Paulo, que é o "hoje" do Mercado Pago.
+ *
+ * `new Date().toISOString()` devolve a data em UTC, e das 21h à meia-noite
+ * isso é o DIA SEGUINTE aqui. Pedir um relatório que termina amanhã faz o
+ * Mercado Pago recusar com `max_date_end_exceeded` — o extrato simplesmente
+ * para de atualizar toda noite, e só toda noite.
+ */
+function hojeEmSaoPaulo(): string {
+  return dataEmSaoPaulo(new Date().toISOString()) ?? new Date().toISOString().slice(0, 10)
+}
+
+/**
+ * O fim da janela nunca passa de hoje.
+ *
+ * O relógio de quem clica pode estar adiantado, em outro fuso ou simplesmente
+ * errado. Recortar aqui, do lado do servidor, é o que impede um relógio
+ * torto de derrubar a atualização inteira.
+ */
+function ateNoMaximoHoje(ate: string): string {
+  const hoje = hojeEmSaoPaulo()
+  return ate > hoje ? hoje : ate
 }
 
 /** Id da conta que o token abriu. Vazio quando o Mercado Pago não responde. */
@@ -591,7 +619,13 @@ export async function pedirRelatorio(de: string, ate: string): Promise<string> {
   const r = await fetch(`${BASE}/v1/account/release_report`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ begin_date: `${de}T00:00:00Z`, end_date: `${ate}T23:59:59Z` }),
+    // Fuso explícito, e não `Z`. `2026-08-10T23:59:59Z` é 20:59:59 aqui: o
+    // relatório pararia três horas antes do fim do dia e o movimento da noite
+    // ficaria de fora sem nada indicar isso.
+    body: JSON.stringify({
+      begin_date: `${de}T00:00:00.000-03:00`,
+      end_date: `${ateNoMaximoHoje(ate)}T23:59:59.000-03:00`,
+    }),
     cache: 'no-store',
   })
   const corpo = await r.text()
@@ -734,9 +768,12 @@ export interface PassoAtualizacao {
  */
 export async function atualizarExtratoMp(
   de: string,
-  ate: string,
+  deAte: string,
   opcoes: { pedir: boolean; jaExistiam?: string[] },
 ): Promise<PassoAtualizacao> {
+  // Recortado logo na entrada para que TODO o resto — o teste de janela
+  // aberta, o recorte das linhas, a mensagem na tela — fale da mesma data.
+  const ate = ateNoMaximoHoje(deAte)
   const lista = await relatoriosDisponiveis()
   const nomes = lista.map((r) => r.arquivo)
 
@@ -748,7 +785,7 @@ export async function atualizarExtratoMp(
   //
   // Por isso, janela que alcança hoje SEMPRE pede um relatório novo, e só
   // aceita um arquivo que não existia antes do pedido.
-  const janelaAberta = ate >= (dataEmSaoPaulo(new Date().toISOString()) ?? ate)
+  const janelaAberta = ate >= hojeEmSaoPaulo()
 
   // Volta automática: serve o que apareceu depois do nosso pedido.
   if (opcoes.jaExistiam) {
