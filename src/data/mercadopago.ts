@@ -132,10 +132,7 @@ export async function sondarRelatorios(): Promise<RespostaCrua[]> {
     [
       '/v1/account/release_report',
       'POST',
-      JSON.stringify({
-        begin_date: `${mesPassado}T00:00:00.000-03:00`,
-        end_date: `${hoje}T23:59:59.000-03:00`,
-      }),
+      corpoDoPedido(mesPassado, hoje),
     ],
   ]
 
@@ -169,6 +166,33 @@ function hojeEmSaoPaulo(): string {
 function ateNoMaximoHoje(ate: string): string {
   const hoje = hojeEmSaoPaulo()
   return ate > hoje ? hoje : ate
+}
+
+
+/**
+ * O corpo do pedido de relatório: a janela em UTC.
+ *
+ * Duas lições, cada uma de um 400 diferente:
+ *
+ *   `invalid_begin_date`      a API só aceita o sufixo `Z`. Mandar
+ *                             `-03:00`, que é o fuso correto da conta, faz
+ *                             ela recusar o parâmetro inteiro.
+ *   `max_date_end_exceeded`   o fim não pode passar do agora dela.
+ *
+ * Então o fuso entra na CONTA, não no texto: 00:00 em São Paulo é 03:00Z, e
+ * o fim de um dia fechado é 02:59:59Z do dia seguinte. Escrever `T00:00:00Z`
+ * direto pareceria certo e cortaria as três primeiras horas de cada dia.
+ *
+ * Quando a janela alcança hoje, o fim é o instante atual: ele é sempre aceito
+ * e traz tudo que existe até agora. Pedir o fim do dia seria empatar com o
+ * teto da API, e empate com relógio alheio é aposta.
+ */
+function corpoDoPedido(de: string, ate: string): string {
+  const agora = `${new Date().toISOString().slice(0, 19)}Z`
+  return JSON.stringify({
+    begin_date: `${de}T03:00:00Z`,
+    end_date: ate >= hojeEmSaoPaulo() ? agora : `${avancar(ate, 1)}T02:59:59Z`,
+  })
 }
 
 /** Id da conta que o token abriu. Vazio quando o Mercado Pago não responde. */
@@ -619,13 +643,7 @@ export async function pedirRelatorio(de: string, ate: string): Promise<string> {
   const r = await fetch(`${BASE}/v1/account/release_report`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' },
-    // Fuso explícito, e não `Z`. `2026-08-10T23:59:59Z` é 20:59:59 aqui: o
-    // relatório pararia três horas antes do fim do dia e o movimento da noite
-    // ficaria de fora sem nada indicar isso.
-    body: JSON.stringify({
-      begin_date: `${de}T00:00:00.000-03:00`,
-      end_date: `${ateNoMaximoHoje(ate)}T23:59:59.000-03:00`,
-    }),
+    body: corpoDoPedido(de, ateNoMaximoHoje(ate)),
     cache: 'no-store',
   })
   const corpo = await r.text()

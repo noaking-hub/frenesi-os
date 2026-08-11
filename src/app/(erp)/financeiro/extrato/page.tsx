@@ -1,5 +1,5 @@
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
-import { conferenciaDeContas, lerExtrato, resumoDoExtrato, ultimaAtualizacao } from '@/data/extrato'
+import { lerExtrato, resumoDoExtrato, ultimaAtualizacao } from '@/data/extrato'
 import { mercadoPagoConfigurado } from '@/data/mercadopago'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { brl, pad2, plural } from '@/domain'
@@ -46,9 +46,8 @@ export default async function Extrato({
     limite: 400,
   }
 
-  const [pagina, contas, categorias, resumo, atualizadoEm] = await Promise.all([
+  const [pagina, categorias, resumo, atualizadoEm] = await Promise.all([
     lerExtrato(filtro),
-    conferenciaDeContas(),
     lerCategorias(),
     resumoDoExtrato(),
     ultimaAtualizacao(),
@@ -110,7 +109,6 @@ export default async function Extrato({
           ate: filtro.ate ?? '',
           busca: filtro.busca ?? '',
         }}
-        contas={contas}
         categorias={categorias}
         gatewayLigado={mercadoPagoConfigurado()}
         atualizadoEm={atualizadoEm}

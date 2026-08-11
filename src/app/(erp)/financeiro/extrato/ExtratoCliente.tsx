@@ -18,7 +18,6 @@ import { COR } from '@/components/erp/tokens'
 import { INICIO_DA_OPERACAO, brl, dataEmSaoPaulo, sugerirCategoria } from '@/domain'
 import type { LinhaExtrato } from '@/domain'
 
-import type { ConferenciaConta } from '@/data/extrato'
 import type { RelatorioDisponivel } from '@/data/mercadopago'
 
 import {
@@ -114,7 +113,6 @@ interface Props {
   linhas: LinhaExtrato[]
   total: number
   filtro: FiltroAtual
-  contas: ConferenciaConta[]
   categorias: { nome: string; natureza: string }[]
   gatewayLigado: boolean
   /** Quando o extrato foi lido pela última vez. Null = nunca. */
@@ -257,7 +255,6 @@ export function ExtratoCliente({
   linhas,
   total,
   filtro,
-  contas,
   categorias,
   gatewayLigado,
   atualizadoEm,
@@ -907,102 +904,6 @@ export function ExtratoCliente({
         </section>
       )}
 
-      {/* ── Conferência ──────────────────────────────────────────────── */}
-      {contas.length > 0 && (
-        <section
-          style={{
-            background: 'var(--color-mesa)',
-            border: '1px solid var(--color-borda)',
-            borderRadius: 'var(--radius-card)',
-            padding: 18,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 12,
-          }}
-        >
-          <span style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <TituloSecao tamanho={14}>Saldo das contas</TituloSecao>
-            <span
-              className="font-sans"
-              style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
-            >
-              O saldo vem do próprio gateway. A nossa leitura de pagamentos não vê saque nem
-              transferência, então ela explica as vendas — não fecha o caixa.
-            </span>
-          </span>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {contas.map((c) => {
-              // A diferença entre o saldo real e o que conseguimos ler é,
-              // literalmente, o que saiu da conta sem passar por um pagamento
-              // recebido: saque, transferência, Pix enviado, conta paga.
-              const naoLido = c.saldoInformado === null
-                ? null
-                : Math.round((c.movimentoLido - c.saldoInformado) * 100) / 100
-              return (
-                <div
-                  key={c.id}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'minmax(0,1fr) 140px 140px minmax(190px,auto)',
-                    alignItems: 'center',
-                    gap: 12,
-                    padding: '10px 12px',
-                    borderRadius: 10,
-                    background: 'rgba(255,255,255,.02)',
-                    border: '1px solid rgba(255,255,255,.05)',
-                  }}
-                >
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <Valor tamanho={12}>{c.nome}</Valor>
-                    <span className="font-mono" style={{ fontSize: 9.5, color: 'rgba(242,237,227,.32)' }}>
-                      {`${c.banco || '—'} · ${c.linhasLidas} linha(s) lida(s)`}
-                    </span>
-                  </span>
-
-                  {/* Sem saldo informado, mostrar o movimento com rótulo de
-                      saldo seria repetir o mesmo número com dois nomes — e foi
-                      assim que R$ 83 mil passaram por saldo de uma conta com
-                      R$ 10 mil. Melhor dizer que não sabemos. */}
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
-                    <Valor tamanho={13} tom={c.saldoInformado === null ? 'atencao' : 'ok'}>
-                      {c.saldoInformado === null ? '—' : brl(c.saldoInformado)}
-                    </Valor>
-                    <span className="font-sans" style={{ fontSize: 9, color: 'rgba(242,237,227,.35)' }}>
-                      {c.saldoInformado === null ? 'saldo não lido ainda' : 'saldo do gateway'}
-                    </span>
-                  </span>
-
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
-                    <Valor tamanho={12} peso={400} tom="rgba(242,237,227,.7)">
-                      {brl(c.movimentoLido)}
-                    </Valor>
-                    <span className="font-sans" style={{ fontSize: 9, color: 'rgba(242,237,227,.35)' }}>
-                      movimento que lemos
-                    </span>
-                  </span>
-
-                  <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    {/* Conta sem nenhuma linha lida não tem diferença a
-                        explicar: o saldo foi digitado e não há leitura para
-                        comparar. Dizer "R$ 986,93 saíram sem virar linha" ali
-                        inventa um movimento que nunca existiu. */}
-                    {c.linhasLidas === 0 ? (
-                      <Badge tom="neutro">saldo digitado · sem extrato ligado</Badge>
-                    ) : naoLido !== null && Math.abs(naoLido) > 1 ? (
-                      <Badge tom="info">{`${brl(naoLido)} saíram sem virar linha`}</Badge>
-                    ) : c.aClassificar > 0 ? (
-                      <Badge tom="atencao">{`${c.aClassificar} precisam de você`}</Badge>
-                    ) : (
-                      <Badge tom="ok">Em dia</Badge>
-                    )}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-        </section>
-      )}
 
       {/* ── Fila ─────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
