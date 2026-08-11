@@ -8,7 +8,7 @@
 
 ## O placar
 
-**29 telas, todas reais.** Zero telas de demonstração — o selo "números de
+**27 telas, todas reais.** Zero telas de demonstração — o selo "números de
 demonstração" foi aposentado junto com elas.
 
 ---
@@ -33,9 +33,11 @@ divergente porque a conciliação precisa dele.
 Catálogo (edição e criação), Precificação (preço do concorrente + publicação
 na Shopify), Concorrentes (coleta de preços).
 
-### Estoque — 7 telas
-Perfumes base, Carga inicial, Derivados, Movimentações, Lotes e perda real,
-Sincronia Shopify, Inventário. A sincronia agora é de mão dupla e automática:
+### Estoque — 6 telas
+Perfumes base, Derivados, Movimentações, Lotes e perda real, Sincronia
+Shopify, Inventário. A carga inicial saiu por decisão do operador: o
+controle de estoque nasce das compras novas, frasco a frasco — base sem
+compra registrada fica fora da sincronia (estado normal, não pendência). A sincronia agora é de mão dupla e automática:
 o catálogo reimporta sozinho ao abrir a tela (12 h de validade) e o estoque
 calculado é **aplicado na loja pela rotina de hora em hora** — o botão só
 existe para quem não quer esperar. Base sem carga inicial fica fora da
@@ -49,7 +51,10 @@ Ordens de envase, conclusão com perda real por lote.
 - **Contas**: criar, editar, remover, saldo informado com data.
 - **Extrato**: importação automática do Relatório de Liberações do Mercado
   Pago (pedido persistido — sobrevive a F5), conciliação por id de transação
-  da Yampi, filtros por período na URL, movimento interno fora da fila.
+  da Yampi, filtros por período na URL, movimento interno fora da fila,
+  contraparte preenchida pela API de pagamentos e **regras de categoria**
+  que classificam sozinhas o destinatário recorrente (motoboy, imposto,
+  anúncios — gerenciadas na tela de Categorias).
 - **Conciliação**: automática, com tarifa real; visões por URL.
 - **Categorias** (entrada e saída) e **Integração contábil** (CSV).
 
@@ -66,17 +71,18 @@ O DRE saiu por decisão do operador — o dashboard mostra vendas do mês e dos
 
 ### Cupons
 Lidos ao vivo da Yampi (`/pricing/promocodes`): vigência, usos contra o
-limite, alerta de expiração em 7 dias, cupom sem freio. Criar e pausar é no
-painel da Yampi — a tela é o retrato fiel.
+limite, alerta de expiração em 7 dias, cupom sem freio. O ERP também CRIA
+cupom direto no checkout (código, % ou R$, validade, limite de usos).
 
 ### Relatórios
 Curva ABC por perfume (tamanhos de frasco agrupados) e vendas por canal,
 derivados dos pedidos pagos, com filtro de período (7/30 dias, mês, tudo) e
 ordenação por receita, unidades ou nome — tudo na URL.
 
-### Configurações — 3 telas
-Visão geral (estado real das conexões), Parâmetros de precificação,
-Integrações (diagnóstico de Shopify, Yampi e Mercado Pago).
+### Configurações — 2 telas
+Parâmetros de precificação (com a embalagem aberta em frasco, válvula,
+etiqueta, caixa e plástico bolha) e Integrações (diagnóstico de Shopify,
+Yampi e Mercado Pago).
 
 ---
 
