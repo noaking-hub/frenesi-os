@@ -2,9 +2,11 @@ import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
 import { Barra, BotaoSecundario, TituloSecao, Valor } from '@/components/erp/primitivos'
 import { Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR, type Tom } from '@/components/erp/tokens'
+import { lerRegrasCategoria } from '@/data/extrato'
 import { repositorio } from '@/data/repository'
 
 import { NovaCategoria } from '../Widgets'
+import { RegrasCategoria } from './Regras'
 import { brl, num, participacaoCategoria, plural, resumirCategorias } from '@/domain'
 import type { CategoriaFinanceira, NaturezaCategoria } from '@/domain'
 
@@ -16,7 +18,10 @@ const TOM_NATUREZA: Record<NaturezaCategoria, string> = {
 }
 
 export default async function Categorias() {
-  const categorias = await repositorio().categorias()
+  const [categorias, regras] = await Promise.all([
+    repositorio().categorias(),
+    lerRegrasCategoria(),
+  ])
   const r = resumirCategorias(categorias)
 
   const ordenadas = [...categorias].sort((a, b) => b.valorMes - a.valorMes)
@@ -142,6 +147,8 @@ export default async function Categorias() {
       </div>
 
       <Tabela colunas={colunas} itens={ordenadas} chaveDe={(c) => c.nome} />
+
+      <RegrasCategoria regras={regras} categorias={categorias.map((c) => c.nome)} />
     </div>
   )
 }

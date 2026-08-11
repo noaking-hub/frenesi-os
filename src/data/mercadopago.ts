@@ -970,7 +970,103 @@ async function importarEComplementar(
     linhas.push(`As tarifas das vendas não puderam ser lidas agora: ${mensagemDe(e)}`)
   }
 
+  // Quem recebeu o dinheiro? O relatório de liberações não diz — a resposta
+  // mora no pagamento. Com a contraparte preenchida, as regras de categoria
+  // conseguem reconhecer o motoboy, o imposto e a fatura de anúncio.
+  try {
+    const nomeados = await enriquecerContrapartes()
+    if (nomeados > 0) linhas.push(`${nomeados} movimento(s) ganharam o nome do destinatário.`)
+  } catch {
+    /* enriquecer é melhoria, não pré-requisito */
+  }
+
+  try {
+    const { data: regras } = await supabaseServer().rpc('aplicar_regras_categoria')
+    const aplicadas = Number((regras as { aplicadas?: number } | null)?.aplicadas ?? 0)
+    if (aplicadas > 0) {
+      linhas.push(`${aplicadas} movimento(s) categorizados sozinhos pelas regras.`)
+    }
+  } catch {
+    /* regra é conforto, não pré-requisito */
+  }
+
   return { estado: 'pronto', linhas }
+}
+
+/**
+ * Preenche a contraparte das saídas que ainda não têm nome.
+ *
+ * O relatório de liberações identifica o movimento mas não o destinatário;
+ * o objeto do pagamento identifica. A colheita é defensiva como a dos
+ * pedidos da Yampi: procura strings em campos com cara de nome em vez de
+ * apostar num caminho fixo, porque o formato varia por meio de pagamento.
+ */
+async function enriquecerContrapartes(limite = 60): Promise<number> {
+  const sb = supabaseServer()
+  const { data, error } = await sb
+    .from('extrato_linhas')
+    .select('chave')
+    .eq('origem', 'mercadopago')
+    .eq('contraparte', '')
+    .eq('tipo', 'saida')
+    .is('lancamento_id', null)
+    .eq('ignorado', false)
+    .limit(limite)
+  if (error) throw error
+
+  let nomeados = 0
+  for (const linha of data ?? []) {
+    const chave = String(linha.chave)
+    // Chave que não é id numérico de pagamento não tem onde ser consultada.
+    if (!/^\d{6,}$/.test(chave)) continue
+    try {
+      const pagamento = await chamar(`/v1/payments/${chave}`)
+      const nome = nomeDaContraparte(pagamento)
+      if (!nome) continue
+      const { error: erroGravar } = await sb
+        .from('extrato_linhas')
+        .update({ contraparte: nome })
+        .eq('origem', 'mercadopago')
+        .eq('chave', chave)
+      if (erroGravar) throw erroGravar
+      nomeados++
+    } catch {
+      // 404/403 aqui é normal: nem todo movimento é um pagamento legível.
+      continue
+    }
+  }
+  return nomeados
+}
+
+/** Campos com cara de nome, do mais específico ao mais genérico. */
+function nomeDaContraparte(pagamento: Record<string, unknown>): string {
+  const achados: string[] = []
+  const PISTAS = /(account_holder|holder_name|beneficiar|recipient|counterpart|razao_social|business_name)/i
+  const NOMES = /^(name|nome|full_name)$/i
+
+  const desce = (valor: unknown, profundidade: number, dentroDePista: boolean) => {
+    if (!valor || profundidade > 4) return
+    if (typeof valor !== 'object') return
+    for (const [campo, v] of Object.entries(valor as Record<string, unknown>)) {
+      const ePista = PISTAS.test(campo)
+      if (typeof v === 'string' && v.trim().length >= 5 && /[a-zA-ZÀ-ú] /.test(v)) {
+        if (ePista || (dentroDePista && NOMES.test(campo))) achados.push(v.trim())
+      } else {
+        desce(v, profundidade + 1, dentroDePista || ePista)
+      }
+    }
+  }
+  desce(pagamento, 0, false)
+
+  // `description` e `statement_descriptor` são o plano B: em Pix enviado é
+  // comum o texto trazer o nome de quem recebeu.
+  if (!achados.length) {
+    for (const campo of ['description', 'statement_descriptor']) {
+      const v = pagamento[campo]
+      if (typeof v === 'string' && v.trim().length >= 5) achados.push(v.trim())
+    }
+  }
+  return achados[0] ?? ''
 }
 
 async function listarRelatorios(): Promise<ArquivoRelatorio[]> {

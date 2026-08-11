@@ -294,3 +294,25 @@ export async function custoPorMeio(): Promise<CustoPorMeio[]> {
     fatia: Number(m.fatia),
   }))
 }
+
+// ── Regras de categoria ────────────────────────────────────────────────────
+
+export interface RegraCategoria {
+  id: string
+  padrao: string
+  categoria: string
+}
+
+export async function lerRegrasCategoria(): Promise<RegraCategoria[]> {
+  if (!supabaseConfigurado()) return []
+  const { data, error } = await supabaseServer()
+    .from('regras_categoria')
+    .select('id, padrao, categoria')
+    .order('criado_em')
+  if (error) throw error
+  return (data ?? []).map((r) => ({
+    id: String(r.id),
+    padrao: String(r.padrao),
+    categoria: String(r.categoria),
+  }))
+}

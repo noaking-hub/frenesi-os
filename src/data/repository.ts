@@ -852,7 +852,7 @@ const repositorioSupabase: Repositorio = {
     const sb = supabaseServer()
     const { data, error } = await sb
       .from('pedidos')
-      .select('valor, comprado_em, pagamento, clientes(nome, email, telefone)')
+      .select('valor, comprado_em, pagamento, destino, clientes(nome, email, telefone)')
       .not('cliente_id', 'is', null)
       .limit(2000)
     if (error) throw error
@@ -861,12 +861,20 @@ const repositorioSupabase: Repositorio = {
       valor: number | string
       comprado_em: string
       pagamento: string
+      destino: string | null
       clientes: { nome: string; email: string; telefone: string | null } | null
     }[]
 
     const porEmail = new Map<
       string,
-      { nome: string; telefone: string; total: number; pedidos: number; ultima: number }
+      {
+        nome: string
+        telefone: string
+        cidade: string
+        total: number
+        pedidos: number
+        ultima: number
+      }
     >()
     for (const l of linhas) {
       const c = l.clientes
@@ -874,6 +882,7 @@ const repositorioSupabase: Repositorio = {
       const atual = porEmail.get(c.email) ?? {
         nome: c.nome,
         telefone: c.telefone ?? '',
+        cidade: '',
         total: 0,
         pedidos: 0,
         ultima: 0,
@@ -882,6 +891,8 @@ const repositorioSupabase: Repositorio = {
       porEmail.set(c.email, {
         nome: c.nome,
         telefone: c.telefone ?? atual.telefone,
+        // A cidade vem do pedido mais recente — é para onde a pessoa recebe hoje.
+        cidade: quando >= atual.ultima ? (l.destino ?? atual.cidade) : atual.cidade,
         // Pedido não pago não é compra: contá-lo inflaria o VIP com carrinho
         // que nunca virou dinheiro.
         total: atual.total + (l.pagamento === 'pago' ? Number(l.valor) : 0),
@@ -903,7 +914,7 @@ const repositorioSupabase: Repositorio = {
         const dias = c.ultima ? Math.floor((agora - c.ultima) / dia) : null
         return {
           nome: c.nome,
-          cidade: '—',
+          cidade: c.cidade || '—',
           iniciais: iniciaisDe(c.nome),
           email,
           telefone: c.telefone,

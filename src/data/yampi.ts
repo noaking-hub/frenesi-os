@@ -198,9 +198,12 @@ interface PedidoYampi {
    * É ESTE o sinal de "pago", não o status do pedido: o status descreve a
    * jornada logística (separação, enviado, entregue) e um pedido pode estar a
    * caminho com o status ainda no passo anterior.
+   *
+   * `has_payment` NÃO entra na conta: ele diz que existe uma TENTATIVA de
+   * pagamento — um Pix gerado e nunca pago, um boleto vencido. Tratá-lo como
+   * aprovação encheu o CRM de "clientes" que nunca pagaram.
    */
   authorized: boolean | number | null
-  has_payment: boolean | number | null
   shipping_address?: { data?: EnderecoYampi } | EnderecoYampi | null
   status?: { data?: { alias?: string; name?: string } } | null
   customer?: { data?: ClienteYampi } | null
@@ -329,6 +332,8 @@ export interface ResultadoYampi {
   pedidosSemTransacao: number
   /** Linhas do extrato que encontraram a venda graças a estas transações. */
   extratoLigado: number
+  /** Pedidos que deixaram de ser venda na Yampi e saíram do banco. */
+  removidos: number
   desde: string
 }
 
@@ -387,14 +392,34 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
   // (estornado) entra de propósito — o dinheiro entrou e voltou, e a
   // conciliação precisa enxergar esse movimento. Um pendente que for pago
   // amanhã entra na próxima rodada, já como pago.
-  const pedidos = (await lerPedidosYampi(dias)).filter((p) => {
+  const lidos = await lerPedidosYampi(dias)
+  const eVenda = (p: PedidoYampi) => {
     const situacao = pagamentoYampi(
       p.status?.data?.alias ?? '',
       p.status?.data?.name ?? '',
-      Boolean(p.authorized) || Boolean(p.has_payment),
+      Boolean(p.authorized),
     )
     return situacao === 'pago' || situacao === 'divergente'
-  })
+  }
+  const pedidos = lidos.filter(eVenda)
+
+  // Autocura: o que a Yampi diz que NÃO é venda sai do banco, se um dia
+  // entrou — versões antigas do importador aceitavam Pix gerado como pago.
+  // A trava dos vínculos protege o histórico financeiro: linha de extrato,
+  // devolução ou lançamento apontando para o pedido impede o descarte.
+  const descartar = lidos.filter((p) => !eVenda(p)).map((p) => `YP-${p.number}`)
+  let removidos = 0
+  for (const parte of lotes(descartar, 200)) {
+    const { data: removiveis, error: erroRemoviveis } = await sb.rpc('pedidos_descartaveis', {
+      p_ids: parte,
+    })
+    if (erroRemoviveis) throw erroRemoviveis
+    const ids = (removiveis ?? []) as string[]
+    if (!ids.length) continue
+    const { error: erroRemover } = await sb.from('pedidos').delete().in('id', ids)
+    if (erroRemover) throw erroRemover
+    removidos += ids.length
+  }
 
   // Ponte entre as plataformas: o SKU. O id de variante é da Shopify e não
   // existe do lado da Yampi.
@@ -440,7 +465,7 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
   const linhasPedidos = pedidos.map((p) => {
     const alias = p.status?.data?.alias ?? ''
     const nome = p.status?.data?.name ?? ''
-    const autorizado = Boolean(p.authorized) || Boolean(p.has_payment)
+    const autorizado = Boolean(p.authorized)
     const entregue = Boolean(p.delivered)
     const endereco = enderecoDe(p)
     const entregueEm = entregue ? dataYampi(p.date_delivery) : null
@@ -524,7 +549,7 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
   let pedidosSemTransacao = 0
   const linhasTransacoes = pedidos.flatMap((p) => {
     const transacoes = transacoesDoPedido(p as unknown as Record<string, unknown>)
-    const autorizado = Boolean(p.authorized) || Boolean(p.has_payment)
+    const autorizado = Boolean(p.authorized)
     // Pedido não pago sem transação é normal — não houve pagamento. Pedido
     // PAGO sem transação é o caso que interessa: é uma venda que o extrato
     // não vai conseguir achar, e o número precisa aparecer no relatório.
@@ -576,6 +601,7 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
       transacoes: linhasTransacoes.length,
       pedidosSemTransacao,
       extratoLigado: Number(ligadas ?? 0),
+      removidos,
     },
   })
   if (erroLog) throw erroLog
@@ -590,6 +616,7 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
     transacoes: linhasTransacoes.length,
     pedidosSemTransacao,
     extratoLigado: Number(ligadas ?? 0),
+    removidos,
     desde,
   }
 }
