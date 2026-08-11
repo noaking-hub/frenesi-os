@@ -289,18 +289,23 @@ async function comDiscountType(
     for (const c of r.data ?? []) {
       const dt = c.discount_type ?? c.type
       if (dt === undefined || dt === null) continue
+      const cru = String(dt).toLowerCase()
+      // "p" e "v" são as formas curtas da doc oficial — o regex anterior as
+      // descartava e jogava fora exatamente o valor que a loja usa.
       const eDeste = percentual
-        ? /percent|porcent|2/.test(String(dt).toLowerCase())
-        : /fix|valor|value|1/.test(String(dt).toLowerCase())
+        ? /^p$|percent|porcent|^2$/.test(cru)
+        : /^v$|^f$|fix|valor|value|^1$/.test(cru)
       if (eDeste && !candidatos.includes(dt)) candidatos.push(dt)
     }
   } catch {
     /* sem leitura, seguem os palpites */
   }
 
+  // A doc oficial (docs.yampi.com.br, criar-cupom) usa "p" para percentual;
+  // por simetria, "v" é o primeiro palpite do desconto fixo.
   for (const palpite of percentual
-    ? ['percentage', 'percent', 2, '2', 'porcentagem', 'P']
-    : ['fixed', 'value', 1, '1', 'valor', 'F']) {
+    ? ['p', 'percentage', 'percent', 2]
+    : ['v', 'f', 'fixed', 1]) {
     if (!candidatos.includes(palpite)) candidatos.push(palpite)
   }
 
