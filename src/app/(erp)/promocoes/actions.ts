@@ -89,6 +89,50 @@ export async function criarCuponsEmLote(
   return { ok: true, resultado }
 }
 
+export interface ResultadoExclusaoLote {
+  excluidos: string[]
+  falhas: { codigo: string; erro: string }[]
+}
+
+/**
+ * Exclui vários cupons de uma vez, com o mesmo respeito ao limite da Yampi
+ * do cadastro em lote: meio segundo entre exclusões e, num 429, espera de
+ * 30 s com nova tentativa antes de virar falha.
+ */
+export async function excluirCuponsEmLote(
+  itens: { id: string; codigo: string }[],
+): Promise<{ ok: true; resultado: ResultadoExclusaoLote } | { ok: false; erro: string }> {
+  const unicos = [...new Map(itens.filter((i) => i.id).map((i) => [i.id, i])).values()]
+  if (unicos.length === 0) return { ok: false, erro: 'Nenhum cupom selecionado.' }
+  if (unicos.length > 300) {
+    return { ok: false, erro: 'Mais de 300 cupons de uma vez — exclua em partes.' }
+  }
+
+  const resultado: ResultadoExclusaoLote = { excluidos: [], falhas: [] }
+  for (const { id, codigo } of unicos) {
+    let tentativas = 0
+    for (;;) {
+      try {
+        await excluirCupomYampi(id)
+        resultado.excluidos.push(codigo)
+        break
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        if (/429|Too Many/i.test(msg) && tentativas < 2) {
+          tentativas++
+          await pausa(30_000)
+          continue
+        }
+        resultado.falhas.push({ codigo, erro: msg })
+        break
+      }
+    }
+    await pausa(500)
+  }
+  revalidatePath('/promocoes')
+  return { ok: true, resultado }
+}
+
 export async function atualizarCupom(
   id: string,
   mudancas: Parameters<typeof atualizarCupomYampi>[1],

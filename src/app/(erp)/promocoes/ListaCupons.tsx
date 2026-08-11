@@ -1,13 +1,16 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 
-import { Badge, TituloSecao } from '@/components/erp/primitivos'
+import { useMemo, useState, useTransition } from 'react'
+
+import { Badge, BotaoSecundario, TituloSecao } from '@/components/erp/primitivos'
 import { Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR, type Tom } from '@/components/erp/tokens'
 import type { CupomYampi } from '@/data/yampi-crm'
 import { plural } from '@/domain'
 
+import { excluirCuponsEmLote } from './actions'
 import { AcoesCupom, LoteCupons } from './GerirCupons'
 import { NovoCupom } from './NovoCupom'
 
@@ -56,6 +59,12 @@ export function ListaCupons({ cupons }: { cupons: CupomComSituacao[] }) {
   const [busca, setBusca] = useState('')
   const [filtro, setFiltro] = useState<Filtro>('Todos')
   const [ordem, setOrdem] = useState<Ordem>('Mais usados')
+  // Seleção para excluir em lote, pelos ids da Yampi — cupom sem id não tem
+  // como ser excluído e por isso não entra.
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
+  const [resumo, setResumo] = useState<{ tom: 'ok' | 'erro'; texto: string } | null>(null)
+  const [excluindo, iniciarTransicao] = useTransition()
+  const router = useRouter()
 
   const termo = busca.trim().toLowerCase()
   const visiveis = useMemo(() => {
@@ -79,7 +88,93 @@ export function ListaCupons({ cupons }: { cupons: CupomComSituacao[] }) {
       })
   }, [cupons, filtro, termo, ordem])
 
+  const alternar = (id: string) =>
+    setSelecionados((s) => {
+      const novo = new Set(s)
+      if (novo.has(id)) novo.delete(id)
+      else novo.add(id)
+      return novo
+    })
+
+  const visiveisComId = visiveis.filter((c) => c.id !== null)
+  const todosVisiveisMarcados =
+    visiveisComId.length > 0 && visiveisComId.every((c) => selecionados.has(c.id as string))
+
+  const alternarVisiveis = () =>
+    setSelecionados((s) => {
+      const novo = new Set(s)
+      for (const c of visiveisComId) {
+        if (todosVisiveisMarcados) novo.delete(c.id as string)
+        else novo.add(c.id as string)
+      }
+      return novo
+    })
+
+  const excluirSelecionados = () => {
+    const escolhidos = cupons
+      .filter((c) => c.id && selecionados.has(c.id))
+      .map((c) => ({ id: c.id as string, codigo: c.codigo }))
+    if (escolhidos.length === 0) return
+    if (
+      !window.confirm(
+        `Excluir ${plural(escolhidos.length, 'cupom', 'cupons')} do checkout da Yampi? A exclusão vale na hora e não tem volta.`,
+      )
+    ) {
+      return
+    }
+    iniciarTransicao(async () => {
+      setResumo(null)
+      const r = await excluirCuponsEmLote(escolhidos)
+      if (!r.ok) {
+        setResumo({ tom: 'erro', texto: r.erro })
+        return
+      }
+      const { excluidos, falhas } = r.resultado
+      // Quem falhou continua marcado — dá para tentar de novo sem reprocurar.
+      const idsFalhos = new Set(
+        cupons.filter((c) => c.id && falhas.some((f) => f.codigo === c.codigo)).map((c) => c.id as string),
+      )
+      setSelecionados(idsFalhos)
+      setResumo(
+        falhas.length === 0
+          ? { tom: 'ok', texto: `${plural(excluidos.length, 'cupom excluído', 'cupons excluídos')} do checkout.` }
+          : {
+              tom: 'erro',
+              texto:
+                `${plural(excluidos.length, 'cupom excluído', 'cupons excluídos')}; ${plural(falhas.length, 'falhou', 'falharam')}: ` +
+                falhas.slice(0, 4).map((f) => `${f.codigo} (${f.erro})`).join(' · ') +
+                (falhas.length > 4 ? ` e mais ${falhas.length - 4}` : '') +
+                '. Os que falharam continuam selecionados — tente de novo.',
+            },
+      )
+      router.refresh()
+    })
+  }
+
   const colunas: Coluna<CupomComSituacao>[] = [
+    {
+      chave: 'selecao',
+      titulo: (
+        <input
+          type="checkbox"
+          checked={todosVisiveisMarcados}
+          onChange={alternarVisiveis}
+          aria-label="Selecionar todos os cupons visíveis"
+          style={{ accentColor: COR.ouro, cursor: 'pointer' }}
+        />
+      ),
+      largura: '36px',
+      render: (c) =>
+        c.id ? (
+          <input
+            type="checkbox"
+            checked={selecionados.has(c.id)}
+            onChange={() => alternar(c.id as string)}
+            aria-label={`Selecionar ${c.codigo}`}
+            style={{ accentColor: COR.ouro, cursor: 'pointer' }}
+          />
+        ) : null,
+    },
     {
       chave: 'cupom',
       titulo: 'Cupom',
@@ -245,6 +340,67 @@ export function ListaCupons({ cupons }: { cupons: CupomComSituacao[] }) {
           </button>
         ))}
       </div>
+
+      {(selecionados.size > 0 || resumo) && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            flexWrap: 'wrap',
+            padding: '10px 14px',
+            border: `1px solid ${selecionados.size > 0 ? 'rgba(224,122,95,.35)' : 'var(--color-borda)'}`,
+            background: selecionados.size > 0 ? 'rgba(224,122,95,.05)' : 'rgba(255,255,255,.02)',
+            borderRadius: 11,
+          }}
+        >
+          {selecionados.size > 0 && (
+            <span className="font-sans" style={{ fontWeight: 600, fontSize: 11.5, color: 'var(--color-corrente)' }}>
+              {plural(selecionados.size, 'cupom selecionado', 'cupons selecionados')}
+            </span>
+          )}
+          {resumo && (
+            <span
+              className="font-sans"
+              style={{ fontSize: 11, lineHeight: 1.45, color: resumo.tom === 'ok' ? COR.ok : COR.erro, textWrap: 'pretty' }}
+            >
+              {resumo.texto}
+            </span>
+          )}
+          <div style={{ flex: 1 }} />
+          {selecionados.size > 0 && (
+            <>
+              <BotaoSecundario altura={32} onClick={() => setSelecionados(new Set())} desabilitado={excluindo}>
+                Limpar seleção
+              </BotaoSecundario>
+              <button
+                type="button"
+                onClick={excluirSelecionados}
+                disabled={excluindo}
+                className="font-sans hover:brightness-110"
+                style={{
+                  height: 32,
+                  padding: '0 15px',
+                  border: '1px solid rgba(224,122,95,.5)',
+                  background: 'rgba(224,122,95,.14)',
+                  color: COR.erro,
+                  fontWeight: 700,
+                  fontSize: 11,
+                  lineHeight: 1,
+                  borderRadius: 8,
+                  cursor: excluindo ? 'wait' : 'pointer',
+                  opacity: excluindo ? 0.55 : 1,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {excluindo
+                  ? 'Excluindo… (meio segundo por cupom, pode demorar)'
+                  : `Excluir ${selecionados.size} do checkout`}
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       <Tabela
         colunas={colunas}

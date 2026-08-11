@@ -117,9 +117,19 @@ export async function lerCuponsYampi(): Promise<LeituraCupons> {
     if (!codigo) return []
 
     const valor = numero(campo(c, ['value', 'discount', 'amount']))
-    const tipoCru = `${texto(campo(c, ['type', 'discount_type', 'value_type'])) ?? ''}`.toLowerCase()
+    // O que separa % de R$ é o discount_type — e nesta loja ele vale "p",
+    // uma letra só (foi o valor que a publicação descobriu no POST). O
+    // reconhecimento antigo só aceitava a palavra inteira ("percent"), e
+    // TODO cupom percentual aparecia como valor em reais. O campo também
+    // pode vir como relação embrulhada; aí vale o alias/nome dela.
+    const cruTipo = miolo(campo(c, ['discount_type', 'type', 'value_type']))
+    const tipoCru = (
+      cruTipo && typeof cruTipo === 'object'
+        ? (texto(campo(cruTipo as Record<string, unknown>, ['alias', 'code', 'name', 'id'])) ?? '')
+        : (texto(cruTipo) ?? '')
+    ).toLowerCase()
     const percentual =
-      /percent|porcent|%|^2$/.test(tipoCru) ||
+      /^p$|percent|porcent|%|^2$/.test(tipoCru) ||
       Boolean(campo(c, ['is_percent', 'percent', 'percentage']))
     const freteGratis = Boolean(campo(c, ['free_shipment', 'free_shipping']))
 
