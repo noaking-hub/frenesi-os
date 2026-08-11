@@ -1,4 +1,6 @@
 import { EstadoVazio, FaixaAlerta } from '@/components/erp/primitivos'
+import { emailConfigurado } from '@/data/email'
+import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { yampiConfigurada } from '@/data/yampi'
 import { lerCarrinhosYampi, type CarrinhoYampi } from '@/data/yampi-crm'
 
@@ -59,9 +61,25 @@ export default async function Carrinhos() {
     )
   }
 
+  // Quando cada carrinho recebeu e-mail pela última vez — é o que separa
+  // "enviar" de "insistir" na tela.
+  const ultimoEnvio: Record<string, string> = {}
+  if (supabaseConfigurado()) {
+    const { data } = await supabaseServer()
+      .from('recuperacoes_carrinho')
+      .select('carrinho_id, enviado_em')
+      .order('enviado_em', { ascending: false })
+      .limit(2000)
+    for (const r of (data ?? []) as { carrinho_id: string; enviado_em: string }[]) {
+      if (!ultimoEnvio[r.carrinho_id]) ultimoEnvio[r.carrinho_id] = r.enviado_em
+    }
+  }
+
   return (
     <CarrinhosCliente
       carrinhos={leitura.carrinhos.map((c) => ({ ...c, whatsapp: linkWhatsApp(c) }))}
+      ultimoEnvio={ultimoEnvio}
+      emailPronto={emailConfigurado()}
     />
   )
 }

@@ -179,6 +179,8 @@ export interface CarrinhoYampi {
   valor: number
   itens: string[]
   abandonadoEm: string | null
+  /** Link de retomada do carrinho, quando a Yampi expõe algum. */
+  link: string | null
 }
 
 export interface LeituraCarrinhos {
@@ -246,6 +248,9 @@ export async function lerCarrinhosYampi(): Promise<LeituraCarrinhos> {
         valor,
         itens,
         abandonadoEm: data(campo(c, ['updated_at', 'abandoned_at', 'created_at'])),
+        link: texto(
+          campo(c, ['checkout_url', 'cart_url', 'recovery_url', 'simulate_url', 'url', 'link']),
+        ),
       },
     ]
   })
