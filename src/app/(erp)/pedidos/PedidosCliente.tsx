@@ -26,7 +26,7 @@ const TOM_ENVIO: Record<StatusEnvio, Tom> = {
   Atrasado: 'erro',
 }
 
-type Filtro = 'Atenção' | 'Todos' | 'Pagos' | 'Pendentes' | 'Enviados' | 'Entregues'
+type Filtro = 'Atenção' | 'Todos' | 'Divergentes' | 'Enviados' | 'Entregues'
 
 interface Item {
   pedido: Pedido
@@ -47,8 +47,10 @@ export function PedidosCliente({ itens }: { itens: Item[] }) {
         i.pedido.envio === 'Atrasado' ||
         i.pedido.envio === 'Aguardando envio',
       Todos: () => true,
-      Pagos: (i) => i.pedido.pagamento === 'pago',
-      Pendentes: (i) => i.pedido.pagamento === 'pendente',
+      // Cancelado e pendente nem chegam ao ERP — o importador só traz venda
+      // paga (e estornada, que a conciliação precisa ver). Um chip "Pagos"
+      // aqui contaria o mesmo que "Todos".
+      Divergentes: (i) => i.pedido.pagamento === 'divergente',
       Enviados: (i) => i.pedido.envio === 'Enviado',
       Entregues: (i) => i.pedido.envio === 'Entregue',
     }),
@@ -62,7 +64,6 @@ export function PedidosCliente({ itens }: { itens: Item[] }) {
     (i) => i.pedido.pagamento === 'pago' && i.pedido.envio === 'Aguardando envio',
   ).length
   const divergentes = itens.filter((i) => i.pedido.pagamento === 'divergente').length
-  const cancelados = itens.filter((i) => i.pedido.pagamento === 'cancelado').length
 
   // Receita é o que foi PAGO. Somar tudo colocaria na conta o carrinho
   // abandonado no boleto e a venda estornada — dinheiro que não entrou.
@@ -77,7 +78,7 @@ export function PedidosCliente({ itens }: { itens: Item[] }) {
     {
       label: 'Pedidos no período',
       valor: pad2(itens.length),
-      hint: `${brl(receita)} de ${pad2(pagos.length)} pagos${cancelados ? ` · ${cancelados} cancelados fora da conta` : ''}`,
+      hint: `${brl(receita)} pagos · cancelados e pendentes ficam na Yampi`,
     },
     {
       label: 'Pagos não enviados',

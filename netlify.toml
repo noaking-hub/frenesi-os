@@ -1,0 +1,12 @@
+# Deploy na Netlify. O plugin oficial converte as rotas do Next em funções;
+# as funções agendadas em netlify/functions/ substituem o Vercel Cron.
+#
+# Variáveis de ambiente necessárias no painel da Netlify: as mesmas do
+# .env.local (Supabase, Yampi, Shopify, Mercado Pago) e CRON_SEGREDO — o
+# agendador manda esse segredo como Bearer para as rotas de sincronia.
+
+[build]
+  command = "npm run build"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

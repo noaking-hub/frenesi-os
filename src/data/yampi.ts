@@ -382,7 +382,19 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
   }
   const sb = supabaseServer()
   const desde = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-  const pedidos = await lerPedidosYampi(dias)
+
+  // Só venda entra no ERP: cancelado e pendente ficam na Yampi. 'divergente'
+  // (estornado) entra de propósito — o dinheiro entrou e voltou, e a
+  // conciliação precisa enxergar esse movimento. Um pendente que for pago
+  // amanhã entra na próxima rodada, já como pago.
+  const pedidos = (await lerPedidosYampi(dias)).filter((p) => {
+    const situacao = pagamentoYampi(
+      p.status?.data?.alias ?? '',
+      p.status?.data?.name ?? '',
+      Boolean(p.authorized) || Boolean(p.has_payment),
+    )
+    return situacao === 'pago' || situacao === 'divergente'
+  })
 
   // Ponte entre as plataformas: o SKU. O id de variante é da Shopify e não
   // existe do lado da Yampi.

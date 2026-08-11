@@ -1,3 +1,5 @@
+import Link from 'next/link'
+
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
 import { EstadoVazio, TituloSecao } from '@/components/erp/primitivos'
 import { COR, FUNDO, type Tom } from '@/components/erp/tokens'
@@ -36,17 +38,56 @@ interface CanalVendas {
   receita: number
 }
 
-async function vendasReais(): Promise<{ itens: ItemVendido[]; canais: CanalVendas[] }> {
+/** Recortes de período, resolvidos para uma data de corte. `null` = tudo. */
+const PERIODOS = [
+  { chave: '7d', rotulo: 'Últimos 7 dias', dias: 7 },
+  { chave: '30d', rotulo: 'Últimos 30 dias', dias: 30 },
+  { chave: 'mes', rotulo: 'Mês atual', dias: null },
+  { chave: 'tudo', rotulo: 'Tudo', dias: null },
+] as const
+type ChavePeriodo = (typeof PERIODOS)[number]['chave']
+
+const ORDENS = [
+  { chave: 'receita', rotulo: 'Por receita' },
+  { chave: 'unidades', rotulo: 'Por unidades' },
+  { chave: 'nome', rotulo: 'Por nome' },
+] as const
+type ChaveOrdem = (typeof ORDENS)[number]['chave']
+
+function corteDe(periodo: ChavePeriodo): string | null {
+  if (periodo === 'tudo') return null
+  if (periodo === 'mes') {
+    const agora = new Date()
+    return new Date(agora.getFullYear(), agora.getMonth(), 1).toISOString()
+  }
+  const dias = PERIODOS.find((p) => p.chave === periodo)?.dias ?? 30
+  return new Date(Date.now() - dias * 86_400_000).toISOString()
+}
+
+async function vendasReais(
+  periodo: ChavePeriodo,
+): Promise<{ itens: ItemVendido[]; canais: CanalVendas[] }> {
   if (!supabaseConfigurado()) return { itens: [], canais: [] }
   const sb = supabaseServer()
+  const corte = corteDe(periodo)
+
+  let consultaItens = sb
+    .from('pedido_itens')
+    .select('descricao, preco, quantidade, pedidos!inner(pagamento, comprado_em)')
+    .eq('pedidos.pagamento', 'pago')
+    .limit(10000)
+  if (corte) consultaItens = consultaItens.gte('pedidos.comprado_em', corte)
+
+  let consultaPedidos = sb
+    .from('pedidos')
+    .select('canal, valor, pagamento, comprado_em')
+    .eq('pagamento', 'pago')
+    .limit(10000)
+  if (corte) consultaPedidos = consultaPedidos.gte('comprado_em', corte)
 
   const [{ data: itensCrus }, { data: pedidosCrus }] = await Promise.all([
-    sb
-      .from('pedido_itens')
-      .select('descricao, preco, quantidade, pedidos!inner(pagamento)')
-      .eq('pedidos.pagamento', 'pago')
-      .limit(10000),
-    sb.from('pedidos').select('canal, valor, pagamento').eq('pagamento', 'pago').limit(10000),
+    consultaItens,
+    consultaPedidos,
   ])
 
   // Agrupado pelo nome SEM o tamanho: "Perfume X 5ml" e "Perfume X 10ml" são
@@ -80,8 +121,20 @@ async function vendasReais(): Promise<{ itens: ItemVendido[]; canais: CanalVenda
   }
 }
 
-export default async function Relatorios() {
-  const { itens, canais } = await vendasReais()
+export default async function Relatorios({
+  searchParams,
+}: {
+  searchParams: Promise<{ periodo?: string; ordem?: string }>
+}) {
+  const sp = await searchParams
+  const periodo: ChavePeriodo = PERIODOS.some((p) => p.chave === sp.periodo)
+    ? (sp.periodo as ChavePeriodo)
+    : 'tudo'
+  const ordem: ChaveOrdem = ORDENS.some((o) => o.chave === sp.ordem)
+    ? (sp.ordem as ChaveOrdem)
+    : 'receita'
+
+  const { itens, canais } = await vendasReais(periodo)
 
   const receitaTotal = itens.reduce((a, i) => a + i.receita, 0)
   const receitaCanais = canais.reduce((a, c) => a + c.receita, 0)
@@ -95,6 +148,46 @@ export default async function Relatorios() {
   })
   const classeA = abc.filter((l) => l.classe === 'A')
   const lider = abc[0]
+
+  // A classe e o acumulado são SEMPRE calculados na ordem de receita — é o
+  // que "curva ABC" significa. A ordenação escolhida só muda a exibição.
+  const exibidos = [...abc].sort((a, b) => {
+    if (ordem === 'unidades') return b.unidades - a.unidades
+    if (ordem === 'nome') return a.descricao.localeCompare(b.descricao, 'pt-BR')
+    return b.receita - a.receita
+  })
+
+  const linkDe = (p: ChavePeriodo, o: ChaveOrdem) => `/relatorios?periodo=${p}&ordem=${o}`
+  const chip = (ativo: boolean): React.CSSProperties => ({
+    height: 31,
+    padding: '0 13px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    border: `1px solid ${ativo ? 'rgba(239,209,140,.45)' : 'rgba(255,255,255,.09)'}`,
+    background: ativo ? 'rgba(239,209,140,.09)' : 'transparent',
+    color: ativo ? COR.ouro : 'rgba(242,237,227,.6)',
+    fontWeight: 600,
+    fontSize: 11,
+    lineHeight: 1,
+    borderRadius: 'var(--radius-pill)',
+    textDecoration: 'none',
+  })
+
+  const filtros = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+      {PERIODOS.map((p) => (
+        <Link key={p.chave} href={linkDe(p.chave, ordem)} className="hover:border-ouro/40 font-sans" style={chip(periodo === p.chave)}>
+          {p.rotulo}
+        </Link>
+      ))}
+      <div style={{ flex: 1 }} />
+      {ORDENS.map((o) => (
+        <Link key={o.chave} href={linkDe(periodo, o.chave)} className="hover:border-ouro/40 font-sans" style={chip(ordem === o.chave)}>
+          {o.rotulo}
+        </Link>
+      ))}
+    </div>
+  )
 
   const kpis: Kpi[] = [
     {
@@ -123,15 +216,23 @@ export default async function Relatorios() {
 
   if (itens.length === 0) {
     return (
-      <EstadoVazio
-        titulo="Sem vendas importadas ainda"
-        instrucao="Os relatórios derivam dos pedidos pagos. Importe os pedidos da Yampi em Pedidos e volte aqui."
-      />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        {filtros}
+        <EstadoVazio
+          titulo={periodo === 'tudo' ? 'Sem vendas importadas ainda' : 'Sem vendas nesse período'}
+          instrucao={
+            periodo === 'tudo'
+              ? 'Os relatórios derivam dos pedidos pagos. Importe os pedidos da Yampi em Pedidos e volte aqui.'
+              : 'Nenhum pedido pago no recorte escolhido — troque o período acima.'
+          }
+        />
+      </div>
     )
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {filtros}
       <FaixaKpis kpis={kpis} />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,2fr) minmax(0,1fr)', gap: 16, alignItems: 'start' }}>
@@ -150,7 +251,7 @@ export default async function Relatorios() {
               receita dos pedidos pagos · participação acumulada
             </span>
           </div>
-          {abc.map((l) => (
+          {exibidos.map((l) => (
             <div
               key={l.descricao}
               className="hover:bg-[rgba(239,209,140,.035)]"

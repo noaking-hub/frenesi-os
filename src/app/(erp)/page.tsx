@@ -3,9 +3,9 @@ import Link from 'next/link'
 import { CardKpi, type Kpi } from '@/components/erp/Kpi'
 import { Losango, Rotulo, TituloSecao } from '@/components/erp/primitivos'
 import { COR, FAIXA, type Tom } from '@/components/erp/tokens'
-import { carregarDashboard, carregarDre } from '@/data/consultas'
+import { carregarDashboard } from '@/data/consultas'
 import { repositorio } from '@/data/repository'
-import { brl, montarDre, pad2, pct, plural, saldoConsolidado, volume } from '@/domain'
+import { brl, pad2, pct, plural, saldoConsolidado, volume } from '@/domain'
 
 /**
  * Dashboard: o dia da operação numa tela.
@@ -17,20 +17,8 @@ import { brl, montarDre, pad2, pct, plural, saldoConsolidado, volume } from '@/d
  * mais em lugar nenhum desta tela.
  */
 export default async function Dashboard() {
-  const [{ estoque, lotes, sync, parametros, bases, pendencias }, apuracao, contas, pedidos] =
-    await Promise.all([
-      carregarDashboard(),
-      carregarDre(),
-      repositorio().contas(),
-      repositorio().pedidos(),
-    ])
-
-  const dre = montarDre(
-    [apuracao.receitaBruta, ...apuracao.receitasExtras],
-    apuracao.deducoes,
-    apuracao.custos,
-    apuracao.despesas,
-  )
+  const [{ estoque, lotes, sync, parametros, bases, pendencias }, contas, pedidos] =
+    await Promise.all([carregarDashboard(), repositorio().contas(), repositorio().pedidos()])
 
   const caixa = saldoConsolidado(contas)
   const esgotadas = bases.filter((b) => b.volumeMl === 0 && b.sobControle)
@@ -39,24 +27,51 @@ export default async function Dashboard() {
   const total = acionaveis.reduce((a, p) => a + p.contagem, 0)
 
   const mes = new Date().toLocaleDateString('pt-BR', { month: 'long' })
-  const pagosNoMes = pedidos.filter((p) => {
-    if (p.pagamento !== 'pago') return false
+  const pagos = pedidos.filter((p) => p.pagamento === 'pago')
+  const pagosNoMes = pagos.filter((p) => {
     const [, m] = p.data.split('/')
-    return Number(m) === new Date().getMonth() + 1
+    return Number(m.slice(0, 2)) === new Date().getMonth() + 1
   })
+  const vendasNoMes = pagosNoMes.reduce((a, p) => a + p.valor, 0)
+
+  // Vendas por dia dos últimos 7 dias. `data` vem como dd/mm — os rótulos de
+  // comparação são gerados pelo mesmo formato, então a virada de ano não
+  // desalinha (os 7 dias são sempre recentes).
+  const p2 = (n: number) => String(n).padStart(2, '0')
+  const dias = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(Date.now() - (6 - i) * 86_400_000)
+    return {
+      rotulo: `${p2(d.getDate())}/${p2(d.getMonth() + 1)}`,
+      diaSemana: d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', ''),
+      valor: 0,
+      pedidos: 0,
+    }
+  })
+  const porDia = new Map(dias.map((d) => [d.rotulo, d]))
+  for (const p of pagos) {
+    const alvo = porDia.get(p.data.slice(0, 5))
+    if (!alvo) continue
+    alvo.valor += p.valor
+    alvo.pedidos += 1
+  }
+  const vendas7d = dias.reduce((a, d) => a + d.valor, 0)
+  const pedidos7d = dias.reduce((a, d) => a + d.pedidos, 0)
+  const picoDoPeriodo = Math.max(...dias.map((d) => d.valor), 1)
 
   const kpis: Kpi[] = [
     {
       label: `Vendas em ${mes}`,
-      valor: brl(dre.receitaBruta),
-      hint: `${plural(pagosNoMes.length, 'pedido pago', 'pedidos pagos')} · loja e fora dela`,
+      valor: brl(vendasNoMes),
+      hint: `${plural(pagosNoMes.length, 'pedido pago', 'pedidos pagos')}${
+        pagosNoMes.length ? ` · ticket ${brl(vendasNoMes / pagosNoMes.length)}` : ''
+      }`,
       tom: 'ouro',
     },
     {
-      label: `Resultado em ${mes}`,
-      valor: brl(dre.resultado),
-      hint: `Receita menos custos e despesas classificados · margem de ${pct(dre.margemLiquidaPct)}`,
-      tom: dre.resultado >= 0 ? 'ok' : 'erro',
+      label: 'Últimos 7 dias',
+      valor: brl(vendas7d),
+      hint: `${plural(pedidos7d, 'pedido pago', 'pedidos pagos')} na semana`,
+      tom: 'ok',
     },
     {
       label: 'Caixa hoje',
@@ -124,16 +139,6 @@ export default async function Dashboard() {
           },
         ]
       : []),
-  ]
-
-  // Resumo financeiro do mês corrente, derivado do DRE — a mesma conta da
-  // tela de DRE, nunca uma versão paralela.
-  const saidas = dre.receitaBruta - dre.resultado
-  const financeiro = [
-    { label: 'Receita bruta', valor: dre.receitaBruta, tom: 'ok' as Tom },
-    { label: 'Receita líquida', valor: dre.receitaLiquida, tom: 'ouro' as Tom },
-    { label: 'Custos e despesas', valor: saidas, tom: 'erro' as Tom },
-    { label: 'Resultado', valor: dre.resultado, tom: dre.resultado >= 0 ? ('ok' as Tom) : ('erro' as Tom) },
   ]
 
   return (
@@ -264,16 +269,16 @@ export default async function Dashboard() {
             }}
           >
             <div style={{ marginBottom: 15 }}>
-              <TituloSecao tamanho={14}>{`Financeiro de ${mes}`}</TituloSecao>
+              <TituloSecao tamanho={14}>Vendas dos últimos 7 dias</TituloSecao>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-              {financeiro.map((f) => (
-                <div key={f.label} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+              {dias.map((d) => (
+                <div key={d.rotulo} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span
-                    className="font-sans"
-                    style={{ fontSize: 11.5, color: 'var(--color-secundario)', width: 108, flex: 'none' }}
+                    className="font-mono"
+                    style={{ fontSize: 10, color: 'var(--color-terciario)', width: 58, flex: 'none' }}
                   >
-                    {f.label}
+                    {`${d.diaSemana} ${d.rotulo}`}
                   </span>
                   <span
                     style={{
@@ -289,9 +294,9 @@ export default async function Dashboard() {
                       style={{
                         display: 'block',
                         height: '100%',
-                        // Proporção sobre a receita bruta do mês — não é número solto.
-                        width: `${dre.receitaBruta > 0 ? Math.min(100, Math.round((Math.abs(f.valor) / dre.receitaBruta) * 100)) : 0}%`,
-                        background: COR[f.tom],
+                        // Proporção sobre o melhor dia da semana — não é número solto.
+                        width: `${Math.round((d.valor / picoDoPeriodo) * 100)}%`,
+                        background: COR.ouro,
                         borderRadius: 3,
                         opacity: 0.75,
                       }}
@@ -301,31 +306,31 @@ export default async function Dashboard() {
                     className="font-mono"
                     style={{
                       fontWeight: 500,
-                      fontSize: 12,
-                      color: COR[f.tom],
-                      width: 104,
+                      fontSize: 11.5,
+                      color: d.valor > 0 ? 'var(--color-corrente)' : 'rgba(242,237,227,.35)',
+                      width: 92,
                       textAlign: 'right',
                       flex: 'none',
                     }}
                   >
-                    {brl(f.valor)}
+                    {d.valor > 0 ? brl(d.valor) : '—'}
                   </span>
                 </div>
               ))}
             </div>
             <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
               <Rotulo>
-                {dre.receitaBruta > 0
-                  ? `${pct(dre.margemLiquidaPct)} de margem sobre a receita bruta`
-                  : 'Sem venda paga no mês ainda'}
+                {pedidos7d > 0
+                  ? `${plural(pedidos7d, 'pedido pago', 'pedidos pagos')} · ticket ${brl(vendas7d / pedidos7d)}`
+                  : 'Sem venda paga na semana ainda'}
               </Rotulo>
               <div style={{ flex: 1 }} />
               <Link
-                href="/financeiro/dre"
+                href="/pedidos"
                 className="font-sans hover:text-ouro"
                 style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}
               >
-                DRE completo →
+                Todos os pedidos →
               </Link>
             </div>
           </section>

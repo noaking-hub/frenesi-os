@@ -892,7 +892,13 @@ const repositorioSupabase: Repositorio = {
 
     const agora = Date.now()
     const dia = 24 * 60 * 60 * 1000
-    return [...porEmail.entries()]
+    return (
+      [...porEmail.entries()]
+        // Quem nunca teve pedido PAGO não é cliente — é visitante com cadastro.
+        // Sem este corte, um pedido estornado colocava a pessoa na lista com
+        // R$ 0,00 comprados, como se fosse compradora.
+        .filter(([, c]) => c.pedidos > 0)
+    )
       .map(([email, c]): ClienteCrm => {
         const dias = c.ultima ? Math.floor((agora - c.ultima) / dia) : null
         return {
