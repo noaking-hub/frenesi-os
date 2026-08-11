@@ -626,6 +626,48 @@ export async function coletarConcorrente(concorrenteId: string): Promise<Resulta
   const unicas = [...porChave.values()]
   const casados = unicas.filter((l) => l.base_id !== null).length
 
+  // Antes de substituir, o DIFF vira registro: subiu, baixou, entrou, saiu.
+  // Sem ele, a mudança de preço do concorrente evaporava a cada releitura —
+  // e é exatamente ela que a tela de mercado precisa alertar.
+  const { data: anteriores } = await sb
+    .from('concorrente_precos')
+    .select('chave, titulo, base_id, variante, preco')
+    .eq('concorrente_id', concorrenteId)
+  const antes = new Map(
+    ((anteriores ?? []) as { chave: string; titulo: string; base_id: string | null; variante: number; preco: number | string }[]).map(
+      (a) => [a.chave, a],
+    ),
+  )
+  if (antes.size > 0) {
+    const mudancas: {
+      concorrente_id: string
+      titulo: string
+      base_id: string | null
+      variante: number | null
+      tipo: 'subiu' | 'baixou' | 'entrou' | 'saiu'
+      preco_de: number | null
+      preco_para: number | null
+    }[] = []
+    const novasChaves = new Set(unicas.map((l) => l.chave))
+    for (const l of unicas) {
+      const a = antes.get(l.chave)
+      if (!a) {
+        mudancas.push({ concorrente_id: concorrenteId, titulo: l.titulo, base_id: l.base_id, variante: l.variante, tipo: 'entrou', preco_de: null, preco_para: l.preco })
+      } else if (Math.round(Number(a.preco) * 100) !== Math.round(l.preco * 100)) {
+        mudancas.push({ concorrente_id: concorrenteId, titulo: l.titulo, base_id: l.base_id, variante: l.variante, tipo: l.preco > Number(a.preco) ? 'subiu' : 'baixou', preco_de: Number(a.preco), preco_para: l.preco })
+      }
+    }
+    for (const [chave, a] of antes) {
+      if (!novasChaves.has(chave)) {
+        mudancas.push({ concorrente_id: concorrenteId, titulo: a.titulo, base_id: a.base_id, variante: a.variante ?? null, tipo: 'saiu', preco_de: Number(a.preco), preco_para: null })
+      }
+    }
+    for (let i = 0; i < mudancas.length; i += 500) {
+      const { error } = await sb.from('concorrente_mudancas').insert(mudancas.slice(i, i + 500))
+      if (error) throw error
+    }
+  }
+
   // A releitura substitui a anterior: preço antigo do mesmo item não é
   // histórico útil aqui, é ruído que puxaria o "menor do mercado" para baixo.
   const { error: erroLimpar } = await sb
