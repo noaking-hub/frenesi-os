@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
 import { Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
@@ -105,7 +105,7 @@ export function CashbackCliente({
       valor: ultimaSincronizacao ? dataHoraBr(ultimaSincronizacao).slice(0, 5) : 'Nunca',
       hint: ultimaSincronizacao
         ? dataHoraBr(ultimaSincronizacao)
-        : 'Clique em “Sincronizar com a Yampi”',
+        : 'A primeira leitura começa sozinha ao abrir',
       tom: ultimaSincronizacao ? 'ok' : 'atencao',
     },
   ]
@@ -156,6 +156,23 @@ export function CashbackCliente({
     }
   }
 
+  /**
+   * A sincronização dispara SOZINHA ao abrir a tela quando o retrato tem
+   * mais de 6 horas (ou nunca rodou) — e roda todo dia no cron. Não há
+   * botão: espelho que depende de clique vive desatualizado.
+   */
+  const jaDisparou = useRef(false)
+  useEffect(() => {
+    if (jaDisparou.current) return
+    const SEIS_HORAS = 6 * 60 * 60 * 1000
+    const velho =
+      !ultimaSincronizacao || Date.now() - new Date(ultimaSincronizacao).getTime() > SEIS_HORAS
+    if (!velho) return
+    jaDisparou.current = true
+    void sincronizar()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ultimaSincronizacao])
+
   const colunas: Coluna<CarteiraYampi>[] = [
     {
       chave: 'cliente',
@@ -205,19 +222,16 @@ export function CashbackCliente({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: 1, minWidth: 220 }}>
             <TituloSecao tamanho={13.5}>Espelho das carteiras da Yampi</TituloSecao>
             <span className="font-sans" style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
-              O cashback nasce, é usado e expira no checkout da Yampi. Sincronizar consulta a carteira
-              de cada cliente e traz os saldos para cá; o extrato abre ao vivo ao clicar num cliente.
+              O cashback nasce, é usado e expira no checkout da Yampi — aqui é o retrato. Ele se
+              atualiza sozinho: todo dia de madrugada no agendador e ao abrir esta tela quando o
+              retrato passa de 6 horas. O extrato de cada cliente abre ao vivo, ao clicar.
             </span>
           </div>
-          <button
-            type="button"
-            onClick={sincronizar}
-            disabled={sincronizando}
-            className="botao-ouro font-sans hover:brightness-[1.07]"
-            style={{ height: 38, padding: '0 18px', fontWeight: 700, fontSize: 11.5, lineHeight: 1, borderRadius: 9, whiteSpace: 'nowrap', cursor: sincronizando ? 'wait' : 'pointer', opacity: sincronizando ? 0.55 : 1 }}
-          >
-            {sincronizando ? 'Sincronizando…' : 'Sincronizar com a Yampi'}
-          </button>
+          {sincronizando && (
+            <span className="font-sans" style={{ fontWeight: 600, fontSize: 11, color: COR.ouro, whiteSpace: 'nowrap' }}>
+              Sincronizando agora…
+            </span>
+          )}
         </div>
         {progresso && (
           <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.5, color: COR.ouro, textWrap: 'pretty' }}>
@@ -268,7 +282,7 @@ export function CashbackCliente({
             <div style={{ padding: '28px 18px', textAlign: 'center' }}>
               <span className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.6, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
                 {carteiras.length === 0
-                  ? 'Nenhuma carteira espelhada ainda — clique em “Sincronizar com a Yampi” ali em cima.'
+                  ? 'Nenhuma carteira espelhada ainda — a primeira sincronização está rodando (acompanhe o progresso ali em cima).'
                   : 'Nada nesse recorte — desligue o “Só com saldo” ou limpe a busca.'}
               </span>
             </div>

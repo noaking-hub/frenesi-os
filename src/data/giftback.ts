@@ -152,5 +152,28 @@ export async function importarAniversariosYampi(): Promise<{ atualizados: number
     if (!p || p.current_page >= p.total_pages) break
   }
 
+  // O registro é o que permite à tela saber quando foi a última leitura —
+  // e só reimportar quando ela envelhecer, em vez de a cada abertura.
+  await sb.from('sincronizacoes').insert({
+    origem: 'yampi',
+    tipo: 'aniversarios',
+    perfumes: lidos,
+    variantes: atualizados,
+  })
+
   return { atualizados, lidos }
+}
+
+/** Quando os aniversários foram importados pela última vez. */
+export async function ultimaImportacaoAniversarios(): Promise<string | null> {
+  if (!supabaseConfigurado()) return null
+  const { data } = await supabaseServer()
+    .from('sincronizacoes')
+    .select('executada_em')
+    .eq('origem', 'yampi')
+    .eq('tipo', 'aniversarios')
+    .order('executada_em', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  return (data?.executada_em as string | undefined) ?? null
 }

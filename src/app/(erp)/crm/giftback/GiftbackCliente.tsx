@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
 import { Badge, BotaoSecundario, Rotulo, TituloSecao } from '@/components/erp/primitivos'
@@ -49,10 +49,13 @@ export function GiftbackCliente({
   lista,
   comAniversario,
   semAniversario,
+  ultimaImportacao,
 }: {
   lista: Aniversariante[]
   comAniversario: number
   semAniversario: number
+  /** ISO da última importação de aniversários da Yampi; null = nunca. */
+  ultimaImportacao: string | null
 }) {
   const [recorte, setRecorte] = useState<'30d' | 'todos'>('30d')
   const [busca, setBusca] = useState('')
@@ -118,6 +121,20 @@ export function GiftbackCliente({
       )
       if (r.ok) router.refresh()
     })
+
+  // A importação da Yampi roda SOZINHA ao abrir quando a última leitura tem
+  // mais de 24 horas (ou nunca houve) — e todo dia no agendador. Sem botão:
+  // aniversário esquecido é exatamente o que este módulo existe para evitar.
+  const jaDisparou = useRef(false)
+  useEffect(() => {
+    if (jaDisparou.current) return
+    const UM_DIA = 24 * 60 * 60 * 1000
+    const velha = !ultimaImportacao || Date.now() - new Date(ultimaImportacao).getTime() > UM_DIA
+    if (!velha) return
+    jaDisparou.current = true
+    importar()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ultimaImportacao])
 
   const presentear = (a: Aniversariante) =>
     iniciarTransicao(async () => {
@@ -264,7 +281,9 @@ export function GiftbackCliente({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
             <TituloSecao tamanho={13.5}>Presente de aniversário</TituloSecao>
             <span className="font-sans" style={{ fontSize: 10.5, lineHeight: 1.4, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
-              Cupom único criado na Yampi (uso único, por CPF, sem acumular) + e-mail de parabéns da marca
+              Cupom único criado na Yampi (uso único, por CPF, sem acumular) + e-mail de parabéns da
+              marca. As datas vêm do cadastro da Yampi sozinhas — ao abrir esta tela e todo dia no
+              agendador.
             </span>
           </div>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 78 }}>
@@ -276,9 +295,11 @@ export function GiftbackCliente({
             <input value={validade} onChange={(e) => setValidade(e.target.value.replace(/[^0-9]/g, ''))} inputMode="numeric" className="font-mono focus:border-ouro/45" style={campo} />
           </label>
           <div style={{ flex: 1 }} />
-          <BotaoSecundario altura={34} onClick={importar} desabilitado={pendente}>
-            {pendente ? 'Trabalhando…' : 'Importar aniversários da Yampi'}
-          </BotaoSecundario>
+          {pendente && (
+            <span className="font-sans" style={{ fontWeight: 600, fontSize: 11, color: COR.ouro, whiteSpace: 'nowrap' }}>
+              Atualizando…
+            </span>
+          )}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap', paddingTop: 10, borderTop: '1px solid rgba(255,255,255,.07)' }}>
