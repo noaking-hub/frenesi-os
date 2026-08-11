@@ -3,9 +3,10 @@
 import { revalidatePath } from 'next/cache'
 
 import { emailConfigurado, entregar } from '@/data/email'
+import { gravarModeloEmail, lerModeloEmail } from '@/data/modelo-email'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { lerCarrinhosYampi } from '@/data/yampi-crm'
-import { emailRecuperacao } from '@/domain'
+import { emailRecuperacao, type ModeloEmailRecuperacao } from '@/domain'
 
 export interface ResultadoRecuperacao {
   /** E-mails que saíram, pelo nome (ou e-mail) de quem recebeu. */
@@ -71,6 +72,7 @@ export async function enviarEmailsCarrinho(
 
   const resultado: ResultadoRecuperacao = { enviados: [], jaContatados: 0, semEmail: 0, falhas: [] }
   const agora = Date.now()
+  const modelo = await lerModeloEmail()
 
   for (const id of unicos) {
     const carrinho = carrinhos.find((c) => c.id === id)
@@ -85,13 +87,16 @@ export async function enviarEmailsCarrinho(
       continue
     }
 
-    const { assunto, html } = emailRecuperacao({
-      nome: carrinho.cliente,
-      itens: carrinho.itens,
-      valor: carrinho.valor,
-      linkCheckout: carrinho.link ?? process.env.LOJA_URL ?? null,
-      cupom,
-    })
+    const { assunto, html } = emailRecuperacao(
+      {
+        nome: carrinho.cliente,
+        itens: carrinho.itens,
+        valor: carrinho.valor,
+        linkCheckout: carrinho.link ?? process.env.LOJA_URL ?? null,
+        cupom,
+      },
+      modelo,
+    )
 
     try {
       await entregar({ para: carrinho.email, assunto, html })
@@ -117,4 +122,26 @@ export async function enviarEmailsCarrinho(
 
   revalidatePath('/crm/carrinhos')
   return { ok: true, resultado }
+}
+
+/** Salva os textos do modelo — a próxima leva de e-mails já sai com eles. */
+export async function salvarModeloEmail(
+  m: ModeloEmailRecuperacao,
+): Promise<{ ok: true } | { ok: false; erro: string }> {
+  const campos = [m.assunto, m.titulo, m.mensagem, m.textoBotao]
+  if (campos.some((c) => !c || !c.trim())) {
+    return { ok: false, erro: 'Assunto, título, mensagem e texto do botão não podem ficar vazios.' }
+  }
+  try {
+    await gravarModeloEmail({
+      assunto: m.assunto.trim(),
+      titulo: m.titulo.trim(),
+      mensagem: m.mensagem.trim(),
+      textoBotao: m.textoBotao.trim(),
+    })
+  } catch (e) {
+    return { ok: false, erro: e instanceof Error ? e.message : String(e) }
+  }
+  revalidatePath('/crm/carrinhos')
+  return { ok: true }
 }

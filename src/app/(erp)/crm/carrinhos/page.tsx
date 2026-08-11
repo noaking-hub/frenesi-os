@@ -1,10 +1,11 @@
 import { EstadoVazio, FaixaAlerta } from '@/components/erp/primitivos'
 import { emailConfigurado } from '@/data/email'
+import { lerModeloEmail } from '@/data/modelo-email'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { yampiConfigurada } from '@/data/yampi'
 import { lerCarrinhosYampi, type CarrinhoYampi } from '@/data/yampi-crm'
 
-import { CarrinhosCliente } from './CarrinhosCliente'
+import { CarrinhosCliente, type EnvioFeito } from './CarrinhosCliente'
 
 export const dynamic = 'force-dynamic'
 
@@ -62,24 +63,43 @@ export default async function Carrinhos() {
   }
 
   // Quando cada carrinho recebeu e-mail pela última vez — é o que separa
-  // "enviar" de "insistir" na tela.
+  // "enviar" de "insistir" na tela — e os últimos envios, para auditar o que
+  // de fato saiu.
   const ultimoEnvio: Record<string, string> = {}
+  let historico: EnvioFeito[] = []
   if (supabaseConfigurado()) {
     const { data } = await supabaseServer()
       .from('recuperacoes_carrinho')
-      .select('carrinho_id, enviado_em')
+      .select('carrinho_id, email, assunto, cupom, enviado_em')
       .order('enviado_em', { ascending: false })
       .limit(2000)
-    for (const r of (data ?? []) as { carrinho_id: string; enviado_em: string }[]) {
+    const linhas = (data ?? []) as {
+      carrinho_id: string
+      email: string
+      assunto: string
+      cupom: string | null
+      enviado_em: string
+    }[]
+    for (const r of linhas) {
       if (!ultimoEnvio[r.carrinho_id]) ultimoEnvio[r.carrinho_id] = r.enviado_em
     }
+    historico = linhas.slice(0, 20).map((r) => ({
+      email: r.email,
+      assunto: r.assunto,
+      cupom: r.cupom,
+      enviadoEm: r.enviado_em,
+    }))
   }
+
+  const modelo = await lerModeloEmail()
 
   return (
     <CarrinhosCliente
       carrinhos={leitura.carrinhos.map((c) => ({ ...c, whatsapp: linkWhatsApp(c) }))}
       ultimoEnvio={ultimoEnvio}
       emailPronto={emailConfigurado()}
+      modelo={modelo}
+      historico={historico}
     />
   )
 }

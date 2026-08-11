@@ -257,8 +257,15 @@ export interface ResumoCliente {
 export const DIAS_INATIVO = 90
 /** Sumiu há mais que isto (e menos que inativo): hora de reconquistar. */
 export const DIAS_EM_RISCO = 45
-/** Total comprado que qualifica um cliente como VIP. */
-export const TETO_VIP = 3000
+/**
+ * Total comprado que qualifica um cliente como VIP.
+ *
+ * Calibrado para a economia do decant: com ticket médio na casa de R$ 150,
+ * quem passou de R$ 800 comprou cinco ou seis vezes o pedido típico — é o
+ * topo real da base. O teto antigo de R$ 3.000 vinha de outro negócio e
+ * deixava a faixa VIP permanentemente vazia.
+ */
+export const TETO_VIP = 800
 
 /**
  * Classifica o cliente pelo que ele fez, não por um rótulo digitado.
@@ -281,6 +288,25 @@ export function statusCliente(
   if (total >= TETO_VIP) return 'VIP'
   if (pedidos >= 2) return 'Recorrente'
   return 'Novo'
+}
+
+/**
+ * O nome do perfume como se fala, não como está no catálogo.
+ *
+ * "Coco Mademoiselle Feminino Eau de Parfum (Decant) 8ml" vira "Coco
+ * Mademoiselle" — é o que cabe numa célula e o que o operador digita no
+ * WhatsApp. Qualificadores que separam produtos (Intense, Elixir, Extrait,
+ * Le Parfum) ficam: cortá-los fundiria perfumes diferentes.
+ */
+export function nomeCurtoPerfume(nome: string): string {
+  const curto = nome
+    .replace(/\s*[-·]?\s*\d+([.,]\d+)?\s*ml\b.*$/i, '')
+    .replace(/\s*\((decant|decants|refil|amostra)\)\s*/gi, ' ')
+    .replace(/\s+(masculino|feminino|unissex)\b/gi, ' ')
+    .replace(/\s+eau de (parfum|toilette|cologne)\b/gi, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+  return curto || nome
 }
 
 /** `Camila Rocha` → `CR`. Duas letras no máximo, para caber no avatar. */

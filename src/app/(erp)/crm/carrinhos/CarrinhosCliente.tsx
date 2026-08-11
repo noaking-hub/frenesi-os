@@ -10,10 +10,20 @@ import { Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR, type Tom } from '@/components/erp/tokens'
 import type { CarrinhoYampi } from '@/data/yampi-crm'
 import { brl, parseNum, plural } from '@/domain'
+import type { ModeloEmailRecuperacao } from '@/domain'
 
 import { enviarEmailsCarrinho } from './actions'
+import { ModeloEmail } from './ModeloEmail'
 
 type Carrinho = CarrinhoYampi & { whatsapp: string | null }
+
+/** Um e-mail que de fato saiu — a linha do histórico de auditoria. */
+export interface EnvioFeito {
+  email: string
+  assunto: string
+  cupom: string | null
+  enviadoEm: string
+}
 
 type Periodo = 'Últimos 7 dias' | 'Últimos 30 dias' | 'Todos'
 const PERIODOS: { rotulo: Periodo; dias: number | null }[] = [
@@ -50,17 +60,23 @@ export function CarrinhosCliente({
   carrinhos,
   ultimoEnvio,
   emailPronto,
+  modelo,
+  historico,
 }: {
   carrinhos: Carrinho[]
   /** carrinho_id → ISO do último e-mail de recuperação enviado. */
   ultimoEnvio: Record<string, string>
   emailPronto: boolean
+  modelo: ModeloEmailRecuperacao
+  historico: EnvioFeito[]
 }) {
   const [periodo, setPeriodo] = useState<Periodo>('Últimos 30 dias')
   const [ordem, setOrdem] = useState<Ordem>('Mais recentes')
   const [soComContato, setSoComContato] = useState(false)
   const [cupomCodigo, setCupomCodigo] = useState('')
   const [cupomPct, setCupomPct] = useState('10')
+  const [editandoModelo, setEditandoModelo] = useState(false)
+  const [vendoHistorico, setVendoHistorico] = useState(false)
   const [aviso, setAviso] = useState<{ tom: 'ok' | 'erro'; texto: string } | null>(null)
   const [enviandoId, setEnviandoId] = useState<string | null>(null)
   const [enviando, iniciarTransicao] = useTransition()
@@ -381,6 +397,47 @@ export function CarrinhosCliente({
           <span className="font-sans" style={{ fontSize: 10.5, lineHeight: 1.4, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
             Preto e dourado, com os decants da pessoa e cupom opcional — no lugar do e-mail genérico da Yampi
           </span>
+          <div style={{ flex: 1 }} />
+          <button
+            type="button"
+            onClick={() => setEditandoModelo(true)}
+            className="hover:border-ouro/40 font-sans"
+            style={{
+              height: 30,
+              padding: '0 13px',
+              border: '1px solid rgba(239,209,140,.3)',
+              background: 'rgba(239,209,140,.07)',
+              color: COR.ouro,
+              fontWeight: 600,
+              fontSize: 10.5,
+              lineHeight: 1,
+              borderRadius: 8,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Ver e editar o modelo
+          </button>
+          <button
+            type="button"
+            onClick={() => setVendoHistorico((v) => !v)}
+            className="hover:border-ouro/40 font-sans"
+            style={{
+              height: 30,
+              padding: '0 13px',
+              border: '1px solid rgba(255,255,255,.12)',
+              background: vendoHistorico ? 'rgba(255,255,255,.06)' : 'transparent',
+              color: 'rgba(242,237,227,.7)',
+              fontWeight: 600,
+              fontSize: 10.5,
+              lineHeight: 1,
+              borderRadius: 8,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {`Últimos envios · ${historico.length}`}
+          </button>
         </div>
 
         {emailPronto ? (
@@ -477,7 +534,59 @@ export function CarrinhosCliente({
             {aviso.texto}
           </span>
         )}
+
+        {vendoHistorico && (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 7,
+              paddingTop: 11,
+              borderTop: '1px solid rgba(255,255,255,.07)',
+              maxHeight: 240,
+              overflowY: 'auto',
+            }}
+          >
+            {historico.length === 0 ? (
+              <span className="font-sans" style={{ fontSize: 11, color: 'var(--color-terciario)' }}>
+                Nenhum e-mail de recuperação enviado ainda.
+              </span>
+            ) : (
+              historico.map((h, i) => (
+                <span
+                  key={`${h.email}-${h.enviadoEm}-${i}`}
+                  style={{ display: 'grid', gridTemplateColumns: '104px minmax(0,1fr) auto', gap: 10, alignItems: 'baseline' }}
+                >
+                  <span className="font-mono" style={{ fontSize: 10, color: 'rgba(242,237,227,.45)', whiteSpace: 'nowrap' }}>
+                    {new Date(h.enviadoEm).toLocaleString('pt-BR', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      timeZone: 'America/Sao_Paulo',
+                    })}
+                  </span>
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                    <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.3, color: 'rgba(242,237,227,.72)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {h.email}
+                    </span>
+                    <span className="font-sans" style={{ fontSize: 10, lineHeight: 1.3, color: 'rgba(242,237,227,.4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {h.assunto}
+                    </span>
+                  </span>
+                  <span className="font-mono" style={{ fontSize: 9.5, color: h.cupom ? 'rgba(239,209,140,.6)' : 'rgba(242,237,227,.3)', whiteSpace: 'nowrap' }}>
+                    {h.cupom ?? 'sem cupom'}
+                  </span>
+                </span>
+              ))
+            )}
+          </div>
+        )}
       </section>
+
+      {editandoModelo && (
+        <ModeloEmail inicial={modelo} cupom={cupom} aoFechar={() => setEditandoModelo(false)} />
+      )}
 
       <Tabela
         colunas={colunas}

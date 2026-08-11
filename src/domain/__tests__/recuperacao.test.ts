@@ -42,4 +42,31 @@ describe('e-mail de recuperação de carrinho', () => {
     expect(html).not.toContain('<script>alert')
     expect(html).toContain('&lt;script&gt;')
   })
+
+  it('usa o modelo editado, com {nome} e {total} preenchidos', () => {
+    const modelo = {
+      assunto: 'Volta aqui, {nome}!',
+      titulo: '{nome}, faltou só o fim.',
+      mensagem: 'Seu carrinho de {total} está guardado.\n\nQualquer dúvida, responde este e-mail.',
+      textoBotao: 'Voltar ao carrinho',
+    }
+    const { assunto, html } = emailRecuperacao(base, modelo)
+    expect(assunto).toBe('Volta aqui, Marina!')
+    expect(html).toContain('Marina, faltou só o fim.')
+    expect(html).toContain('249,70 está guardado.')
+    expect(html).toContain('Qualquer dúvida, responde este e-mail.')
+    expect(html).toContain('Voltar ao carrinho')
+  })
+
+  it('sem nome, o {nome} do modelo some sem deixar vírgula órfã', () => {
+    const modelo = {
+      assunto: '{nome}, seu carrinho espera',
+      titulo: '{nome}, ficou pronto.',
+      mensagem: 'Tudo separado.',
+      textoBotao: 'Concluir',
+    }
+    const { assunto, html } = emailRecuperacao({ ...base, nome: null }, modelo)
+    expect(assunto).toBe('Seu carrinho espera')
+    expect(html).toContain('Ficou pronto.')
+  })
 })

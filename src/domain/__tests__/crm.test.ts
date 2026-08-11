@@ -12,6 +12,7 @@ import {
   statusCliente,
   TETO_VIP,
   iniciaisDe,
+  nomeCurtoPerfume,
 } from '..'
 import type {
   CampanhaMkt,
@@ -208,5 +209,26 @@ describe('classificação de cliente', () => {
     expect(iniciaisDe('Camila Rocha')).toBe('CR')
     expect(iniciaisDe('Ana')).toBe('A')
     expect(iniciaisDe('  ')).toBe('—')
+  })
+})
+
+describe('nome curto do perfume', () => {
+  it('corta tamanho, decant, gênero e concentração base', () => {
+    expect(nomeCurtoPerfume('Coco Mademoiselle Feminino Eau de Parfum (Decant) 8ml')).toBe(
+      'Coco Mademoiselle',
+    )
+    expect(nomeCurtoPerfume('Jo Malone English Pear & Freesia 100ml')).toBe(
+      'Jo Malone English Pear & Freesia',
+    )
+  })
+
+  it('mantém o qualificador que separa produtos', () => {
+    // Elixir, Le Parfum e Intense são produtos diferentes das versões base —
+    // cortar fundiria dois preços e dois perfumes num nome só.
+    expect(nomeCurtoPerfume('Sauvage Elixir Masculino (Decant) 5ml')).toBe('Sauvage Elixir')
+    expect(nomeCurtoPerfume('Jean Paul Gaultier - Le Male Le Parfum (decant) 10ml')).toBe(
+      'Jean Paul Gaultier - Le Male Le Parfum',
+    )
+    expect(nomeCurtoPerfume('1 Million Masculino Parfum (Decant) 5ml')).toBe('1 Million Parfum')
   })
 })

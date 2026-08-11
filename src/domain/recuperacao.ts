@@ -20,14 +20,53 @@ export interface DadosEmailCarrinho {
   cupom?: { codigo: string; pct: number } | null
 }
 
+/**
+ * Os textos do e-mail, editáveis pela tela de Carrinhos.
+ *
+ * `{nome}` vira o primeiro nome do cliente (e some com elegância quando o
+ * checkout não trouxe nome); `{total}` vira o valor do carrinho. A moldura —
+ * logotipo, lista de itens, cupom, botão — é fixa; o que a operação ajusta é
+ * a voz.
+ */
+export interface ModeloEmailRecuperacao {
+  assunto: string
+  titulo: string
+  /** Parágrafos separados por linha em branco. */
+  mensagem: string
+  textoBotao: string
+}
+
+export const MODELO_PADRAO: ModeloEmailRecuperacao = {
+  assunto: '{nome}, seus decants ainda estão guardados',
+  titulo: '{nome}, deixamos tudo separado.',
+  mensagem:
+    'Você montou um carrinho na FRENESI e não finalizou — acontece. Seus decants continuam aqui, fracionados do frasco original e prontos para envio.',
+  textoBotao: 'Concluir meu pedido',
+}
+
+/** Aplica {nome} e {total}; sem nome, remove o placeholder sem deixar cicatriz. */
+export function preencherModelo(texto: string, nome: string | null, total: string): string {
+  const comTotal = texto.split('{total}').join(total)
+  if (nome) return comTotal.split('{nome}').join(nome)
+  const sem = comTotal.replace(/\{nome\}\s*,?\s*/gi, '').trimStart()
+  return sem.charAt(0).toUpperCase() + sem.slice(1)
+}
+
 const escapaHtml = (t: string) =>
   t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
-export function emailRecuperacao(d: DadosEmailCarrinho): { assunto: string; html: string } {
-  const primeiroNome = d.nome?.trim().split(/\s+/)[0] ?? null
-  const assunto = primeiroNome
-    ? `${primeiroNome}, seus decants ainda estão guardados`
-    : 'Seus decants ainda estão guardados'
+export function emailRecuperacao(
+  d: DadosEmailCarrinho,
+  modelo: ModeloEmailRecuperacao = MODELO_PADRAO,
+): { assunto: string; html: string } {
+  const primeiroNome = d.nome?.trim().split(/\s+/)[0] || null
+  const total = brl(d.valor)
+  const assunto = preencherModelo(modelo.assunto, primeiroNome, total)
+  const titulo = preencherModelo(modelo.titulo, primeiroNome, total)
+  const paragrafos = modelo.mensagem
+    .split(/\n\s*\n|\n/)
+    .map((p) => preencherModelo(p.trim(), primeiroNome, total))
+    .filter(Boolean)
 
   const linhasItens = d.itens
     .map(
@@ -69,7 +108,7 @@ export function emailRecuperacao(d: DadosEmailCarrinho): { assunto: string; html
         <td style="padding:26px 0 6px;text-align:center;">
           <a href="${escapaHtml(d.linkCheckout)}"
              style="display:inline-block;background:#141414;color:#EFD18C;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:bold;font-size:13px;letter-spacing:.08em;text-transform:uppercase;padding:15px 34px;border-radius:8px;">
-            Concluir meu pedido
+            ${escapaHtml(modelo.textoBotao)}
           </a>
         </td>
       </tr>`
@@ -94,13 +133,14 @@ export function emailRecuperacao(d: DadosEmailCarrinho): { assunto: string; html
                   <tr>
                     <td>
                       <p style="margin:0 0 14px;font-family:Georgia,'Times New Roman',serif;font-size:21px;line-height:1.35;color:#1A1A1A;">
-                        ${primeiroNome ? `${escapaHtml(primeiroNome)}, ` : ''}deixamos tudo separado.
+                        ${escapaHtml(titulo)}
                       </p>
-                      <p style="margin:0 0 20px;font-family:Arial,Helvetica,sans-serif;font-size:13.5px;line-height:1.65;color:#4C463A;">
-                        Você montou um carrinho na FRENESI e não finalizou — acontece.
-                        ${d.itens.length === 1 ? 'O seu decant continua aqui' : 'Os seus decants continuam aqui'},
-                        fracionados do frasco original e prontos para envio.
-                      </p>
+                      ${paragrafos
+                        .map(
+                          (p) =>
+                            `<p style="margin:0 0 20px;font-family:Arial,Helvetica,sans-serif;font-size:13.5px;line-height:1.65;color:#4C463A;">${escapaHtml(p)}</p>`,
+                        )
+                        .join('')}
                     </td>
                   </tr>
                   <tr>

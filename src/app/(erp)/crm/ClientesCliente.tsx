@@ -7,7 +7,7 @@ import { Badge, BotaoSecundario, Rotulo, TituloSecao, Valor } from '@/components
 import { Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR, FUNDO, type Tom } from '@/components/erp/tokens'
 import type { PerfilCliente } from '@/data/perfis-clientes'
-import { brl, plural } from '@/domain'
+import { brl, nomeCurtoPerfume, plural } from '@/domain'
 import type { StatusCliente } from '@/domain'
 
 const TOM_STATUS: Record<StatusCliente, Tom> = {
@@ -212,31 +212,55 @@ export function ClientesCliente({ perfis }: { perfis: PerfilCliente[] }) {
       chave: 'favorito',
       titulo: 'Mais comprado',
       largura: 'minmax(120px,1fr)',
-      render: (c) =>
-        c.favoritos[0] ? (
+      render: (c) => {
+        if (!c.favoritos[0]) {
+          return (
+            <span className="font-sans" style={{ fontSize: 10, color: 'rgba(242,237,227,.3)' }}>
+              sem itens no histórico
+            </span>
+          )
+        }
+        // O que oferecer na próxima conversa: o favorito e o que mais a
+        // pessoa já levou — nomes curtos, do jeito que se fala.
+        const outros = c.favoritos.slice(1).map((f) => nomeCurtoPerfume(f.nome))
+        return (
           <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
             <span
               className="font-sans"
               style={{
-                fontSize: 11,
+                fontSize: 11.5,
                 lineHeight: 1.3,
-                color: 'rgba(242,237,227,.7)',
+                color: 'rgba(242,237,227,.75)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}
             >
-              {c.favoritos[0].nome}
+              {nomeCurtoPerfume(c.favoritos[0].nome)}
+              {c.favoritos[0].vezes > 1 && (
+                <span className="font-mono" style={{ fontSize: 9.5, color: 'rgba(239,209,140,.55)' }}>
+                  {`  ${c.favoritos[0].vezes}×`}
+                </span>
+              )}
             </span>
-            <span className="font-mono" style={{ fontSize: 9.5, lineHeight: 1.25, color: 'rgba(239,209,140,.45)' }}>
-              {`${c.favoritos[0].vezes}× · ${plural(c.favoritos.length, 'perfume diferente', 'perfumes diferentes')}`}
-            </span>
+            {outros.length > 0 && (
+              <span
+                className="font-sans"
+                style={{
+                  fontSize: 10,
+                  lineHeight: 1.25,
+                  color: 'rgba(242,237,227,.38)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {`também: ${outros.join(' · ')}`}
+              </span>
+            )}
           </span>
-        ) : (
-          <span className="font-sans" style={{ fontSize: 10, color: 'rgba(242,237,227,.3)' }}>
-            sem itens no histórico
-          </span>
-        ),
+        )
+      },
     },
     {
       chave: 'total',
