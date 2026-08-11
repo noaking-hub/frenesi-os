@@ -91,7 +91,7 @@ export default async function Carrinhos() {
     }))
   }
 
-  const modelo = await lerModeloEmail()
+  const modelo = await lerModeloEmail('carrinho')
 
   return (
     <CarrinhosCliente

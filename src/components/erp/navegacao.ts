@@ -76,6 +76,7 @@ export const NAV: GrupoNav[] = [
       { id: 'carrinhos', label: 'Carrinhos abandonados', href: '/crm/carrinhos', pronta: true },
       { id: 'cashback', label: 'Cashback', href: '/crm/cashback', pronta: true },
       { id: 'giftback', label: 'Giftback · Aniversários', href: '/crm/giftback', pronta: true },
+      { id: 'emails', label: 'E-mails da marca', href: '/crm/emails', pronta: true },
     ],
   },
   { id: 'promocoes', label: 'Cupons', href: '/promocoes', pronta: true },

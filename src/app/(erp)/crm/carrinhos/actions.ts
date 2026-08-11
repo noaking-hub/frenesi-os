@@ -3,10 +3,10 @@
 import { revalidatePath } from 'next/cache'
 
 import { emailConfigurado, entregar } from '@/data/email'
-import { gravarModeloEmail, lerModeloEmail } from '@/data/modelo-email'
+import { lerModeloEmail } from '@/data/modelo-email'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { criarCupomYampi, lerCarrinhosYampi } from '@/data/yampi-crm'
-import { emailRecuperacao, type ModeloEmailRecuperacao } from '@/domain'
+import { emailRecuperacao } from '@/domain'
 
 /**
  * Como o cupom entra no envio: um código fixo já publicado, ou um código
@@ -106,7 +106,7 @@ export async function enviarEmailsCarrinho(
   }
   const agora = Date.now()
   const inicio = Date.now()
-  const modelo = await lerModeloEmail()
+  const modelo = await lerModeloEmail('carrinho')
 
   for (let i = 0; i < unicos.length; i++) {
     // O prazo desta rodada acabou: devolve o resto para a tela continuar.
@@ -209,32 +209,3 @@ export async function enviarEmailsCarrinho(
   return { ok: true, resultado }
 }
 
-/** Salva os textos do modelo — a próxima leva de e-mails já sai com eles. */
-export async function salvarModeloEmail(
-  m: ModeloEmailRecuperacao,
-): Promise<{ ok: true } | { ok: false; erro: string }> {
-  if (!m.assunto?.trim()) return { ok: false, erro: 'O assunto não pode ficar vazio.' }
-  const html = m.html?.trim() ?? ''
-  if (!html && [m.titulo, m.mensagem, m.textoBotao].some((c) => !c || !c.trim())) {
-    return { ok: false, erro: 'Título, mensagem e texto do botão não podem ficar vazios na moldura da marca.' }
-  }
-  if (html && !/\{itens\}/.test(html)) {
-    return {
-      ok: false,
-      erro: 'O HTML precisa conter {itens} — sem ele o cliente recebe um e-mail de carrinho sem os produtos.',
-    }
-  }
-  try {
-    await gravarModeloEmail({
-      assunto: m.assunto.trim(),
-      titulo: m.titulo.trim(),
-      mensagem: m.mensagem.trim(),
-      textoBotao: m.textoBotao.trim(),
-      html: html || null,
-    })
-  } catch (e) {
-    return { ok: false, erro: e instanceof Error ? e.message : String(e) }
-  }
-  revalidatePath('/crm/carrinhos')
-  return { ok: true }
-}

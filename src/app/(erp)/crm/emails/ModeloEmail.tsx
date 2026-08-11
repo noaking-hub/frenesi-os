@@ -7,9 +7,9 @@ import { useMemo, useState, useTransition } from 'react'
 import { Modal } from '@/components/erp/Modal'
 import { BotaoOuro, BotaoSecundario, Rotulo } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
-import { HTML_BASE_RECUPERACAO, emailRecuperacao, type ModeloEmailRecuperacao } from '@/domain'
+import { HTML_BASE_RECUPERACAO, emailGiftback, emailRecuperacao, type ModeloEmailRecuperacao } from '@/domain'
 
-import { salvarModeloEmail } from './actions'
+import { salvarModelo } from './actions'
 
 const campo: React.CSSProperties = {
   padding: '9px 12px',
@@ -32,10 +32,13 @@ const campo: React.CSSProperties = {
  * para ver como ficou.
  */
 export function ModeloEmail({
+  tipo = 'carrinho',
   inicial,
   cupom,
   aoFechar,
 }: {
+  /** Qual e-mail está sendo editado — muda a prévia e os campos vivos. */
+  tipo?: 'carrinho' | 'giftback'
   inicial: ModeloEmailRecuperacao
   /** O cupom preenchido na tela, para a prévia mostrar o e-mail completo. */
   cupom: { codigo: string; pct: number } | null
@@ -60,26 +63,36 @@ export function ModeloEmail({
     setModoHtml(true)
   }
 
-  const previa = useMemo(
-    () =>
-      emailRecuperacao(
+  const previa = useMemo(() => {
+    const modelo = { assunto, titulo, mensagem, textoBotao, html: modoHtml ? htmlProprio : null }
+    if (tipo === 'giftback') {
+      return emailGiftback(
         {
           nome: 'Marina Fontes',
-          itens: ['1× Baccarat Rouge 540 (Decant) · 5 ml', '1× Sauvage Elixir (Decant) · 10 ml'],
-          valor: 189.8,
-          linkCheckout: '#',
-          cupom,
+          cupom: cupom ?? { codigo: 'NIVER15-A7K2MB', pct: 15 },
+          validadeDias: 7,
+          lojaUrl: '#',
         },
-        { assunto, titulo, mensagem, textoBotao, html: modoHtml ? htmlProprio : null },
-      ),
-    [assunto, titulo, mensagem, textoBotao, cupom, modoHtml, htmlProprio],
-  )
+        modelo,
+      )
+    }
+    return emailRecuperacao(
+      {
+        nome: 'Marina Fontes',
+        itens: ['1× Baccarat Rouge 540 (Decant) · 5 ml', '1× Sauvage Elixir (Decant) · 10 ml'],
+        valor: 189.8,
+        linkCheckout: '#',
+        cupom,
+      },
+      modelo,
+    )
+  }, [tipo, assunto, titulo, mensagem, textoBotao, cupom, modoHtml, htmlProprio])
 
   const salvar = () =>
     iniciarTransicao(async () => {
       setErro(null)
       setSalvo(false)
-      const r = await salvarModeloEmail({
+      const r = await salvarModelo(tipo, {
         assunto,
         titulo,
         mensagem,
@@ -109,20 +122,26 @@ export function ModeloEmail({
   })
 
   return (
-    <Modal titulo="Modelo do e-mail de recuperação" largura={980} aoFechar={aoFechar}>
+    <Modal
+      titulo={tipo === 'giftback' ? 'Modelo do e-mail de aniversário' : 'Modelo do e-mail de recuperação'}
+      largura={980}
+      aoFechar={aoFechar}
+    >
       <div
         className="empilha-900"
         style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.1fr)', gap: 18, alignItems: 'start' }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" onClick={() => setModoHtml(false)} className="hover:border-ouro/40 font-sans" style={abaModo(!modoHtml)}>
-              Moldura da marca
-            </button>
-            <button type="button" onClick={abrirModoHtml} className="hover:border-ouro/40 font-sans" style={abaModo(modoHtml)}>
-              HTML do zero
-            </button>
-          </div>
+          {tipo === 'carrinho' && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" onClick={() => setModoHtml(false)} className="hover:border-ouro/40 font-sans" style={abaModo(!modoHtml)}>
+                Moldura da marca
+              </button>
+              <button type="button" onClick={abrirModoHtml} className="hover:border-ouro/40 font-sans" style={abaModo(modoHtml)}>
+                HTML do zero
+              </button>
+            </div>
+          )}
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <Rotulo>Assunto</Rotulo>
@@ -164,9 +183,22 @@ export function ModeloEmail({
               >
                 {'Escreva como a marca fala. '}
                 <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{nome}'}</span>
-                {' vira o primeiro nome do cliente (e some quando o checkout não trouxe nome); '}
-                <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{total}'}</span>
-                {' vira o valor do carrinho. A lista de itens, o cupom e o rodapé entram sozinhos.'}
+                {' vira o primeiro nome do cliente (e some quando não há nome); '}
+                {tipo === 'giftback' ? (
+                  <>
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{cupom}'}</span>
+                    {', '}
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{desconto}'}</span>
+                    {' e '}
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{validade}'}</span>
+                    {' viram o código, o % e os dias do presente. O quadro do cupom e o rodapé entram sozinhos.'}
+                  </>
+                ) : (
+                  <>
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{total}'}</span>
+                    {' vira o valor do carrinho. A lista de itens, o cupom e o rodapé entram sozinhos.'}
+                  </>
+                )}
               </span>
 
               <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

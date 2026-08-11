@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 
 import { emailConfigurado, entregar } from '@/data/email'
+import { lerModeloEmail } from '@/data/modelo-email'
 import { gravarAniversario, importarAniversariosYampi, registrarGiftback } from '@/data/giftback'
 import { criarCupomYampi } from '@/data/yampi-crm'
 import { emailGiftback } from '@/domain'
@@ -80,12 +81,16 @@ export async function enviarPresente(dados: {
       naoAcumula: true,
       expiraEm,
     })
-    const { assunto, html } = emailGiftback({
-      nome: dados.nome,
-      cupom: { codigo, pct },
-      validadeDias: validade,
-      lojaUrl: process.env.LOJA_URL ?? null,
-    })
+    const modelo = await lerModeloEmail('giftback')
+    const { assunto, html } = emailGiftback(
+      {
+        nome: dados.nome,
+        cupom: { codigo, pct },
+        validadeDias: validade,
+        lojaUrl: process.env.LOJA_URL ?? null,
+      },
+      modelo,
+    )
     await entregar({ para: dados.email, assunto, html })
     await registrarGiftback({ email: dados.email, cupom: codigo, canal: 'email' })
   } catch (e) {

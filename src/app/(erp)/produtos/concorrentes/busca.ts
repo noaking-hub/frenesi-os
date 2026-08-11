@@ -63,37 +63,31 @@ export async function buscarPrecos(termo: string): Promise<ResultadoBusca | null
 
   const sb = supabaseServer()
 
-  // Um grupo por palavra, todos exigidos — e dentro do grupo, as formas em
-  // que aquela palavra pode aparecer. Só a concentração tem mais de uma:
-  // "Eau de Toilette" e "EDT" são o mesmo produto, e uma loja escreve de um
-  // jeito, outra de outro. Sem isso, quem procura por extenso não acha quem
-  // abreviou — e ignorar a concentração seria pior, porque ela separa dois
-  // produtos com preços diferentes.
+  // A busca NÃO depende do catálogo nem da grafia exata: os preços coletados
+  // vêm inteiros e o casamento acontece aqui, com acento removido dos dois
+  // lados. Antes o filtro era ilike no banco — e "Idôle" digitado não achava
+  // "Idole" gravado (nem o contrário), o que parecia exigir cadastro prévio.
+  // Cada palavra digitada precisa aparecer no título; a concentração aceita
+  // as duas formas (EDT e Eau de Toilette).
   const grupos = formasDeBusca(limpo).slice(0, 6)
-
-  let consulta = sb
-    .from('concorrente_precos')
-    .select('titulo, preco, variante, url, concorrentes(nome)')
-    .not('variante', 'is', null)
-
-  for (const formas of grupos.length ? grupos : [[limpo]]) {
-    // Vírgula e parêntese são a sintaxe do filtro; num nome de perfume eles
-    // quebrariam a consulta inteira em vez de buscar.
-    const seguras = formas.map((f) => f.replace(/[(),*]/g, ' ').trim()).filter(Boolean)
-    if (seguras.length === 0) continue
-    consulta =
-      seguras.length === 1
-        ? consulta.ilike('titulo', `%${seguras[0]}%`)
-        : consulta.or(seguras.map((f) => `titulo.ilike.%${f}%`).join(','))
-  }
 
   const [{ data: bases }, { data: precos }] = await Promise.all([
     sb.from('perfumes_base').select('id, nome, marca').eq('ativo', true).limit(500),
-    consulta.limit(400),
+    sb
+      .from('concorrente_precos')
+      .select('titulo, preco, variante, url, concorrentes(nome)')
+      .not('variante', 'is', null)
+      .limit(8000),
   ])
 
   const candidatos = buscarNoCatalogo(limpo, bases ?? [])
   const nosso = candidatos[0] ?? null
+
+  const normaliza = (t: string) =>
+    t
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
 
   const observados = ((precos ?? []) as unknown as {
     titulo: string
@@ -101,13 +95,20 @@ export async function buscarPrecos(termo: string): Promise<ResultadoBusca | null
     variante: number
     url: string | null
     concorrentes: { nome: string } | null
-  }[]).map((p) => ({
-    fonte: p.concorrentes?.nome ?? '—',
-    titulo: p.titulo,
-    preco: Number(p.preco),
-    variante: p.variante as VarianteMl,
-    url: p.url,
-  }))
+  }[])
+    .filter((p) => {
+      const alvo = normaliza(p.titulo)
+      return (grupos.length ? grupos : [[limpo]]).every((formas) =>
+        formas.some((f) => alvo.includes(normaliza(f))),
+      )
+    })
+    .map((p) => ({
+      fonte: p.concorrentes?.nome ?? '—',
+      titulo: p.titulo,
+      preco: Number(p.preco),
+      variante: p.variante as VarianteMl,
+      url: p.url,
+    }))
 
   let nossosPrecos: Partial<Record<VarianteMl, number>> = {}
   if (nosso) {

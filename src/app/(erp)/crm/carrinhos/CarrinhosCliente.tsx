@@ -13,7 +13,7 @@ import { brl, parseNum, plural } from '@/domain'
 import type { ModeloEmailRecuperacao } from '@/domain'
 
 import { enviarEmailsCarrinho, type CupomEnvio } from './actions'
-import { ModeloEmail } from './ModeloEmail'
+import { ModeloEmail } from '../emails/ModeloEmail'
 
 type Carrinho = CarrinhoYampi & { whatsapp: string | null }
 

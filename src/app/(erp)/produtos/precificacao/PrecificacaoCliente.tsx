@@ -53,12 +53,28 @@ type Filtro = (typeof FILTROS)[number]
 /** Vírgula é o separador que o usuário digita; o domínio recebe número. */
 const texto = (n: number) => n.toFixed(2).replace('.', ',')
 
+/**
+ * O modo calculadora: nenhum perfume vinculado — só o custo por ml digitado.
+ * Serve para avaliar uma compra ANTES de ela existir no catálogo, com a
+ * mesma fórmula das bases reais.
+ */
+const BASE_LIVRE: PerfumeBase = {
+  id: '',
+  nome: 'Calculadora de compra',
+  marca: 'simulação — nada é gravado',
+  custoPorMl: 0,
+  volumeMl: 0,
+  consumoDiarioMl: 0,
+} as PerfumeBase
+
 export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
   // Abrir num perfume sem custo mostra uma tabela de preços que não cobre o
   // perfume — começamos por um que já tem custo, quando existe algum.
   const [baseId, setBaseId] = useState(
-    () => (bases.find((b) => b.custoPorMl > 0) ?? bases[0]).id,
+    () => (bases.find((b) => b.custoPorMl > 0) ?? bases[0])?.id ?? '',
   )
+  // Sem catálogo, a tela já nasce como calculadora em vez de quebrar.
+  const [modoLivre, setModoLivre] = useState(bases.length === 0)
   const [varianteSel, setVarianteSel] = useState<VarianteMl>(5)
   const [custoTexto, setCustoTexto] = useState<string | null>(null)
   const [margemTexto, setMargemTexto] = useState<string | null>(null)
@@ -69,7 +85,7 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
   const [mercado, setMercado] = useState<PrecoDeMercado[]>([])
   const [lendoMercado, setLendoMercado] = useState(false)
 
-  const base = bases.find((b) => b.id === baseId) ?? bases[0]
+  const base = modoLivre ? BASE_LIVRE : (bases.find((b) => b.id === baseId) ?? bases[0] ?? BASE_LIVRE)
 
   // O preço de mercado é do perfume selecionado: trocar de base tem de
   // limpar o anterior, senão a tela compara o preço de um com o do outro.
@@ -77,6 +93,11 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
     let atual = true
     setMercado([])
     setManuais({})
+    if (!base.id) {
+      // Calculadora: não há perfume para procurar no mercado.
+      setLendoMercado(false)
+      return
+    }
     setLendoMercado(true)
     mercadoDaBase(base.id)
       .then((r) => {
@@ -360,16 +381,51 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
       }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
-        <PerfumeEscolhido
-          base={base}
-          total={bases.length}
-          aoTrocar={() => setTrocando(true)}
-        />
+        {modoLivre ? (
+          <section
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 15,
+              background: 'linear-gradient(170deg,#17161A,#101011)',
+              border: '1px solid rgba(239,209,140,.22)',
+              borderRadius: 16,
+              padding: '15px 18px',
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: 1, minWidth: 0 }}>
+              <TituloSecao tamanho={16}>Calculadora de compra</TituloSecao>
+              <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
+                Nenhum perfume vinculado — digite o custo por ml do frasco que você está avaliando e
+                veja preço, margem e lucro por tamanho. Nada é gravado.
+              </span>
+            </div>
+            {bases.length > 0 && (
+              <BotaoSecundario altura={34} onClick={() => setModoLivre(false)}>
+                Usar um perfume do catálogo
+              </BotaoSecundario>
+            )}
+          </section>
+        ) : (
+          <PerfumeEscolhido
+            base={base}
+            total={bases.length}
+            aoTrocar={() => setTrocando(true)}
+            aoCalculadora={() => {
+              setModoLivre(true)
+              setCustoTexto(null)
+            }}
+          />
+        )}
 
         {custoPorMl === 0 && (
           <FaixaAlerta
-            tom="erro"
-            texto={`${base.nome} está sem custo por ml — os preços abaixo cobrem só taxas e custos fixos, não o perfume. O custo entra sozinho ao registrar a compra do frasco em Estoque → Lotes, ou à mão no Catálogo.`}
+            tom={modoLivre ? 'atencao' : 'erro'}
+            texto={
+              modoLivre
+                ? 'Digite acima o custo por ml do frasco que você está avaliando — ex.: frasco de 100 ml por R$ 470 = R$ 4,70/ml.'
+                : `${base.nome} está sem custo por ml — os preços abaixo cobrem só taxas e custos fixos, não o perfume. O custo entra sozinho ao registrar a compra do frasco em Estoque → Lotes, ou à mão no Catálogo.`
+            }
           />
         )}
 
@@ -544,7 +600,7 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
           bandeiraDe={(l) => (l.variante === varianteSel ? 'ouro' : null)}
         />
 
-        <PublicarPrecos base={base} linhas={linhas} simulando={simulando} />
+        {!modoLivre && <PublicarPrecos base={base} linhas={linhas} simulando={simulando} />}
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -661,7 +717,7 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
           </div>
         </section>
 
-        <FrascoEEstoque base={base} variante={varianteSel} />
+        {!modoLivre && <FrascoEEstoque base={base} variante={varianteSel} />}
       </div>
 
       {trocando && (
@@ -669,6 +725,7 @@ export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
           bases={bases}
           atualId={base.id}
           aoEscolher={(id) => {
+            setModoLivre(false)
             setBaseId(id)
             // O custo digitado era do perfume anterior; sem isto a tabela do
             // novo perfume nasceria com o número errado.
@@ -687,10 +744,12 @@ function PerfumeEscolhido({
   base,
   total,
   aoTrocar,
+  aoCalculadora,
 }: {
   base: PerfumeBase
   total: number
   aoTrocar: () => void
+  aoCalculadora: () => void
 }) {
   return (
     <section
@@ -725,9 +784,14 @@ function PerfumeEscolhido({
         </span>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 7, flex: 'none' }}>
-        <BotaoSecundario altura={34} onClick={aoTrocar}>
-          Trocar perfume
-        </BotaoSecundario>
+        <span style={{ display: 'flex', gap: 7 }}>
+          <BotaoSecundario altura={34} onClick={aoCalculadora}>
+            Calculadora de compra
+          </BotaoSecundario>
+          <BotaoSecundario altura={34} onClick={aoTrocar}>
+            Trocar perfume
+          </BotaoSecundario>
+        </span>
         <Link
           href="/produtos"
           className="font-sans"

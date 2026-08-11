@@ -244,21 +244,49 @@ function renderHtmlProprio(
 /**
  * E-mail de aniversário (Giftback): parabéns da marca com um cupom-presente
  * de uso único. Mesma moldura visual da recuperação — é a mesma marca
- * falando, em outra data.
+ * falando, em outra data. Os textos são editáveis na Central de E-mails;
+ * além de {nome}, valem {cupom}, {desconto} e {validade}.
  */
-export function emailGiftback(d: {
-  nome: string | null
-  cupom: { codigo: string; pct: number }
-  validadeDias: number
-  lojaUrl: string | null
-}): { assunto: string; html: string } {
+export const MODELO_GIFT_PADRAO: ModeloEmailRecuperacao = {
+  assunto: 'Feliz aniversário, {nome} — um presente da FRENESI',
+  titulo: '{nome}, hoje o dia é seu.',
+  mensagem:
+    'Feliz aniversário! Para celebrar com a fragrância que você ama — ou uma nova para marcar o ano — deixamos um presente no seu nome.',
+  textoBotao: 'Escolher meu decant',
+  html: null,
+}
+
+export function emailGiftback(
+  d: {
+    nome: string | null
+    cupom: { codigo: string; pct: number }
+    validadeDias: number
+    lojaUrl: string | null
+  },
+  modelo: ModeloEmailRecuperacao = MODELO_GIFT_PADRAO,
+): { assunto: string; html: string } {
   const primeiroNome = d.nome?.trim().split(/\s+/)[0] || null
-  const assunto = primeiroNome
-    ? `Feliz aniversário, ${primeiroNome} — um presente da FRENESI`
-    : 'Feliz aniversário — um presente da FRENESI'
+  const preenche = (t: string) =>
+    preencherModelo(
+      t
+        .split('{cupom}')
+        .join(d.cupom.codigo)
+        .split('{desconto}')
+        .join(String(d.cupom.pct))
+        .split('{validade}')
+        .join(String(d.validadeDias)),
+      primeiroNome,
+      '',
+    )
+  const assunto = preenche(modelo.assunto)
+  const titulo = preenche(modelo.titulo)
+  const paragrafos = modelo.mensagem
+    .split(/\n\s*\n|\n/)
+    .map((p) => preenche(p.trim()))
+    .filter(Boolean)
 
   const botao = d.lojaUrl
-    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:26px 0 6px;text-align:center;"><a href="${escapaHtml(d.lojaUrl)}" style="display:inline-block;background:#141414;color:#EFD18C;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:bold;font-size:13px;letter-spacing:.08em;text-transform:uppercase;padding:15px 34px;border-radius:8px;">Escolher meu decant</a></td></tr></table>`
+    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:26px 0 6px;text-align:center;"><a href="${escapaHtml(d.lojaUrl)}" style="display:inline-block;background:#141414;color:#EFD18C;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:bold;font-size:13px;letter-spacing:.08em;text-transform:uppercase;padding:15px 34px;border-radius:8px;">${escapaHtml(preenche(modelo.textoBotao))}</a></td></tr></table>`
     : ''
 
   const html = `<!doctype html>
@@ -273,12 +301,14 @@ export function emailGiftback(d: {
           </td></tr>
           <tr><td style="background:#FFFDF8;border:1px solid #EAE2CF;border-radius:14px;padding:34px 36px;">
             <p style="margin:0 0 14px;font-family:Georgia,'Times New Roman',serif;font-size:22px;line-height:1.35;color:#1A1A1A;">
-              ${primeiroNome ? `${escapaHtml(primeiroNome)}, hoje o dia é seu.` : 'Hoje o dia é seu.'}
+              ${escapaHtml(titulo)}
             </p>
-            <p style="margin:0 0 20px;font-family:Arial,Helvetica,sans-serif;font-size:13.5px;line-height:1.65;color:#4C463A;">
-              Feliz aniversário! Para celebrar com a fragrância que você ama — ou uma nova para
-              marcar o ano — deixamos um presente no seu nome.
-            </p>
+            ${paragrafos
+              .map(
+                (p) =>
+                  `<p style="margin:0 0 20px;font-family:Arial,Helvetica,sans-serif;font-size:13.5px;line-height:1.65;color:#4C463A;">${escapaHtml(p)}</p>`,
+              )
+              .join('')}
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px dashed #B08D3E;border-radius:10px;">
               <tr><td style="padding:16px 20px;text-align:center;">
                 <p style="margin:0 0 6px;font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8A7440;">${d.cupom.pct}% de presente de aniversário</p>

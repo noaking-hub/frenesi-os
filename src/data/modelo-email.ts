@@ -1,22 +1,30 @@
 import 'server-only'
 
-import { MODELO_PADRAO, type ModeloEmailRecuperacao } from '@/domain'
+import { MODELO_GIFT_PADRAO, MODELO_PADRAO, type ModeloEmailRecuperacao } from '@/domain'
 
 import { supabaseConfigurado, supabaseServer } from './supabase'
 
 /**
- * O modelo do e-mail de recuperação vive numa linha do banco: texto editável
- * pela tela não pode exigir deploy. Sem linha gravada, vale o padrão do
- * domínio — a tela nunca abre vazia.
+ * Os modelos de e-mail da marca vivem numa tabela, um por chave: texto
+ * editável pela tela não pode exigir deploy. Sem linha gravada, vale o
+ * padrão do domínio — a tela nunca abre vazia.
  */
 
-export async function lerModeloEmail(): Promise<ModeloEmailRecuperacao> {
-  if (!supabaseConfigurado()) return MODELO_PADRAO
+export type ChaveModelo = 'carrinho' | 'giftback'
+
+const PADROES: Record<ChaveModelo, ModeloEmailRecuperacao> = {
+  carrinho: MODELO_PADRAO,
+  giftback: MODELO_GIFT_PADRAO,
+}
+
+export async function lerModeloEmail(chave: ChaveModelo): Promise<ModeloEmailRecuperacao> {
+  if (!supabaseConfigurado()) return PADROES[chave]
   const { data } = await supabaseServer()
-    .from('modelo_email_recuperacao')
+    .from('modelos_email')
     .select('assunto, titulo, mensagem, texto_botao, html')
+    .eq('chave', chave)
     .maybeSingle()
-  if (!data) return MODELO_PADRAO
+  if (!data) return PADROES[chave]
   return {
     assunto: data.assunto,
     titulo: data.titulo,
@@ -26,12 +34,12 @@ export async function lerModeloEmail(): Promise<ModeloEmailRecuperacao> {
   }
 }
 
-export async function gravarModeloEmail(m: ModeloEmailRecuperacao): Promise<void> {
+export async function gravarModeloEmail(chave: ChaveModelo, m: ModeloEmailRecuperacao): Promise<void> {
   if (!supabaseConfigurado()) {
     throw new Error('O Supabase precisa estar configurado para salvar o modelo.')
   }
-  const { error } = await supabaseServer().from('modelo_email_recuperacao').upsert({
-    id: true,
+  const { error } = await supabaseServer().from('modelos_email').upsert({
+    chave,
     assunto: m.assunto,
     titulo: m.titulo,
     mensagem: m.mensagem,
