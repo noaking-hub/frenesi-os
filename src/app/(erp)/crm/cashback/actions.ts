@@ -3,7 +3,7 @@
 import { amostraCarteiraCrua, extratoCashbackYampi, type MovimentoCashback } from '@/data/cashback'
 
 export type RespostaExtrato =
-  | { ok: true; movimentos: MovimentoCashback[]; camposCrus: string[] }
+  | { ok: true; movimentos: MovimentoCashback[]; saldo: number; camposCrus: string[] }
   | { ok: false; erro: string }
 
 /** Extrato de uma carteira, ao vivo da Yampi — chamado ao abrir o cliente. */

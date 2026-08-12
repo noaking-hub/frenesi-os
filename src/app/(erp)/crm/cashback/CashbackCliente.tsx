@@ -40,7 +40,11 @@ export function CashbackCliente({
   const [progresso, setProgresso] = useState<string | null>(null)
   const [aviso, setAviso] = useState<{ tom: 'ok' | 'erro'; texto: string } | null>(null)
   const [selecionado, setSelecionado] = useState<string | null>(null)
-  const [extrato, setExtrato] = useState<{ movimentos: MovimentoCashback[]; camposCrus: string[] } | null>(null)
+  const [extrato, setExtrato] = useState<{
+    movimentos: MovimentoCashback[]
+    saldo: number
+    camposCrus: string[]
+  } | null>(null)
   const [extratoErro, setExtratoErro] = useState<string | null>(null)
   const [lendoExtrato, setLendoExtrato] = useState(false)
   const router = useRouter()
@@ -57,7 +61,7 @@ export function CashbackCliente({
     extratoDoCliente(selecionado)
       .then((r) => {
         if (!atual) return
-        if (r.ok) setExtrato({ movimentos: r.movimentos, camposCrus: r.camposCrus })
+        if (r.ok) setExtrato({ movimentos: r.movimentos, saldo: r.saldo, camposCrus: r.camposCrus })
         else setExtratoErro(r.erro)
       })
       .finally(() => {
@@ -147,7 +151,7 @@ export function CashbackCliente({
           ? {
               tom: 'erro',
               texto:
-                `${plural(lidos, 'carteira lida', 'carteiras lidas')} e TODAS zeradas. Ou o cashback ainda não está ativo no painel da Yampi, ou a resposta vem num formato que o leitor não conhece. ` +
+                `${plural(lidos, 'carteira lida', 'carteiras lidas')} e TODAS zeradas — o saldo sai do extrato de cada cliente (créditos aprovados, menos o já usado, dentro da validade). ` +
                 `Resposta crua da Yampi para diagnóstico: ${amostra.slice(0, 2).join(' ||| ') || '(vazia)'} — me mande este texto que eu ajusto a leitura em cima do fato.`,
             }
           : {
@@ -196,11 +200,15 @@ export function CashbackCliente({
     const SEIS_HORAS = 6 * 60 * 60 * 1000
     const velho =
       !ultimaSincronizacao || Date.now() - new Date(ultimaSincronizacao).getTime() > SEIS_HORAS
-    if (!velho) return
+    // Espelho recente mas inteiramente zerado é retrato de leitura quebrada,
+    // não de loja sem cashback: refazer é o único jeito de a correção
+    // aparecer sem esperar as 6 horas do retrato "fresco".
+    const todoZerado = carteiras.length > 0 && carteiras.every((c) => c.saldo <= 0)
+    if (!velho && !todoZerado) return
     jaDisparou.current = true
     void sincronizar()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ultimaSincronizacao])
+  }, [ultimaSincronizacao, carteiras])
 
   const colunas: Coluna<CarteiraYampi>[] = [
     {
@@ -343,11 +351,18 @@ export function CashbackCliente({
                 ×
               </button>
             </div>
-            <span style={{ display: 'flex', alignItems: 'baseline', gap: 9 }}>
-              <Valor tamanho={19} tom="ouro">{brl(carteiraSel.saldo)}</Valor>
+            <span style={{ display: 'flex', alignItems: 'baseline', gap: 9, flexWrap: 'wrap' }}>
+              <Valor tamanho={19} tom="ouro">{brl(extrato?.saldo ?? carteiraSel.saldo)}</Valor>
               <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
-                saldo espelhado
+                {extrato ? 'saldo ao vivo · créditos válidos menos o já usado' : 'saldo espelhado'}
               </span>
+              {/* Espelho e leitura ao vivo discordando é notícia, não detalhe:
+                  quer dizer que o cashback mudou depois do último retrato. */}
+              {extrato && Math.abs(extrato.saldo - carteiraSel.saldo) >= 0.01 && (
+                <span className="font-sans" style={{ fontSize: 10, color: COR.atencao }}>
+                  {`espelho de ${brl(carteiraSel.saldo)} — atualiza na próxima sincronização`}
+                </span>
+              )}
             </span>
 
             <Rotulo>Extrato · direto da Yampi</Rotulo>
@@ -376,9 +391,11 @@ export function CashbackCliente({
                       </Valor>
                     </span>
                     <span className="font-sans" style={{ fontSize: 10, lineHeight: 1.4, color: 'rgba(242,237,227,.55)', textWrap: 'pretty' }}>
-                      {m.rotulo}
-                      {m.descricao ? ` · ${m.descricao}` : ''}
+                      {m.descricao || m.rotulo}
+                      {m.pedido ? ` · pedido ${m.pedido}` : ''}
+                      {m.usado > 0 ? ` · ${brl(m.usado)} já usados` : ''}
                       {m.expiraEm ? ` · expira ${dataHoraBr(m.expiraEm).slice(0, 8)}` : ''}
+                      {m.vale ? '' : ' · não conta no saldo'}
                     </span>
                   </span>
                 ))}

@@ -37,10 +37,10 @@ export const HTML_VALIDADO_CARRINHO = `<!DOCTYPE html>
 
       <span style="display:none; font-size:1px; color:#070605; line-height:1px; max-height:0; max-width:0; opacity:0; overflow:hidden;">Seus produtos continuam reservados — e seu cupom vale por 48 horas.</span>
 
-      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" class="w600" style="width:600px; max-width:600px; background-color:#0B0907; border:1px solid #6B5836; border-radius:16px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="680" class="w600" style="width:680px; max-width:680px; background-color:#0B0907; border:1px solid #6B5836; border-radius:16px;">
         <tr>
           <td style="padding:8px;">
-            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="582" class="win" style="width:582px; border:1px solid #2E2718; border-radius:10px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="662" class="win" style="width:662px; border:1px solid #2E2718; border-radius:10px;">
 
               <tr>
                 <td align="center" class="pad" style="padding:44px 40px 0 40px;">
@@ -50,7 +50,7 @@ export const HTML_VALIDADO_CARRINHO = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:26px 46px 0 46px;">
-                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="490" class="win" style="width:490px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="570" class="win" style="width:570px;">
                     <tr>
                       <td width="60" valign="middle" style="width:60px;"><div style="border-top:1px solid #6B5836; height:1px; line-height:1px; font-size:0;">&nbsp;</div></td>
                       <td align="center" valign="middle" style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#D4AF6A; padding:0 14px;">SUA SELE&Ccedil;&Atilde;O CONTINUA RESERVADA</td>
@@ -69,10 +69,10 @@ export const HTML_VALIDADO_CARRINHO = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:34px 32px 0 32px;">
-                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="518" class="win" style="width:518px; border:1px solid #6B5836; border-radius:12px; background-color:#0D0B08;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="598" class="win" style="width:598px; border:1px solid #6B5836; border-radius:12px; background-color:#0D0B08;">
                     <tr>
                       <td align="center" style="padding:24px 26px 0 26px;">
-                        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="466" class="win" style="width:466px;">
+                        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="546" class="win" style="width:546px;">
                           <tr>
                             <td width="90" valign="middle" style="width:90px;"><div style="border-top:1px solid #4A3D25; height:1px; line-height:1px; font-size:0;">&nbsp;</div></td>
                             <td align="center" valign="middle" style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#D4AF6A; padding:0 12px;">NO SEU CARRINHO</td>
@@ -83,13 +83,13 @@ export const HTML_VALIDADO_CARRINHO = `<!DOCTYPE html>
                     </tr>
                     <tr>
                       <td style="padding:18px 26px 0 26px;">
-                        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="466" class="win" style="width:466px; border:1px solid #2E2718; border-radius:8px; background-color:#0A0806;">
+                        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="546" class="win" style="width:546px; border:1px solid #2E2718; border-radius:8px; background-color:#0A0806;">
                           <tr>
                             <td style="padding:18px 20px; font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:22px; mso-line-height-rule:exactly; color:#EDE6DA;">{itens}</td>
                           </tr>
                           <tr>
                             <td style="padding:0 20px;">
-                              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="426" style="width:426px; border-top:1px dashed #3A3222;">
+                              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="506" style="width:506px; border-top:1px dashed #3A3222;">
                                 <tr>
                                   <td align="left" style="padding:16px 0 18px 0; font-family:Arial,Helvetica,sans-serif; font-size:12px; line-height:18px; mso-line-height-rule:exactly; letter-spacing:3px; color:#A2957F;">TOTAL</td>
                                   <td align="right" style="padding:16px 0 18px 0; font-family:Georgia,'Times New Roman',serif; font-size:24px; line-height:28px; mso-line-height-rule:exactly; color:#D4AF6A;">{total}</td>
@@ -107,7 +107,7 @@ export const HTML_VALIDADO_CARRINHO = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:34px 32px 0 32px;">
-                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="518" class="win" style="width:518px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="598" class="win" style="width:598px;">
                     <tr>
                       <td bgcolor="#D4AF6A" align="center" style="background-color:#D4AF6A; background-image:linear-gradient(180deg,#EAC97E,#C89A4E); border-radius:10px; padding:19px 20px;">
                         <a href="{link}" style="display:block; font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:18px; mso-line-height-rule:exactly; letter-spacing:2.5px; color:#14100A; text-decoration:none; font-weight:bold;">FINALIZAR MINHA COMPRA</a>
@@ -125,7 +125,7 @@ export const HTML_VALIDADO_CARRINHO = `<!DOCTYPE html>
               </tr>
               <tr>
                 <td align="center" class="pad" style="padding:10px 32px 0 32px;">
-                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="518" class="win" style="width:518px; border:1px solid #6B5836; border-radius:12px; background-color:#0D0B08;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="598" class="win" style="width:598px; border:1px solid #6B5836; border-radius:12px; background-color:#0D0B08;">
                     <tr>
                       <td align="center" style="padding:28px 30px 30px 30px;">
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#D4AF6A;">UM INCENTIVO PARA VOLTAR</div>
@@ -155,7 +155,7 @@ export const HTML_VALIDADO_CARRINHO = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:30px 46px 0 46px;">
-                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="490" class="win" style="width:490px; border-top:1px solid #2E2718;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="570" class="win" style="width:570px; border-top:1px solid #2E2718;">
                     <tr>
                       <td align="center" style="padding-top:26px;">
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#D4AF6A;">ATENDIMENTO OFICIAL</div>
@@ -237,10 +237,10 @@ export const HTML_VALIDADO_GIFT = `<!DOCTYPE html>
 
       <span style="display:none; font-size:1px; color:#070605; line-height:1px; max-height:0; max-width:0; opacity:0; overflow:hidden;">Um presente da FRENESI para o seu anivers&aacute;rio — {desconto}% de desconto para celebrar.</span>
 
-      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" class="w600" style="width:600px; max-width:600px; background-color:#0B0907; border:1px solid #6B5836; border-radius:16px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="680" class="w600" style="width:680px; max-width:680px; background-color:#0B0907; border:1px solid #6B5836; border-radius:16px;">
         <tr>
           <td style="padding:8px;">
-            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="582" class="win" style="width:582px; border:1px solid #2E2718; border-radius:10px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="662" class="win" style="width:662px; border:1px solid #2E2718; border-radius:10px;">
 
               <tr>
                 <td align="center" class="pad" style="padding:44px 40px 0 40px;">
@@ -250,7 +250,7 @@ export const HTML_VALIDADO_GIFT = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:26px 46px 0 46px;">
-                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="490" class="win" style="width:490px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="570" class="win" style="width:570px;">
                     <tr>
                       <td width="60" valign="middle" style="width:60px;"><div style="border-top:1px solid #6B5836; height:1px; line-height:1px; font-size:0;">&nbsp;</div></td>
                       <td align="center" valign="middle" style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#D4AF6A; padding:0 14px;">HOJE O DIA &Eacute; SEU</td>
@@ -275,7 +275,7 @@ export const HTML_VALIDADO_GIFT = `<!DOCTYPE html>
               </tr>
               <tr>
                 <td align="center" class="pad" style="padding:10px 32px 0 32px;">
-                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="518" class="win" style="width:518px; border:1px solid #6B5836; border-radius:12px; background-color:#0D0B08;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="598" class="win" style="width:598px; border:1px solid #6B5836; border-radius:12px; background-color:#0D0B08;">
                     <tr>
                       <td align="center" style="padding:28px 30px 30px 30px;">
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#D4AF6A;">O SEU PRESENTE</div>
@@ -297,7 +297,7 @@ export const HTML_VALIDADO_GIFT = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:26px 32px 0 32px;">
-                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="518" class="win" style="width:518px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="598" class="win" style="width:598px;">
                     <tr>
                       <td bgcolor="#D4AF6A" align="center" style="background-color:#D4AF6A; background-image:linear-gradient(180deg,#EAC97E,#C89A4E); border-radius:10px; padding:19px 20px;">
                         <a href="https://frenesiperfumes.com.br" style="display:block; font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:18px; mso-line-height-rule:exactly; letter-spacing:2.5px; color:#14100A; text-decoration:none; font-weight:bold;">RESGATAR MEU PRESENTE</a>
@@ -316,7 +316,7 @@ export const HTML_VALIDADO_GIFT = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:30px 46px 0 46px;">
-                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="490" class="win" style="width:490px; border-top:1px solid #2E2718;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="570" class="win" style="width:570px; border-top:1px solid #2E2718;">
                     <tr>
                       <td align="center" style="padding-top:26px;">
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#D4AF6A;">ATENDIMENTO OFICIAL</div>

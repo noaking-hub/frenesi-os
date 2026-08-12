@@ -228,9 +228,9 @@ function tabelaDeItens(itens: string[], imagens?: (string | null)[]): string {
       const foto = !temFoto
         ? ''
         : img
-          ? `<td width="78" valign="middle" style="width:78px; padding:8px 14px 8px 0;"><img src="${escapaHtml(img)}" width="64" height="64" alt="" style="display:block; width:64px; height:64px; border-radius:8px; border:0;" /></td>`
-          : `<td width="78" valign="middle" style="width:78px; padding:8px 14px 8px 0;">&nbsp;</td>`
-      return `<tr>${foto}<td valign="middle" style="padding:7px 0; font-family:inherit; font-size:inherit; line-height:inherit; color:inherit;">${escapaHtml(i)}</td></tr>`
+          ? `<td width="98" valign="middle" style="width:98px; padding:9px 16px 9px 0;"><img src="${escapaHtml(img)}" width="82" height="82" alt="" style="display:block; width:82px; height:82px; border-radius:8px; border:0;" /></td>`
+          : `<td width="98" valign="middle" style="width:98px; padding:9px 16px 9px 0;">&nbsp;</td>`
+      return `<tr>${foto}<td valign="middle" style="padding:9px 0; font-family:inherit; font-size:inherit; line-height:inherit; color:inherit;">${escapaHtml(i)}</td></tr>`
     })
     .join('')
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${linhas}</table>`

@@ -1,5 +1,7 @@
 import 'server-only'
 
+import { creditoVale, dataDe as textoData, saldoDoExtrato } from '@/domain'
+
 import { supabaseConfigurado, supabaseServer } from './supabase'
 import { chamarYampi, yampiConfigurada } from './yampi'
 
@@ -40,27 +42,17 @@ function numero(valor: unknown): number {
   return 0
 }
 
-/**
- * O saldo pode vir como número cru, `{ balance }`, `{ amount }`, embrulhado
- * ou aninhado mais fundo — a leitura desce até dois níveis atrás do primeiro
- * campo com cara de dinheiro.
- */
-function saldoDe(resposta: unknown, nivel = 0): number {
+/** A lista de movimentos de dentro da resposta do extrato, em qualquer embrulho. */
+function movimentosDe(resposta: unknown): Record<string, unknown>[] {
   const cru = miolo(resposta)
-  if (typeof cru === 'number' || typeof cru === 'string') return numero(cru)
-  if (cru && typeof cru === 'object' && !Array.isArray(cru) && nivel < 3) {
-    const o = cru as Record<string, unknown>
-    const direto = campo(o, ['balance', 'amount', 'value', 'total', 'saldo', 'available'])
-    if (direto !== undefined) {
-      const n = saldoDe(direto, nivel + 1)
-      if (n !== 0) return n
-      return numero(direto)
+  if (Array.isArray(cru)) return cru as Record<string, unknown>[]
+  if (cru && typeof cru === 'object') {
+    for (const nome of ['transactions', 'statement', 'movements', 'items']) {
+      const dentro = miolo((cru as Record<string, unknown>)[nome])
+      if (Array.isArray(dentro)) return dentro as Record<string, unknown>[]
     }
-    // Sem campo conhecido: desce em wallet/cashback, se existirem.
-    const dentro = campo(o, ['wallet', 'cashback'])
-    if (dentro !== undefined) return saldoDe(dentro, nivel + 1)
   }
-  return 0
+  return []
 }
 
 const pausa = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -123,11 +115,13 @@ export async function sincronizarCashbackYampi(
         null
       const email = typeof c.email === 'string' ? c.email.trim().toLowerCase() : null
 
+      // O extrato é a fonte: o endpoint de saldo desta loja responde 404, e
+      // era ele que fazia TODAS as carteiras aparecerem zeradas.
       let saldo = 0
       let tentativas = 0
       for (;;) {
         try {
-          const cru = await chamarYampi(`/pricing/wallet/${String(id)}/balance`)
+          const cru = await chamarYampi(`/pricing/wallet/statement/${String(id)}`)
           if (amostraCrua.length < 3) {
             try {
               amostraCrua.push(JSON.stringify(cru).slice(0, 320))
@@ -135,7 +129,7 @@ export async function sincronizarCashbackYampi(
               /* amostra é diagnóstico, não pode derrubar a leitura */
             }
           }
-          saldo = saldoDe(cru)
+          saldo = saldoDoExtrato(movimentosDe(cru))
           break
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
@@ -253,6 +247,12 @@ export interface MovimentoCashback {
   rotulo: string
   descricao: string | null
   expiraEm: string | null
+  /** Quanto deste crédito já foi gasto — o que sobra é `valor - usado`. */
+  usado: number
+  /** Crédito vivo: aprovado, não cancelado, dentro da validade. */
+  vale: boolean
+  /** Pedido que gerou o movimento, quando a Yampi informa. */
+  pedido: string | null
 }
 
 /**
@@ -261,35 +261,36 @@ export interface MovimentoCashback {
  */
 export async function extratoCashbackYampi(customerId: string): Promise<{
   movimentos: MovimentoCashback[]
+  /** Soma do que ainda vale — o mesmo cálculo que alimenta o espelho. */
+  saldo: number
   camposCrus: string[]
 }> {
   const r = await chamarYampi<unknown>(`/pricing/wallet/statement/${encodeURIComponent(customerId)}`)
-  const cru = miolo(r)
-  const lista = Array.isArray(cru) ? cru : []
+  const lista = movimentosDe(r)
+  const hoje = new Date().toISOString().slice(0, 10)
 
-  const movimentos = (lista as Record<string, unknown>[]).map((m) => {
-    const dataCru = miolo(campo(m, ['created_at', 'date', 'createdAt']))
-    const expiraCru = miolo(campo(m, ['expires_at', 'expire_at', 'expiration_date']))
-    const texto = (v: unknown) =>
-      typeof v === 'string'
-        ? v
-        : v && typeof v === 'object' && 'date' in (v as object)
-          ? String((v as { date: unknown }).date)
-          : null
-    const tipoCru = campo(m, ['type', 'operation', 'kind', 'description_type'])
+  const movimentos = lista.map((m) => {
+    const tipoCru = campo(m, ['transaction_type', 'type', 'operation', 'kind'])
+    const pedidoCru = miolo(campo(m, ['order'])) as Record<string, unknown> | undefined
+    const numeroPedido = pedidoCru ? campo(pedidoCru, ['number', 'id']) : campo(m, ['order_id'])
+
     return {
-      quando: texto(dataCru),
-      valor: numero(campo(m, ['value', 'amount', 'total'])),
+      quando: textoData(campo(m, ['created_at', 'date', 'createdAt'])),
+      valor: numero(campo(m, ['amount', 'value', 'total'])),
+      usado: numero(campo(m, ['used_amount', 'used', 'consumed_amount'])),
       rotulo: typeof tipoCru === 'string' ? tipoCru : 'movimento',
-      descricao:
-        (typeof m.description === 'string' && m.description) ||
-        (typeof m.order_id !== 'undefined' ? `pedido ${String(m.order_id)}` : null),
-      expiraEm: texto(expiraCru),
+      // Mesma regra que soma o saldo — a linha da tela e o total não podem
+      // discordar sobre o que conta.
+      vale: creditoVale(m, hoje),
+      descricao: typeof m.description === 'string' ? m.description : null,
+      expiraEm: textoData(campo(m, ['expires_at', 'expire_at', 'expiration_date'])),
+      pedido: numeroPedido !== undefined ? String(numeroPedido) : null,
     }
   })
 
   return {
     movimentos,
-    camposCrus: lista[0] ? Object.keys(lista[0] as object).sort() : [],
+    saldo: saldoDoExtrato(lista),
+    camposCrus: lista[0] ? Object.keys(lista[0]).sort() : [],
   }
 }
