@@ -2,10 +2,10 @@
 
 import Link from 'next/link'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
-import { BotaoOuro, FaixaAlerta, Ponto, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
+import { BotaoOuro, BotaoSecundario, FaixaAlerta, Ponto, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
 import { CelulaDupla, Tabela, type Coluna } from '@/components/erp/Tabela'
 import { Modal } from '@/components/erp/Modal'
 import { COR, type Tom } from '@/components/erp/tokens'
@@ -17,9 +17,9 @@ import { entregaLocal,
   plural,
   resumirEnvios,
 } from '@/domain'
-import type { Envio, EstadoShopify, StatusRastreio } from '@/domain'
+import type { Envio, EstadoShopify, EventoTransportadora, StatusRastreio } from '@/domain'
 
-import { baixarNaShopify } from './actions'
+import { atualizarRastreioAgora, baixarNaShopify, rastreioDoPedido } from './actions'
 
 const TOM_RASTREIO: Record<StatusRastreio, Tom> = {
   'pagamento-pendente': 'neutro',
@@ -602,6 +602,116 @@ function CardIntegracao({
   )
 }
 
+const dataHoraCurta = (iso: string | null) =>
+  iso
+    ? new Date(iso).toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'America/Sao_Paulo',
+      })
+    : '—'
+
+/**
+ * A linha do tempo que vem da TRANSPORTADORA.
+ *
+ * Separada dos marcos do sistema de propósito: uma coisa é o que o ERP sabe
+ * (pagou, emitiu código, espelhou na loja), outra é onde o objeto está. Juntar
+ * as duas numa lista só faria o operador tratar dedução do ERP como leitura
+ * de scanner — e é sobre a segunda que ele responde ao cliente.
+ */
+function TimelineTransportadora({ pedidoId, temCodigo }: { pedidoId: string; temCodigo: boolean }) {
+  const [eventos, setEventos] = useState<EventoTransportadora[] | null>(null)
+  const [erro, setErro] = useState<string | null>(null)
+  const [buscando, setBuscando] = useState(false)
+
+  useEffect(() => {
+    let atual = true
+    rastreioDoPedido(pedidoId).then((r) => {
+      if (!atual) return
+      if (r.ok) setEventos(r.eventos)
+      else setErro(r.erro)
+    })
+    return () => {
+      atual = false
+    }
+  }, [pedidoId])
+
+  const atualizar = () => {
+    setBuscando(true)
+    setErro(null)
+    void atualizarRastreioAgora(pedidoId)
+      .then((r) => {
+        if (r.ok) setEventos(r.eventos)
+        else setErro(r.erro)
+      })
+      .finally(() => setBuscando(false))
+  }
+
+  if (!temCodigo) return null
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 6 }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <Rotulo>Na transportadora</Rotulo>
+        <div style={{ flex: 1 }} />
+        <BotaoSecundario altura={26} desabilitado={buscando} onClick={atualizar}>
+          {buscando ? 'Consultando…' : 'Atualizar agora'}
+        </BotaoSecundario>
+      </span>
+
+      {erro && (
+        <span className="font-sans" style={{ fontSize: 10.5, lineHeight: 1.45, color: COR.erro, textWrap: 'pretty' }}>
+          {erro}
+        </span>
+      )}
+
+      {eventos === null && !erro && (
+        <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
+          lendo os eventos…
+        </span>
+      )}
+
+      {eventos?.length === 0 && (
+        <span className="font-sans" style={{ fontSize: 10.5, lineHeight: 1.45, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
+          Nenhuma ocorrência gravada ainda. O rastreio chega pelo webhook da transportadora e pela
+          varredura de hora em hora — “Atualizar agora” pergunta na hora.
+        </span>
+      )}
+
+      {eventos?.map((ev, i) => (
+        <span
+          key={ev.id}
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '92px 12px minmax(0,1fr)',
+            gap: 11,
+            alignItems: 'start',
+            padding: '6px 0',
+          }}
+        >
+          <span className="font-mono" style={{ fontSize: 10, lineHeight: 1.45, color: 'rgba(242,237,227,.34)' }}>
+            {dataHoraCurta(ev.quando)}
+          </span>
+          <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, paddingTop: 4 }}>
+            <Ponto tom={ev.entregue ? 'ok' : i === 0 ? 'info' : 'neutro'} />
+            <span style={{ width: 1, flex: 1, minHeight: 10, background: 'var(--color-borda)', display: 'block' }} />
+          </span>
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+            <span className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.45, color: 'rgba(242,237,227,.78)' }}>
+              {ev.descricao}
+            </span>
+            <span className="font-sans" style={{ fontSize: 10, lineHeight: 1.25, color: 'var(--color-terciario)' }}>
+              {[ev.local, ev.origem === 'frenet' ? 'Frenet' : 'Melhor Envio'].filter(Boolean).join(' · ')}
+            </span>
+          </span>
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function ModalRastreio({
   envio,
   aoFechar,
@@ -664,6 +774,9 @@ function ModalRastreio({
           </button>
         </div>
 
+        <TimelineTransportadora pedidoId={envio.pedidoId} temCodigo={Boolean(envio.rastreio)} />
+
+        <Rotulo>No sistema</Rotulo>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {envio.eventos.map((ev, i) => {
             const tom: Tom =

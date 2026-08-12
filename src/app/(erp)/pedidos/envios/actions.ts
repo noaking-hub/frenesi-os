@@ -2,11 +2,79 @@
 
 import { revalidatePath } from 'next/cache'
 
+import {
+  eventosDoPedido,
+  frenetConfigurada,
+  gravarEventosRastreio,
+  rastrearNaFrenet,
+} from '@/data/frenet'
 import { mensagemDe, shopifyConfigurada, sincronizarEnviosShopify, vincularPedidosShopify } from '@/data/shopify'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import type { EnvioParaShopify } from '@/data/shopify'
+import type { EventoTransportadora } from '@/domain'
 
 export type Resposta<T = object> = ({ ok: true } & T) | { ok: false; erro: string }
+
+/**
+ * A linha do tempo da transportadora para UM pedido.
+ *
+ * Lê do banco, não da Frenet: os eventos chegam por webhook e por varredura, e
+ * consultar a transportadora a cada abertura de modal gastaria cota para
+ * mostrar o que já está gravado.
+ */
+export async function rastreioDoPedido(
+  pedidoId: string,
+): Promise<Resposta<{ eventos: EventoTransportadora[] }>> {
+  try {
+    return { ok: true, eventos: await eventosDoPedido(pedidoId) }
+  } catch (e) {
+    return { ok: false, erro: mensagemDe(e) }
+  }
+}
+
+/**
+ * Consulta a transportadora AGORA para um pedido — o botão de quem está com o
+ * cliente na linha e não pode esperar a próxima rodada.
+ */
+export async function atualizarRastreioAgora(
+  pedidoId: string,
+): Promise<Resposta<{ eventos: EventoTransportadora[]; novos: number }>> {
+  if (!frenetConfigurada()) {
+    return {
+      ok: false,
+      erro: 'A Frenet não está configurada — defina FRENET_TOKEN no ambiente para consultar o rastreio ao vivo.',
+    }
+  }
+  if (!supabaseConfigurado()) return { ok: false, erro: 'O Supabase precisa estar configurado.' }
+
+  try {
+    const sb = supabaseServer()
+    const { data, error } = await sb
+      .from('pedidos')
+      .select('id, rastreio, servico_frete')
+      .eq('id', pedidoId)
+      .maybeSingle()
+    if (error) return { ok: false, erro: mensagemDe(error) }
+
+    const pedido = data as { rastreio: string | null; servico_frete: string | null } | null
+    if (!pedido?.rastreio) {
+      return { ok: false, erro: 'Este pedido ainda não tem código de rastreio.' }
+    }
+    if (/^ME[_ ]/i.test(pedido.servico_frete ?? '')) {
+      return {
+        ok: false,
+        erro: 'Este envio saiu pelo Melhor Envio, que ainda não está ligado ao ERP — a consulta ao vivo cobre por enquanto os envios da Frenet (Correios e Jadlog).',
+      }
+    }
+
+    const lidos = await rastrearNaFrenet(pedido.rastreio, pedido.servico_frete)
+    const r = await gravarEventosRastreio(lidos)
+    revalidatePath('/pedidos/envios')
+    return { ok: true, eventos: await eventosDoPedido(pedidoId), novos: r.gravados }
+  } catch (e) {
+    return { ok: false, erro: mensagemDe(e) }
+  }
+}
 
 export interface ResultadoBaixa {
   enviados: number

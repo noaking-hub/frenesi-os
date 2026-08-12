@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 
+import { frenetConfigurada, varrerRastreiosFrenet } from '@/data/frenet'
 import { atualizarExtratoEsperando, mercadoPagoConfigurado } from '@/data/mercadopago'
 import {
   aplicarEstoqueCalculado,
@@ -101,6 +102,25 @@ export async function POST(req: Request) {
     }
   } else {
     relatorio.yampi = { pulado: 'credenciais da Yampi não estão definidas' }
+  }
+
+  // Rastreio logo depois dos pedidos: a importação acabou de trazer códigos
+  // novos, e eles entram nesta mesma rodada em vez de esperar a próxima hora.
+  // É a rede de segurança do webhook — que se perde em queda, deploy ou 500.
+  if (frenetConfigurada()) {
+    try {
+      const r = await varrerRastreiosFrenet(60)
+      relatorio.rastreio = {
+        consultados: r.consultados,
+        eventos: r.eventos,
+        entregasConfirmadas: r.entregues,
+        falhas: r.falhas.length,
+      }
+    } catch (e) {
+      relatorio.rastreio = { erro: mensagemDe(e) }
+    }
+  } else {
+    relatorio.rastreio = { pulado: 'FRENET_TOKEN não está definido' }
   }
 
   // O estoque publicado na Shopify vem logo depois dos pedidos: a importação
