@@ -1,4 +1,5 @@
 import { brl } from './format'
+import { HTML_VALIDADO_CARRINHO, HTML_VALIDADO_GIFT } from './emails-validados'
 
 /**
  * O e-mail de recuperação de carrinho, escrito pela marca — não pelo gateway.
@@ -51,7 +52,7 @@ export const MODELO_PADRAO: ModeloEmailRecuperacao = {
   mensagem:
     'Você montou um carrinho na FRENESI e não finalizou — acontece. Seus decants continuam aqui, fracionados do frasco original e prontos para envio.',
   textoBotao: 'Concluir meu pedido',
-  html: null,
+  html: HTML_VALIDADO_CARRINHO,
 }
 
 /** Aplica {nome} e {total}; sem nome, remove o placeholder sem deixar cicatriz. */
@@ -253,7 +254,7 @@ export const MODELO_GIFT_PADRAO: ModeloEmailRecuperacao = {
   mensagem:
     'Feliz aniversário! Para celebrar com a fragrância que você ama — ou uma nova para marcar o ano — deixamos um presente no seu nome.',
   textoBotao: 'Escolher meu decant',
-  html: null,
+  html: HTML_VALIDADO_GIFT,
 }
 
 export function emailGiftback(
@@ -279,6 +280,22 @@ export function emailGiftback(
       '',
     )
   const assunto = preenche(modelo.assunto)
+
+  // Modo HTML do zero: o documento é da operação; aqui só se preenche.
+  if (modelo.html && modelo.html.trim()) {
+    const doc = modelo.html
+      .replace(/\[\[\/?cupom\]\]/gi, '')
+      .split('{cupom}')
+      .join(escapaHtml(d.cupom.codigo))
+      .split('{desconto}')
+      .join(String(d.cupom.pct))
+      .split('{validade}')
+      .join(String(d.validadeDias))
+      .split('{link}')
+      .join(escapaHtml(d.lojaUrl ?? '#'))
+    return { assunto, html: preencherModelo(doc, primeiroNome, '') }
+  }
+
   const titulo = preenche(modelo.titulo)
   const paragrafos = modelo.mensagem
     .split(/\n\s*\n|\n/)

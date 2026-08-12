@@ -132,7 +132,7 @@ export function ModeloEmail({
         style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.1fr)', gap: 18, alignItems: 'start' }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
-          {tipo === 'carrinho' && (
+          {(
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="button" onClick={() => setModoHtml(false)} className="hover:border-ouro/40 font-sans" style={abaModo(!modoHtml)}>
                 Moldura da marca
@@ -154,17 +154,34 @@ export function ModeloEmail({
                 className="font-sans"
                 style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--color-terciario)', textWrap: 'pretty' }}
               >
-                {'O documento inteiro é seu — o campo abre com a base da marca para editar. Campos vivos: '}
+                {tipo === 'giftback'
+                  ? 'O documento inteiro é seu. Campos vivos: '
+                  : 'O documento inteiro é seu — o campo abre com a base da marca para editar. Campos vivos: '}
                 <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{nome}'}</span>
                 {', '}
                 <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{total}'}</span>
                 {', '}
+                {tipo === 'giftback' ? (
+                  <>
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{cupom}'}</span>
+                    {', '}
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{desconto}'}</span>
+                    {', '}
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{validade}'}</span>
+                    {' e '}
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{link}'}</span>
+                    {'. Use tabela e estilo inline — Gmail ignora CSS de cabeçalho.'}
+                  </>
+                ) : (
+                  <>
                 <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{itens}'}</span>
                 {' (tabela pronta com produtos e total, obrigatório), '}
                 <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{link}'}</span>
                 {' (URL do carrinho) e o bloco '}
                 <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'[[cupom]] … {cupom} … {desconto} … [[/cupom]]'}</span>
                 {', que some inteiro quando o envio não leva cupom. Use tabela e estilo inline — Gmail ignora CSS de cabeçalho.'}
+                  </>
+                )}
               </span>
               <textarea
                 value={htmlProprio}
