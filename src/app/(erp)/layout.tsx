@@ -1,12 +1,13 @@
 import { Sidebar } from '@/components/erp/Sidebar'
 import { Topbar } from '@/components/erp/Topbar'
 import { carregarDashboard } from '@/data/consultas'
+import { sessaoAtual } from '@/data/sessao'
 import { origemDados } from '@/data/repository'
 
 export default async function ErpLayout({ children }: { children: React.ReactNode }) {
   // A contagem de alertas do topo é a mesma que alimenta as pendências do
   // Dashboard — uma grandeza, um cálculo.
-  const { pendencias } = await carregarDashboard()
+  const [{ pendencias }, usuario] = await Promise.all([carregarDashboard(), sessaoAtual()])
   const alertas = pendencias.filter((p) => p.contagem > 0 && p.tom !== 'ouro').length
 
   return (
@@ -16,7 +17,7 @@ export default async function ErpLayout({ children }: { children: React.ReactNod
     >
       <Sidebar origem={origemDados()} />
       <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <Topbar alertas={alertas} />
+        <Topbar alertas={alertas} usuario={usuario} />
         <div
           className="animate-[fr-in_.32s_ease_both] conteudo-erp"
           style={{ flex: 1, padding: '26px 30px 46px' }}

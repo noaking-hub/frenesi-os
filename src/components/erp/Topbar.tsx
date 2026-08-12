@@ -1,12 +1,43 @@
 'use client'
 
+import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+
+import { sair } from '@/app/entrar/actions'
 
 import { localizar } from './navegacao'
 
-export function Topbar({ alertas }: { alertas: number }) {
+const itemMenu: React.CSSProperties = {
+  padding: '9px 10px',
+  borderRadius: 8,
+  fontSize: 12,
+  lineHeight: 1.2,
+  color: 'var(--color-corrente)',
+  textDecoration: 'none',
+  display: 'block',
+}
+
+export function Topbar({
+  alertas,
+  usuario,
+}: {
+  alertas: number
+  /** Null quando a autenticação ainda não está configurada (desenvolvimento). */
+  usuario: { nome: string; email: string; papel: 'dono' | 'operacao' } | null
+}) {
   const pathname = usePathname()
   const { modulo, tela } = localizar(pathname)
+  // "Rafael Araújo" vira "Rafael A." e "RA": o topo tem largura fixa, e nome
+  // inteiro empurrava o breadcrumb.
+  const partes = (usuario?.nome ?? '').trim().split(/\s+/).filter(Boolean)
+  const nomeCurto = partes.length
+    ? partes.length > 1
+      ? `${partes[0]} ${partes[partes.length - 1][0]}.`
+      : partes[0]
+    : 'Sem sessão'
+  const iniciais = partes.length
+    ? (partes[0][0] + (partes.length > 1 ? partes[partes.length - 1][0] : '')).toUpperCase()
+    : '—'
   // Breadcrumb `módulo · tela`; quando o grupo não tem subtelas os dois coincidem.
   const crumb = modulo === tela ? modulo : `${modulo} · ${tela}`
 
@@ -163,22 +194,83 @@ export function Topbar({ alertas }: { alertas: number }) {
             justifyContent: 'center',
           }}
         >
-          MF
+          {iniciais}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span
             className="font-sans"
             style={{ fontWeight: 600, fontSize: 11.5, lineHeight: 1.3, color: 'var(--color-corrente)' }}
           >
-            Marina F.
+            {nomeCurto}
           </span>
           <span
             className="font-sans"
             style={{ fontSize: 9.5, lineHeight: 1.3, color: 'rgba(242,237,227,.38)' }}
           >
-            Operação
+            {usuario ? (usuario.papel === 'dono' ? 'Dono' : 'Operação') : 'Sem sessão'}
           </span>
         </div>
+
+        {/* O menu é <details>: abre e fecha sem estado, sem efeito e sem
+            listener de clique fora — HTML dando conta do que costuma virar
+            trezentas linhas de dropdown. */}
+        <details style={{ position: 'relative' }}>
+          <summary
+            aria-label="Menu da conta"
+            className="hover:brightness-125"
+            style={{
+              listStyle: 'none',
+              cursor: 'pointer',
+              width: 26,
+              height: 26,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 7,
+              color: 'rgba(242,237,227,.5)',
+              fontSize: 10,
+            }}
+          >
+            ▾
+          </summary>
+          <div
+            style={{
+              position: 'absolute',
+              right: 0,
+              top: 34,
+              minWidth: 210,
+              padding: 7,
+              borderRadius: 12,
+              background: 'var(--color-painel)',
+              border: '1px solid var(--color-borda)',
+              boxShadow: '0 18px 40px rgba(0,0,0,.5)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2,
+              zIndex: 40,
+            }}
+          >
+            <span
+              className="font-mono"
+              style={{ padding: '7px 10px 8px', fontSize: 10, lineHeight: 1.4, color: 'var(--color-terciario)', wordBreak: 'break-all' }}
+            >
+              {usuario?.email ?? 'autenticação desligada'}
+            </span>
+            <Link href="/perfil" className="hover:brightness-125 font-sans" style={itemMenu}>
+              Meu perfil
+            </Link>
+            {usuario?.papel === 'dono' && (
+              <Link href="/configuracoes/usuarios" className="hover:brightness-125 font-sans" style={itemMenu}>
+                Usuários do ERP
+              </Link>
+            )}
+            <form action={sair}>
+              <button type="submit" className="hover:brightness-125 font-sans" style={{ ...itemMenu, width: '100%', textAlign: 'left', border: 0, background: 'transparent', cursor: 'pointer', color: 'var(--color-erro-claro, #d98078)' }}>
+                Sair
+              </button>
+            </form>
+          </div>
+        </details>
       </div>
     </header>
   )

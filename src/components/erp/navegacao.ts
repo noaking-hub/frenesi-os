@@ -87,6 +87,7 @@ export const NAV: GrupoNav[] = [
     telas: [
       { id: 'cfgpreco', label: 'Parâmetros de precificação', href: '/configuracoes/precificacao', pronta: true },
       { id: 'integracoes', label: 'Integrações', href: '/configuracoes/integracoes', pronta: true },
+      { id: 'usuarios', label: 'Usuários', href: '/configuracoes/usuarios', pronta: true },
     ],
   },
 ]
