@@ -67,6 +67,8 @@ export interface ProdutoDerivado {
 
 /** Uma saída de produção que consumiu volume de um lote. */
 export interface SaidaLote {
+  /** Identidade da linha — é por ela que a correção e o estorno acham a saída. */
+  id: string | null
   data: string
   /** Ordem de produção que originou a saída; `null` na saída lançada à mão. */
   ref: string | null

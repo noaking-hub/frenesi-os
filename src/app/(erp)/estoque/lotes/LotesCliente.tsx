@@ -17,9 +17,16 @@ import {
 import { CelulaDupla, Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR, type Tom } from '@/components/erp/tokens'
 import { apurarLote, brl, pad2, parseNum, pct, plural, previaEncerramento, volume } from '@/domain'
-import type { Lote, ParametrosPrecificacao, PerdaReal, PerfumeBase } from '@/domain'
+import type { Lote, ParametrosPrecificacao, PerdaReal, PerfumeBase, SaidaLote } from '@/domain'
 
-import { ajustarPerdaParametro, encerrarLote, estornarCompra, registrarSaidaLote } from './actions'
+import {
+  ajustarPerdaParametro,
+  editarSaidaLote,
+  encerrarLote,
+  estornarCompra,
+  estornarSaidaLote,
+  registrarSaidaLote,
+} from './actions'
 
 interface Props {
   lotes: Lote[]
@@ -34,6 +41,7 @@ export function LotesCliente({ lotes, bases, parametros, perda, conciliacao }: P
   const [encerrando, setEncerrando] = useState<Lote | null>(null)
   const [dandoSaida, setDandoSaida] = useState<Lote | null>(null)
   const [estornando, setEstornando] = useState<Lote | null>(null)
+  const [corrigindo, setCorrigindo] = useState<SaidaLote | null>(null)
 
   const abrirEncerramento = (l: Lote) => {
     setSelecionado(l.id)
@@ -382,7 +390,7 @@ export function LotesCliente({ lotes, bases, parametros, perda, conciliacao }: P
             >
               {loteSel.saidas.map((s) => (
                 <span
-                  key={`${s.ref}-${s.data}`}
+                  key={s.id ?? `${s.ref}-${s.data}-${s.ml}`}
                   style={{
                     display: 'grid',
                     gridTemplateColumns: '44px minmax(0,1fr) 76px',
@@ -412,10 +420,31 @@ export function LotesCliente({ lotes, bases, parametros, perda, conciliacao }: P
                       {s.ref ?? 'lançada à mão'}
                     </span>
                   </span>
-                  <span style={{ textAlign: 'right' }}>
+                  <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
                     <Valor tamanho={11} tom="var(--color-secundario)">
                       {volume(s.ml)}
                     </Valor>
+                    {/* Só a saída lançada à mão se corrige aqui. A de produção
+                        tem decants envasados do outro lado — mexer nela pelo
+                        extrato deixaria as duas pontas discordando. */}
+                    {!s.ref && s.id && apSel.aberto && (
+                      <button
+                        type="button"
+                        onClick={() => setCorrigindo(s)}
+                        className="font-sans hover:brightness-125"
+                        style={{
+                          border: 0,
+                          background: 'transparent',
+                          padding: 0,
+                          fontSize: 9.5,
+                          fontWeight: 600,
+                          color: 'rgba(239,209,140,.6)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        corrigir
+                      </button>
+                    )}
                   </span>
                 </span>
               ))}
@@ -446,9 +475,10 @@ export function LotesCliente({ lotes, bases, parametros, perda, conciliacao }: P
               <BotaoOuro altura={36} onClick={() => setEncerrando(loteSel)}>
                 Declarar frasco vazio
               </BotaoOuro>
-              {/* O estorno só aparece enquanto o lote está intacto: com saída
-                  lançada, apagar a compra falsificaria o histórico. */}
-              {apSel.consumidoMl === 0 && (
+              {/* Saída de PRODUÇÃO barra o estorno: apagar o lote deixaria
+                  decants envasados sem origem. A lançada à mão é desfeita
+                  junto, porque não tem contrapartida nenhuma. */}
+              {!loteSel.saidas.some((s) => s.ref) && (
                 <button
                   type="button"
                   onClick={() => setEstornando(loteSel)}
@@ -489,6 +519,14 @@ export function LotesCliente({ lotes, bases, parametros, perda, conciliacao }: P
         />
       )}
 
+      {corrigindo && (
+        <CorrigirSaida
+          saida={corrigindo}
+          aoFechar={() => setCorrigindo(null)}
+          aoConcluir={() => setCorrigindo(null)}
+        />
+      )}
+
       {estornando && (
         <ConfirmarEstorno
           lote={estornando}
@@ -503,6 +541,163 @@ export function LotesCliente({ lotes, bases, parametros, perda, conciliacao }: P
     </div>
   )
 }
+
+/**
+ * Corrigir ou apagar uma saída lançada à mão.
+ *
+ * As duas ações moram no mesmo lugar porque nascem da mesma pergunta — "esse
+ * número está errado" — e a diferença é só o tamanho do erro: volume trocado
+ * se corrige, saída que não devia existir se apaga. Separar em duas telas
+ * faria a pessoa escolher antes de saber qual das duas ela quer.
+ */
+function CorrigirSaida({
+  saida,
+  aoFechar,
+  aoConcluir,
+}: {
+  saida: SaidaLote
+  aoFechar: () => void
+  aoConcluir: () => void
+}) {
+  const [ml, setMl] = useState(String(saida.ml))
+  const [motivo, setMotivo] = useState(saida.motivo ?? '')
+  const [erro, setErro] = useState<string | null>(null)
+  const [confirmandoExclusao, setConfirmandoExclusao] = useState(false)
+  const [pendente, iniciarTransicao] = useTransition()
+
+  const volumeNovo = parseNum(ml)
+  const mudou = volumeNovo !== saida.ml || motivo.trim() !== (saida.motivo ?? '')
+
+  const salvar = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      const r = await editarSaidaLote({
+        saidaId: saida.id ?? '',
+        volumeMl: volumeNovo,
+        motivo,
+      })
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      aoConcluir()
+    })
+
+  const apagar = () =>
+    iniciarTransicao(async () => {
+      setErro(null)
+      const r = await estornarSaidaLote(saida.id ?? '')
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      aoConcluir()
+    })
+
+  return (
+    <Modal titulo="Corrigir saída lançada à mão" largura={480} aoFechar={aoFechar}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <Rotulo>{`Lançada em ${saida.data}`}</Rotulo>
+        <TituloSecao tamanho={15}>{saida.motivo ?? 'Saída sem motivo registrado'}</TituloSecao>
+      </div>
+
+      <span
+        className="font-sans"
+        style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+      >
+        {`Hoje esta linha tira ${volume(saida.ml)} do frasco e do estoque da base. A diferença entre o valor de agora e o corrigido volta (ou sai) do estoque no mesmo instante, com o ajuste registrado em Movimentações.`}
+      </span>
+
+      <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <Rotulo>Volume que saiu (ml)</Rotulo>
+        <input
+          value={ml}
+          onChange={(e) => setMl(e.target.value)}
+          inputMode="decimal"
+          className="font-mono focus:border-ouro/45"
+          style={campoModal}
+        />
+      </label>
+
+      <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <Rotulo>Motivo</Rotulo>
+        <input
+          value={motivo}
+          onChange={(e) => setMotivo(e.target.value)}
+          className="font-sans focus:border-ouro/45"
+          style={campoModal}
+        />
+      </label>
+
+      {erro && (
+        <span className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.5, color: COR.erro, textWrap: 'pretty' }}>
+          {erro}
+        </span>
+      )}
+
+      {confirmandoExclusao ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <span className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.55, color: 'var(--color-secundario)', textWrap: 'pretty' }}>
+            {`Apagar devolve ${volume(saida.ml)} ao estoque da base e tira esta linha do extrato do lote. O ajuste fica em Movimentações.`}
+          </span>
+          <div style={{ display: 'flex', gap: 9, justifyContent: 'flex-end' }}>
+            <BotaoSecundario altura={36} onClick={() => setConfirmandoExclusao(false)}>
+              Voltar
+            </BotaoSecundario>
+            <button type="button" onClick={apagar} disabled={pendente} className="font-sans hover:brightness-110" style={botaoPerigo(pendente)}>
+              {pendente ? 'Apagando…' : 'Apagar saída'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 9, justifyContent: 'space-between', alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={() => setConfirmandoExclusao(true)}
+            className="font-sans hover:brightness-125"
+            style={{ border: 0, background: 'transparent', padding: 0, fontWeight: 600, fontSize: 10.5, color: COR.erro, opacity: 0.85, cursor: 'pointer' }}
+          >
+            Apagar esta saída
+          </button>
+          <span style={{ display: 'flex', gap: 9 }}>
+            <BotaoSecundario altura={36} onClick={aoFechar}>
+              Cancelar
+            </BotaoSecundario>
+            <BotaoOuro altura={36} desabilitado={pendente || !mudou || !(volumeNovo > 0)} onClick={salvar}>
+              {pendente ? 'Salvando…' : 'Salvar correção'}
+            </BotaoOuro>
+          </span>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
+const campoModal: React.CSSProperties = {
+  height: 40,
+  width: '100%',
+  padding: '0 12px',
+  border: '1px solid rgba(255,255,255,.12)',
+  background: 'rgba(255,255,255,.04)',
+  color: 'var(--color-corrente)',
+  fontSize: 13,
+  borderRadius: 9,
+  outline: 'none',
+}
+
+const botaoPerigo = (pendente: boolean): React.CSSProperties => ({
+  height: 36,
+  padding: '0 18px',
+  border: '1px solid rgba(224,122,95,.5)',
+  background: 'rgba(224,122,95,.14)',
+  color: COR.erro,
+  fontWeight: 700,
+  fontSize: 11.5,
+  lineHeight: 1,
+  borderRadius: 9,
+  cursor: pendente ? 'wait' : 'pointer',
+  opacity: pendente ? 0.55 : 1,
+})
 
 /**
  * Estornar apaga o lote e devolve estoque e custo médio ao que eram. A
@@ -550,8 +745,10 @@ function ConfirmarEstorno({
         className="font-sans"
         style={{ fontSize: 10.5, lineHeight: 1.55, color: 'var(--color-terciario)', textWrap: 'pretty' }}
       >
-        Só é possível enquanto o lote não tem nenhuma saída lançada. Se este perfume também sincroniza
-        estoque com a Shopify, a próxima sincronia leva o volume corrigido.
+        Saídas lançadas à mão neste lote são desfeitas junto, e o volume delas volta ao estoque antes
+        de a compra ser apagada. Lote que já rendeu ordem de produção não pode ser estornado — ali o
+        caminho é encerrar e acertar pelo Inventário. Se este perfume sincroniza estoque com a Shopify,
+        a próxima sincronia leva o volume corrigido.
       </span>
 
       {erro && (

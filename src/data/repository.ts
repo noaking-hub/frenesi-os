@@ -317,7 +317,7 @@ const repositorioSupabase: Repositorio = {
       .from('lotes')
       .select(
         'id, base_id, fornecedor, volume_ml, custo_total, entrada_em, encerrado_em, ' +
-          'perfumes_base(nome), lote_saidas(ocorrida_em, ordem_id, ml, unidades, variante, motivo)',
+          'perfumes_base(nome), lote_saidas(id, ocorrida_em, ordem_id, ml, unidades, variante, motivo)',
       )
       .order('entrada_em', { ascending: false })
     if (error) throw error
@@ -337,6 +337,7 @@ const repositorioSupabase: Repositorio = {
         entrada: l.entrada_em,
         encerradoEm: l.encerrado_em,
         saidas: saidas.map((s) => ({
+          id: s.id ?? null,
           data: s.ocorrida_em,
           ref: s.ordem_id,
           ml: Number(s.ml),
@@ -1024,6 +1025,7 @@ interface LinhaLote {
   encerrado_em: string | null
   perfumes_base: { nome: string } | null
   lote_saidas: {
+    id: string
     ocorrida_em: string
     ordem_id: string | null
     ml: number | string

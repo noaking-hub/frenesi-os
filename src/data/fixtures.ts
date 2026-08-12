@@ -90,6 +90,9 @@ export const CONCORRENTES_FONTES: FonteConcorrente[] = [
 ]
 
 const saida = (data: string, ref: string, unidades: number, variante: VarianteMl) => ({
+  // Fixture não tem linha no banco: sem id, a tela esconde as ações de
+  // correção — que é o certo, porque não haveria o que corrigir.
+  id: null,
   data,
   ref,
   ml: unidades * variante,

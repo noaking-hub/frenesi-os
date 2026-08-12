@@ -136,6 +136,61 @@ export async function registrarSaidaLote(dados: {
   return { ok: true, saldoMl: Number(data) }
 }
 
+/**
+ * Corrige uma saída lançada à mão.
+ *
+ * Quem digita erra: 5 ml viram 50, o motivo sai trocado. Sem correção, o
+ * número errado fica no extrato inflando o consumido do lote — e, no
+ * encerramento, distorce a perda real medida, que é o número que entra no
+ * custo de todo preço calculado.
+ */
+export async function editarSaidaLote(dados: {
+  saidaId: string
+  volumeMl: number
+  motivo: string
+}): Promise<RespostaSaida> {
+  if (!supabaseConfigurado()) {
+    return { ok: false, erro: 'O Supabase precisa estar configurado para corrigir saídas.' }
+  }
+  if (!dados.saidaId) return { ok: false, erro: 'Escolha a saída a corrigir.' }
+  if (!(dados.volumeMl > 0)) return { ok: false, erro: 'Informe o volume que saiu, em ml.' }
+  if (!dados.motivo.trim()) return { ok: false, erro: 'Informe o motivo da saída.' }
+
+  const { data, error } = await supabaseServer().rpc('editar_saida_lote', {
+    p_saida_id: dados.saidaId,
+    p_ml: dados.volumeMl,
+    p_motivo: dados.motivo.trim(),
+    p_operador: OPERADOR,
+  })
+  if (error) {
+    console.error('[lotes] editar_saida_lote falhou:', error)
+    return { ok: false, erro: error.message || error.details || 'Falha ao corrigir a saída.' }
+  }
+
+  revalidatePath('/', 'layout')
+  return { ok: true, saldoMl: Number(data) }
+}
+
+/** Apaga uma saída lançada à mão e devolve o volume ao estoque. */
+export async function estornarSaidaLote(saidaId: string): Promise<RespostaSaida> {
+  if (!supabaseConfigurado()) {
+    return { ok: false, erro: 'O Supabase precisa estar configurado para estornar saídas.' }
+  }
+  if (!saidaId) return { ok: false, erro: 'Escolha a saída a estornar.' }
+
+  const { data, error } = await supabaseServer().rpc('estornar_saida_lote', {
+    p_saida_id: saidaId,
+    p_operador: OPERADOR,
+  })
+  if (error) {
+    console.error('[lotes] estornar_saida_lote falhou:', error)
+    return { ok: false, erro: error.message || error.details || 'Falha ao estornar a saída.' }
+  }
+
+  revalidatePath('/', 'layout')
+  return { ok: true, saldoMl: Number(data) }
+}
+
 export type RespostaParametro = { ok: true } | { ok: false; erro: string }
 
 /**
