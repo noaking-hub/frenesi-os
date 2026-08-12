@@ -2,8 +2,10 @@
  * Os HTMLs VALIDADOS dos e-mails da marca. A logomarca vem do CDN da
  * Brandfetch; os ícones de redes são os PNGs da operação, servidos por uma
  * URL pública estável (edge function do Supabase) — assim carregam no Gmail
- * seja o envio local ou da Netlify. São o PADRÃO dos modelos: valem até
- * alguém editar na Central de E-mails. Cópias de referência em docs/emails/.
+ * seja o envio local ou da Netlify. O ?v=2 do TikTok fura o cache do proxy
+ * do Gmail, que guardou a primeira publicação (corrompida) por um ano.
+ * São o PADRÃO dos modelos: valem até alguém editar na Central de E-mails.
+ * Cópias de referência em docs/emails/.
  */
 
 export const HTML_VALIDADO_CARRINHO = `<!DOCTYPE html>
@@ -176,7 +178,7 @@ export const HTML_VALIDADO_CARRINHO = `<!DOCTYPE html>
                         <a href="https://instagram.com/frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="https://gxzvlknlxwihooqgctst.supabase.co/functions/v1/marca/icon-instagram.png" width="40" height="40" alt="Instagram" style="display:block; width:40px; height:40px; border:0;" /></a>
                       </td>
                       <td align="center" style="padding:0 7px;">
-                        <a href="https://tiktok.com/@frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="https://gxzvlknlxwihooqgctst.supabase.co/functions/v1/marca/icon-tiktok.png" width="40" height="40" alt="TikTok" style="display:block; width:40px; height:40px; border:0;" /></a>
+                        <a href="https://tiktok.com/@frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="https://gxzvlknlxwihooqgctst.supabase.co/functions/v1/marca/icon-tiktok.png?v=2" width="40" height="40" alt="TikTok" style="display:block; width:40px; height:40px; border:0;" /></a>
                       </td>
                     </tr>
                   </table>
@@ -337,7 +339,7 @@ export const HTML_VALIDADO_GIFT = `<!DOCTYPE html>
                         <a href="https://instagram.com/frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="https://gxzvlknlxwihooqgctst.supabase.co/functions/v1/marca/icon-instagram.png" width="40" height="40" alt="Instagram" style="display:block; width:40px; height:40px; border:0;" /></a>
                       </td>
                       <td align="center" style="padding:0 7px;">
-                        <a href="https://tiktok.com/@frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="https://gxzvlknlxwihooqgctst.supabase.co/functions/v1/marca/icon-tiktok.png" width="40" height="40" alt="TikTok" style="display:block; width:40px; height:40px; border:0;" /></a>
+                        <a href="https://tiktok.com/@frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="https://gxzvlknlxwihooqgctst.supabase.co/functions/v1/marca/icon-tiktok.png?v=2" width="40" height="40" alt="TikTok" style="display:block; width:40px; height:40px; border:0;" /></a>
                       </td>
                     </tr>
                   </table>

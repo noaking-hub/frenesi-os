@@ -1543,6 +1543,11 @@ export async function vincularPedidosShopify(): Promise<ResultadoVinculo> {
   )
   const filtro = `created_at:>=${maisAntigo.slice(0, 10)}`
 
+  // Token novo SEMPRE: sem read_all_orders a API corta a janela em ~60 dias
+  // SILENCIOSAMENTE — não é erro que o retry pegue. Quem acabou de marcar o
+  // escopo no painel só o vê valer num token novo, e o custo de emitir um é
+  // uma chamada por rodada de vínculo.
+  esquecerToken()
   let token = await tokenDeAcesso(loja)
   const buscar = async (consulta: string) => {
     const encontrados: PedidoVinculoShopify[] = []
