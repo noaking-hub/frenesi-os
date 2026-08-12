@@ -1,9 +1,9 @@
 /**
  * Os HTMLs VALIDADOS dos e-mails da marca. A logomarca vem do CDN da
- * Brandfetch; os ícones de redes são os PNGs da operação, servidos pelo
- * próprio ERP em /marca — o campo vivo {site} vira a URL do site no envio.
- * São o PADRÃO dos modelos: valem até alguém editar na Central de E-mails.
- * Cópias de referência em docs/emails/.
+ * Brandfetch; os ícones de redes são os PNGs da operação, servidos por uma
+ * URL pública estável (edge function do Supabase) — assim carregam no Gmail
+ * seja o envio local ou da Netlify. São o PADRÃO dos modelos: valem até
+ * alguém editar na Central de E-mails. Cópias de referência em docs/emails/.
  */
 
 export const HTML_VALIDADO_CARRINHO = `<!DOCTYPE html>
@@ -170,13 +170,13 @@ export const HTML_VALIDADO_CARRINHO = `<!DOCTYPE html>
                   <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:auto;">
                     <tr>
                       <td align="center" style="padding:0 7px;">
-                        <a href="https://wa.me/5532998661887" style="display:inline-block; text-decoration:none;"><img src="{site}/marca/icon-whatsapp.png" width="40" height="40" alt="WhatsApp" style="display:block; width:40px; height:40px; border:0;" /></a>
+                        <a href="https://wa.me/5532998661887" style="display:inline-block; text-decoration:none;"><img src="https://gxzvlknlxwihooqgctst.supabase.co/functions/v1/marca/icon-whatsapp.png" width="40" height="40" alt="WhatsApp" style="display:block; width:40px; height:40px; border:0;" /></a>
                       </td>
                       <td align="center" style="padding:0 7px;">
-                        <a href="https://instagram.com/frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="{site}/marca/icon-instagram.png" width="40" height="40" alt="Instagram" style="display:block; width:40px; height:40px; border:0;" /></a>
+                        <a href="https://instagram.com/frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="https://gxzvlknlxwihooqgctst.supabase.co/functions/v1/marca/icon-instagram.png" width="40" height="40" alt="Instagram" style="display:block; width:40px; height:40px; border:0;" /></a>
                       </td>
                       <td align="center" style="padding:0 7px;">
-                        <a href="https://tiktok.com/@frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="{site}/marca/icon-tiktok.png" width="40" height="40" alt="TikTok" style="display:block; width:40px; height:40px; border:0;" /></a>
+                        <a href="https://tiktok.com/@frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="https://gxzvlknlxwihooqgctst.supabase.co/functions/v1/marca/icon-tiktok.png" width="40" height="40" alt="TikTok" style="display:block; width:40px; height:40px; border:0;" /></a>
                       </td>
                     </tr>
                   </table>
@@ -204,8 +204,7 @@ export const HTML_VALIDADO_CARRINHO = `<!DOCTYPE html>
   </tr>
 </table>
 </body>
-</html>
-`
+</html>`
 
 export const HTML_VALIDADO_GIFT = `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -332,13 +331,13 @@ export const HTML_VALIDADO_GIFT = `<!DOCTYPE html>
                   <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:auto;">
                     <tr>
                       <td align="center" style="padding:0 7px;">
-                        <a href="https://wa.me/5532998661887" style="display:inline-block; text-decoration:none;"><img src="{site}/marca/icon-whatsapp.png" width="40" height="40" alt="WhatsApp" style="display:block; width:40px; height:40px; border:0;" /></a>
+                        <a href="https://wa.me/5532998661887" style="display:inline-block; text-decoration:none;"><img src="https://gxzvlknlxwihooqgctst.supabase.co/functions/v1/marca/icon-whatsapp.png" width="40" height="40" alt="WhatsApp" style="display:block; width:40px; height:40px; border:0;" /></a>
                       </td>
                       <td align="center" style="padding:0 7px;">
-                        <a href="https://instagram.com/frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="{site}/marca/icon-instagram.png" width="40" height="40" alt="Instagram" style="display:block; width:40px; height:40px; border:0;" /></a>
+                        <a href="https://instagram.com/frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="https://gxzvlknlxwihooqgctst.supabase.co/functions/v1/marca/icon-instagram.png" width="40" height="40" alt="Instagram" style="display:block; width:40px; height:40px; border:0;" /></a>
                       </td>
                       <td align="center" style="padding:0 7px;">
-                        <a href="https://tiktok.com/@frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="{site}/marca/icon-tiktok.png" width="40" height="40" alt="TikTok" style="display:block; width:40px; height:40px; border:0;" /></a>
+                        <a href="https://tiktok.com/@frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="https://gxzvlknlxwihooqgctst.supabase.co/functions/v1/marca/icon-tiktok.png" width="40" height="40" alt="TikTok" style="display:block; width:40px; height:40px; border:0;" /></a>
                       </td>
                     </tr>
                   </table>
@@ -366,5 +365,4 @@ export const HTML_VALIDADO_GIFT = `<!DOCTYPE html>
   </tr>
 </table>
 </body>
-</html>
-`
+</html>`

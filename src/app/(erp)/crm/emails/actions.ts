@@ -8,11 +8,12 @@ import { aplicarSite, emailGiftback, emailRecuperacao } from '@/domain'
 import type { ModeloEmailRecuperacao } from '@/domain'
 
 /**
- * Foto real do catálogo para o teste mostrar a linha de item COM imagem —
- * ao lado de uma sem, que mostra o comportamento quando a Yampi não manda.
+ * Foto REAL do catálogo (Sauvage Elixir, do CDN da própria loja) para o
+ * teste mostrar a linha de item com imagem — ao lado de uma sem, que mostra
+ * o comportamento quando a Yampi não manda a foto.
  */
 const FOTO_EXEMPLO =
-  'https://www.frenesiperfumes.com.br/cdn/shop/files/088_eros-masculino-eau-de-parfum-decant-_eros-eau-de-parfum-2790tu7i1c-personalizado-padrao-luxo.png?v=1778676473&width=120'
+  'https://cdn.shopify.com/s/files/1/0998/2889/1957/files/sauvage-elixir-eau-de-parfum-decant-7141591.png?v=1780590669'
 
 /** Salva um modelo da Central de E-mails — o próximo envio já sai com ele. */
 export async function salvarModelo(
@@ -71,7 +72,7 @@ export async function enviarTeste(
             {
               nome: 'Marina Fontes',
               itens: ['1× Baccarat Rouge 540 (Decant) · 5 ml', '1× Sauvage Elixir (Decant) · 10 ml'],
-              imagens: [FOTO_EXEMPLO, null],
+              imagens: [null, FOTO_EXEMPLO],
               valor: 189.8,
               linkCheckout: process.env.LOJA_URL ?? 'https://frenesiperfumes.com.br',
               cupom: { codigo: 'VOLTA10-TESTE1', pct: 10 },

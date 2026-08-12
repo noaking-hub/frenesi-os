@@ -218,12 +218,18 @@ export function emailRecuperacao(
  * o template tem a própria linha {total}.
  */
 function tabelaDeItens(itens: string[], imagens?: (string | null)[]): string {
+  // Quando QUALQUER item tem foto, todas as linhas ganham a célula de 54px —
+  // vazia nas que não têm. Sem isso, a linha sem foto tem uma célula a menos
+  // e o texto dela cai espremido na coluna estreita da imagem.
+  const temFoto = Boolean(imagens?.some(Boolean))
   const linhas = itens
     .map((i, indice) => {
       const img = imagens?.[indice]
-      const foto = img
-        ? `<td width="54" valign="middle" style="width:54px; padding:7px 12px 7px 0;"><img src="${escapaHtml(img)}" width="44" height="44" alt="" style="display:block; width:44px; height:44px; border-radius:6px; border:0;" /></td>`
-        : ''
+      const foto = !temFoto
+        ? ''
+        : img
+          ? `<td width="54" valign="middle" style="width:54px; padding:7px 12px 7px 0;"><img src="${escapaHtml(img)}" width="44" height="44" alt="" style="display:block; width:44px; height:44px; border-radius:6px; border:0;" /></td>`
+          : `<td width="54" valign="middle" style="width:54px; padding:7px 12px 7px 0;">&nbsp;</td>`
       return `<tr>${foto}<td valign="middle" style="padding:7px 0; font-family:inherit; font-size:inherit; line-height:inherit; color:inherit;">${escapaHtml(i)}</td></tr>`
     })
     .join('')

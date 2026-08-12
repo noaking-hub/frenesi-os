@@ -82,11 +82,11 @@ export function ModeloEmail({
       {
         nome: 'Marina Fontes',
         itens: ['1× Baccarat Rouge 540 (Decant) · 5 ml', '1× Sauvage Elixir (Decant) · 10 ml'],
-        // Uma linha com foto e outra sem: a prévia mostra os dois casos —
-        // a Yampi nem sempre manda imagem no item do carrinho.
+        // Uma linha sem foto e outra com (imagem real do catálogo): a prévia
+        // mostra os dois casos — a Yampi nem sempre manda a foto do item.
         imagens: [
-          'https://www.frenesiperfumes.com.br/cdn/shop/files/088_eros-masculino-eau-de-parfum-decant-_eros-eau-de-parfum-2790tu7i1c-personalizado-padrao-luxo.png?v=1778676473&width=120',
           null,
+          'https://cdn.shopify.com/s/files/1/0998/2889/1957/files/sauvage-elixir-eau-de-parfum-decant-7141591.png?v=1780590669',
         ],
         valor: 189.8,
         linkCheckout: '#',
