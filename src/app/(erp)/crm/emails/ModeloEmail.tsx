@@ -9,7 +9,7 @@ import { BotaoOuro, BotaoSecundario, Rotulo } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
 import { HTML_BASE_RECUPERACAO, emailGiftback, emailRecuperacao, type ModeloEmailRecuperacao } from '@/domain'
 
-import { salvarModelo } from './actions'
+import { enviarTeste, salvarModelo } from './actions'
 
 const campo: React.CSSProperties = {
   padding: '9px 12px',
@@ -55,6 +55,8 @@ export function ModeloEmail({
   const [htmlProprio, setHtmlProprio] = useState(inicial.html ?? '')
   const [erro, setErro] = useState<string | null>(null)
   const [salvo, setSalvo] = useState(false)
+  const [emailTeste, setEmailTeste] = useState('')
+  const [avisoTeste, setAvisoTeste] = useState<{ tom: 'ok' | 'erro'; texto: string } | null>(null)
   const [pendente, iniciarTransicao] = useTransition()
   const router = useRouter()
 
@@ -284,6 +286,41 @@ export function ModeloEmail({
             <span style={{ color: 'var(--color-terciario)' }}>Assunto: </span>
             {previa.assunto}
           </span>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              value={emailTeste}
+              onChange={(e) => setEmailTeste(e.target.value)}
+              placeholder="seu@email.com — receber este modelo como teste"
+              className="font-mono focus:border-ouro/45"
+              style={{ ...campo, height: 34, flex: 1, fontSize: 11.5 }}
+            />
+            <BotaoSecundario
+              altura={34}
+              desabilitado={pendente || !emailTeste.trim()}
+              onClick={() =>
+                iniciarTransicao(async () => {
+                  setAvisoTeste(null)
+                  const r = await enviarTeste(
+                    tipo,
+                    { assunto, titulo, mensagem, textoBotao, html: modoHtml ? htmlProprio : null },
+                    emailTeste,
+                  )
+                  setAvisoTeste(
+                    r.ok
+                      ? { tom: 'ok', texto: `Teste enviado para ${emailTeste.trim()} com dados de exemplo — confira também a caixa de spam.` }
+                      : { tom: 'erro', texto: r.erro },
+                  )
+                })
+              }
+            >
+              {pendente ? 'Enviando…' : 'Enviar teste'}
+            </BotaoSecundario>
+          </div>
+          {avisoTeste && (
+            <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.5, color: avisoTeste.tom === 'ok' ? COR.ok : COR.erro, textWrap: 'pretty' }}>
+              {avisoTeste.texto}
+            </span>
+          )}
           <iframe
             title="Prévia do e-mail de recuperação"
             srcDoc={previa.html}
