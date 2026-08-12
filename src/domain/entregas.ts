@@ -52,8 +52,13 @@ export interface Envio {
  *
  * A operação usa dois gateways: Correios e Jadlog saem pela Frenet; J&T,
  * Total Express e Buslog pelo Melhor Envio. A Yampi devolve o serviço
- * (`shipment_service`), e quando ele falta o formato do código desempata:
- * `AA123456789BR` é padrão dos Correios.
+ * (`shipment_service`), e quando ele falta — ou vem como um rótulo opaco do
+ * Melhor Envio, tipo `ME_STANDARD_33` — o formato do código desempata:
+ * `AA123456789BR` é padrão dos Correios, quinze dígitos é J&T, nove é Jadlog.
+ *
+ * O que NÃO se faz é devolver o rótulo cru como se fosse nome de
+ * transportadora: "Rastrear na ME_STANDARD_33" não diz nada a ninguém, e a
+ * tela ainda oferecia esse texto como se fosse uma empresa.
  */
 export function identificarFrete(
   servico: string | null | undefined,
@@ -65,11 +70,23 @@ export function identificarFrete(
   if (/j&t|jet|j&amp;t/.test(s)) return { transportadora: 'J&T Express', gateway: 'Melhor Envio' }
   if (/total/.test(s)) return { transportadora: 'Total Express', gateway: 'Melhor Envio' }
   if (/buslog/.test(s)) return { transportadora: 'Buslog', gateway: 'Melhor Envio' }
-  if (/^[A-Z]{2}\d{9}BR$/i.test((rastreio ?? '').trim())) {
-    return { transportadora: 'Correios', gateway: 'Frenet' }
+
+  // Rótulo do Melhor Envio: o gateway é conhecido, a transportadora não vem
+  // nele. O código é quem entrega essa informação.
+  const doMelhorEnvio = /^me[_ ]/i.test((servico ?? '').trim())
+  const codigo = (rastreio ?? '').trim()
+  if (/^[A-Z]{2}\d{9}BR$/i.test(codigo)) {
+    return { transportadora: 'Correios', gateway: doMelhorEnvio ? 'Melhor Envio' : 'Frenet' }
   }
+  if (/^\d{15}$/.test(codigo)) return { transportadora: 'J&T Express', gateway: 'Melhor Envio' }
+  if (/^\d{8,11}$/.test(codigo)) {
+    return { transportadora: 'Jadlog', gateway: doMelhorEnvio ? 'Melhor Envio' : 'Frenet' }
+  }
+
   return {
-    transportadora: servico?.trim() || 'Não informada',
+    // Rótulo do Melhor Envio não é nome de transportadora — dizer "não
+    // informada" é mais honesto que exibir o código do serviço como empresa.
+    transportadora: doMelhorEnvio ? 'Não informada' : servico?.trim() || 'Não informada',
     gateway: 'Melhor Envio',
   }
 }

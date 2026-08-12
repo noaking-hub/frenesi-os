@@ -8,6 +8,7 @@ import {
   ehExcecao,
   emAberto,
   etapaDe,
+  identificarFrete,
   resumirEnvios,
   resumirOcorrencias,
   triarDevolucao,
@@ -27,6 +28,39 @@ const envio = (p: Partial<Envio>): Envio => ({
   shopify: 'em-transito',
   eventos: [],
   ...p,
+})
+
+describe('identificação da transportadora', () => {
+  it('o serviço da Yampi nomeia a transportadora quando é legível', () => {
+    expect(identificarFrete('FRENET_SEDEX_03220', 'AD754669044BR')).toEqual({
+      transportadora: 'Correios',
+      gateway: 'Frenet',
+    })
+    expect(identificarFrete('FRENET_JADLOG_PACKAGE_F_3', '614554609')).toEqual({
+      transportadora: 'Jadlog',
+      gateway: 'Frenet',
+    })
+  })
+
+  it('rótulo opaco do Melhor Envio não vira nome de transportadora', () => {
+    // A tela chegou a oferecer "Rastrear na ME_STANDARD_33 →" — o código do
+    // serviço exibido como se fosse uma empresa. O formato do código resolve.
+    expect(identificarFrete('ME_STANDARD_33', '888030874765341')).toEqual({
+      transportadora: 'J&T Express',
+      gateway: 'Melhor Envio',
+    })
+    expect(identificarFrete('ME_STANDARD_35', 'TXAQ501445605tx')).toEqual({
+      transportadora: 'Não informada',
+      gateway: 'Melhor Envio',
+    })
+  })
+
+  it('sem serviço nenhum, o código ainda entrega a transportadora', () => {
+    // Metade da base é anterior ao ERP e veio sem `shipment_service`.
+    expect(identificarFrete(null, 'AP331906566BR').transportadora).toBe('Correios')
+    expect(identificarFrete(null, '602350827').transportadora).toBe('Jadlog')
+    expect(identificarFrete(null, null).transportadora).toBe('Não informada')
+  })
 })
 
 describe('rastreamento e baixa na Shopify', () => {
