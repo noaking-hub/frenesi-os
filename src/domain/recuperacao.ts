@@ -49,10 +49,10 @@ export interface ModeloEmailRecuperacao {
 }
 
 export const MODELO_PADRAO: ModeloEmailRecuperacao = {
-  assunto: '{nome}, seus decants ainda estão guardados',
+  assunto: '{nome}, seus produtos ainda estão guardados',
   titulo: '{nome}, deixamos tudo separado.',
   mensagem:
-    'Você montou um carrinho na FRENESI e não finalizou — acontece. Seus decants continuam aqui, fracionados do frasco original e prontos para envio.',
+    'Você montou um carrinho na FRENESI e não finalizou — acontece. Seus produtos continuam aqui, separados e prontos para envio.',
   textoBotao: 'Concluir meu pedido',
   html: HTML_VALIDADO_CARRINHO,
 }
@@ -228,8 +228,8 @@ function tabelaDeItens(itens: string[], imagens?: (string | null)[]): string {
       const foto = !temFoto
         ? ''
         : img
-          ? `<td width="54" valign="middle" style="width:54px; padding:7px 12px 7px 0;"><img src="${escapaHtml(img)}" width="44" height="44" alt="" style="display:block; width:44px; height:44px; border-radius:6px; border:0;" /></td>`
-          : `<td width="54" valign="middle" style="width:54px; padding:7px 12px 7px 0;">&nbsp;</td>`
+          ? `<td width="78" valign="middle" style="width:78px; padding:8px 14px 8px 0;"><img src="${escapaHtml(img)}" width="64" height="64" alt="" style="display:block; width:64px; height:64px; border-radius:8px; border:0;" /></td>`
+          : `<td width="78" valign="middle" style="width:78px; padding:8px 14px 8px 0;">&nbsp;</td>`
       return `<tr>${foto}<td valign="middle" style="padding:7px 0; font-family:inherit; font-size:inherit; line-height:inherit; color:inherit;">${escapaHtml(i)}</td></tr>`
     })
     .join('')
@@ -279,7 +279,7 @@ export const MODELO_GIFT_PADRAO: ModeloEmailRecuperacao = {
   titulo: '{nome}, hoje o dia é seu.',
   mensagem:
     'Feliz aniversário! Para celebrar com a fragrância que você ama — ou uma nova para marcar o ano — deixamos um presente no seu nome.',
-  textoBotao: 'Escolher meu decant',
+  textoBotao: 'Escolher meu presente',
   html: HTML_VALIDADO_GIFT,
 }
 

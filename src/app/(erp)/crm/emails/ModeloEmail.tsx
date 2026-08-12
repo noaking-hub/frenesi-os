@@ -81,11 +81,14 @@ export function ModeloEmail({
     return emailRecuperacao(
       {
         nome: 'Marina Fontes',
-        itens: ['1× Baccarat Rouge 540 (Decant) · 5 ml', '1× Sauvage Elixir (Decant) · 10 ml'],
-        // Uma linha sem foto e outra com (imagem real do catálogo): a prévia
-        // mostra os dois casos — a Yampi nem sempre manda a foto do item.
+        // Produtos reais do catálogo, com as fotos do CDN da própria loja —
+        // a prévia tem que parecer um envio de verdade.
+        itens: [
+          '1× 1 Million Elixir Masculino Eau de Parfum (Decant) · 5 ml',
+          '1× Sauvage Elixir Eau de Parfum (Decant) · 10 ml',
+        ],
         imagens: [
-          null,
+          'https://cdn.shopify.com/s/files/1/0998/2889/1957/files/1-million-elixir-masculino-eau-de-parfum-decant-7330761.png?v=1780590250',
           'https://cdn.shopify.com/s/files/1/0998/2889/1957/files/sauvage-elixir-eau-de-parfum-decant-7141591.png?v=1780590669',
         ],
         valor: 189.8,

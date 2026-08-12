@@ -8,12 +8,18 @@ import { aplicarSite, emailGiftback, emailRecuperacao } from '@/domain'
 import type { ModeloEmailRecuperacao } from '@/domain'
 
 /**
- * Foto REAL do catálogo (Sauvage Elixir, do CDN da própria loja) para o
- * teste mostrar a linha de item com imagem — ao lado de uma sem, que mostra
- * o comportamento quando a Yampi não manda a foto.
+ * Dados de exemplo com produtos REAIS do catálogo da loja, fotos incluídas
+ * (CDN da própria loja) — o teste tem que parecer um envio de verdade, não
+ * um mostruário de casos.
  */
-const FOTO_EXEMPLO =
-  'https://cdn.shopify.com/s/files/1/0998/2889/1957/files/sauvage-elixir-eau-de-parfum-decant-7141591.png?v=1780590669'
+const ITENS_EXEMPLO = [
+  '1× 1 Million Elixir Masculino Eau de Parfum (Decant) · 5 ml',
+  '1× Sauvage Elixir Eau de Parfum (Decant) · 10 ml',
+]
+const FOTOS_EXEMPLO = [
+  'https://cdn.shopify.com/s/files/1/0998/2889/1957/files/1-million-elixir-masculino-eau-de-parfum-decant-7330761.png?v=1780590250',
+  'https://cdn.shopify.com/s/files/1/0998/2889/1957/files/sauvage-elixir-eau-de-parfum-decant-7141591.png?v=1780590669',
+]
 
 /** Salva um modelo da Central de E-mails — o próximo envio já sai com ele. */
 export async function salvarModelo(
@@ -71,8 +77,8 @@ export async function enviarTeste(
         : emailRecuperacao(
             {
               nome: 'Marina Fontes',
-              itens: ['1× Baccarat Rouge 540 (Decant) · 5 ml', '1× Sauvage Elixir (Decant) · 10 ml'],
-              imagens: [null, FOTO_EXEMPLO],
+              itens: ITENS_EXEMPLO,
+              imagens: FOTOS_EXEMPLO,
               valor: 189.8,
               linkCheckout: process.env.LOJA_URL ?? 'https://frenesiperfumes.com.br',
               cupom: { codigo: 'VOLTA10-TESTE1', pct: 10 },
