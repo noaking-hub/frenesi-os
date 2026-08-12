@@ -101,10 +101,14 @@ export function EnviosCliente({
       })
       setRecado(
         [
+          x.vinculados
+            ? `${x.vinculados} pedido(s) da Yampi ganharam o número da Shopify nesta rodada.`
+            : '',
           `${x.entregues} entrega(s) marcada(s) na Shopify · ${x.fechados} pedido(s) fechado(s).`,
           x.semEspelho.length
-            ? `${x.semEspelho.length} pedido(s) nasceram fora da Shopify e não têm o que baixar lá: ${x.semEspelho.slice(0, 5).join(', ')}.`
+            ? `${x.semEspelho.length} pedido(s) ficaram sem par na Shopify — ou a venda só existe na Yampi, ou é mais antiga que a janela de ~60 dias que a API da Shopify deixa ler (ex.: ${x.semEspelho.slice(0, 3).join(', ')}).`
             : '',
+          x.erroVinculo ? `O vínculo automático com a Shopify falhou: ${x.erroVinculo}` : '',
           ...x.ignorados.slice(0, 5).map((i) => `${i.pedido}: ${i.motivo}`),
         ]
           .filter(Boolean)

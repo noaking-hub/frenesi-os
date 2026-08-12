@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { mensagemDe, shopifyConfigurada, sincronizarEnviosShopify } from '@/data/shopify'
+import { mensagemDe, shopifyConfigurada, sincronizarEnviosShopify, vincularPedidosShopify } from '@/data/shopify'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import type { EnvioParaShopify } from '@/data/shopify'
 
@@ -14,6 +14,10 @@ export interface ResultadoBaixa {
   fechados: number
   ignorados: { pedido: string; motivo: string }[]
   semEspelho: string[]
+  /** Pedidos que ganharam o número da Shopify nesta rodada, antes da baixa. */
+  vinculados: number
+  /** O vínculo automático falhou (a baixa dos já vinculados seguiu normal). */
+  erroVinculo: string | null
 }
 
 /**
@@ -42,23 +46,44 @@ export async function baixarNaShopify(pedidoIds?: string[]): Promise<Resposta<{ 
 
   try {
     const sb = supabaseServer()
-    let consulta = sb
-      .from('pedidos')
-      .select('id, shopify_numero, rastreio, envio, entrega_shopify_em')
-      .eq('envio', 'entregue')
-      .is('entrega_shopify_em', null)
-      .limit(200)
+    const lerFila = async () => {
+      let consulta = sb
+        .from('pedidos')
+        .select('id, shopify_numero, rastreio, envio, entrega_shopify_em')
+        .eq('envio', 'entregue')
+        .is('entrega_shopify_em', null)
+        .limit(200)
+      if (pedidoIds?.length) consulta = consulta.in('id', pedidoIds)
+      return consulta
+    }
 
-    if (pedidoIds?.length) consulta = consulta.in('id', pedidoIds)
-
-    const { data, error } = await consulta
+    const { data, error } = await lerFila()
     if (error) return { ok: false, erro: mensagemDe(error) }
 
-    const linhas = (data ?? []) as unknown as {
+    let linhas = (data ?? []) as unknown as {
       id: string
       shopify_numero: string | null
       rastreio: string | null
     }[]
+
+    // Pedido sem número da Shopify não é beco sem saída: a importação da
+    // Yampi não trouxe o vínculo nesta loja, então ele é descoberto aqui,
+    // lendo os pedidos da própria Shopify e casando com os da Yampi. Só
+    // depois do vínculo é que "sem espelho" vira um veredito.
+    let vinculados = 0
+    let erroVinculo: string | null = null
+    if (linhas.some((p) => !p.shopify_numero)) {
+      try {
+        vinculados = (await vincularPedidosShopify()).vinculados
+      } catch (e) {
+        erroVinculo = mensagemDe(e)
+      }
+      if (vinculados > 0) {
+        const { data: relidos, error: erroReler } = await lerFila()
+        if (erroReler) return { ok: false, erro: mensagemDe(erroReler) }
+        linhas = (relidos ?? []) as typeof linhas
+      }
+    }
 
     // Pedido que nasceu na Yampi e nunca foi espelhado na Shopify não tem o
     // que baixar lá. Devolver a lista é melhor que somar como "ignorado
@@ -77,7 +102,7 @@ export async function baixarNaShopify(pedidoIds?: string[]): Promise<Resposta<{ 
     if (alvos.length === 0) {
       return {
         ok: true,
-        resultado: { enviados: 0, entregues: 0, fechados: 0, ignorados: [], semEspelho },
+        resultado: { enviados: 0, entregues: 0, fechados: 0, ignorados: [], semEspelho, vinculados, erroVinculo },
       }
     }
 
@@ -98,7 +123,7 @@ export async function baixarNaShopify(pedidoIds?: string[]): Promise<Resposta<{ 
     }
 
     revalidatePath('/', 'layout')
-    return { ok: true, resultado: { ...r, semEspelho } }
+    return { ok: true, resultado: { ...r, semEspelho, vinculados, erroVinculo } }
   } catch (e) {
     console.error('[envios] baixar na Shopify falhou:', e)
     return { ok: false, erro: mensagemDe(e) }

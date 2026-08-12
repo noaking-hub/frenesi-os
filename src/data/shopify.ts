@@ -1426,6 +1426,241 @@ export async function sincronizarEnviosShopify(
   return { enviados, entregues, fechados, ignorados }
 }
 
+// ── Vínculo Yampi → Shopify ────────────────────────────────────────────────
+
+const CONSULTA_PEDIDOS_VINCULO = /* GraphQL */ `
+  query ($cursor: String, $filtro: String) {
+    orders(first: 100, after: $cursor, sortKey: CREATED_AT, reverse: true, query: $filtro) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        name
+        createdAt
+        email
+        sourceIdentifier
+        note
+        customAttributes {
+          key
+          value
+        }
+        totalPriceSet {
+          shopMoney {
+            amount
+          }
+        }
+      }
+    }
+  }
+`
+
+/** A mesma consulta sem e-mail — para lojas sem aprovação de dados protegidos. */
+const CONSULTA_PEDIDOS_VINCULO_SEM_EMAIL = (() => {
+  const reduzida = CONSULTA_PEDIDOS_VINCULO.replace(/\n\s*email\n/, '\n')
+  if (/\bemail\b/.test(reduzida)) {
+    throw new Error('A consulta de vínculo sem e-mail não removeu o campo protegido.')
+  }
+  return reduzida
+})()
+
+interface PedidoVinculoShopify {
+  name: string
+  createdAt: string
+  email: string | null
+  sourceIdentifier: string | null
+  note: string | null
+  customAttributes: { key: string; value: string | null }[]
+  totalPriceSet: { shopMoney: { amount: string } }
+}
+
+export interface ResultadoVinculo {
+  /** Pedidos do ERP que estavam sem número da Shopify antes da rodada. */
+  pendentes: number
+  /** Pedidos lidos da Shopify na janela que a API permitiu. */
+  examinados: number
+  vinculados: number
+  /** Casamentos por e-mail+valor com mais de um candidato — não vinculados. */
+  ambiguos: number
+  /** A loja não liberou o e-mail do pedido; só o vínculo por referência rodou. */
+  semEmailShopify: boolean
+}
+
+/**
+ * Preenche o `shopify_numero` dos pedidos que nasceram na Yampi.
+ *
+ * A importação esperava `marketplace_sale_number` no pedido da Yampi, mas
+ * nesta loja o campo veio vazio em TODOS os pedidos — e sem o número a baixa
+ * de entrega na Shopify não tem o que fazer. Aqui o vínculo é feito pelo
+ * outro lado: lê os pedidos da própria Shopify e casa com os da Yampi.
+ *
+ * Dois casamentos, do mais certeiro ao mais circunstancial:
+ * 1. Referência explícita — o número Yampi citado em sourceIdentifier, nota
+ *    ou atributo do pedido Shopify (é como integrações de checkout costumam
+ *    marcar a origem).
+ * 2. E-mail + valor idênticos, com data a até 10 dias — e só quando o par é
+ *    único dos dois lados; havendo dois candidatos, ninguém é vinculado,
+ *    porque um vínculo errado baixaria a entrega no pedido de outra pessoa.
+ *
+ * A API sem o escopo read_all_orders devolve só ~60 dias: pedidos mais
+ * antigos que isso ficam sem par e a tela diz o porquê.
+ */
+export async function vincularPedidosShopify(): Promise<ResultadoVinculo> {
+  if (!supabaseConfigurado()) {
+    throw new Error('O Supabase precisa estar configurado para vincular os pedidos.')
+  }
+  const { loja } = credenciais()
+  if (!loja) throw new Error('SHOPIFY_LOJA precisa estar no .env.local')
+
+  const sb = supabaseServer()
+  const { data: soltos, error } = await sb
+    .from('pedidos')
+    .select('id, valor, comprado_em, cliente_id')
+    .is('shopify_numero', null)
+  if (error) throw error
+
+  const pendentes = (soltos ?? []) as unknown as {
+    id: string
+    valor: number
+    comprado_em: string
+    cliente_id: string | null
+  }[]
+  if (pendentes.length === 0) {
+    return { pendentes: 0, examinados: 0, vinculados: 0, ambiguos: 0, semEmailShopify: false }
+  }
+
+  const { data: donos, error: erroClientes } = await sb.from('clientes').select('id, email')
+  if (erroClientes) throw erroClientes
+  const emailDoCliente = new Map(
+    (donos ?? []).map((c) => [c.id as string, (c.email as string).trim().toLowerCase()]),
+  )
+
+  // Janela de leitura: do pedido solto mais antigo até hoje. Sem o escopo
+  // read_all_orders a Shopify corta em ~60 dias por conta própria.
+  const maisAntigo = pendentes.reduce(
+    (menor, p) => (p.comprado_em < menor ? p.comprado_em : menor),
+    pendentes[0].comprado_em,
+  )
+  const filtro = `created_at:>=${maisAntigo.slice(0, 10)}`
+
+  let token = await tokenDeAcesso(loja)
+  const buscar = async (consulta: string) => {
+    const encontrados: PedidoVinculoShopify[] = []
+    let cursor: string | null = null
+    for (let pagina = 0; pagina < 40; pagina++) {
+      const dados: {
+        orders: {
+          pageInfo: { hasNextPage: boolean; endCursor: string }
+          nodes: PedidoVinculoShopify[]
+        }
+      } = await chamarShopify(
+        loja,
+        token,
+        consulta,
+        { cursor, filtro },
+        'ler os pedidos da loja para vincular',
+        'read_orders',
+      )
+      encontrados.push(...dados.orders.nodes)
+      if (!dados.orders.pageInfo.hasNextPage) break
+      cursor = dados.orders.pageInfo.endCursor
+    }
+    return encontrados
+  }
+
+  let daLoja: PedidoVinculoShopify[]
+  let semEmailShopify = false
+  try {
+    daLoja = await buscar(CONSULTA_PEDIDOS_VINCULO)
+  } catch (e) {
+    if (!(e instanceof AcessoNegadoShopify)) throw e
+    esquecerToken()
+    token = await tokenDeAcesso(loja)
+    try {
+      daLoja = await buscar(CONSULTA_PEDIDOS_VINCULO)
+    } catch (e2) {
+      if (!(e2 instanceof AcessoNegadoShopify)) throw e2
+      semEmailShopify = true
+      daLoja = await buscar(CONSULTA_PEDIDOS_VINCULO_SEM_EMAIL)
+    }
+  }
+
+  // 1º casamento: o número Yampi citado em algum campo do pedido Shopify.
+  const pedidoPorNumero = new Map(pendentes.map((p) => [p.id.replace(/^YP-/, ''), p]))
+  const vinculo = new Map<string, string>() // id do ERP → número Shopify (sem '#')
+  const usados = new Set<string>() // names da Shopify já reivindicados
+  for (const o of daLoja) {
+    const texto = [
+      o.sourceIdentifier ?? '',
+      o.note ?? '',
+      ...o.customAttributes.flatMap((a) => [a.key, a.value ?? '']),
+    ].join(' ')
+    for (const trecho of texto.match(/\d{6,}/g) ?? []) {
+      const par = pedidoPorNumero.get(trecho)
+      if (par && !vinculo.has(par.id) && !usados.has(o.name)) {
+        vinculo.set(par.id, o.name.replace(/^#/, ''))
+        usados.add(o.name)
+        break
+      }
+    }
+  }
+
+  // 2º casamento: e-mail + valor exato, único dos dois lados, datas próximas.
+  let ambiguos = 0
+  const chaveDe = (email: string, valor: number) => `${email}|${Math.round(valor * 100)}`
+  const soltosPorChave = new Map<string, typeof pendentes>()
+  for (const p of pendentes) {
+    if (vinculo.has(p.id)) continue
+    const email = p.cliente_id ? emailDoCliente.get(p.cliente_id) : null
+    if (!email) continue
+    const chave = chaveDe(email, p.valor)
+    soltosPorChave.set(chave, [...(soltosPorChave.get(chave) ?? []), p])
+  }
+  const lojaPorChave = new Map<string, PedidoVinculoShopify[]>()
+  for (const o of daLoja) {
+    if (usados.has(o.name) || !o.email) continue
+    const chave = chaveDe(o.email.trim().toLowerCase(), Number(o.totalPriceSet.shopMoney.amount))
+    lojaPorChave.set(chave, [...(lojaPorChave.get(chave) ?? []), o])
+  }
+  const DEZ_DIAS = 10 * 24 * 60 * 60 * 1000
+  for (const [chave, meus] of soltosPorChave) {
+    const deles = lojaPorChave.get(chave) ?? []
+    if (meus.length === 1 && deles.length === 1) {
+      const distancia = Math.abs(
+        new Date(meus[0].comprado_em).getTime() - new Date(deles[0].createdAt).getTime(),
+      )
+      if (distancia <= DEZ_DIAS) {
+        vinculo.set(meus[0].id, deles[0].name.replace(/^#/, ''))
+        usados.add(deles[0].name)
+      }
+    } else if (deles.length > 0) {
+      ambiguos += meus.length
+    }
+  }
+
+  for (const parte of emLotes([...vinculo.entries()], 20)) {
+    await Promise.all(
+      parte.map(([id, numeroShopify]) =>
+        sb
+          .from('pedidos')
+          .update({ shopify_numero: numeroShopify })
+          .eq('id', id)
+          .then(({ error: e }) => {
+            if (e) throw e
+          }),
+      ),
+    )
+  }
+
+  return {
+    pendentes: pendentes.length,
+    examinados: daLoja.length,
+    vinculados: vinculo.size,
+    ambiguos,
+    semEmailShopify,
+  }
+}
+
 // ── Aplicação automática do estoque calculado ──────────────────────────────
 
 export interface AplicacaoCalculada extends ResultadoAplicacao {
