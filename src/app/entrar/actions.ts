@@ -29,7 +29,23 @@ export async function entrar(
 
   const sb = await supabaseDaSessao()
   const { data, error } = await sb.auth.signInWithPassword({ email, password: senha })
-  if (error || !data.user) return { erro: 'E-mail ou senha não conferem.' }
+
+  if (error || !data.user) {
+    // Credencial errada e serviço quebrado são problemas diferentes, e tratar
+    // os dois como "não confere" mandou uma investigação inteira para o lado
+    // errado: o login estava falhando por erro de schema no Supabase, e a
+    // tela dizia que a senha estava errada. O texto genérico continua para o
+    // caso legítimo (400), porque distinguir "e-mail não existe" de "senha
+    // errada" entrega a lista de quem tem conta aqui.
+    const status = error?.status ?? 0
+    if (status >= 500 || status === 0) {
+      console.error('[entrar] o Supabase não respondeu ao login:', error?.message)
+      return {
+        erro: 'O serviço de autenticação não respondeu. Tente de novo em instantes — se insistir, é falha do Supabase, não da sua senha.',
+      }
+    }
+    return { erro: 'E-mail ou senha não conferem.' }
+  }
 
   const { data: perfil } = await supabaseServer()
     .from('usuarios')
