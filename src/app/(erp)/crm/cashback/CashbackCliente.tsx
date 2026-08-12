@@ -293,7 +293,6 @@ export function CashbackCliente({
           type="checkbox"
           checked={Boolean(marcados[c.customerId])}
           onChange={(e) => setMarcados((s) => ({ ...s, [c.customerId]: e.target.checked }))}
-          onClick={(e) => e.stopPropagation()}
           aria-label={`Selecionar ${c.nome}`}
           style={{ accentColor: COR.ouro, cursor: 'pointer' }}
         />
@@ -324,7 +323,6 @@ export function CashbackCliente({
             href={`https://wa.me/${c.telefone}`}
             target="_blank"
             rel="noreferrer"
-            onClick={(e) => e.stopPropagation()}
             className="font-mono hover:brightness-125"
             style={{ fontSize: 11, color: COR.ouro, textDecoration: 'none' }}
           >
@@ -387,16 +385,24 @@ export function CashbackCliente({
     {
       chave: 'acao',
       titulo: '',
-      largura: '116px',
+      largura: '196px',
       alinhamento: 'right',
+      // Duas ações explícitas em vez de linha-inteira-clicável: a linha
+      // precisaria virar <button>, e botão dentro de botão é HTML inválido.
       render: (c) => (
-        <span onClick={(e) => e.stopPropagation()}>
+        <span style={{ display: 'inline-flex', gap: 7, justifyContent: 'flex-end' }}>
+          <BotaoSecundario
+            altura={28}
+            onClick={() => setSelecionado(c.customerId === selecionado ? null : c.customerId)}
+          >
+            {c.customerId === selecionado ? 'Fechar' : 'Extrato'}
+          </BotaoSecundario>
           <BotaoSecundario
             altura={28}
             desabilitado={enviando || !c.email}
             onClick={() => avisar([c.customerId])}
           >
-            {c.email ? 'Enviar aviso' : 'Sem e-mail'}
+            {c.email ? 'Avisar' : 'Sem e-mail'}
           </BotaoSecundario>
         </span>
       ),
@@ -493,7 +499,6 @@ export function CashbackCliente({
               return dias !== null && dias <= 7 ? tomDoVencimento(dias) : null
             }}
             selecionadoDe={(c) => c.customerId === selecionado}
-            aoClicar={(c) => setSelecionado(c.customerId === selecionado ? null : c.customerId)}
             cabecalho={
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '13px 15px', borderBottom: '1px solid var(--color-borda)', flexWrap: 'wrap' }}>
                 <TituloSecao tamanho={13}>Clientes com cashback disponível</TituloSecao>
@@ -515,7 +520,7 @@ export function CashbackCliente({
             rodape={
               <div style={{ padding: '11px 15px', borderTop: '1px solid var(--color-borda)' }}>
                 <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
-                  {`${visiveis.length} de ${plural(carteiras.length, 'carteira', 'carteiras')} · clique na linha para ver o extrato ao vivo · o texto do aviso se edita em CRM → E-mails da marca`}
+                  {`${visiveis.length} de ${plural(carteiras.length, 'carteira', 'carteiras')} · "Extrato" abre a carteira ao vivo na Yampi · o texto do aviso se edita em CRM → E-mails da marca`}
                 </span>
               </div>
             }

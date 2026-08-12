@@ -119,8 +119,9 @@ export function PortalDevolucoes() {
             <Image
               src="/assets/frenesi-logo.png"
               alt="FRENESI"
-              width={118}
-              height={38}
+              // Tamanho real do arquivo; o CSS abaixo escala proporcionalmente.
+              width={3791}
+              height={795}
               priority
               style={{ width: 118, height: 'auto', display: 'block' }}
             />

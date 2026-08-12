@@ -76,8 +76,12 @@ export function Sidebar({ origem }: { origem: 'supabase' | 'fixtures' }) {
             <Image
               src="/assets/frenesi-logo.png"
               alt="FRENESI"
-              width={164}
-              height={52}
+              // O tamanho declarado é o REAL do arquivo (3791×795): o CSS
+              // abaixo escala os dois lados juntos e a proporção fica correta.
+              // Declarar 164×52 (que não é a proporção do PNG) fazia o Next
+              // avisar, a cada página, que só uma das medidas foi alterada.
+              width={3791}
+              height={795}
               priority
               style={{ width: 164, height: 'auto', display: 'block' }}
             />
