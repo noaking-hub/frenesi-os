@@ -55,7 +55,21 @@ export async function entrar(
 
   // Credencial válida mas sem perfil ativo no ERP: a sessão é desfeita na
   // hora, senão o cookie ficaria valendo para as rotas de API.
-  if (!perfil || !(perfil as { ativo: boolean }).ativo) {
+  //
+  // "Não tem perfil" e "foi desativado" são situações diferentes e a saída
+  // também: uma pede que criem o acesso, a outra que reativem. Dizer
+  // "desativado" para quem nunca teve perfil manda a pessoa pedir a coisa
+  // errada — foi o que aconteceu quando a credencial foi recriada no painel
+  // do Supabase e o perfil ficou para trás.
+  if (!perfil) {
+    await sb.auth.signOut()
+    return {
+      erro:
+        'A credencial confere, mas este e-mail ainda não tem acesso liberado no ERP. ' +
+        'Peça a quem administra para criar o acesso em Configurações → Usuários.',
+    }
+  }
+  if (!(perfil as { ativo: boolean }).ativo) {
     await sb.auth.signOut()
     return { erro: 'Este acesso está desativado. Fale com quem administra o ERP.' }
   }
