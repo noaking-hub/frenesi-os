@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest'
 
-import { dataDaTransportadora, idDoEvento, ocorrenciaDeEntrega, ordenarEventos } from '..'
+import {
+  dataDaTransportadora,
+  idDoEvento,
+  ocorrenciaDeEntrega,
+  ordenarEventos,
+  servicoFrenetDe,
+  servicosPeloFormato,
+} from '..'
 import type { EventoTransportadora } from '..'
+
+/** Os serviços que a conta da Frenet devolve em `GET /shipping/info`. */
+const SERVICOS = ['JTE_INT', '03220', '03298', 'F_3']
 
 describe('ocorrência de entrega', () => {
   it('reconhece as formas em que a transportadora diz "entregue"', () => {
@@ -77,9 +87,50 @@ describe('data da transportadora', () => {
     expect(dataDaTransportadora('2026-08-11T14:55:00-03:00')).toBe('2026-08-11T17:55:00.000Z')
   })
 
+  it('lê o dd/MM/yyyy dos Correios, que convive com o ISO da J&T', () => {
+    // A Frenet devolve os dois formatos na mesma conta, sem avisar qual vem.
+    // Lido como ISO, `12/08/2026 09:56` dá data inválida — e o evento entraria
+    // sem data, no fim da lista, como se fosse o registro mais pobre.
+    expect(dataDaTransportadora('12/08/2026 09:56')).toBe('2026-08-12T12:56:00.000Z')
+    expect(dataDaTransportadora('06/08/2026 09:47:31')).toBe('2026-08-06T12:47:31.000Z')
+    expect(dataDaTransportadora('06/08/2026')).toBe('2026-08-06T03:00:00.000Z')
+  })
+
   it('vazio ou lixo não vira data inventada', () => {
     expect(dataDaTransportadora(null)).toBeNull()
     expect(dataDaTransportadora('')).toBeNull()
     expect(dataDaTransportadora('sem data')).toBeNull()
+  })
+})
+
+describe('serviço da Frenet a partir do rótulo da Yampi', () => {
+  it('extrai o código do rótulo, que é o que a consulta exige', () => {
+    expect(servicoFrenetDe('FRENET_SEDEX_03220', SERVICOS)).toBe('03220')
+    expect(servicoFrenetDe('FRENET_PAC_03298', SERVICOS)).toBe('03298')
+    expect(servicoFrenetDe('FRENET_JADLOG_PACKAGE_F_3', SERVICOS)).toBe('F_3')
+  })
+
+  it('rótulo de outro emissor não vira serviço da Frenet', () => {
+    // Mandar o rótulo inteiro era o bug: a Frenet respondia 200 com
+    // ErrorMessage e zero ocorrências, igualzinho a "ainda não escaneado".
+    expect(servicoFrenetDe('ME_STANDARD_35', SERVICOS)).toBeNull()
+    expect(servicoFrenetDe(null, SERVICOS)).toBeNull()
+    expect(servicoFrenetDe('FRENET_SEDEX_03220', [])).toBeNull()
+  })
+})
+
+describe('serviço pelo formato do código', () => {
+  it('reconhece Correios, Jadlog e J&T pelo desenho do código', () => {
+    expect(servicosPeloFormato('AD754669044BR')).toEqual(['03220', '03298'])
+    expect(servicosPeloFormato('614554609')).toEqual(['F_3'])
+    expect(servicosPeloFormato('888030860328538')).toEqual(['JTE_INT'])
+  })
+
+  it('código que não se parece com nenhum não recebe palpite', () => {
+    // Metade dos pedidos veio antes do ERP, sem serviço gravado — chutar um
+    // serviço qualquer gastaria consulta e ainda gravaria histórico de outro.
+    expect(servicosPeloFormato('TXAQ485921993tx')).toEqual([])
+    expect(servicosPeloFormato('')).toEqual([])
+    expect(servicosPeloFormato(null)).toEqual([])
   })
 })

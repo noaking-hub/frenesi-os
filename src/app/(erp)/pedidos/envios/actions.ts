@@ -24,9 +24,19 @@ export type Resposta<T = object> = ({ ok: true } & T) | { ok: false; erro: strin
  */
 export async function rastreioDoPedido(
   pedidoId: string,
-): Promise<Resposta<{ eventos: EventoTransportadora[] }>> {
+): Promise<Resposta<{ eventos: EventoTransportadora[]; url: string | null }>> {
   try {
-    return { ok: true, eventos: await eventosDoPedido(pedidoId) }
+    const eventos = await eventosDoPedido(pedidoId)
+    let url: string | null = null
+    if (supabaseConfigurado()) {
+      const { data } = await supabaseServer()
+        .from('pedidos')
+        .select('rastreio_url')
+        .eq('id', pedidoId)
+        .maybeSingle()
+      url = ((data as { rastreio_url: string | null } | null)?.rastreio_url ?? null) || null
+    }
+    return { ok: true, eventos, url }
   } catch (e) {
     return { ok: false, erro: mensagemDe(e) }
   }
@@ -38,7 +48,7 @@ export async function rastreioDoPedido(
  */
 export async function atualizarRastreioAgora(
   pedidoId: string,
-): Promise<Resposta<{ eventos: EventoTransportadora[]; novos: number }>> {
+): Promise<Resposta<{ eventos: EventoTransportadora[]; novos: number; url: string | null }>> {
   if (!frenetConfigurada()) {
     return {
       ok: false,
@@ -51,26 +61,44 @@ export async function atualizarRastreioAgora(
     const sb = supabaseServer()
     const { data, error } = await sb
       .from('pedidos')
-      .select('id, rastreio, servico_frete')
+      .select('id, rastreio, servico_frete, rastreio_servico, rastreio_url')
       .eq('id', pedidoId)
       .maybeSingle()
     if (error) return { ok: false, erro: mensagemDe(error) }
 
-    const pedido = data as { rastreio: string | null; servico_frete: string | null } | null
+    const pedido = data as {
+      rastreio: string | null
+      servico_frete: string | null
+      rastreio_servico: string | null
+      rastreio_url: string | null
+    } | null
     if (!pedido?.rastreio) {
       return { ok: false, erro: 'Este pedido ainda não tem código de rastreio.' }
     }
-    if (/^ME[_ ]/i.test(pedido.servico_frete ?? '')) {
-      return {
-        ok: false,
-        erro: 'Este envio saiu pelo Melhor Envio, que ainda não está ligado ao ERP — a consulta ao vivo cobre por enquanto os envios da Frenet (Correios e Jadlog).',
-      }
+
+    const leitura = await rastrearNaFrenet(
+      pedido.rastreio,
+      pedido.rastreio_servico ?? pedido.servico_frete,
+    )
+    const r = await gravarEventosRastreio(leitura.eventos)
+
+    if (leitura.url || leitura.servico) {
+      await sb
+        .from('pedidos')
+        .update({
+          ...(leitura.url ? { rastreio_url: leitura.url } : {}),
+          ...(leitura.servico ? { rastreio_servico: leitura.servico } : {}),
+        })
+        .eq('id', pedidoId)
     }
 
-    const lidos = await rastrearNaFrenet(pedido.rastreio, pedido.servico_frete)
-    const r = await gravarEventosRastreio(lidos)
     revalidatePath('/pedidos/envios')
-    return { ok: true, eventos: await eventosDoPedido(pedidoId), novos: r.gravados }
+    return {
+      ok: true,
+      eventos: await eventosDoPedido(pedidoId),
+      novos: r.gravados,
+      url: leitura.url ?? pedido.rastreio_url,
+    }
   } catch (e) {
     return { ok: false, erro: mensagemDe(e) }
   }

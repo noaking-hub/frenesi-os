@@ -623,6 +623,7 @@ const dataHoraCurta = (iso: string | null) =>
  */
 function TimelineTransportadora({ pedidoId, temCodigo }: { pedidoId: string; temCodigo: boolean }) {
   const [eventos, setEventos] = useState<EventoTransportadora[] | null>(null)
+  const [url, setUrl] = useState<string | null>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [buscando, setBuscando] = useState(false)
 
@@ -630,8 +631,10 @@ function TimelineTransportadora({ pedidoId, temCodigo }: { pedidoId: string; tem
     let atual = true
     rastreioDoPedido(pedidoId).then((r) => {
       if (!atual) return
-      if (r.ok) setEventos(r.eventos)
-      else setErro(r.erro)
+      if (r.ok) {
+        setEventos(r.eventos)
+        setUrl(r.url)
+      } else setErro(r.erro)
     })
     return () => {
       atual = false
@@ -643,8 +646,10 @@ function TimelineTransportadora({ pedidoId, temCodigo }: { pedidoId: string; tem
     setErro(null)
     void atualizarRastreioAgora(pedidoId)
       .then((r) => {
-        if (r.ok) setEventos(r.eventos)
-        else setErro(r.erro)
+        if (r.ok) {
+          setEventos(r.eventos)
+          setUrl(r.url)
+        } else setErro(r.erro)
       })
       .finally(() => setBuscando(false))
   }
@@ -674,9 +679,30 @@ function TimelineTransportadora({ pedidoId, temCodigo }: { pedidoId: string; tem
       )}
 
       {eventos?.length === 0 && (
-        <span className="font-sans" style={{ fontSize: 10.5, lineHeight: 1.45, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
-          Nenhuma ocorrência gravada ainda. O rastreio chega pelo webhook da transportadora e pela
-          varredura de hora em hora — “Atualizar agora” pergunta na hora.
+        <span
+          className="font-sans"
+          style={{ fontSize: 10.5, lineHeight: 1.45, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+        >
+          {url ? (
+            <>
+              A transportadora reconhece o objeto, mas não devolve o histórico de escaneamentos ao
+              ERP — é o caso da Jadlog. O acompanhamento existe só na página dela:{' '}
+              <a
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="hover:brightness-110"
+                style={{ fontWeight: 600, color: 'var(--color-ouro)', textDecoration: 'none' }}
+              >
+                abrir rastreio →
+              </a>
+            </>
+          ) : (
+            <>
+              Nenhuma ocorrência gravada ainda. O rastreio chega pelo webhook da transportadora e
+              pela varredura de hora em hora — “Atualizar agora” pergunta na hora.
+            </>
+          )}
         </span>
       )}
 

@@ -4,6 +4,8 @@ import {
   dataDaTransportadora,
   idDoEvento,
   ocorrenciaDeEntrega,
+  servicoFrenetDe,
+  servicosPeloFormato,
   type EventoTransportadora,
   type OrigemRastreio,
 } from '@/domain'
@@ -30,7 +32,7 @@ export function frenetConfigurada(): boolean {
   return Boolean(process.env.FRENET_TOKEN?.trim())
 }
 
-async function chamarFrenet<T>(caminho: string, corpo: unknown): Promise<T> {
+async function chamarFrenet<T>(caminho: string, corpo?: unknown): Promise<T> {
   const token = process.env.FRENET_TOKEN?.trim()
   if (!token) {
     throw new Error(
@@ -39,13 +41,13 @@ async function chamarFrenet<T>(caminho: string, corpo: unknown): Promise<T> {
   }
 
   const resposta = await fetch(`${BASE}${caminho}`, {
-    method: 'POST',
+    method: corpo === undefined ? 'GET' : 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
       token,
     },
-    body: JSON.stringify(corpo),
+    body: corpo === undefined ? undefined : JSON.stringify(corpo),
     cache: 'no-store',
   })
 
@@ -62,6 +64,65 @@ async function chamarFrenet<T>(caminho: string, corpo: unknown): Promise<T> {
   const cru = await resposta.text()
   if (!cru.trim()) return undefined as T
   return JSON.parse(cru) as T
+}
+
+export interface ServicoFrenet {
+  codigo: string
+  descricao: string
+  transportadora: string
+}
+
+/**
+ * Os serviços contratados nesta conta da Frenet.
+ *
+ * É a tabela que traduz o rótulo da Yampi (`FRENET_SEDEX_03220`) no código que
+ * a consulta de rastreio exige (`03220`). Ela mora na conta, não no código:
+ * contratar a J&T amanhã acrescenta um serviço, e uma lista fixa aqui deixaria
+ * esses envios sem histórico até alguém lembrar de editar o arquivo.
+ *
+ * O cache é de processo e vale a vida da instância — o catálogo muda em
+ * semanas, e reler a cada código consultado gastaria uma chamada por pedido.
+ */
+let catalogo: { quando: number; servicos: ServicoFrenet[] } | null = null
+const VALIDADE_CATALOGO_MS = 6 * 60 * 60 * 1000
+
+export async function servicosDaFrenet(): Promise<ServicoFrenet[]> {
+  if (catalogo && Date.now() - catalogo.quando < VALIDADE_CATALOGO_MS) return catalogo.servicos
+
+  const resposta = await chamarFrenet<Record<string, unknown>>('/shipping/info')
+  const lista = Array.isArray(resposta?.ShippingSeviceAvailableArray)
+    ? (resposta.ShippingSeviceAvailableArray as Record<string, unknown>[])
+    : []
+
+  const servicos = lista
+    .map((s) => ({
+      codigo: texto(campo(s, ['serviceCode'])) ?? '',
+      descricao: texto(campo(s, ['serviceDescription'])) ?? '',
+      transportadora: texto(campo(s, ['carrier'])) ?? '',
+    }))
+    .filter((s) => s.codigo)
+
+  if (servicos.length) catalogo = { quando: Date.now(), servicos }
+  return servicos
+}
+
+/**
+ * Quais serviços tentar para um código.
+ *
+ * Primeiro o que o rótulo da Yampi indica; depois o que o formato do código
+ * denuncia, para os pedidos anteriores ao ERP e para as etiquetas emitidas
+ * fora da Frenet. A lista sai sem repetição e limitada aos serviços que a
+ * conta realmente tem — pedir um serviço não contratado só devolve erro.
+ */
+async function servicosParaTentar(
+  codigo: string,
+  servicoFrete: string | null | undefined,
+): Promise<string[]> {
+  const disponiveis = await servicosDaFrenet()
+  const codigos = disponiveis.map((s) => s.codigo)
+  const doRotulo = servicoFrenetDe(servicoFrete, codigos)
+  const doFormato = servicosPeloFormato(codigo).filter((c) => codigos.includes(c))
+  return [...new Set([doRotulo, ...doFormato].filter((c): c is string => Boolean(c)))]
 }
 
 /** Desembrulha valores em qualquer capitalização — a Frenet mistura as duas. */
@@ -143,27 +204,75 @@ export function eventoDaFrenet(
   }
 }
 
+export interface LeituraRastreio {
+  eventos: EventoTransportadora[]
+  /** Página pública da Frenet para este objeto — o que sobra quando não há evento. */
+  url: string | null
+  /** O código de serviço que respondeu; vale guardar para não redescobrir. */
+  servico: string | null
+}
+
 /**
  * Consulta o rastreio de UM código.
  *
- * `POST /tracking/trackinginfo` é o endpoint documentado; o corpo pede o
- * número do objeto e, quando conhecido, a transportadora.
+ * `POST /tracking/trackinginfo` sempre responde 200 — inclusive quando recusa.
+ * Serviço desconhecido volta como `{"ErrorMessage": "...", ...}` com zero
+ * ocorrências, indistinguível de "o objeto ainda não foi escaneado" para quem
+ * só conta o tamanho da lista. Era exatamente isso que estava acontecendo: o
+ * ERP mandava o rótulo da Yampi no lugar do código, a Frenet recusava, e o
+ * pedido era marcado como lido sem nunca ter sido consultado de verdade.
+ *
+ * Quando o serviço não é conhecido de antemão, os candidatos são tentados em
+ * ordem e o primeiro que responder com ocorrência encerra a busca.
  */
 export async function rastrearNaFrenet(
   codigo: string,
-  transportadora?: string | null,
-): Promise<EventoTransportadora[]> {
+  servicoFrete?: string | null,
+): Promise<LeituraRastreio> {
   const alvo = codigo.trim()
-  if (!alvo) return []
+  if (!alvo) return { eventos: [], url: null, servico: null }
 
-  const resposta = await chamarFrenet<unknown>('/tracking/trackinginfo', {
-    ShippingServiceCode: transportadora ?? '',
-    TrackingNumber: alvo,
-  })
+  const candidatos = await servicosParaTentar(alvo, servicoFrete)
+  if (candidatos.length === 0) {
+    throw new Error(
+      `A Frenet não tem serviço para o código ${alvo}` +
+        (servicoFrete ? ` (${servicoFrete})` : '') +
+        '. Provavelmente a etiqueta saiu por outro emissor.',
+    )
+  }
 
-  return ocorrenciasDe(resposta)
-    .map((o) => eventoDaFrenet(o, alvo))
-    .filter((e): e is EventoTransportadora => e !== null)
+  let recusa: string | null = null
+  let ultima: LeituraRastreio = { eventos: [], url: null, servico: null }
+
+  for (const servico of candidatos) {
+    const resposta = await chamarFrenet<Record<string, unknown>>('/tracking/trackinginfo', {
+      ShippingServiceCode: servico,
+      TrackingNumber: alvo,
+    })
+
+    const erro = texto(campo(resposta ?? {}, ['errorMessage', 'message']))
+    if (erro) {
+      recusa = erro
+      continue
+    }
+
+    const eventos = ocorrenciasDe(resposta)
+      .map((o) => eventoDaFrenet(o, alvo))
+      .filter((e): e is EventoTransportadora => e !== null)
+
+    ultima = {
+      eventos,
+      url: texto(campo(resposta ?? {}, ['trackingUrl'])),
+      servico,
+    }
+    // Serviço aceito e com histórico: não há por que perguntar aos outros.
+    if (eventos.length) return ultima
+  }
+
+  // Todos os candidatos foram recusados: isso é falha, não silêncio. Deixar
+  // passar como "sem ocorrência" é o que escondeu o problema por semanas.
+  if (recusa && !ultima.servico) throw new Error(`A Frenet recusou a consulta de ${alvo}: ${recusa}`)
+  return ultima
 }
 
 /**
@@ -255,39 +364,58 @@ export async function varrerRastreiosFrenet(limite = 60): Promise<RodadaRastreio
   const sb = supabaseServer()
   const { data, error } = await sb
     .from('pedidos')
-    .select('id, rastreio, servico_frete, rastreio_lido_em')
+    .select('id, rastreio, servico_frete, rastreio_servico, rastreio_lido_em')
     .not('rastreio', 'is', null)
     .is('entregue_em', null)
     .order('rastreio_lido_em', { ascending: true, nullsFirst: true })
     .limit(limite)
   if (error) throw error
 
-  const alvos = ((data ?? []) as { id: string; rastreio: string; servico_frete: string | null }[])
-    // Códigos do Melhor Envio não são consulta da Frenet — ela responderia
-    // vazio, e o pedido voltaria para o fim da fila sem nada ter acontecido.
-    .filter((p) => !/^ME[_ ]/i.test(p.servico_frete ?? ''))
+  // Nada é descartado por rótulo aqui: etiqueta emitida no Melhor Envio pode
+  // ter saído por uma transportadora que a Frenet consulta igual (a J&T
+  // responde por código público). Quem decide é `rastrearNaFrenet`, que sabe
+  // quais serviços esta conta tem — e avisa quando não tem nenhum.
+  const alvos = (data ?? []) as {
+    id: string
+    rastreio: string
+    servico_frete: string | null
+    rastreio_servico: string | null
+  }[]
 
   const resultado: RodadaRastreio = { consultados: 0, eventos: 0, entregues: 0, falhas: [] }
   const agora = new Date().toISOString()
 
   for (const p of alvos) {
     try {
-      const eventos = await rastrearNaFrenet(p.rastreio, p.servico_frete)
+      // O serviço já descoberto tem prioridade sobre o rótulo da Yampi: ele é
+      // o que a Frenet aceitou de fato, e evita repetir a tentativa e erro.
+      const leitura = await rastrearNaFrenet(p.rastreio, p.rastreio_servico ?? p.servico_frete)
       resultado.consultados++
-      if (eventos.length) {
-        const r = await gravarEventosRastreio(eventos)
+      if (leitura.eventos.length) {
+        const r = await gravarEventosRastreio(leitura.eventos)
         resultado.eventos += r.gravados
         resultado.entregues += r.entregues
-      } else {
-        // Sem ocorrência ainda: marca a leitura assim mesmo, senão o mesmo
-        // código volta primeiro na fila em todas as rodadas.
-        await sb.from('pedidos').update({ rastreio_lido_em: agora }).eq('id', p.id)
       }
+      // A leitura é marcada mesmo sem ocorrência: senão o mesmo código volta
+      // primeiro na fila em todas as rodadas e os outros nunca chegam a ser
+      // consultados. O link público entra aqui — para a Jadlog, é a única
+      // coisa que a Frenet devolve.
+      await sb
+        .from('pedidos')
+        .update({
+          rastreio_lido_em: agora,
+          ...(leitura.url ? { rastreio_url: leitura.url } : {}),
+          ...(leitura.servico ? { rastreio_servico: leitura.servico } : {}),
+        })
+        .eq('id', p.id)
     } catch (e) {
       resultado.falhas.push({
         codigo: p.rastreio,
         erro: e instanceof Error ? e.message : String(e),
       })
+      // Falha também marca leitura: sem isso o código recusado monopoliza o
+      // topo da fila e a varredura gira em falso sobre os mesmos dez pedidos.
+      await sb.from('pedidos').update({ rastreio_lido_em: agora }).eq('id', p.id)
     }
     // Espaçamento entre consultas: são dezenas por rodada e o limite da
     // Frenet é por minuto.
