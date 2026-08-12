@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { emailRecuperacao } from '..'
+import { aplicarSite, emailRecuperacao } from '..'
 
 describe('e-mail de recuperação de carrinho', () => {
   const base = {
@@ -117,5 +117,37 @@ describe('modo HTML do zero', () => {
     )
     expect(html).not.toContain('<img src=x')
     expect(html).toContain('&lt;img')
+  })
+
+  it('a linha do item traz a foto quando o carrinho informa, e herda o estilo do template', () => {
+    const { html } = emailRecuperacao(
+      {
+        ...base,
+        itens: ['1× Erba Pura · 5 ml', '1× Eros · 10 ml'],
+        imagens: ['https://cdn.loja.com/erba.png', null],
+        cupom: null,
+      },
+      modelo,
+    )
+    expect(html).toContain('src="https://cdn.loja.com/erba.png"')
+    // Só uma foto: o segundo item veio sem imagem e não pode sair <img> vazio.
+    expect(html.match(/<img /g)?.length).toBe(1)
+    // A lista herda cor e fonte do documento — cores fixas claras foi o que
+    // deixou o bloco ilegível no template escuro.
+    expect(html).toContain('color:inherit')
+    // O total é do template ({total}), não da tabela de itens.
+    expect(html.split('84,90').length - 1).toBe(1)
+  })
+})
+
+describe('aplicarSite', () => {
+  it('troca {site} pela URL sem barra final', () => {
+    expect(aplicarSite('<img src="{site}/marca/icon-whatsapp.png">', 'https://erp.com/')).toBe(
+      '<img src="https://erp.com/marca/icon-whatsapp.png">',
+    )
+  })
+
+  it('sem URL conhecida, o caminho fica relativo em vez de literal', () => {
+    expect(aplicarSite('{site}/marca/x.png', null)).toBe('/marca/x.png')
   })
 })

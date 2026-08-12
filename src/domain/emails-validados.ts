@@ -1,9 +1,9 @@
 /**
- * Os HTMLs VALIDADOS dos e-mails da marca — aprovados pela operação, com a
- * logomarca no CDN da Brandfetch e as redes sociais como links em texto
- * dourado (ícone de terceiro destoava do design e imagem própria exigiria
- * hospedagem). São o PADRÃO dos modelos: valem até alguém editar na Central
- * de E-mails. Cópias de referência em docs/emails/.
+ * Os HTMLs VALIDADOS dos e-mails da marca. A logomarca vem do CDN da
+ * Brandfetch; os ícones de redes são os PNGs da operação, servidos pelo
+ * próprio ERP em /marca — o campo vivo {site} vira a URL do site no envio.
+ * São o PADRÃO dos modelos: valem até alguém editar na Central de E-mails.
+ * Cópias de referência em docs/emails/.
  */
 
 export const HTML_VALIDADO_CARRINHO = `<!DOCTYPE html>
@@ -166,14 +166,20 @@ export const HTML_VALIDADO_CARRINHO = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:26px 40px 0 40px;">
-                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:12px; line-height:18px; mso-line-height-rule:exactly; letter-spacing:2px; color:#8A7B62; padding-bottom:14px;">@frenesiperfumes</div>
-                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:12px; line-height:20px; mso-line-height-rule:exactly; letter-spacing:2px;">
-                    <a href="https://wa.me/5532998661887" style="color:#D4AF6A; text-decoration:none;">WHATSAPP</a>
-                    <span style="color:#6B5836;">&nbsp;&nbsp;&#9670;&nbsp;&nbsp;</span>
-                    <a href="https://instagram.com/frenesiperfumes" style="color:#D4AF6A; text-decoration:none;">INSTAGRAM</a>
-                    <span style="color:#6B5836;">&nbsp;&nbsp;&#9670;&nbsp;&nbsp;</span>
-                    <a href="https://tiktok.com/@frenesiperfumes" style="color:#D4AF6A; text-decoration:none;">TIKTOK</a>
-                  </div>
+                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:12px; line-height:18px; mso-line-height-rule:exactly; letter-spacing:2px; color:#8A7B62; padding-bottom:12px;">@frenesiperfumes</div>
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:auto;">
+                    <tr>
+                      <td align="center" style="padding:0 7px;">
+                        <a href="https://wa.me/5532998661887" style="display:inline-block; text-decoration:none;"><img src="{site}/marca/icon-whatsapp.png" width="40" height="40" alt="WhatsApp" style="display:block; width:40px; height:40px; border:0;" /></a>
+                      </td>
+                      <td align="center" style="padding:0 7px;">
+                        <a href="https://instagram.com/frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="{site}/marca/icon-instagram.png" width="40" height="40" alt="Instagram" style="display:block; width:40px; height:40px; border:0;" /></a>
+                      </td>
+                      <td align="center" style="padding:0 7px;">
+                        <a href="https://tiktok.com/@frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="{site}/marca/icon-tiktok.png" width="40" height="40" alt="TikTok" style="display:block; width:40px; height:40px; border:0;" /></a>
+                      </td>
+                    </tr>
+                  </table>
                 </td>
               </tr>
 
@@ -322,14 +328,20 @@ export const HTML_VALIDADO_GIFT = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:26px 40px 0 40px;">
-                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:12px; line-height:18px; mso-line-height-rule:exactly; letter-spacing:2px; color:#8A7B62; padding-bottom:14px;">@frenesiperfumes</div>
-                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:12px; line-height:20px; mso-line-height-rule:exactly; letter-spacing:2px;">
-                    <a href="https://wa.me/5532998661887" style="color:#D4AF6A; text-decoration:none;">WHATSAPP</a>
-                    <span style="color:#6B5836;">&nbsp;&nbsp;&#9670;&nbsp;&nbsp;</span>
-                    <a href="https://instagram.com/frenesiperfumes" style="color:#D4AF6A; text-decoration:none;">INSTAGRAM</a>
-                    <span style="color:#6B5836;">&nbsp;&nbsp;&#9670;&nbsp;&nbsp;</span>
-                    <a href="https://tiktok.com/@frenesiperfumes" style="color:#D4AF6A; text-decoration:none;">TIKTOK</a>
-                  </div>
+                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:12px; line-height:18px; mso-line-height-rule:exactly; letter-spacing:2px; color:#8A7B62; padding-bottom:12px;">@frenesiperfumes</div>
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:auto;">
+                    <tr>
+                      <td align="center" style="padding:0 7px;">
+                        <a href="https://wa.me/5532998661887" style="display:inline-block; text-decoration:none;"><img src="{site}/marca/icon-whatsapp.png" width="40" height="40" alt="WhatsApp" style="display:block; width:40px; height:40px; border:0;" /></a>
+                      </td>
+                      <td align="center" style="padding:0 7px;">
+                        <a href="https://instagram.com/frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="{site}/marca/icon-instagram.png" width="40" height="40" alt="Instagram" style="display:block; width:40px; height:40px; border:0;" /></a>
+                      </td>
+                      <td align="center" style="padding:0 7px;">
+                        <a href="https://tiktok.com/@frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="{site}/marca/icon-tiktok.png" width="40" height="40" alt="TikTok" style="display:block; width:40px; height:40px; border:0;" /></a>
+                      </td>
+                    </tr>
+                  </table>
                 </td>
               </tr>
 

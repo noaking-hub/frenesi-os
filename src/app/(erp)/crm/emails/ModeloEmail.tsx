@@ -7,7 +7,7 @@ import { useMemo, useState, useTransition } from 'react'
 import { Modal } from '@/components/erp/Modal'
 import { BotaoOuro, BotaoSecundario, Rotulo } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
-import { HTML_BASE_RECUPERACAO, emailGiftback, emailRecuperacao, type ModeloEmailRecuperacao } from '@/domain'
+import { HTML_BASE_RECUPERACAO, aplicarSite, emailGiftback, emailRecuperacao, type ModeloEmailRecuperacao } from '@/domain'
 
 import { enviarTeste, salvarModelo } from './actions'
 
@@ -82,6 +82,12 @@ export function ModeloEmail({
       {
         nome: 'Marina Fontes',
         itens: ['1× Baccarat Rouge 540 (Decant) · 5 ml', '1× Sauvage Elixir (Decant) · 10 ml'],
+        // Uma linha com foto e outra sem: a prévia mostra os dois casos —
+        // a Yampi nem sempre manda imagem no item do carrinho.
+        imagens: [
+          'https://www.frenesiperfumes.com.br/cdn/shop/files/088_eros-masculino-eau-de-parfum-decant-_eros-eau-de-parfum-2790tu7i1c-personalizado-padrao-luxo.png?v=1778676473&width=120',
+          null,
+        ],
         valor: 189.8,
         linkCheckout: '#',
         cupom,
@@ -89,6 +95,13 @@ export function ModeloEmail({
       modelo,
     )
   }, [tipo, assunto, titulo, mensagem, textoBotao, cupom, modoHtml, htmlProprio])
+
+  // {site} na prévia é o próprio ERP aberto no navegador — é ele que serve
+  // os ícones de /marca. No envio real, o servidor usa a URL da Netlify.
+  const htmlPrevia = useMemo(
+    () => aplicarSite(previa.html, typeof window === 'undefined' ? '' : window.location.origin),
+    [previa.html],
+  )
 
   const salvar = () =>
     iniciarTransicao(async () => {
@@ -323,7 +336,7 @@ export function ModeloEmail({
           )}
           <iframe
             title="Prévia do e-mail de recuperação"
-            srcDoc={previa.html}
+            srcDoc={htmlPrevia}
             sandbox=""
             style={{
               width: '100%',

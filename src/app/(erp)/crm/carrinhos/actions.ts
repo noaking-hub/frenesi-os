@@ -6,7 +6,7 @@ import { emailConfigurado, entregar } from '@/data/email'
 import { lerModeloEmail } from '@/data/modelo-email'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { criarCupomYampi, lerCarrinhosYampi } from '@/data/yampi-crm'
-import { emailRecuperacao } from '@/domain'
+import { aplicarSite, emailRecuperacao } from '@/domain'
 
 /**
  * Como o cupom entra no envio: um código fixo já publicado, ou um código
@@ -176,15 +176,18 @@ export async function enviarEmailsCarrinho(
       {
         nome: carrinho.cliente,
         itens: carrinho.itens,
+        imagens: carrinho.imagens,
         valor: carrinho.valor,
         linkCheckout: carrinho.link ?? process.env.LOJA_URL ?? null,
         cupom: cupomDoEmail,
       },
       modelo,
     )
+    // {site} é a URL deste ERP no ar — é dela que saem os ícones de /marca.
+    const htmlFinal = aplicarSite(html, process.env.URL ?? process.env.LOJA_URL ?? '')
 
     try {
-      await entregar({ para: carrinho.email, assunto, html })
+      await entregar({ para: carrinho.email, assunto, html: htmlFinal })
       resultado.enviados.push(carrinho.cliente ?? carrinho.email)
       if (sb) {
         await sb.from('recuperacoes_carrinho').insert({

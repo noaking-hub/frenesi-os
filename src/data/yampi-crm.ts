@@ -178,6 +178,8 @@ export interface CarrinhoYampi {
   telefone: string | null
   valor: number
   itens: string[]
+  /** Foto de cada item, alinhada por índice com `itens` (null quando a Yampi não manda). */
+  imagens: (string | null)[]
   abandonadoEm: string | null
   /** Link de retomada do carrinho, quando a Yampi expõe algum. */
   link: string | null
@@ -186,6 +188,24 @@ export interface CarrinhoYampi {
 export interface LeituraCarrinhos {
   carrinhos: CarrinhoYampi[]
   camposCrus: string[]
+}
+
+/**
+ * Extrai uma URL de imagem de qualquer formato que a Yampi use: string
+ * direta, objeto `{ url | src | thumb... }`, relação embrulhada em `{ data }`
+ * ou lista de imagens (vale a primeira).
+ */
+function urlDeImagem(valor: unknown): string | null {
+  const cru = miolo(valor)
+  if (typeof cru === 'string') return /^https?:\/\//.test(cru.trim()) ? cru.trim() : null
+  if (Array.isArray(cru)) return cru.length ? urlDeImagem(cru[0]) : null
+  if (cru && typeof cru === 'object') {
+    for (const nome of ['thumb', 'small', 'url', 'src', 'medium', 'large', 'original']) {
+      const achado = urlDeImagem((cru as Record<string, unknown>)[nome])
+      if (achado) return achado
+    }
+  }
+  return null
 }
 
 /**
@@ -227,7 +247,7 @@ export async function lerCarrinhosYampi(): Promise<LeituraCarrinhos> {
       (totalizadores ? numero(campo(totalizadores, ['total', 'value_total', 'subtotal'])) : 0)
 
     const itensCrus = miolo(campo(c, ['items', 'products', 'spreadsheet']))
-    const itens = Array.isArray(itensCrus)
+    const linhas = Array.isArray(itensCrus)
       ? itensCrus.flatMap((i) => {
           const item = miolo(i) as Record<string, unknown>
           const sku = miolo(campo(item, ['sku'])) as Record<string, unknown> | undefined
@@ -235,9 +255,14 @@ export async function lerCarrinhosYampi(): Promise<LeituraCarrinhos> {
             (sku ? texto(campo(sku, ['title', 'name'])) : null) ??
             texto(campo(item, ['name', 'title', 'description', 'product_name']))
           const qtd = numero(campo(item, ['quantity', 'qty'])) || 1
-          return titulo ? [qtd > 1 ? `${qtd}× ${titulo}` : titulo] : []
+          const imagem =
+            (sku ? urlDeImagem(campo(sku, ['image_reference', 'image', 'thumbnail', 'images'])) : null) ??
+            urlDeImagem(campo(item, ['image_reference', 'image', 'thumbnail', 'images']))
+          return titulo ? [{ rotulo: qtd > 1 ? `${qtd}× ${titulo}` : titulo, imagem }] : []
         })
       : []
+    const itens = linhas.map((l) => l.rotulo)
+    const imagens = linhas.map((l) => l.imagem)
 
     return [
       {
@@ -247,6 +272,7 @@ export async function lerCarrinhosYampi(): Promise<LeituraCarrinhos> {
         telefone: digitos.length >= 10 ? (digitos.length <= 11 ? `55${digitos}` : digitos) : null,
         valor,
         itens,
+        imagens,
         abandonadoEm: data(campo(c, ['updated_at', 'abandoned_at', 'created_at'])),
         link: texto(
           campo(c, ['checkout_url', 'cart_url', 'recovery_url', 'simulate_url', 'url', 'link']),

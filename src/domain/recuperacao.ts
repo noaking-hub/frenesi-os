@@ -18,6 +18,8 @@ export interface DadosEmailCarrinho {
   valor: number
   /** Para onde o botão aponta: o link do carrinho, ou a home da loja. */
   linkCheckout: string | null
+  /** Foto de cada item, alinhada por índice com `itens`. */
+  imagens?: (string | null)[]
   cupom?: { codigo: string; pct: number } | null
 }
 
@@ -65,6 +67,16 @@ export function preencherModelo(texto: string, nome: string | null, total: strin
 
 const escapaHtml = (t: string) =>
   t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+/**
+ * Preenche o campo vivo {site} — a URL onde o PRÓPRIO ERP está no ar, usada
+ * pelos templates para servir as imagens de /marca (ícones das redes). Fica
+ * fora do render porque cada lado sabe sua URL de um jeito: o servidor pela
+ * variável de ambiente, a prévia no navegador por window.location.origin.
+ */
+export function aplicarSite(html: string, site: string | null | undefined): string {
+  return html.split('{site}').join((site ?? '').trim().replace(/\/+$/, ''))
+}
 
 export function emailRecuperacao(
   d: DadosEmailCarrinho,
@@ -199,15 +211,23 @@ export function emailRecuperacao(
   return { assunto, html }
 }
 
-/** A tabela de itens pronta para o modo HTML próprio — vale em qualquer lugar do documento. */
-function tabelaDeItens(itens: string[], totalFormatado: string): string {
+/**
+ * A lista de itens para o modo HTML próprio: herda cor e fonte do template
+ * (impor cores claras num e-mail escuro foi o que deixou o bloco ilegível),
+ * traz a foto do produto quando o carrinho a informa, e NÃO repete o total —
+ * o template tem a própria linha {total}.
+ */
+function tabelaDeItens(itens: string[], imagens?: (string | null)[]): string {
   const linhas = itens
-    .map(
-      (i) =>
-        `<tr><td style="padding:9px 0;border-bottom:1px solid #E5DFD2;font-family:Georgia,'Times New Roman',serif;font-size:14px;line-height:1.5;color:#1A1A1A;">${escapaHtml(i)}</td></tr>`,
-    )
+    .map((i, indice) => {
+      const img = imagens?.[indice]
+      const foto = img
+        ? `<td width="54" valign="middle" style="width:54px; padding:7px 12px 7px 0;"><img src="${escapaHtml(img)}" width="44" height="44" alt="" style="display:block; width:44px; height:44px; border-radius:6px; border:0;" /></td>`
+        : ''
+      return `<tr>${foto}<td valign="middle" style="padding:7px 0; font-family:inherit; font-size:inherit; line-height:inherit; color:inherit;">${escapaHtml(i)}</td></tr>`
+    })
     .join('')
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${linhas}<tr><td style="padding:12px 0 0;text-align:right;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#4C463A;">Total: <strong style="color:#1A1A1A;font-size:15px;">${totalFormatado}</strong></td></tr></table>`
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${linhas}</table>`
 }
 
 /**
@@ -230,7 +250,7 @@ function renderHtmlProprio(
   return preencherModelo(
     comCupom
       .split('{itens}')
-      .join(tabelaDeItens(d.itens, total))
+      .join(tabelaDeItens(d.itens, d.imagens))
       .split('{link}')
       .join(escapaHtml(d.linkCheckout ?? '#'))
       .split('{cupom}')
@@ -378,6 +398,7 @@ export const HTML_BASE_RECUPERACAO = `<!doctype html>
                 </p>
                 <p style="margin:0 0 4px;font-family:Arial,Helvetica,sans-serif;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:#8A7440;">No seu carrinho</p>
                 {itens}
+                <p style="margin:12px 0 0;text-align:right;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#4C463A;">Total: <strong style="color:#1A1A1A;font-size:15px;">{total}</strong></p>
                 [[cupom]]
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:22px;border:1px dashed #B08D3E;border-radius:10px;">
                   <tr>

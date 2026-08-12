@@ -4,8 +4,15 @@ import { revalidatePath } from 'next/cache'
 
 import { emailConfigurado, entregar } from '@/data/email'
 import { gravarModeloEmail, type ChaveModelo } from '@/data/modelo-email'
-import { emailGiftback, emailRecuperacao } from '@/domain'
+import { aplicarSite, emailGiftback, emailRecuperacao } from '@/domain'
 import type { ModeloEmailRecuperacao } from '@/domain'
+
+/**
+ * Foto real do catálogo para o teste mostrar a linha de item COM imagem —
+ * ao lado de uma sem, que mostra o comportamento quando a Yampi não manda.
+ */
+const FOTO_EXEMPLO =
+  'https://www.frenesiperfumes.com.br/cdn/shop/files/088_eros-masculino-eau-de-parfum-decant-_eros-eau-de-parfum-2790tu7i1c-personalizado-padrao-luxo.png?v=1778676473&width=120'
 
 /** Salva um modelo da Central de E-mails — o próximo envio já sai com ele. */
 export async function salvarModelo(
@@ -64,13 +71,18 @@ export async function enviarTeste(
             {
               nome: 'Marina Fontes',
               itens: ['1× Baccarat Rouge 540 (Decant) · 5 ml', '1× Sauvage Elixir (Decant) · 10 ml'],
+              imagens: [FOTO_EXEMPLO, null],
               valor: 189.8,
               linkCheckout: process.env.LOJA_URL ?? 'https://frenesiperfumes.com.br',
               cupom: { codigo: 'VOLTA10-TESTE1', pct: 10 },
             },
             m,
           )
-    await entregar({ para: para.trim(), assunto: `[TESTE] ${r.assunto}`, html: r.html })
+    await entregar({
+      para: para.trim(),
+      assunto: `[TESTE] ${r.assunto}`,
+      html: aplicarSite(r.html, process.env.URL ?? process.env.LOJA_URL ?? ''),
+    })
   } catch (e) {
     return { ok: false, erro: e instanceof Error ? e.message : String(e) }
   }

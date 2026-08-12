@@ -6,7 +6,7 @@ import { emailConfigurado, entregar } from '@/data/email'
 import { lerModeloEmail } from '@/data/modelo-email'
 import { gravarAniversario, importarAniversariosYampi, registrarGiftback } from '@/data/giftback'
 import { criarCupomYampi } from '@/data/yampi-crm'
-import { emailGiftback } from '@/domain'
+import { aplicarSite, emailGiftback } from '@/domain'
 
 type Resposta<T = object> = ({ ok: true } & T) | { ok: false; erro: string }
 
@@ -91,7 +91,11 @@ export async function enviarPresente(dados: {
       },
       modelo,
     )
-    await entregar({ para: dados.email, assunto, html })
+    await entregar({
+      para: dados.email,
+      assunto,
+      html: aplicarSite(html, process.env.URL ?? process.env.LOJA_URL ?? ''),
+    })
     await registrarGiftback({ email: dados.email, cupom: codigo, canal: 'email' })
   } catch (e) {
     return { ok: false, erro: e instanceof Error ? e.message : String(e) }
