@@ -1,6 +1,16 @@
 import 'server-only'
 
-import { creditoVale, dataDe as textoData, saldoDoExtrato } from '@/domain'
+import {
+  creditoVale,
+  dataDe as textoData,
+  janelaDoPeriodo,
+  metricasCashback,
+  saldoDoExtrato,
+  type CarteiraCashback,
+  type MetricasCashback,
+  type MovimentoGravado,
+  type Periodo,
+} from '@/domain'
 
 import { supabaseConfigurado, supabaseServer } from './supabase'
 import { chamarYampi, yampiConfigurada } from './yampi'
@@ -9,12 +19,15 @@ import { chamarYampi, yampiConfigurada } from './yampi'
  * Cashback ESPELHADO da Yampi.
  *
  * O cashback nasce, é resgatado e expira no checkout da Yampi — o ERP não
- * mantém livro próprio, ele retrata. A carteira de cada cliente vem de
- * `/pricing/wallet/{customerId}/balance`, e o extrato completo de
- * `/pricing/wallet/statement/{customerId}` (endpoints do portal oficial).
- * Como o saldo é por cliente, a sincronização varre o cadastro de clientes
- * e consulta carteira a carteira — por isso ela roda em rodadas, com
- * progresso, e grava o retrato em `cashback_yampi`.
+ * mantém livro próprio, ele retrata. A fonte é o extrato de cada cliente
+ * (`/pricing/wallet/statement/{customerId}`): o endpoint de saldo não existe
+ * nesta conta, e o extrato traz mais — quanto foi creditado, quanto já foi
+ * usado, quando vence. A sincronização varre o cadastro de clientes em
+ * rodadas e grava dois retratos: a carteira em `cashback_yampi` e cada
+ * movimento em `cashback_movimentos`, de onde saem as métricas de período.
+ *
+ * Nada de diagnóstico aqui vai para a tela: quando algo não bate, o motivo
+ * vai para o log do servidor. A tela mostra o resultado, não a investigação.
  */
 
 function miolo(valor: unknown): unknown {
@@ -62,12 +75,22 @@ export interface RodadaCashback {
   proximaPagina: number | null
   lidos: number
   comSaldo: number
-  /**
-   * Respostas CRUAS de carteira, para diagnóstico: quando tudo vem zerado,
-   * a diferença entre "a loja não tem cashback" e "o leitor não entendeu o
-   * formato" está aqui — e se conserta em cima do fato, não de palpite.
-   */
-  amostraCrua: string[]
+}
+
+/** Telefone do cliente da Yampi, só dígitos, em qualquer formato que ela use. */
+function telefoneDe(c: Record<string, unknown>): string | null {
+  const cru =
+    campo(c, ['whatsapp', 'phone', 'cellphone']) ??
+    (miolo(campo(c, ['phone'])) as Record<string, unknown> | undefined)?.full_number
+  const bruto = miolo(cru)
+  const texto =
+    typeof bruto === 'string'
+      ? bruto
+      : bruto && typeof bruto === 'object'
+        ? String(campo(bruto as Record<string, unknown>, ['full_number', 'number', 'phone']) ?? '')
+        : ''
+  const digitos = texto.replace(/\D/g, '')
+  return digitos.length >= 10 ? digitos : null
 }
 
 /**
@@ -88,7 +111,7 @@ export async function sincronizarCashbackYampi(
   const inicio = Date.now()
   let lidos = 0
   let comSaldo = 0
-  const amostraCrua: string[] = []
+  const hoje = new Date().toISOString().slice(0, 10)
 
   for (let pagina = Math.max(1, paginaInicial); ; pagina++) {
     const r = await chamarYampi<{
@@ -97,13 +120,8 @@ export async function sincronizarCashbackYampi(
     }>('/customers', { limit: '50', page: String(pagina) })
     const clientes = r.data ?? []
 
-    const linhas: {
-      customer_id: string
-      email: string | null
-      nome: string | null
-      saldo: number
-      atualizado_em: string
-    }[] = []
+    const linhas: Record<string, unknown>[] = []
+    const movimentos: Record<string, unknown>[] = []
 
     for (const c of clientes) {
       const id = campo(c, ['id'])
@@ -117,19 +135,11 @@ export async function sincronizarCashbackYampi(
 
       // O extrato é a fonte: o endpoint de saldo desta loja responde 404, e
       // era ele que fazia TODAS as carteiras aparecerem zeradas.
-      let saldo = 0
+      let extrato: Record<string, unknown>[] = []
       let tentativas = 0
       for (;;) {
         try {
-          const cru = await chamarYampi(`/pricing/wallet/statement/${String(id)}`)
-          if (amostraCrua.length < 3) {
-            try {
-              amostraCrua.push(JSON.stringify(cru).slice(0, 320))
-            } catch {
-              /* amostra é diagnóstico, não pode derrubar a leitura */
-            }
-          }
-          saldo = saldoDoExtrato(movimentosDe(cru))
+          extrato = movimentosDe(await chamarYampi(`/pricing/wallet/statement/${String(id)}`))
           break
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
@@ -143,12 +153,66 @@ export async function sincronizarCashbackYampi(
           throw new Error(`Falha ao ler a carteira do cliente ${String(id)}: ${msg}`)
         }
       }
+
+      const saldo = saldoDoExtrato(extrato)
       if (saldo > 0) comSaldo++
+
+      // O que a gestão precisa e o saldo sozinho não conta: quando vence o
+      // próximo crédito, quanto já entrou e saiu, e a última compra que
+      // gerou cashback.
+      let gerado = 0
+      let usado = 0
+      let expiraEm: string | null = null
+      let ultimoCredito: string | null = null
+      for (const m of extrato) {
+        const mid = campo(m, ['id'])
+        const tipo = String(campo(m, ['transaction_type', 'type', 'operation', 'kind']) ?? 'credit')
+        const valor = numero(campo(m, ['amount', 'value', 'total']))
+        const gasto = numero(campo(m, ['used_amount', 'used', 'consumed_amount']))
+        const criadoEm = textoData(campo(m, ['created_at', 'date', 'createdAt']))
+        const venceEm = textoData(campo(m, ['expires_at', 'expire_at', 'expiration_date']))
+        const vale = creditoVale(m, hoje)
+        const credito = !/debit|debito|débito|resgate|withdraw/i.test(tipo)
+        const pedidoCru = miolo(campo(m, ['order'])) as Record<string, unknown> | undefined
+        const pedido = pedidoCru ? campo(pedidoCru, ['number', 'id']) : campo(m, ['order_id'])
+
+        if (credito) {
+          gerado += valor
+          usado += gasto
+          if (criadoEm && (!ultimoCredito || criadoEm > ultimoCredito)) ultimoCredito = criadoEm
+          // Vence primeiro o crédito vivo mais próximo: é o que a operação
+          // persegue quando avisa o cliente.
+          if (vale && valor - gasto > 0 && venceEm && (!expiraEm || venceEm < expiraEm)) {
+            expiraEm = venceEm.slice(0, 10)
+          }
+        }
+
+        if (mid !== undefined) {
+          movimentos.push({
+            id: String(mid),
+            customer_id: String(id),
+            tipo,
+            valor: Math.round(valor * 100) / 100,
+            usado: Math.round(gasto * 100) / 100,
+            status: String(campo(m, ['status']) ?? ''),
+            pedido: pedido !== undefined ? String(pedido) : null,
+            criado_em: criadoEm ? new Date(criadoEm.replace(' ', 'T')).toISOString() : null,
+            expira_em: venceEm ? venceEm.slice(0, 10) : null,
+            vale,
+          })
+        }
+      }
+
       linhas.push({
         customer_id: String(id),
         email,
         nome,
-        saldo: Math.round(saldo * 100) / 100,
+        telefone: telefoneDe(c),
+        saldo,
+        expira_em: expiraEm,
+        gerado: Math.round(gerado * 100) / 100,
+        usado: Math.round(usado * 100) / 100,
+        ultimo_credito_em: ultimoCredito ? new Date(ultimoCredito.replace(' ', 'T')).toISOString() : null,
         atualizado_em: new Date().toISOString(),
       })
       // Espaçamento curto: são muitas consultas pequenas, e o limite da
@@ -160,50 +224,21 @@ export async function sincronizarCashbackYampi(
       const { error } = await sb.from('cashback_yampi').upsert(linhas)
       if (error) throw error
     }
+    if (movimentos.length) {
+      const { error } = await sb.from('cashback_movimentos').upsert(movimentos)
+      // Movimento é histórico para métrica: se falhar, o saldo já está
+      // gravado e a rodada continua — o erro vai para o log, não para a tela.
+      if (error) console.error('[cashback] movimentos não gravados:', error.message)
+    }
 
     const p = r.meta?.pagination
     const acabou = !p || p.current_page >= p.total_pages
-    if (acabou) return { proximaPagina: null, lidos, comSaldo, amostraCrua }
-    if (Date.now() - inicio > prazoMs) return { proximaPagina: pagina + 1, lidos, comSaldo, amostraCrua }
+    if (acabou) return { proximaPagina: null, lidos, comSaldo }
+    if (Date.now() - inicio > prazoMs) return { proximaPagina: pagina + 1, lidos, comSaldo }
   }
 }
 
-/**
- * Diagnóstico instantâneo: a resposta CRUA da carteira do primeiro cliente.
- * É o que separa "a loja não tem cashback" de "o leitor não entendeu o
- * formato" sem esperar uma varredura inteira.
- */
-export async function amostraCarteiraCrua(): Promise<{ saldoCru: string; extratoCru: string }> {
-  const r = await chamarYampi<{ data?: Record<string, unknown>[] }>('/customers', { limit: '1', page: '1' })
-  const id = r.data?.[0] ? campo(r.data[0], ['id']) : undefined
-  if (id === undefined) throw new Error('A Yampi não devolveu nenhum cliente para diagnosticar.')
-  const json = (v: unknown) => {
-    try {
-      return JSON.stringify(v).slice(0, 500)
-    } catch {
-      return '(resposta não serializável)'
-    }
-  }
-  let saldoCru = ''
-  try {
-    saldoCru = json(await chamarYampi(`/pricing/wallet/${String(id)}/balance`))
-  } catch (e) {
-    saldoCru = `ERRO: ${e instanceof Error ? e.message : String(e)}`
-  }
-  let extratoCru = ''
-  try {
-    extratoCru = json(await chamarYampi(`/pricing/wallet/statement/${String(id)}`))
-  } catch (e) {
-    extratoCru = `ERRO: ${e instanceof Error ? e.message : String(e)}`
-  }
-  return { saldoCru, extratoCru }
-}
-
-export interface CarteiraYampi {
-  customerId: string
-  nome: string
-  email: string | null
-  saldo: number
+export interface CarteiraYampi extends CarteiraCashback {
   atualizadoEm: string
 }
 
@@ -214,7 +249,8 @@ export async function carteirasYampi(): Promise<{
   if (!supabaseConfigurado()) return { carteiras: [], ultimaSincronizacao: null }
   const { data, error } = await supabaseServer()
     .from('cashback_yampi')
-    .select('customer_id, email, nome, saldo, atualizado_em')
+    .select('customer_id, email, nome, telefone, saldo, expira_em, ultimo_credito_em, aviso_em, atualizado_em')
+    .gt('saldo', 0)
     .order('saldo', { ascending: false })
     .limit(5000)
   if (error) throw error
@@ -223,13 +259,21 @@ export async function carteirasYampi(): Promise<{
     customer_id: string
     email: string | null
     nome: string | null
+    telefone: string | null
     saldo: number | string
+    expira_em: string | null
+    ultimo_credito_em: string | null
+    aviso_em: string | null
     atualizado_em: string
   }[]).map((c) => ({
     customerId: c.customer_id,
     nome: c.nome ?? c.email ?? c.customer_id,
     email: c.email,
+    telefone: c.telefone,
     saldo: Number(c.saldo),
+    expiraEm: c.expira_em,
+    ultimaCompra: c.ultimo_credito_em,
+    avisoEm: c.aviso_em,
     atualizadoEm: c.atualizado_em,
   }))
 
@@ -238,6 +282,77 @@ export async function carteirasYampi(): Promise<{
     null,
   )
   return { carteiras, ultimaSincronizacao: ultima }
+}
+
+/**
+ * As métricas do período: quanto de cashback nasceu, quanto foi usado, em
+ * quantos pedidos, que fatia das vendas e quanto de receita isso moveu.
+ *
+ * Os movimentos vêm do espelho (não da Yampi ao vivo) porque a pergunta é
+ * sobre um período inteiro — perguntar carteira a carteira levaria minutos
+ * a cada troca de filtro.
+ */
+export async function metricasDoPeriodo(periodo: Periodo): Promise<MetricasCashback> {
+  const vazio: MetricasCashback = {
+    gerado: 0,
+    utilizado: 0,
+    pedidosComCashback: 0,
+    percentualPedidos: 0,
+    receita: 0,
+    tempoMedioDeUso: null,
+  }
+  if (!supabaseConfigurado()) return vazio
+
+  const { de, ate } = janelaDoPeriodo(periodo)
+  const sb = supabaseServer()
+
+  const { data: movs, error } = await sb
+    .from('cashback_movimentos')
+    .select('id, customer_id, tipo, valor, usado, pedido, criado_em, expira_em, vale')
+    .gte('criado_em', de)
+    .lt('criado_em', ate)
+    .limit(20_000)
+  if (error) throw error
+
+  const movimentos: MovimentoGravado[] = ((movs ?? []) as Record<string, unknown>[]).map((m) => ({
+    id: String(m.id),
+    customerId: String(m.customer_id),
+    tipo: String(m.tipo),
+    valor: Number(m.valor),
+    usado: Number(m.usado),
+    pedido: (m.pedido as string | null) ?? null,
+    criadoEm: (m.criado_em as string | null) ?? null,
+    expiraEm: (m.expira_em as string | null) ?? null,
+    vale: Boolean(m.vale),
+  }))
+
+  // Os pedidos do mesmo período, para a fatia e a receita. O id do pedido no
+  // ERP é `YP-{número}`, e é o número que o movimento de cashback cita.
+  const { data: pedidos, error: erroPedidos } = await sb
+    .from('pedidos')
+    .select('id, valor')
+    .eq('pagamento', 'pago')
+    .gte('comprado_em', de)
+    .lt('comprado_em', ate)
+    .limit(20_000)
+  if (erroPedidos) throw erroPedidos
+
+  const doPeriodo = ((pedidos ?? []) as { id: string; valor: number | string }[]).map((p) => ({
+    id: p.id.replace(/^YP-/, ''),
+    valor: Number(p.valor),
+  }))
+
+  return metricasCashback(movimentos, doPeriodo)
+}
+
+/** Marca que o cliente foi avisado do vencimento — some da fila do dia. */
+export async function registrarAvisoCashback(customerIds: string[]): Promise<void> {
+  if (!supabaseConfigurado() || customerIds.length === 0) return
+  const { error } = await supabaseServer()
+    .from('cashback_yampi')
+    .update({ aviso_em: new Date().toISOString() })
+    .in('customer_id', customerIds)
+  if (error) throw error
 }
 
 export interface MovimentoCashback {

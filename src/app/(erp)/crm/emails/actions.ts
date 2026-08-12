@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 
 import { emailConfigurado, entregar } from '@/data/email'
 import { gravarModeloEmail, type ChaveModelo } from '@/data/modelo-email'
-import { aplicarSite, emailGiftback, emailRecuperacao } from '@/domain'
+import { aplicarSite, emailCashback, emailGiftback, emailRecuperacao } from '@/domain'
 import type { ModeloEmailRecuperacao } from '@/domain'
 
 /**
@@ -69,7 +69,17 @@ export async function enviarTeste(
   }
   try {
     const r =
-      chave === 'giftback'
+      chave === 'cashback'
+        ? emailCashback(
+            {
+              nome: 'Marina Fontes',
+              saldo: 47.9,
+              validade: '30/09/2026',
+              lojaUrl: process.env.LOJA_URL ?? 'https://frenesiperfumes.com.br',
+            },
+            m,
+          )
+        : chave === 'giftback'
         ? emailGiftback(
             { nome: 'Marina Fontes', cupom: { codigo: 'NIVER15-TESTE1', pct: 15 }, validadeDias: 7, lojaUrl: process.env.LOJA_URL ?? 'https://frenesiperfumes.com.br' },
             m,

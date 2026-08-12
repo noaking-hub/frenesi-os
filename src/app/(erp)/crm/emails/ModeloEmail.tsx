@@ -7,7 +7,15 @@ import { useMemo, useState, useTransition } from 'react'
 import { Modal } from '@/components/erp/Modal'
 import { BotaoOuro, BotaoSecundario, Rotulo } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
-import { HTML_BASE_RECUPERACAO, aplicarSite, emailGiftback, emailRecuperacao, type ModeloEmailRecuperacao } from '@/domain'
+import type { ChaveModelo } from '@/data/modelo-email'
+import {
+  HTML_BASE_RECUPERACAO,
+  aplicarSite,
+  emailCashback,
+  emailGiftback,
+  emailRecuperacao,
+  type ModeloEmailRecuperacao,
+} from '@/domain'
 
 import { enviarTeste, salvarModelo } from './actions'
 
@@ -38,7 +46,7 @@ export function ModeloEmail({
   aoFechar,
 }: {
   /** Qual e-mail está sendo editado — muda a prévia e os campos vivos. */
-  tipo?: 'carrinho' | 'giftback'
+  tipo?: ChaveModelo
   inicial: ModeloEmailRecuperacao
   /** O cupom preenchido na tela, para a prévia mostrar o e-mail completo. */
   cupom: { codigo: string; pct: number } | null
@@ -67,6 +75,12 @@ export function ModeloEmail({
 
   const previa = useMemo(() => {
     const modelo = { assunto, titulo, mensagem, textoBotao, html: modoHtml ? htmlProprio : null }
+    if (tipo === 'cashback') {
+      return emailCashback(
+        { nome: 'Marina Fontes', saldo: 47.9, validade: '30/09/2026', lojaUrl: '#' },
+        modelo,
+      )
+    }
     if (tipo === 'giftback') {
       return emailGiftback(
         {
@@ -141,7 +155,13 @@ export function ModeloEmail({
 
   return (
     <Modal
-      titulo={tipo === 'giftback' ? 'Modelo do e-mail de aniversário' : 'Modelo do e-mail de recuperação'}
+      titulo={
+        tipo === 'giftback'
+          ? 'Modelo do e-mail de aniversário'
+          : tipo === 'cashback'
+            ? 'Modelo do aviso de cashback'
+            : 'Modelo do e-mail de recuperação'
+      }
       largura={980}
       aoFechar={aoFechar}
     >
@@ -172,14 +192,21 @@ export function ModeloEmail({
                 className="font-sans"
                 style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--color-terciario)', textWrap: 'pretty' }}
               >
-                {tipo === 'giftback'
-                  ? 'O documento inteiro é seu. Campos vivos: '
-                  : 'O documento inteiro é seu — o campo abre com a base da marca para editar. Campos vivos: '}
+                {tipo === 'carrinho'
+                  ? 'O documento inteiro é seu — o campo abre com a base da marca para editar. Campos vivos: '
+                  : 'O documento inteiro é seu. Campos vivos: '}
                 <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{nome}'}</span>
                 {', '}
-                <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{total}'}</span>
-                {', '}
-                {tipo === 'giftback' ? (
+                {tipo === 'cashback' ? (
+                  <>
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{saldo}'}</span>
+                    {' (o valor em reais), '}
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{validade}'}</span>
+                    {' (a data em que vence) e '}
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{link}'}</span>
+                    {'. Use tabela e estilo inline — Gmail ignora CSS de cabeçalho.'}
+                  </>
+                ) : tipo === 'giftback' ? (
                   <>
                     <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{cupom}'}</span>
                     {', '}
@@ -219,7 +246,14 @@ export function ModeloEmail({
                 {'Escreva como a marca fala. '}
                 <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{nome}'}</span>
                 {' vira o primeiro nome do cliente (e some quando não há nome); '}
-                {tipo === 'giftback' ? (
+                {tipo === 'cashback' ? (
+                  <>
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{saldo}'}</span>
+                    {' e '}
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{validade}'}</span>
+                    {' viram o saldo do cliente e a data em que ele vence. O quadro do saldo e o rodapé entram sozinhos.'}
+                  </>
+                ) : tipo === 'giftback' ? (
                   <>
                     <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{cupom}'}</span>
                     {', '}

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 
 import { BotaoOuro, Rotulo, TituloSecao } from '@/components/erp/primitivos'
+import type { ChaveModelo } from '@/data/modelo-email'
 import type { ModeloEmailRecuperacao } from '@/domain'
 
 import { ModeloEmail } from './ModeloEmail'
@@ -15,11 +16,13 @@ import { ModeloEmail } from './ModeloEmail'
 export function EmailsCliente({
   carrinho,
   giftback,
+  cashback,
 }: {
   carrinho: ModeloEmailRecuperacao
   giftback: ModeloEmailRecuperacao
+  cashback: ModeloEmailRecuperacao
 }) {
-  const [editando, setEditando] = useState<'carrinho' | 'giftback' | null>(null)
+  const [editando, setEditando] = useState<ChaveModelo | null>(null)
 
   const cartoes = [
     {
@@ -35,6 +38,13 @@ export function EmailsCliente({
       onde: 'Enviado de CRM → Giftback ao presentear um aniversariante',
       modelo: giftback,
       extras: 'cupom-presente único criado na Yampi entra sozinho',
+    },
+    {
+      chave: 'cashback' as const,
+      nome: 'Aviso de cashback',
+      onde: 'Enviado de CRM → Cashback, para quem tem saldo perto de vencer',
+      modelo: cashback,
+      extras: 'saldo e data de validade do próprio cliente entram sozinhos',
     },
   ]
 
@@ -74,7 +84,7 @@ export function EmailsCliente({
       {editando && (
         <ModeloEmail
           tipo={editando}
-          inicial={editando === 'carrinho' ? carrinho : giftback}
+          inicial={editando === 'carrinho' ? carrinho : editando === 'giftback' ? giftback : cashback}
           cupom={editando === 'carrinho' ? { codigo: 'VOLTA10-A7K2MB', pct: 10 } : { codigo: 'NIVER15-A7K2MB', pct: 15 }}
           aoFechar={() => setEditando(null)}
         />

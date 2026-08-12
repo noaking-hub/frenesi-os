@@ -1,5 +1,9 @@
 import { brl } from './format'
-import { HTML_VALIDADO_CARRINHO, HTML_VALIDADO_GIFT } from './emails-validados'
+import {
+  HTML_VALIDADO_CARRINHO,
+  HTML_VALIDADO_CASHBACK,
+  HTML_VALIDADO_GIFT,
+} from './emails-validados'
 
 /**
  * O e-mail de recuperação de carrinho, escrito pela marca — não pelo gateway.
@@ -439,3 +443,79 @@ export const HTML_BASE_RECUPERACAO = `<!doctype html>
     </table>
   </body>
 </html>`
+
+/**
+ * Aviso de cashback prestes a vencer.
+ *
+ * Terceiro e-mail da marca, mesma moldura validada. Aqui não há cupom: o
+ * saldo já está na conta do cliente e entra sozinho no checkout — o que o
+ * e-mail faz é lembrar que ele existe e que tem prazo. Placeholders:
+ * {nome}, {saldo}, {validade} (a data, por extenso) e {link}.
+ */
+export const MODELO_CASHBACK_PADRAO: ModeloEmailRecuperacao = {
+  assunto: '{nome}, você tem {saldo} de cashback esperando',
+  titulo: '{nome}, seu cashback está esperando.',
+  mensagem:
+    'O cashback das suas compras anteriores continua disponível na sua conta — mas ele expira. Dá para usar em qualquer produto da loja, direto no checkout.',
+  textoBotao: 'Usar meu cashback',
+  html: HTML_VALIDADO_CASHBACK,
+}
+
+export function emailCashback(
+  d: { nome: string | null; saldo: number; validade: string | null; lojaUrl: string | null },
+  modelo: ModeloEmailRecuperacao = MODELO_CASHBACK_PADRAO,
+): { assunto: string; html: string } {
+  const primeiroNome = d.nome?.trim().split(/\s+/)[0] || null
+  const saldo = brl(d.saldo)
+  const validade = d.validade ?? 'em breve'
+  const preenche = (t: string) =>
+    preencherModelo(t.split('{saldo}').join(saldo).split('{validade}').join(validade), primeiroNome, saldo)
+
+  const assunto = preenche(modelo.assunto)
+
+  if (modelo.html && modelo.html.trim()) {
+    const doc = preenche(modelo.html).split('{link}').join(escapaHtml(d.lojaUrl ?? '#'))
+    return { assunto, html: doc }
+  }
+
+  const paragrafos = modelo.mensagem
+    .split(/\n\s*\n|\n/)
+    .map((p) => preenche(p.trim()))
+    .filter(Boolean)
+  const botao = d.lojaUrl
+    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:26px 0 6px;text-align:center;"><a href="${escapaHtml(d.lojaUrl)}" style="display:inline-block;background:#141414;color:#EFD18C;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:bold;font-size:13px;letter-spacing:.08em;text-transform:uppercase;padding:15px 34px;border-radius:8px;">${escapaHtml(preenche(modelo.textoBotao))}</a></td></tr></table>`
+    : ''
+
+  const html = `<!doctype html>
+<html lang="pt-BR">
+  <body style="margin:0;padding:0;background:#F6F1E7;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F6F1E7;padding:32px 12px;">
+      <tr><td align="center">
+        <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+          <tr><td style="padding:0 0 22px;text-align:center;">
+            <p style="margin:0;font-family:Georgia,'Times New Roman',serif;font-size:26px;letter-spacing:.34em;color:#141414;">FRENESI</p>
+          </td></tr>
+          <tr><td style="background:#FFFDF8;border:1px solid #EAE2CF;border-radius:14px;padding:34px 36px;">
+            <p style="margin:0 0 14px;font-family:Georgia,'Times New Roman',serif;font-size:22px;line-height:1.35;color:#1A1A1A;">${escapaHtml(preenche(modelo.titulo))}</p>
+            ${paragrafos
+              .map(
+                (p) =>
+                  `<p style="margin:0 0 20px;font-family:Arial,Helvetica,sans-serif;font-size:13.5px;line-height:1.65;color:#4C463A;">${escapaHtml(p)}</p>`,
+              )
+              .join('')}
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px dashed #B08D3E;border-radius:10px;">
+              <tr><td style="padding:16px 20px;text-align:center;">
+                <p style="margin:0 0 6px;font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8A7440;">Seu saldo</p>
+                <p style="margin:0;font-family:Georgia,'Times New Roman',serif;font-size:26px;color:#1A1A1A;">${escapaHtml(saldo)}</p>
+                <p style="margin:6px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#8A8374;">válido até ${escapaHtml(validade)}</p>
+              </td></tr>
+            </table>
+            ${botao}
+          </td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </body>
+</html>`
+  return { assunto, html }
+}
