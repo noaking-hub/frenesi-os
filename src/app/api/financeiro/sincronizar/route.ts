@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { frenetConfigurada, varrerRastreiosFrenet } from '@/data/frenet'
+import { codigosDoMelhorEnvio, melhorEnvioConectado, rastrearNoMelhorEnvio } from '@/data/melhorenvio'
 import { atualizarExtratoEsperando, mercadoPagoConfigurado } from '@/data/mercadopago'
 import {
   aplicarEstoqueCalculado,
@@ -121,6 +122,23 @@ export async function POST(req: Request) {
     }
   } else {
     relatorio.rastreio = { pulado: 'FRENET_TOKEN não está definido' }
+  }
+
+  // Melhor Envio cobre os 22% que a Frenet não vê. Só roda depois de alguém
+  // ter autorizado no navegador — sem token guardado não há o que consultar.
+  if (await melhorEnvioConectado()) {
+    try {
+      const r = await rastrearNoMelhorEnvio(await codigosDoMelhorEnvio(80))
+      relatorio.rastreioMelhorEnvio = {
+        consultados: r.consultados,
+        eventos: r.eventos,
+        entregasConfirmadas: r.entregues,
+      }
+    } catch (e) {
+      relatorio.rastreioMelhorEnvio = { erro: mensagemDe(e) }
+    }
+  } else {
+    relatorio.rastreioMelhorEnvio = { pulado: 'Melhor Envio ainda não foi conectado' }
   }
 
   // O estoque publicado na Shopify vem logo depois dos pedidos: a importação

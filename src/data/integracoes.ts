@@ -1,6 +1,8 @@
 import 'server-only'
 
 import { emailConfigurado } from './email'
+import { frenetConfigurada } from './frenet'
+import { melhorEnvioConfigurado } from './melhorenvio'
 import { mercadoPagoConfigurado } from './mercadopago'
 import { shopifyConfigurada } from './shopify'
 import { supabaseConfigurado, supabaseServer } from './supabase'
@@ -28,6 +30,7 @@ export type PapelIntegracao =
   | 'Dados'
   | 'Preço de mercado'
   | 'Nota fiscal'
+  | 'Frete'
 
 export interface EstadoIntegracao {
   id: string
@@ -107,6 +110,32 @@ export async function estadoDasIntegracoes(): Promise<EstadoIntegracao[]> {
       testavel: true,
     },
     {
+      id: 'frenet',
+      sigla: 'FR',
+      nome: 'Frenet',
+      papel: 'Frete',
+      configurada: frenetConfigurada(),
+      faltando: falta('rastreio', 'FRENET_TOKEN'),
+      detalhe:
+        'Eventos de rastreio dos Correios e da Jadlog — 78% dos envios. A Yampi entrega o código; o caminho do objeto vem daqui.',
+      ultimaAtividade: atividades.rastreio,
+      atividade: 'último evento de rastreio gravado',
+      testavel: false,
+    },
+    {
+      id: 'melhorenvio',
+      sigla: 'ME',
+      nome: 'Melhor Envio',
+      papel: 'Frete',
+      configurada: melhorEnvioConfigurado(),
+      faltando: falta('rastreio', 'MELHORENVIO_CLIENT_ID', 'MELHORENVIO_CLIENT_SECRET'),
+      detalhe:
+        'Os 22% restantes dos envios. Depois das credenciais, precisa de UMA autorização no navegador — o botão Conectar abaixo.',
+      ultimaAtividade: atividades.rastreio,
+      atividade: 'último evento de rastreio gravado',
+      testavel: false,
+    },
+    {
       id: 'resend',
       sigla: 'EM',
       nome: 'E-mail transacional',
@@ -154,6 +183,7 @@ interface Atividades {
   shopify: string | null
   mercadopago: string | null
   concorrentes: string | null
+  rastreio: string | null
 }
 
 /** Últimos fatos produzidos por cada integração. Nada de ping inventado. */
@@ -163,11 +193,12 @@ async function ultimasAtividades(): Promise<Atividades> {
     shopify: null,
     mercadopago: null,
     concorrentes: null,
+    rastreio: null,
   }
   if (!supabaseConfigurado()) return vazio
 
   const sb = supabaseServer()
-  const [pedido, sincronia, extratoMp, concorrente] = await Promise.all([
+  const [pedido, sincronia, extratoMp, concorrente, rastreio] = await Promise.all([
     sb.from('pedidos').select('comprado_em').order('comprado_em', { ascending: false }).limit(1),
     sb
       .from('sincronizacoes')
@@ -186,6 +217,11 @@ async function ultimasAtividades(): Promise<Atividades> {
       .not('ultima_leitura', 'is', null)
       .order('ultima_leitura', { ascending: false })
       .limit(1),
+    sb
+      .from('rastreio_eventos')
+      .select('criado_em')
+      .order('criado_em', { ascending: false })
+      .limit(1),
   ])
 
   return {
@@ -193,5 +229,6 @@ async function ultimasAtividades(): Promise<Atividades> {
     shopify: sincronia.data?.[0]?.executada_em ?? null,
     mercadopago: extratoMp.data?.[0]?.lido_em ?? null,
     concorrentes: concorrente.data?.[0]?.ultima_leitura ?? null,
+    rastreio: rastreio.data?.[0]?.criado_em ?? null,
   }
 }

@@ -28,7 +28,17 @@ function quando(iso: string | null): string {
  * chama o serviço de verdade e mostra o que ele respondeu — escopos, contagens,
  * nomes de campo —, porque o que trava uma integração quase nunca é a conexão.
  */
-export function IntegracoesCliente({ integracoes }: { integracoes: EstadoIntegracao[] }) {
+export function IntegracoesCliente({
+  integracoes,
+  conectado = false,
+  avisoMelhorEnvio,
+}: {
+  integracoes: EstadoIntegracao[]
+  /** O Melhor Envio já foi autorizado por alguém neste navegador ou noutro. */
+  conectado?: boolean
+  /** Resultado da volta do OAuth, quando a pessoa acabou de autorizar. */
+  avisoMelhorEnvio?: 'conectado' | 'falhou' | 'estado-invalido'
+}) {
   const [saida, setSaida] = useState<{ id: string; linhas: string[]; erro: boolean } | null>(null)
   const [pendente, iniciar] = useTransition()
   const [testando, setTestando] = useState<string | null>(null)
@@ -53,6 +63,19 @@ export function IntegracoesCliente({ integracoes }: { integracoes: EstadoIntegra
           texto={`${faltando.length} integração(ões) sem credencial completa: ${faltando
             .map((i) => i.nome)
             .join(', ')}. As telas que dependem delas continuam funcionando, mas com o que já está no banco.`}
+        />
+      )}
+
+      {avisoMelhorEnvio && (
+        <FaixaAlerta
+          tom={avisoMelhorEnvio === 'conectado' ? 'ok' : 'erro'}
+          texto={
+            avisoMelhorEnvio === 'conectado'
+              ? 'Melhor Envio conectado. A próxima varredura de rastreio já inclui os envios dele.'
+              : avisoMelhorEnvio === 'estado-invalido'
+                ? 'A autorização voltou sem bater com o pedido original — comece de novo pelo botão Conectar.'
+                : 'O Melhor Envio recusou a autorização. Confira client id, secret e a URL de redirecionamento cadastrada lá.'
+          }
         />
       )}
 
@@ -129,6 +152,30 @@ export function IntegracoesCliente({ integracoes }: { integracoes: EstadoIntegra
                 >
                   {testando === i.id ? 'Testando…' : 'Testar conexão'}
                 </BotaoSecundario>
+              )}
+              {/* OAuth não se resolve com variável de ambiente: alguém precisa
+                  autorizar no navegador, uma vez. O link leva à rota que
+                  começa a conversa com o Melhor Envio. */}
+              {i.id === 'melhorenvio' && i.configurada && (
+                <a
+                  href="/api/melhorenvio/autorizar"
+                  className="font-sans hover:brightness-110"
+                  style={{
+                    height: 28,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    padding: '0 13px',
+                    borderRadius: 8,
+                    border: `1px solid ${conectado ? 'rgba(255,255,255,.14)' : 'rgba(239,209,140,.45)'}`,
+                    background: conectado ? 'transparent' : 'rgba(239,209,140,.1)',
+                    color: conectado ? 'var(--color-secundario)' : COR.ouro,
+                    fontWeight: 600,
+                    fontSize: 11,
+                    textDecoration: 'none',
+                  }}
+                >
+                  {conectado ? 'Reconectar' : 'Conectar'}
+                </a>
               )}
             </div>
 

@@ -1,5 +1,6 @@
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
 import { estadoDasIntegracoes } from '@/data/integracoes'
+import { melhorEnvioConectado } from '@/data/melhorenvio'
 import { pad2, plural } from '@/domain'
 
 import { IntegracoesCliente } from './IntegracoesCliente'
@@ -14,8 +15,16 @@ export const dynamic = 'force-dynamic'
  * está tudo bem sem ter tentado atrapalha justamente quando algo quebra —
  * é o primeiro lugar que se olha.
  */
-export default async function Integracoes() {
-  const integracoes = await estadoDasIntegracoes()
+export default async function Integracoes({
+  searchParams,
+}: {
+  searchParams: Promise<{ me?: string }>
+}) {
+  const [integracoes, conectado, { me }] = await Promise.all([
+    estadoDasIntegracoes(),
+    melhorEnvioConectado(),
+    searchParams,
+  ])
   const ligadas = integracoes.filter((i) => i.configurada)
   const comAtividade = integracoes.filter((i) => i.ultimaAtividade)
 
@@ -43,7 +52,11 @@ export default async function Integracoes() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <FaixaKpis kpis={kpis} />
-      <IntegracoesCliente integracoes={integracoes} />
+      <IntegracoesCliente
+        integracoes={integracoes}
+        conectado={conectado}
+        avisoMelhorEnvio={me === 'conectado' || me === 'falhou' || me === 'estado-invalido' ? me : undefined}
+      />
     </div>
   )
 }
