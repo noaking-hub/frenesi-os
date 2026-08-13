@@ -8,6 +8,7 @@ import {
   gravarEventosRastreio,
   rastrearNaFrenet,
 } from '@/data/frenet'
+import { enviarAvisosDePedido } from '@/data/notificacoes'
 import { mensagemDe, shopifyConfigurada, sincronizarEnviosShopify, vincularPedidosShopify } from '@/data/shopify'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import type { EnvioParaShopify } from '@/data/shopify'
@@ -249,6 +250,38 @@ export async function baixarNaShopify(pedidoIds?: string[]): Promise<Resposta<{ 
     }
   } catch (e) {
     console.error('[envios] baixar na Shopify falhou:', e)
+    return { ok: false, erro: mensagemDe(e) }
+  }
+}
+
+/**
+ * Dispara o aviso de envio para um endereço de teste.
+ *
+ * Existe porque ninguém deveria ligar um remetente automático sem ter visto o
+ * que ele manda. O ensaio vai com `[TESTE]` no assunto, usa pedidos reais para
+ * o texto sair como sairá de verdade, e NÃO grava no log — senão consumiria o
+ * direito daquele cliente de receber o aviso quando o módulo for ligado.
+ */
+export async function testarAvisoDeEnvio(
+  email: string,
+): Promise<Resposta<{ enviados: number; falhas: string[] }>> {
+  const destino = email.trim()
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(destino)) {
+    return { ok: false, erro: 'Informe um e-mail válido para receber o teste.' }
+  }
+
+  try {
+    const r = await enviarAvisosDePedido({ destinoDeTeste: destino, limite: 2 })
+    if (r.candidatos === 0) {
+      return {
+        ok: false,
+        erro:
+          'Nenhum pedido enviado nos últimos 15 dias para servir de exemplo. ' +
+          'O teste usa pedidos reais para o texto sair como sairá de verdade.',
+      }
+    }
+    return { ok: true, enviados: r.enviados, falhas: r.falhas.map((f) => `${f.pedido}: ${f.erro}`) }
+  } catch (e) {
     return { ok: false, erro: mensagemDe(e) }
   }
 }

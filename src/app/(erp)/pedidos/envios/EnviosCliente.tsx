@@ -19,7 +19,7 @@ import { entregaLocal,
 } from '@/domain'
 import type { Envio, EstadoShopify, EventoTransportadora, StatusRastreio } from '@/domain'
 
-import { atualizarRastreioAgora, baixarNaShopify, rastreioDoPedido } from './actions'
+import { atualizarRastreioAgora, baixarNaShopify, rastreioDoPedido, testarAvisoDeEnvio } from './actions'
 
 const TOM_RASTREIO: Record<StatusRastreio, Tom> = {
   'pagamento-pendente': 'neutro',
@@ -62,10 +62,14 @@ export function EnviosCliente({
   envios,
   yampiLigada,
   shopifyLigada,
+  avisosLigados,
+  emailDoOperador,
 }: {
   envios: Envio[]
   yampiLigada: boolean
   shopifyLigada: boolean
+  avisosLigados: boolean
+  emailDoOperador: string | null
 }) {
   const [filtro, setFiltro] = useState<Filtro>('Todos')
   const [busca, setBusca] = useState('')
@@ -349,6 +353,8 @@ export function EnviosCliente({
         />
       </div>
 
+      <PainelAvisoDeEnvio ligado={avisosLigados} emailPadrao={emailDoOperador} />
+
       <FaixaKpis kpis={kpis} />
 
       {erro && <FaixaAlerta tom="erro" texto={erro} />}
@@ -620,6 +626,113 @@ const dataHoraCurta = (iso: string | null) =>
         timeZone: 'America/Sao_Paulo',
       })
     : '—'
+
+/**
+ * O aviso de envio ao cliente: estado e ensaio.
+ *
+ * Fica aqui, e não em Configurações, porque é aqui que se olha para os envios
+ * — e a pergunta "o cliente foi avisado?" nasce nesta tela, não naquela.
+ *
+ * O teste manda para um endereço só, com `[TESTE]` no assunto, usando pedidos
+ * reais para o texto sair como sairá de verdade. Não grava no log: o ensaio
+ * não pode consumir o direito daquele cliente de receber o aviso quando o
+ * módulo for ligado.
+ */
+function PainelAvisoDeEnvio({
+  ligado,
+  emailPadrao,
+}: {
+  ligado: boolean
+  emailPadrao: string | null
+}) {
+  const [email, setEmail] = useState(emailPadrao ?? '')
+  const [recado, setRecado] = useState<{ tom: 'ok' | 'erro'; texto: string } | null>(null)
+  const [enviando, setEnviando] = useState(false)
+
+  const testar = () => {
+    setEnviando(true)
+    setRecado(null)
+    void testarAvisoDeEnvio(email)
+      .then((r) => {
+        if (!r.ok) return setRecado({ tom: 'erro', texto: r.erro })
+        setRecado({
+          tom: 'ok',
+          texto: r.falhas.length
+            ? `Falhou: ${r.falhas.join(' · ')}`
+            : `${r.enviados} aviso(s) de teste enviado(s) para ${email}. Chegam com [TESTE] no assunto.`,
+        })
+      })
+      .finally(() => setEnviando(false))
+  }
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+        padding: '15px 18px',
+        borderRadius: 13,
+        border: '1px solid rgba(255,255,255,.09)',
+        background: 'rgba(255,255,255,.02)',
+      }}
+    >
+      <span style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <Rotulo>Aviso de envio ao cliente</Rotulo>
+        <span
+          className="font-sans"
+          style={{ display: 'flex', alignItems: 'center', gap: 7, fontWeight: 500, fontSize: 10.5, color: COR[ligado ? 'ok' : 'neutro'] }}
+        >
+          <Ponto tom={ligado ? 'ok' : 'neutro'} />
+          {ligado ? 'Ligado · o ERP avisa envio e entrega' : 'Desligado · nenhum e-mail sai'}
+        </span>
+      </span>
+
+      <span
+        className="font-sans"
+        style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+      >
+        {ligado
+          ? 'Cada fato gera um e-mail só, para sempre. Pedidos anteriores à ativação não são avisados.'
+          : 'Para ligar, defina AVISOS_DE_PEDIDO=1 no ambiente. Antes disso, mande um teste para você e confira o texto.'}
+      </span>
+
+      <span style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="seu@email.com"
+          type="email"
+          className="font-sans focus:border-ouro/45"
+          style={{
+            flex: '1 1 240px',
+            maxWidth: 320,
+            height: 34,
+            padding: '0 12px',
+            border: '1px solid rgba(255,255,255,.09)',
+            background: 'rgba(255,255,255,.03)',
+            borderRadius: 9,
+            outline: 0,
+            color: 'var(--color-corrente)',
+            fontSize: 12.5,
+          }}
+        />
+        <BotaoSecundario altura={34} desabilitado={enviando || !email.trim()} onClick={testar}>
+          {enviando ? 'Enviando…' : 'Enviar teste para mim'}
+        </BotaoSecundario>
+      </span>
+
+      {recado && (
+        <span
+          className="font-sans"
+          style={{ fontSize: 10.5, lineHeight: 1.45, color: recado.tom === 'ok' ? COR.ok : COR.erro, textWrap: 'pretty' }}
+        >
+          {recado.texto}
+        </span>
+      )}
+    </div>
+  )
+}
 
 /**
  * A linha do tempo que vem da TRANSPORTADORA.
