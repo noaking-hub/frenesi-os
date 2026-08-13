@@ -271,9 +271,14 @@ export async function rastreioPublico(
   const sb = supabaseServer()
 
   // O dono vem primeiro: é ele que limita tudo o que será lido a seguir.
+  //
+  // O `%` e o `_` são curingas para o `ilike`, e vêm de texto que o visitante
+  // digitou: `%@%` casaria com a base inteira. A conferência exata depois
+  // barraria o resultado de qualquer jeito, mas a varredura já teria custado —
+  // escapar aqui é o que impede a rota de virar um scan de tabela grátis.
   const ehEmail = doc.includes('@')
   const consultaDono = ehEmail
-    ? sb.from('clientes').select('id, email, cpf').ilike('email', doc)
+    ? sb.from('clientes').select('id, email, cpf').ilike('email', doc.replace(/[%_\\]/g, '\\$&'))
     : sb.from('clientes').select('id, email, cpf').eq('cpf', doc.replace(/\D/g, ''))
   const { data: donos, error: erroDono } = await consultaDono
   if (erroDono) throw erroDono
@@ -282,6 +287,10 @@ export async function rastreioPublico(
     .filter((c) => documentoConfere(doc, c))
   if (clientes.length === 0) return { ok: false, motivo: 'nao_encontrado' }
 
+  // Pode haver mais de um cadastro para o mesmo CPF, e os pedidos de todos
+  // eles entram na resposta. É intencional: quase sempre é a mesma pessoa que
+  // comprou com e-mails diferentes, e separar em cadastros distintos faria a
+  // consulta esconder metade do histórico de quem informou o CPF certo.
   const ids = clientes.map((c) => c.id)
   let consulta = sb
     .from('pedidos')

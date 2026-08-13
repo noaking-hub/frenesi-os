@@ -1,8 +1,8 @@
-# FRENESI · ERP → Site — Resposta ao documento r2
+# FRENESI · ERP → Site — Resposta aos documentos r2 e r3
 
 **De:** desenvolvimento do ERP · **Para:** desenvolvimento do site/tema (Shopify)
-**Ref.:** "Respostas às decisões de §9" r2 · 12/08/2026
-**Este doc:** 13/08/2026 · acompanha o técnico completo, v6
+**Ref.:** "Respostas às decisões de §9" r2 · 12/08/2026 · e r3 · 13/08/2026
+**Este doc:** r3-resposta · 13/08/2026 · acompanha o técnico completo, v6
 
 ---
 
@@ -12,27 +12,42 @@
 2. **A divergência de 16 × 10 dígitos do adendo não existe** — o número de 10 era um exemplo fictício do nosso documento. Nenhuma das hipóteses (a), (b), (c) precisa ser testada. Detalhe abaixo.
 3. **O webhook da Frenet caiu.** Não por falta de cadastro: ele é estruturalmente indisponível para esta operação. Isso derruba a premissa de "sempre A" e por isso a **opção B foi implementada**.
 4. **`descricaoResumida` implementada**, como pedido.
-5. **Chave de acesso está no fim deste documento.** Falta só o DNS de `erp.frenesiperfumes.com.br`, em andamento com o suporte da Netlify.
+5. **Chave de acesso está no fim deste documento.** As origens do r3 já estão configuradas — **nada mais bloqueia vocês**. Do nosso lado falta publicar o endpoint; o DNS de `erp.frenesiperfumes.com.br` está em andamento com o suporte da Netlify.
 
 ---
 
-## ⬅ O que precisamos de vocês
+## ✅ Origens recebidas — nada mais bloqueia vocês
 
-Uma coisa só bloqueia a integração, e é rápida de responder:
+As três do r3 estão configuradas:
 
-> ### Quais domínios exatos vão chamar o endpoint?
->
-> Precisamos da lista completa, com `https://` e sem barra no fim, para liberar no CORS. Por exemplo:
->
-> ```
-> https://frenesiperfumes.com.br
-> https://www.frenesiperfumes.com.br
-> https://frenesiperfumes.myshopify.com     ← incluir se forem testar por aqui antes de publicar
-> ```
->
-> **Incluam tudo de onde a chamada pode partir**, inclusive ambiente de preview ou tema não publicado. Origem que faltar na lista é bloqueada pelo navegador, e o sintoma engana: o endpoint responde certo por servidor, os logs não acusam nada, e a página fica em branco. Sobra na lista não custa nada; falta custa uma tarde de depuração.
+```
+https://www.frenesiperfumes.com.br
+https://frenesiperfumes.com.br
+https://hjfbkb-c3.myshopify.com
+```
 
-E uma segunda, sem pressa: **quando vocês querem fazer a validação conjunta?** Proponho um pedido real de cada um dos quatro degraus da seção 4 — são estados diferentes de desenho, não variações do mesmo, e é melhor descobrir isso com a gente junto do que em produção.
+Obrigado pela observação sobre o preview: vocês estão certos, `?preview_theme_id=…` roda no domínio principal e não precisa de origem extra. E certos também sobre a URL provisória — as origens dizem respeito a quem **chama**, não a quem responde, então trocar `api_base` no customizador não mexe no CORS.
+
+**A validação dos quatro degraus está aceita.** Mando o endereço final e um documento de exemplo de cada degrau assim que o endpoint subir.
+
+---
+
+## ⚠️ Correção a uma afirmação nossa: o CPF funciona para todo mundo
+
+No documento anterior escrevemos que "e-mail é a chave que sempre funciona; CPF funciona para quem informou", sugerindo que faltasse CPF em boa parte da base. **Está errado.** Conferência feita agora, nos 661 clientes:
+
+- **100% têm CPF**, e todos gravados como 11 dígitos limpos — casa exatamente com a normalização que vocês descreveram no r3;
+- **100% têm e-mail**, todos em minúsculas.
+
+As duas chaves são igualmente confiáveis. A guarda contra cadastro sem CPF continua no código — ela protege contra o dia em que um cadastro chegar incompleto — mas hoje não exclui ninguém.
+
+### Um comportamento do CPF que vale vocês conhecerem
+
+**A busca por CPF pode devolver pedidos de mais de um cadastro.** Há 6 CPFs na base com mais de um registro de cliente, quase sempre a mesma pessoa que comprou com e-mails diferentes.
+
+Isso é **intencional**, não defeito: separar por cadastro faria a consulta esconder metade do histórico de quem informou o CPF certo. Consequência prática para a tela: no modo lista, os cards podem vir de compras feitas com e-mails distintos. Como a resposta não traz nome do cliente, não há exposição de identidade — só os pedidos daquele CPF.
+
+A busca por **e-mail** continua restrita a um cadastro só.
 
 ---
 
@@ -87,7 +102,7 @@ Falha na consulta ao vivo é silenciosa: o espelho responde de qualquer jeito. A
 https://erp.frenesiperfumes.com.br
 ```
 
-⚠️ **O DNS está sendo apontado agora** (CNAME para `erp-frenesi.netlify.app`), com suporte da Netlify. Programem contra esse endereço. Se precisarem começar antes de ele propagar, `https://erp-frenesi.netlify.app` responde igual — mas **não deixem no código final**, e avisem para eu incluir essa origem no CORS durante o teste.
+⚠️ **O DNS está sendo apontado agora** (CNAME para `erp-frenesi.netlify.app`), com suporte da Netlify. Se a validação começar antes de ele propagar, `https://erp-frenesi.netlify.app` responde igual — e, como vocês notaram no r3, trocar `api_base` no customizador **não exige mexer no CORS**, porque as origens dizem respeito a quem chama. Só não deixem a provisória como configuração final.
 
 ### As duas chamadas
 
@@ -113,7 +128,7 @@ Headers:
 
 Mandem o que tiverem em mãos — não é preciso perguntar nada ao cliente nem saber de qual mundo ele veio.
 
-**Sobre o CPF:** cliente **sem CPF cadastrado** não é liberado por qualquer sequência de onze dígitos. A conferência exige que o dado exista dos dois lados. São centenas de clientes sem CPF na base, e sem essa guarda os pedidos deles ficariam abertos a chute. Na prática: e-mail é a chave que sempre funciona; CPF funciona para quem informou.
+**Sobre o CPF:** as duas chaves são igualmente confiáveis — 100% da base tem e-mail e CPF (ver a correção no topo). A conferência exige que o dado exista dos dois lados, então um cadastro que chegasse sem CPF não seria liberado por qualquer sequência de onze dígitos.
 
 ### Resposta 200
 
@@ -263,7 +278,8 @@ Ela é **semi-pública por natureza** — vai viver no JavaScript da loja, visí
 |---|---|---|
 | Publicar o endpoint | ERP | Código pronto e testado; sobe no próximo deploy |
 | DNS de `erp.frenesiperfumes.com.br` | FRENESI | Em andamento com o suporte da Netlify — CNAME para `erp-frenesi.netlify.app` |
-| **Lista de domínios para o CORS** | **Site** | ⬅ **Único item bloqueado em vocês.** Ver o pedido no topo |
+| Lista de domínios para o CORS | Site | ✅ Entregue no r3 e configurada |
+| Atribuir o template `page.rastreio` à página | FRENESI (operação) | 1 clique no admin, após subir o tema v12 |
 | Backfill do `shopify_numero` | ERP | Diagnóstico da leitura da Shopify em andamento |
 | Autorização OAuth do Melhor Envio | FRENESI | Destrava os 18 pedidos `TXAQ…tx`. Depende do DNS acima |
 
