@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 import { COR, FUNDO, BORDA, type Tom } from '@/components/erp/tokens'
 import {
@@ -751,7 +752,10 @@ function TabelaPedidos({
               gap: 10,
               alignItems: 'center',
               padding: '9px 14px',
-              background: 'var(--color-cabecalho)',
+              // Cor SÓLIDA, não o token translúcido: o cabeçalho é sticky e as
+              // linhas rolam por baixo dele — com fundo a 3% de opacidade, os
+              // textos das duas camadas se sobrepunham na tela.
+              background: '#161617',
               borderBottom: '1px solid var(--color-borda)',
               position: 'sticky',
               top: 0,
@@ -1831,7 +1835,7 @@ function Menu({
   const posicao: React.CSSProperties = fixo
     ? {
         position: 'fixed',
-        top: Math.min(fixo.y + 5, window.innerHeight - 220),
+        top: Math.min(fixo.y + 5, window.innerHeight - 230),
         left: Math.max(8, fixo.x - 210),
         zIndex: 80,
       }
@@ -1842,7 +1846,7 @@ function Menu({
         zIndex: 40,
       }
 
-  return (
+  const corpo = (
     <div
       ref={ref}
       role="menu"
@@ -1851,7 +1855,7 @@ function Menu({
         ...posicao,
         display: 'flex',
         flexDirection: 'column',
-        minWidth: 210,
+        width: 210,
         padding: 5,
         borderRadius: 10,
         border: '1px solid rgba(239,209,140,.25)',
@@ -1862,6 +1866,12 @@ function Menu({
       {children}
     </div>
   )
+
+  // O menu por coordenada vai por PORTAL para o `body`: dentro da árvore da
+  // tabela, qualquer ancestral com transform/filter (a animação de entrada da
+  // página, por exemplo) vira o referencial do `fixed` e o menu aparece
+  // espremido no canto da tela — foi exatamente o defeito em produção.
+  return fixo ? createPortal(<span className="erp">{corpo}</span>, document.body) : corpo
 }
 
 function ItemMenu({

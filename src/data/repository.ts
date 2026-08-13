@@ -357,12 +357,38 @@ const repositorioSupabase: Repositorio = {
           'destino, cep, logradouro, peso, dimensoes, gateway, rastreio, situacao, ' +
           'servico_frete, rastreio_url, rastreio_lido_em, entrega_local, ' +
           'producao_em, enviado_shopify_em, estoque_baixado_em, estoque_baixado_ml, ' +
-          'clientes(nome, email, cpf, telefone), pedido_itens(descricao, variante, preco)',
+          'clientes(nome, email, cpf, telefone), pedido_itens(descricao, variante, preco, base_id)',
       )
       .order('comprado_em', { ascending: false })
     if (error) throw error
     const dia = 24 * 60 * 60 * 1000
     const linhas = (data ?? []) as unknown as LinhaPedido[]
+
+    // A foto de cada item vem do catálogo. O caminho titular é o base_id que
+    // a importação casou por SKU; os itens anteriores ao casamento ficam sem
+    // ele, e para esses o nome do perfume dentro da descrição é a rede — a
+    // descrição da Yampi é "Nome do Perfume (Decant) 5ml", que contém o nome
+    // do catálogo por inteiro.
+    const { data: bases } = await supabaseServer()
+      .from('perfumes_base')
+      .select('id, nome, imagem_url')
+      .not('imagem_url', 'is', null)
+    const imagemPorId = new Map<string, string>()
+    const porNome: { nome: string; url: string }[] = []
+    for (const b of (bases ?? []) as { id: string; nome: string; imagem_url: string }[]) {
+      imagemPorId.set(b.id, b.imagem_url)
+      porNome.push({ nome: b.nome.toLowerCase(), url: b.imagem_url })
+    }
+    // Nomes mais longos primeiro: "Sauvage Elixir" precisa vencer "Sauvage".
+    porNome.sort((a, b) => b.nome.length - a.nome.length)
+    const imagemDe = (baseId: string | null, descricao: string): string | null => {
+      if (baseId) {
+        const direta = imagemPorId.get(baseId)
+        if (direta) return direta
+      }
+      const alvo = descricao.toLowerCase()
+      return porNome.find((c) => alvo.includes(c.nome))?.url ?? null
+    }
     return linhas.map((p): Pedido => {
       const cliente = p.clientes
       const itens = p.pedido_itens ?? []
@@ -415,6 +441,7 @@ const repositorioSupabase: Repositorio = {
           marca: '',
           variante: (i.variante ?? 5) as VarianteMl,
           preco: Number(i.preco),
+          imagem: imagemDe(i.base_id, i.descricao),
         })),
       }
     })
@@ -1081,7 +1108,12 @@ interface LinhaPedido {
   estoque_baixado_em: string | null
   estoque_baixado_ml: number | string | null
   clientes: { nome: string; email: string; cpf: string | null; telefone: string } | null
-  pedido_itens: { descricao: string; variante: number | null; preco: number | string }[]
+  pedido_itens: {
+    descricao: string
+    variante: number | null
+    preco: number | string
+    base_id: string | null
+  }[]
 }
 
 interface LinhaMovimentacao {

@@ -177,6 +177,8 @@ export interface ItemPedido {
   marca: string
   variante: VarianteMl
   preco: number
+  /** Foto do perfume no catálogo (Shopify). Nem todo item antigo casa. */
+  imagem?: string | null
 }
 
 export interface Pedido {

@@ -425,17 +425,61 @@ export function FichaDoPedido({
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 12,
-                  padding: '11px 14px',
+                  gap: 13,
+                  padding: '9px 12px',
                   borderRadius: 10,
                   background: 'rgba(255,255,255,.03)',
                   border: '1px solid rgba(255,255,255,.06)',
                 }}
               >
+                {/* A foto vem do catálogo (Shopify). Item antigo sem casamento
+                    mostra o frasco genérico — nunca um buraco no layout. */}
+                {i.imagem ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={i.imagem}
+                    alt=""
+                    loading="lazy"
+                    style={{
+                      width: 44,
+                      height: 44,
+                      flex: 'none',
+                      borderRadius: 8,
+                      objectFit: 'cover',
+                      background: 'rgba(255,255,255,.05)',
+                      border: '1px solid rgba(255,255,255,.08)',
+                    }}
+                  />
+                ) : (
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 44,
+                      height: 44,
+                      flex: 'none',
+                      display: 'grid',
+                      placeItems: 'center',
+                      borderRadius: 8,
+                      background: 'rgba(255,255,255,.04)',
+                      border: '1px solid rgba(255,255,255,.08)',
+                      color: 'rgba(239,209,140,.5)',
+                    }}
+                  >
+                    <IcFrascoFicha />
+                  </span>
+                )}
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <span
                     className="font-sans"
-                    style={{ display: 'block', fontSize: 12.5, fontWeight: 600 }}
+                    style={{
+                      display: 'block',
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      color: 'var(--color-corrente)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
                   >
                     {i.perfume}
                   </span>
@@ -443,7 +487,10 @@ export function FichaDoPedido({
                     {i.variante} ml
                   </span>
                 </span>
-                <span className="font-mono" style={{ fontSize: 12 }}>
+                <span
+                  className="font-mono"
+                  style={{ fontSize: 12, color: 'var(--color-corrente)', flex: 'none' }}
+                >
                   {brl(i.preco)}
                 </span>
               </div>
@@ -998,6 +1045,13 @@ export const IcExterno = () => (
     <path d="M14 4h6v6" />
     <path d="M20 4 11 13" />
     <path d="M19 14v5a1.5 1.5 0 0 1-1.5 1.5h-12A1.5 1.5 0 0 1 4 19V6.5A1.5 1.5 0 0 1 5.5 5H11" />
+  </Svg>
+)
+export const IcFrascoFicha = () => (
+  <Svg>
+    <path d="M9.5 3.5h5" />
+    <path d="M10.5 3.5v3h3v-3" />
+    <path d="M10.5 6.5C7.5 7.6 5.5 10.4 5.5 13.7c0 3.8 2.9 6.8 6.5 6.8s6.5-3 6.5-6.8c0-3.3-2-6.1-5-7.2" />
   </Svg>
 )
 export const IcCheck = () => (
