@@ -117,6 +117,18 @@
   }
 }
 
+/* Gaveta inferior: sobe do rodapé, e não some do canto. */
+@keyframes fr-sobe {
+  from {
+    transform: translateY(26px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
 /* Portal — entrada um pouco mais longa e com deslocamento maior. */
 @keyframes pt-in {
   from {

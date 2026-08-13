@@ -537,17 +537,28 @@ export interface Sla {
  * Pedido já enviado ou entregue sai da conta: cobrar prazo de expedição de
  * quem já despachou encheria a fila de pendências com trabalho terminado.
  */
+/** Data só quando ela chega em ISO — ver o comentário em `slaDeExpedicao`. */
+function dataIso(valor: string | null | undefined): Date | null {
+  if (!valor || !/^\d{4}-\d{2}-\d{2}/.test(valor)) return null
+  const d = new Date(valor)
+  return Number.isFinite(d.getTime()) ? d : null
+}
+
 export function slaDeExpedicao(
   p: { situacao: SituacaoPedido; compradoEm: string; entregueEm: string | null },
   prazoDias = 2,
   agora = new Date(),
 ): Sla {
   if (p.situacao === 'entregue') {
-    const quando = p.entregueEm ? new Date(p.entregueEm) : null
+    // Só data ISO é aceita, e a exigência não é purismo: `new Date` interpreta
+    // "06/03/2026" como MÊS/dia e devolve 2 de JUNHO sem reclamar. A tela
+    // mostraria uma entrega três meses fora do lugar com toda a confiança do
+    // mundo — pior que não mostrar data nenhuma.
+    const legivel = dataIso(p.entregueEm)
     return {
       estado: 'entregue',
-      rotulo: quando
-        ? `Entregue ${quando.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'America/Sao_Paulo' })}`
+      rotulo: legivel
+        ? `Entregue ${legivel.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'America/Sao_Paulo' })}`
         : 'Entregue',
       dias: null,
     }

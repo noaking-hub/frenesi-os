@@ -1,7 +1,9 @@
 'use server'
 
 import { confirmarEntregaLocal } from '@/data/baixa-estoque'
+import { eventosDoPedido, frenetConfigurada, rastrearPedidos } from '@/data/frenet'
 import { OPERADOR } from '@/data/operador'
+import type { EventoTransportadora } from '@/domain'
 
 import { revalidatePath } from 'next/cache'
 
@@ -244,4 +246,57 @@ export async function confirmarEntregaEmMaos(
   const r = await confirmarEntregaLocal(pedidoId, OPERADOR)
   if (r.ok) revalidatePath('/pedidos')
   return r
+}
+
+/**
+ * A linha do tempo de um pedido, buscada quando a gaveta abre.
+ *
+ * Sob demanda e não junto da lista: a tela carrega 612 pedidos, e mandar a
+ * linha do tempo de todos eles para preencher uma que o operador talvez abra
+ * seria pagar o transporte de tudo para usar um.
+ */
+export async function linhaDoTempoDoPedido(pedidoId: string): Promise<EventoTransportadora[]> {
+  try {
+    return await eventosDoPedido(pedidoId)
+  } catch (e) {
+    console.error('[rastreio] leitura da linha do tempo falhou:', e)
+    return []
+  }
+}
+
+export type RespostaRastreio =
+  | { ok: true; consultados: number; eventos: number; falhas: number; aviso?: string }
+  | { ok: false; erro: string }
+
+/**
+ * Relê o rastreio dos pedidos selecionados, agora.
+ *
+ * A rotina de hora em hora já faz isso sozinha; esta ação existe para o
+ * momento em que alguém está com o cliente na linha e a resposta "atualiza
+ * daqui a 40 minutos" não serve.
+ */
+export async function atualizarRastreamento(ids: string[]): Promise<RespostaRastreio> {
+  if (ids.length === 0) return { ok: false, erro: 'Selecione ao menos um pedido.' }
+  if (!frenetConfigurada()) {
+    return { ok: false, erro: 'A Frenet não está configurada — FRENET_TOKEN não está definido.' }
+  }
+  try {
+    const r = await rastrearPedidos(ids)
+    revalidatePath('/pedidos')
+    return {
+      ok: true,
+      consultados: r.consultados,
+      eventos: r.eventos,
+      falhas: r.falhas.length,
+      // A Frenet não enxerga os códigos emitidos pelo Melhor Envio. Dizer
+      // isso é melhor que devolver "0 ocorrências" e deixar parecer que o
+      // objeto não andou.
+      aviso: r.falhas.length
+        ? `${r.falhas.length} código(s) que a Frenet não reconhece — provavelmente Melhor Envio, que ainda não foi conectado.`
+        : undefined,
+    }
+  } catch (e) {
+    console.error('[rastreio] atualização manual falhou:', e)
+    return { ok: false, erro: mensagemDe(e) }
+  }
 }

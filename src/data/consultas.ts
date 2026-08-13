@@ -15,12 +15,53 @@ import {
   resumirOcorrencias,
   resumoSync,
   sincronizarBase,
+  situacaoLogistica,
   statusDoPedido,
 } from '@/domain'
-import type { ApuracaoLote, CoberturaBase, PerdaReal, ResumoSync } from '@/domain'
+import type { ApuracaoLote, CoberturaBase, EventoLido, PerdaReal, ResumoSync } from '@/domain'
 
 import { resumoDoExtrato } from './extrato'
 import { origemDados, repositorio } from './repository'
+import { supabaseConfigurado, supabaseServer } from './supabase'
+
+/**
+ * Os eventos de rastreio de todos os pedidos, agrupados por pedido.
+ *
+ * Uma leitura só em vez de uma por pedido: 612 consultas sequenciais levariam
+ * mais de um minuto e a tela não abriria. O teto existe porque a tabela cresce
+ * a cada varredura — passando dele, a tela continua funcionando com o status
+ * derivado do que veio, em vez de travar tentando ler tudo.
+ */
+const TETO_EVENTOS = 20_000
+
+async function eventosPorPedido(): Promise<Map<string, EventoLido[]>> {
+  const mapa = new Map<string, EventoLido[]>()
+  if (!supabaseConfigurado()) return mapa
+
+  const { data, error } = await supabaseServer()
+    .from('rastreio_eventos')
+    .select('pedido_id, quando, descricao, local')
+    .order('quando', { ascending: false })
+    .limit(TETO_EVENTOS)
+  if (error) {
+    // Rastreio indisponível não pode derrubar a tela de pedidos: sem os
+    // eventos, cada pedido cai no status que o código de rastreio já indica.
+    console.error('[pedidos] leitura de eventos de rastreio falhou:', error)
+    return mapa
+  }
+
+  for (const linha of (data ?? []) as Record<string, unknown>[]) {
+    const id = String(linha.pedido_id)
+    const lista = mapa.get(id) ?? []
+    lista.push({
+      quando: (linha.quando as string | null) ?? null,
+      descricao: String(linha.descricao ?? ''),
+      local: (linha.local as string | null) ?? null,
+    })
+    mapa.set(id, lista)
+  }
+  return mapa
+}
 
 /**
  * Consultas derivadas compartilhadas pelas telas.
@@ -87,9 +128,27 @@ export async function carregarSincronia(): Promise<ResumoSync> {
   return resumoSync(bases.map((b) => sincronizarBase(b, derivados, publicados)))
 }
 
+/**
+ * Os pedidos com a situação logística já resolvida.
+ *
+ * A tradução dos eventos acontece AQUI, no servidor, e só o resumo viaja para
+ * o navegador. Mandar a linha do tempo inteira de 612 pedidos para preencher
+ * uma coluna custaria centenas de kB por carregamento — e 99% desses eventos
+ * nunca seriam abertos. Quem abre um pedido busca a linha do tempo daquele
+ * pedido sob demanda.
+ */
 export async function carregarPedidos() {
   const pedidos = await repositorio().pedidos()
-  return pedidos.map((p) => ({ pedido: p, devolucao: statusDoPedido(p) }))
+  const eventos = await eventosPorPedido()
+  return pedidos.map((p) => ({
+    pedido: p,
+    devolucao: statusDoPedido(p),
+    logistica: situacaoLogistica({
+      rastreio: p.rastreio,
+      entregueEm: p.entregueEm,
+      eventos: eventos.get(p.id),
+    }),
+  }))
 }
 
 /** Devoluções elegíveis de um cliente, para o portal. */

@@ -88,6 +88,67 @@ export function Gaveta({
   )
 }
 
+/**
+ * Gaveta INFERIOR de largura total.
+ *
+ * O escopo do módulo de Pedidos pede explicitamente esta forma no desktop, e o
+ * motivo é o rastreamento: a ficha tem seis blocos lado a lado e duas linhas
+ * do tempo. Num diálogo central de 900 px eles viram uma coluna de rolagem
+ * infinita; ocupando a largura da tela, cabem todos de uma vez.
+ *
+ * A lista continua visível acima — é isso que permite passar de um pedido para
+ * o próximo sem perder o lugar na fila.
+ */
+export function GavetaInferior({
+  titulo,
+  altura = '72vh',
+  aoFechar,
+  children,
+}: {
+  titulo: string
+  /** Altura máxima; o conteúdo rola dentro dela. */
+  altura?: string
+  aoFechar: () => void
+  children: ReactNode
+}) {
+  const montado = useDialogoAberto(aoFechar)
+  if (!montado) return null
+
+  return createPortal(
+    <div
+      onClick={aoFechar}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 70,
+        display: 'flex',
+        alignItems: 'flex-end',
+        background: 'rgba(5,5,4,.5)',
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-label={titulo}
+        onClick={(e) => e.stopPropagation()}
+        className="erp animate-[fr-sobe_.24s_ease_both]"
+        style={{
+          width: '100%',
+          maxHeight: altura,
+          display: 'flex',
+          flexDirection: 'column',
+          background: 'linear-gradient(180deg,#17161A,#0F0E10)',
+          borderTop: '1px solid rgba(239,209,140,.24)',
+          boxShadow: '0 -24px 60px rgba(0,0,0,.55)',
+        }}
+      >
+        {children}
+      </section>
+    </div>,
+    document.body,
+  )
+}
+
 export function Modal({
   titulo,
   largura = 620,

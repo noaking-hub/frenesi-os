@@ -375,13 +375,41 @@ export async function varrerRastreiosFrenet(limite = 60): Promise<RodadaRastreio
   // ter saído por uma transportadora que a Frenet consulta igual (a J&T
   // responde por código público). Quem decide é `rastrearNaFrenet`, que sabe
   // quais serviços esta conta tem — e avisa quando não tem nenhum.
-  const alvos = (data ?? []) as {
-    id: string
-    rastreio: string
-    servico_frete: string | null
-    rastreio_servico: string | null
-  }[]
+  return consultarAlvos((data ?? []) as AlvoRastreio[])
+}
 
+interface AlvoRastreio {
+  id: string
+  rastreio: string
+  servico_frete: string | null
+  rastreio_servico: string | null
+}
+
+/**
+ * Releitura sob demanda dos pedidos que o operador escolheu na tela.
+ *
+ * Diferente da varredura em dois pontos que importam: ignora a fila de "mais
+ * antigo primeiro" — quem está atendendo um cliente quer AQUELE código agora —
+ * e não pula pedido já entregue, porque a dúvida sobre o que a transportadora
+ * registrou continua valendo depois da entrega.
+ */
+export async function rastrearPedidos(ids: string[]): Promise<RodadaRastreio> {
+  if (!frenetConfigurada()) throw new Error('A Frenet não está configurada.')
+  if (!supabaseConfigurado()) throw new Error('O Supabase precisa estar configurado.')
+  if (ids.length === 0) return { consultados: 0, eventos: 0, entregues: 0, falhas: [] }
+
+  const { data, error } = await supabaseServer()
+    .from('pedidos')
+    .select('id, rastreio, servico_frete, rastreio_servico')
+    .in('id', ids.slice(0, 40))
+    .not('rastreio', 'is', null)
+  if (error) throw error
+
+  return consultarAlvos((data ?? []) as AlvoRastreio[])
+}
+
+async function consultarAlvos(alvos: AlvoRastreio[]): Promise<RodadaRastreio> {
+  const sb = supabaseServer()
   const resultado: RodadaRastreio = { consultados: 0, eventos: 0, entregues: 0, falhas: [] }
   const agora = new Date().toISOString()
 

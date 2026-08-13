@@ -313,6 +313,15 @@ describe('SLA de expedição', () => {
     )
     expect(e.estado).toBe('entregue')
     expect(e.rotulo).toContain('12/08')
+
+    // dd/MM/yyyy NÃO vira data: `new Date('06/03/2026')` devolve 2 de junho,
+    // não 6 de março. A tela prefere não datar a datar errado.
+    const ilegivel = slaDeExpedicao(
+      { situacao: 'entregue', compradoEm: '2026-08-01T00:00:00Z', entregueEm: '06/03/2026' },
+      2,
+      agora,
+    )
+    expect(ilegivel.rotulo).toBe('Entregue')
     expect(slaDeExpedicao({ ...base, situacao: 'cancelado', compradoEm: '2026-08-01T00:00:00Z' }, 2, agora).rotulo).toBe('Cancelado')
   })
 
