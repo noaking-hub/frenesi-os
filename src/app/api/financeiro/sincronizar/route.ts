@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { frenetConfigurada, varrerRastreiosFrenet } from '@/data/frenet'
 import { codigosDoMelhorEnvio, melhorEnvioConectado, rastrearNoMelhorEnvio } from '@/data/melhorenvio'
 import { atualizarExtratoEsperando, mercadoPagoConfigurado } from '@/data/mercadopago'
+import { baixarEstoqueDosFaturados } from '@/data/baixa-estoque'
 import { enviarAvisosDePedido } from '@/data/notificacoes'
 import {
   aplicarEstoqueCalculado,
@@ -186,6 +187,22 @@ export async function POST(req: Request) {
     relatorio.mercadopago = { pulado: 'MERCADOPAGO_ACCESS_TOKEN não está definido' }
   }
 
+
+  // A baixa de estoque vem depois da importação da Yampi, que é quem acabou
+  // de trazer os faturamentos novos. Antes dela, os pedidos faturados nesta
+  // hora só sairiam do estoque na rodada seguinte — e o saldo ficaria sempre
+  // uma hora otimista, justamente no número que decide quando repor.
+  try {
+    const b = await baixarEstoqueDosFaturados(100)
+    relatorio.baixaDeEstoque = {
+      candidatos: b.candidatos,
+      baixados: b.baixados,
+      mlConsumido: b.mlConsumido,
+      falhas: b.falhas.length,
+    }
+  } catch (e) {
+    relatorio.baixaDeEstoque = { erro: mensagemDe(e) }
+  }
 
   // Os avisos vêm DEPOIS do rastreio: a varredura acabou de confirmar
   // entregas, e essas entram nesta mesma rodada em vez de esperar a próxima
