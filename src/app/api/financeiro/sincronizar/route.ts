@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { frenetConfigurada, varrerRastreiosFrenet } from '@/data/frenet'
 import { codigosDoMelhorEnvio, melhorEnvioConectado, rastrearNoMelhorEnvio } from '@/data/melhorenvio'
 import { atualizarExtratoEsperando, mercadoPagoConfigurado } from '@/data/mercadopago'
+import { enviarAvisosDePedido } from '@/data/notificacoes'
 import {
   aplicarEstoqueCalculado,
   marcarAnuladosDaShopify,
@@ -185,6 +186,19 @@ export async function POST(req: Request) {
     relatorio.mercadopago = { pulado: 'MERCADOPAGO_ACCESS_TOKEN não está definido' }
   }
 
+
+  // Os avisos vêm DEPOIS do rastreio: a varredura acabou de confirmar
+  // entregas, e essas entram nesta mesma rodada em vez de esperar a próxima
+  // hora. Fica desligado até AVISOS_DE_PEDIDO=1 — rotina que escreve para
+  // cliente real não se liga sozinha num deploy.
+  try {
+    const a = await enviarAvisosDePedido()
+    relatorio.avisos = a.desligado
+      ? { pulado: 'AVISOS_DE_PEDIDO não está ligado' }
+      : { candidatos: a.candidatos, enviados: a.enviados, falhas: a.falhas.length }
+  } catch (e) {
+    relatorio.avisos = { erro: mensagemDe(e) }
+  }
 
   try {
     const { data, error } = await supabaseServer().rpc('varrer_ocorrencias', {

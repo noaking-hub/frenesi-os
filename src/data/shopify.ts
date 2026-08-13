@@ -940,7 +940,10 @@ export async function importarPedidosShopify(dias = 60): Promise<ResultadoPedido
   let token = await tokenDeAcesso(loja)
 
   const desde = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-  const filtro = `created_at:>=${desde}`
+  // Sem `status:any` a Shopify devolve só pedido ABERTO, e some com todo o
+  // histórico já entregue e arquivado — uma importação que parece completa e
+  // não é.
+  const filtro = `status:any AND created_at:>=${desde}`
 
   const buscar = async (consulta: string) => {
     const encontrados: PedidoShopify[] = []
@@ -1560,7 +1563,13 @@ export async function vincularPedidosShopify(): Promise<ResultadoVinculo> {
     (menor, p) => (p.comprado_em < menor ? p.comprado_em : menor),
     pendentes[0].comprado_em,
   )
-  const filtro = `created_at:>=${maisAntigo.slice(0, 10)}`
+  // `status:any` NÃO é detalhe: a busca de pedidos da Shopify devolve por
+  // padrão só os ABERTOS. E os pedidos que precisam de vínculo são justamente
+  // os já entregues — que a loja fecha e arquiva. Sem isto, a consulta lia a
+  // janela inteira e voltava sem nenhum dos pedidos procurados, o que na tela
+  // aparecia como "nasceram fora da Shopify". Era esta a causa dos 602
+  // pedidos sem `shopify_numero`, e não a regra de casamento.
+  const filtro = `status:any AND created_at:>=${maisAntigo.slice(0, 10)}`
 
   // Token novo SEMPRE: sem read_all_orders a API corta a janela em ~60 dias
   // SILENCIOSAMENTE — não é erro que o retry pegue. Quem acabou de marcar o

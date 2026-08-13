@@ -90,7 +90,10 @@ export function apenasOAtual(avisos: AvisoPendente[]): {
 export const ASSUNTO: Record<EventoNotificacao, string> = {
   pedido_pago: 'Pagamento confirmado · pedido {pedido}',
   pedido_faturado: 'Nota fiscal emitida · pedido {pedido}',
-  pedido_enviado: 'Seu pedido saiu para entrega · {pedido}',
+  // "Enviado" e "saiu para entrega" são fatos diferentes, e o segundo é o que
+  // o cliente espera no dia da chegada. Prometer o errado no assunto gera
+  // frustração exatamente no aviso que deveria acalmar.
+  pedido_enviado: 'Seu pedido foi enviado · {pedido}',
   pedido_entregue: 'Seu pedido chegou · {pedido}',
   devolucao_recebida: 'Recebemos sua devolução · {pedido}',
   cashback_creditado: 'Você ganhou cashback na Frenesi',
@@ -106,4 +109,100 @@ export const ROTULO_EVENTO: Record<EventoNotificacao, string> = {
   devolucao_recebida: 'Devolução recebida',
   cashback_creditado: 'Cashback creditado',
   cashback_expirando: 'Cashback expirando',
+}
+
+/** Primeiro nome, para a saudação. Nome completo em e-mail soa a cobrança. */
+function primeiroNome(cliente: string): string {
+  const nome = cliente.trim().split(/\s+/)[0] ?? ''
+  if (!nome) return 'Olá'
+  return nome.charAt(0).toUpperCase() + nome.slice(1).toLowerCase()
+}
+
+export interface ConteudoAviso {
+  assunto: string
+  titulo: string
+  saudacao: string
+  corpo: string[]
+  acao?: { texto: string; url: string }
+}
+
+/**
+ * O que o cliente lê em cada aviso.
+ *
+ * Escrito para responder a pergunta que ele faria em seguida, e não para
+ * anunciar um estado do sistema. "Seu pedido foi enviado" sem o código e sem
+ * onde acompanhar é um e-mail que gera a mensagem no WhatsApp que ele deveria
+ * ter evitado.
+ *
+ * Prazo não entra: a transportadora não nos dá data confiável, e prometer o
+ * que não se controla é como se perde a confiança que este aviso existe para
+ * construir.
+ */
+export function conteudoDoAviso(dados: {
+  evento: EventoNotificacao
+  pedidoId: string
+  cliente: string
+  rastreio: string | null
+  transportadora: string | null
+  urlRastreio: string | null
+}): ConteudoAviso {
+  const { evento, pedidoId, cliente, rastreio, transportadora, urlRastreio } = dados
+  const assunto = ASSUNTO[evento].replace('{pedido}', pedidoId)
+  const saudacao = `${primeiroNome(cliente)}, tudo bem?`
+  const empresa = transportadora ?? 'a transportadora'
+
+  if (evento === 'pedido_enviado') {
+    const corpo = [
+      `Seu pedido <strong>${pedidoId}</strong> saiu daqui e já está com ${empresa}.`,
+    ]
+    if (rastreio) {
+      corpo.push(
+        `Código de rastreio: <strong style="letter-spacing:.04em">${rastreio}</strong>`,
+        'O primeiro registro costuma aparecer em até um dia útil depois da postagem — ' +
+          'até lá é normal a consulta não mostrar movimentação.',
+      )
+    } else {
+      // Sem código não há o que rastrear, e fingir que há é pior que admitir.
+      corpo.push('Assim que o código de rastreio for emitido, enviamos para você.')
+    }
+    corpo.push('Qualquer dúvida, é só responder este e-mail.')
+    return {
+      assunto,
+      titulo: 'Seu pedido está a caminho',
+      saudacao,
+      corpo,
+      acao: urlRastreio ? { texto: 'Acompanhar entrega', url: urlRastreio } : undefined,
+    }
+  }
+
+  if (evento === 'pedido_entregue') {
+    return {
+      assunto,
+      titulo: 'Seu pedido chegou',
+      saudacao,
+      corpo: [
+        `A entrega do pedido <strong>${pedidoId}</strong> foi confirmada.`,
+        'Se algo não estiver como você esperava, responda este e-mail — a gente resolve.',
+      ],
+    }
+  }
+
+  if (evento === 'pedido_pago') {
+    return {
+      assunto,
+      titulo: 'Pagamento confirmado',
+      saudacao,
+      corpo: [
+        `Recebemos o pagamento do pedido <strong>${pedidoId}</strong>.`,
+        'Agora ele entra na fila de preparo. Avisamos assim que sair para entrega.',
+      ],
+    }
+  }
+
+  return {
+    assunto,
+    titulo: ROTULO_EVENTO[evento],
+    saudacao,
+    corpo: [`Atualização do seu pedido <strong>${pedidoId}</strong>.`],
+  }
 }
