@@ -417,3 +417,77 @@ export function montarEnvio(p: PedidoParaEnvio, agora = new Date()): Envio {
     eventos,
   }
 }
+
+/**
+ * Os quatro momentos reais do pedido na FRENESI, mais os dois terminais.
+ *
+ * O escopo do módulo propunha uma escada operacional de seis degraus
+ * (aguardando separação, em separação, separado, aguardando expedição…). A
+ * operação não trabalha assim, e inventar degraus que ninguém marca produz
+ * campo sempre vazio — pior que campo nenhum, porque parece informação.
+ *
+ * Três destes momentos vêm da Yampi. `em_producao` é NOSSO: nasce quando a
+ * ordem de produção é aberta no ERP, e é o único ponto do ciclo que a Yampi
+ * não conhece.
+ */
+export type SituacaoPedido =
+  | 'pago'
+  | 'em_producao'
+  | 'faturado'
+  | 'enviado'
+  | 'entregue'
+  | 'cancelado'
+
+export const ROTULO_SITUACAO: Record<SituacaoPedido, string> = {
+  pago: 'Pago',
+  em_producao: 'Em produção',
+  faturado: 'Faturado',
+  enviado: 'Enviado',
+  entregue: 'Entregue',
+  cancelado: 'Cancelado',
+}
+
+/** Ordem do ciclo. `cancelado` fica fora: ele interrompe, não avança. */
+export const CICLO: SituacaoPedido[] = ['pago', 'em_producao', 'faturado', 'enviado', 'entregue']
+
+/**
+ * A situação a partir do que a Yampi informou, preservando o que é nosso.
+ *
+ * `em_producao` só sobrevive enquanto a Yampi ainda não faturou: ela não
+ * conhece esse momento, e derivá-lo do status dela o apagaria na importação
+ * seguinte. Depois do faturamento ele deixa de importar — o pedido já avançou.
+ *
+ * O caminho é de mão única. Yampi que volta atrás num status — acontece em
+ * correção manual no painel — não pode fazer um pedido enviado regredir para
+ * pago na nossa tela.
+ */
+export function situacaoDoPedido(dados: {
+  statusYampi: string | null | undefined
+  pagamento: 'pago' | 'pendente' | 'divergente' | 'cancelado'
+  entregue: boolean
+  rastreio: string | null
+  /** A situação já gravada, para não perder o que a Yampi não sabe. */
+  atual?: SituacaoPedido | null
+  producaoEm?: string | null
+}): SituacaoPedido {
+  if (dados.pagamento === 'cancelado') return 'cancelado'
+
+  const t = (dados.statusYampi ?? '').toLowerCase()
+  const daYampi: SituacaoPedido = dados.entregue || /entregue|delivered/.test(t)
+    ? 'entregue'
+    : /enviad|shipped|transito|transporte|on_?carriage/.test(t) || Boolean(dados.rastreio)
+      ? 'enviado'
+      : /faturad|invoiced|nota|separa|picking/.test(t)
+        ? 'faturado'
+        : 'pago'
+
+  // Produção é anterior ao faturamento: se a Yampi ainda não passou de "pago",
+  // o que o ERP sabe é mais recente que o que ela sabe.
+  if (daYampi === 'pago' && (dados.atual === 'em_producao' || dados.producaoEm)) {
+    return 'em_producao'
+  }
+
+  // Mão única: o maior avanço entre o que já estava e o que chegou.
+  const anterior = dados.atual && dados.atual !== 'cancelado' ? CICLO.indexOf(dados.atual) : -1
+  return CICLO.indexOf(daYampi) >= anterior ? daYampi : (dados.atual as SituacaoPedido)
+}

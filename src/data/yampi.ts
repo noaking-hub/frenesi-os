@@ -16,7 +16,8 @@ import 'server-only'
  * lado da Yampi, e já provou ser instável quando um produto é recriado.
  */
 
-import { transacoesDoPedido } from '@/domain'
+import { situacaoDoPedido as situacaoDeUmPedido, transacoesDoPedido } from '@/domain'
+import type { SituacaoPedido } from '@/domain'
 
 import { supabaseConfigurado, supabaseServer } from './supabase'
 
@@ -499,6 +500,19 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
     (idsClientes ?? []).map((c) => [(c.email as string).toLowerCase(), c.id as string]),
   )
 
+  // O que já está gravado, para a derivação não apagar o que é NOSSO:
+  // `em_producao` não existe na Yampi, e sem esta leitura toda importação o
+  // devolveria para "pago".
+  const { data: jaGravados } = await supabaseServer()
+    .from('pedidos')
+    .select('id, situacao, producao_em')
+    .in('id', pedidos.map((p) => `YP-${p.number}`))
+  const anterior = new Map(
+    ((jaGravados ?? []) as { id: string; situacao: string | null; producao_em: string | null }[]).map(
+      (l) => [l.id, l],
+    ),
+  )
+
   let entregues = 0
   const linhasPedidos = pedidos.map((p) => {
     const alias = p.status?.data?.alias ?? ''
@@ -518,6 +532,17 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
       cashback: 0,
       pagamento: situacaoDoPedido(p),
       envio: envioYampi(alias, nome, entregue, p.track_code),
+      // O alias CRU vai junto: derivação corrigida depois vale um UPDATE, e
+      // não uma reimportação da Yampi inteira.
+      status_yampi: [alias, nome].filter(Boolean).join(' · ') || null,
+      situacao: situacaoDeUmPedido({
+        statusYampi: `${alias} ${nome}`,
+        pagamento: situacaoDoPedido(p),
+        entregue,
+        rastreio: p.track_code,
+        atual: (anterior.get(`YP-${p.number}`)?.situacao ?? null) as SituacaoPedido | null,
+        producaoEm: anterior.get(`YP-${p.number}`)?.producao_em ?? null,
+      }),
       comprado_em: dataYampi(p.created_at) ?? new Date().toISOString(),
       // Sem esta data o Portal de Devoluções não funciona: o prazo de 7 dias
       // conta a partir dela, e é a única plataforma que a marca.

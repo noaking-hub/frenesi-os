@@ -1,18 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import {
-  acoesDisponiveis,
-  aferirItem,
-  aguardaBaixaShopify,
-  diasAlemDoPrazo,
-  ehExcecao,
-  emAberto,
-  etapaDe,
-  identificarFrete,
-  resumirEnvios,
-  resumirOcorrencias,
-  triarDevolucao,
-} from '..'
+import { acoesDisponiveis, aferirItem, aguardaBaixaShopify, diasAlemDoPrazo, ehExcecao, emAberto, etapaDe, identificarFrete, resumirEnvios, resumirOcorrencias, situacaoDoPedido, triarDevolucao } from '..'
 import type { Envio, Ocorrencia } from '..'
 
 const envio = (p: Partial<Envio>): Envio => ({
@@ -224,5 +212,51 @@ describe('ciclo de vida da devolução', () => {
     expect(emAberto('Em trânsito reverso')).toBe(true)
     expect(emAberto('Concluída')).toBe(false)
     expect(emAberto('Recusada')).toBe(false)
+  })
+})
+
+describe('situação do pedido', () => {
+  const base = {
+    statusYampi: 'paid Pago',
+    pagamento: 'pago' as const,
+    entregue: false,
+    rastreio: null,
+  }
+
+  it('lê os quatro momentos que a operação realmente tem', () => {
+    expect(situacaoDoPedido(base)).toBe('pago')
+    expect(situacaoDoPedido({ ...base, statusYampi: 'invoiced Faturado' })).toBe('faturado')
+    expect(situacaoDoPedido({ ...base, statusYampi: 'shipped Enviado' })).toBe('enviado')
+    expect(situacaoDoPedido({ ...base, entregue: true })).toBe('entregue')
+  })
+
+  it('código de rastreio já vale como enviado', () => {
+    // A Yampi às vezes emite o código antes de mexer no status.
+    expect(situacaoDoPedido({ ...base, rastreio: 'AD1BR' })).toBe('enviado')
+  })
+
+  it('cancelado interrompe, venha o que vier no status', () => {
+    expect(situacaoDoPedido({ ...base, pagamento: 'cancelado', entregue: true })).toBe('cancelado')
+  })
+
+  it('em produção sobrevive à importação seguinte', () => {
+    // É o único momento que a Yampi não conhece. Derivá-lo do status dela o
+    // apagaria toda vez que a rotina rodasse.
+    expect(situacaoDoPedido({ ...base, atual: 'em_producao' })).toBe('em_producao')
+    expect(situacaoDoPedido({ ...base, producaoEm: '2026-08-13T10:00:00Z' })).toBe('em_producao')
+  })
+
+  it('faturamento passa por cima da produção', () => {
+    // A Yampi avançou: o que ela sabe agora é mais recente que o nosso.
+    expect(
+      situacaoDoPedido({ ...base, statusYampi: 'invoiced', atual: 'em_producao' }),
+    ).toBe('faturado')
+  })
+
+  it('o ciclo é de mão única', () => {
+    // Correção manual no painel da Yampi não pode fazer um pedido enviado
+    // regredir para pago na nossa tela.
+    expect(situacaoDoPedido({ ...base, statusYampi: 'paid', atual: 'enviado' })).toBe('enviado')
+    expect(situacaoDoPedido({ ...base, statusYampi: 'invoiced', atual: 'entregue' })).toBe('entregue')
   })
 })
