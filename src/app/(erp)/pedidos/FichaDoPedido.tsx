@@ -37,7 +37,7 @@ import { atualizarRastreamento, confirmarEntregaEmMaos, linhaDoTempoDoPedido } f
 type Aba = 'Resumo' | 'Itens' | 'Pagamento' | 'Rastreamento' | 'Timeline'
 const ABAS: Aba[] = ['Resumo', 'Itens', 'Pagamento', 'Rastreamento', 'Timeline']
 
-const TOM_LOGISTICO: Record<string, Tom> = {
+export const TOM_LOGISTICO: Record<string, Tom> = {
   'sem-rastreio': 'neutro',
   etiqueta: 'atencao',
   postado: 'info',

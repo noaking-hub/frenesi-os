@@ -1076,7 +1076,7 @@ interface Metrica {
   ativo?: (e: EstadoFiltros) => boolean
 }
 
-function CardMetrica({
+export function CardMetrica({
   label,
   valor,
   hint,
@@ -1192,7 +1192,7 @@ function janelas(vivas: Viva[], dias: number): { doPeriodo: Viva[]; doAnterior: 
  * ("+1533%" sobre 3 pedidos) — aí o cartão diz o número absoluto, que é o que
  * a comparação realmente sabe.
  */
-function delta(agora: number, antes: number, comparavel: boolean): ReactNode {
+export function delta(agora: number, antes: number, comparavel: boolean): ReactNode {
   if (!comparavel) return 'no período selecionado'
   if (antes === 0) return agora === 0 ? 'sem movimento no período' : 'sem base de comparação'
   const pct = Math.round(((agora - antes) / antes) * 100)
@@ -1373,7 +1373,7 @@ function baixarCsv(itens: Viva[]) {
 
 // ── peças ──────────────────────────────────────────────────────────────────
 
-function Aba({
+export function Aba({
   children,
   ativo,
   contagem,
@@ -1413,7 +1413,7 @@ function Aba({
   )
 }
 
-function Busca({ valor, aoMudar }: { valor: string; aoMudar: (v: string) => void }) {
+export function Busca({ valor, aoMudar }: { valor: string; aoMudar: (v: string) => void }) {
   return (
     <label
       className="focus-within:border-ouro/45"
@@ -1452,7 +1452,7 @@ function Busca({ valor, aoMudar }: { valor: string; aoMudar: (v: string) => void
 }
 
 /** Dropdown do mockup: caixa com o rótulo pequeno DENTRO, valor embaixo. */
-function CaixaSeletor({
+export function CaixaSeletor({
   rotulo,
   valor,
   aoMudar,
@@ -1509,7 +1509,7 @@ function CaixaSeletor({
   )
 }
 
-function BotaoFiltro({
+export function BotaoFiltro({
   children,
   destaque,
   ativo,
@@ -1556,7 +1556,7 @@ function BotaoFiltro({
   )
 }
 
-function BotaoMassa({
+export function BotaoMassa({
   children,
   icone,
   desabilitado,
@@ -1599,7 +1599,7 @@ function BotaoMassa({
   )
 }
 
-function BotaoIcone({
+export function BotaoIcone({
   children,
   rotulo,
   menuAberto,
@@ -1638,7 +1638,7 @@ function BotaoIcone({
   )
 }
 
-function Caixa({
+export function Caixa({
   marcada,
   mista,
   aoMarcar,
@@ -1678,7 +1678,7 @@ function Caixa({
   )
 }
 
-function Pilula({ tom, children }: { tom: Tom; children: ReactNode }) {
+export function Pilula({ tom, children }: { tom: Tom; children: ReactNode }) {
   return (
     <span
       className="font-sans"
@@ -1705,7 +1705,7 @@ function Pilula({ tom, children }: { tom: Tom; children: ReactNode }) {
   )
 }
 
-function Dupla({
+export function Dupla({
   principal,
   secundaria,
   tomSecundaria,
@@ -1755,7 +1755,7 @@ function Dupla({
 }
 
 /** Popover dos filtros extras — fecha fora/Esc como qualquer flutuante. */
-function PopoverFiltros({ children, aoFechar }: { children: ReactNode; aoFechar: () => void }) {
+export function PopoverFiltros({ children, aoFechar }: { children: ReactNode; aoFechar: () => void }) {
   const ref = useFecharFora(aoFechar)
   return (
     <div
@@ -1794,7 +1794,7 @@ function PopoverFiltros({ children, aoFechar }: { children: ReactNode; aoFechar:
  * como fecha ANTES do clique do próximo gatilho processar, trocar de menu
  * passa a ser um clique só, não dois.
  */
-function useFecharFora(aoFechar: () => void) {
+export function useFecharFora(aoFechar: () => void) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const aoTocar = (e: PointerEvent) => {
@@ -1818,7 +1818,7 @@ function useFecharFora(aoFechar: () => void) {
  * menu de uma linha escapar do contêiner com overflow da tabela (que cortaria
  * um absoluto) e flutuar ACIMA da ficha aberta.
  */
-function Menu({
+export function Menu({
   children,
   direita,
   fixo,
@@ -1874,7 +1874,7 @@ function Menu({
   return fixo ? createPortal(<span className="erp">{corpo}</span>, document.body) : corpo
 }
 
-function ItemMenu({
+export function ItemMenu({
   children,
   desabilitado,
   aoClicar,
@@ -1910,7 +1910,7 @@ function ItemMenu({
 }
 
 /** Interruptor pequeno do popover de filtros. */
-function Alternador({
+export function Alternador({
   rotulo,
   ligado,
   aoMudar,
@@ -1958,7 +1958,7 @@ function Alternador({
   )
 }
 
-function Faixa({ tom, texto, aoFechar }: { tom: Tom; texto: string; aoFechar: () => void }) {
+export function Faixa({ tom, texto, aoFechar }: { tom: Tom; texto: string; aoFechar: () => void }) {
   return (
     <div
       style={{
@@ -1998,7 +1998,7 @@ function Faixa({ tom, texto, aoFechar }: { tom: Tom; texto: string; aoFechar: ()
 
 // ── ícones ─────────────────────────────────────────────────────────────────
 
-function Svg({ children, tamanho = 14 }: { children: ReactNode; tamanho?: number }) {
+export function Svg({ children, tamanho = 14 }: { children: ReactNode; tamanho?: number }) {
   return (
     <svg
       aria-hidden
@@ -2017,27 +2017,27 @@ function Svg({ children, tamanho = 14 }: { children: ReactNode; tamanho?: number
   )
 }
 
-const IcCaixaFechada = () => (
+export const IcCaixaFechada = () => (
   <Svg>
     <path d="M3.5 8 12 3.5 20.5 8v8L12 20.5 3.5 16z" />
     <path d="M3.5 8 12 12.5 20.5 8" />
     <path d="M12 12.5V20.5" />
   </Svg>
 )
-const IcRelogio = () => (
+export const IcRelogio = () => (
   <Svg>
     <circle cx="12" cy="12" r="8.5" />
     <path d="M12 7v5.2l3.2 1.9" />
   </Svg>
 )
-const IcAlerta = () => (
+export const IcAlerta = () => (
   <Svg>
     <path d="M12 4.5 21 19.5H3z" />
     <path d="M12 10v4" />
     <path d="M12 17h.01" />
   </Svg>
 )
-const IcCaminhao = () => (
+export const IcCaminhao = () => (
   <Svg>
     <path d="M2.5 7.5h10v9h-10z" />
     <path d="M12.5 11h4l3 3v2.5h-7z" />
@@ -2045,27 +2045,27 @@ const IcCaminhao = () => (
     <circle cx="16.5" cy="18" r="1.7" />
   </Svg>
 )
-const IcCheque = () => (
+export const IcCheque = () => (
   <Svg>
     <circle cx="12" cy="12" r="8.5" />
     <path d="m8.4 12.2 2.5 2.4 4.7-4.9" />
   </Svg>
 )
-const IcXCirculo = () => (
+export const IcXCirculo = () => (
   <Svg>
     <circle cx="12" cy="12" r="8.5" />
     <path d="m9.2 9.2 5.6 5.6" />
     <path d="m14.8 9.2-5.6 5.6" />
   </Svg>
 )
-const IcRelogioAlerta = () => (
+export const IcRelogioAlerta = () => (
   <Svg>
     <circle cx="12" cy="12" r="8.5" />
     <path d="M12 7v5.2l3.2 1.9" />
     <path d="M19.4 4.6 4.6 19.4" />
   </Svg>
 )
-const IcLupa = () => (
+export const IcLupa = () => (
   <span style={{ color: 'var(--color-terciario)' }}>
     <Svg tamanho={13}>
       <circle cx="11" cy="11" r="6.5" />
@@ -2073,53 +2073,53 @@ const IcLupa = () => (
     </Svg>
   </span>
 )
-const IcFunil = () => (
+export const IcFunil = () => (
   <Svg tamanho={13}>
     <path d="M4 5h16l-6.5 7.5V19l-3-1.6v-4.9z" />
   </Svg>
 )
-const IcLinhas = () => (
+export const IcLinhas = () => (
   <Svg tamanho={13}>
     <path d="M4 7h16" />
     <path d="M7 12h10" />
     <path d="M10 17h4" />
   </Svg>
 )
-const IcLixeira = () => (
+export const IcLixeira = () => (
   <Svg tamanho={13}>
     <path d="M4.5 7h15" />
     <path d="M9 7V4.8A.8.8 0 0 1 9.8 4h4.4a.8.8 0 0 1 .8.8V7" />
     <path d="M6.5 7 7.4 20h9.2l.9-13" />
   </Svg>
 )
-const IcExportar = () => (
+export const IcExportar = () => (
   <Svg tamanho={13}>
     <path d="M12 3v11" />
     <path d="m7.5 9.5 4.5 4.5 4.5-4.5" />
     <path d="M4 20h16" />
   </Svg>
 )
-const IcOlho = () => (
+export const IcOlho = () => (
   <Svg tamanho={13}>
     <path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z" />
     <circle cx="12" cy="12" r="2.6" />
   </Svg>
 )
-const IcKebab = () => (
+export const IcKebab = () => (
   <Svg tamanho={13}>
     <circle cx="12" cy="5.5" r="1.1" fill="currentColor" stroke="none" />
     <circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none" />
     <circle cx="12" cy="18.5" r="1.1" fill="currentColor" stroke="none" />
   </Svg>
 )
-const IcFrasco = () => (
+export const IcFrasco = () => (
   <Svg tamanho={13}>
     <path d="M9.5 3.5h5" />
     <path d="M10.5 3.5v3h3v-3" />
     <path d="M10.5 6.5C7.5 7.6 5.5 10.4 5.5 13.7c0 3.8 2.9 6.8 6.5 6.8s6.5-3 6.5-6.8c0-3.3-2-6.1-5-7.2" />
   </Svg>
 )
-const Caret = () => (
+export const Caret = () => (
   <Svg tamanho={11}>
     <path d="m6 9.5 6 6 6-6" />
   </Svg>

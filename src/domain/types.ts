@@ -230,6 +230,10 @@ export interface Pedido {
    */
   producaoEm?: string | null
   enviadoShopifyEm?: string | null
+  /** Número do pedido espelho na Shopify — sem ele não há baixa a fazer. */
+  shopifyNumero?: string | null
+  /** Quando o ERP marcou a entrega na Shopify. Preenchido = baixado. */
+  entregaShopifyEm?: string | null
   estoqueBaixadoEm?: string | null
   estoqueBaixadoMl?: number | null
 }
