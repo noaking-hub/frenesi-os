@@ -16,6 +16,13 @@ import { supabaseConfigurado, supabaseServer } from './supabase'
  * atômica: ou o pedido inteiro sai do estoque, ou nada sai. Item a item, uma
  * falha no terceiro perfume deixaria o pedido meio baixado e ninguém saberia
  * qual metade.
+ *
+ * O controle não é retroativo, e isso é regra da operação, não limitação: só
+ * entra o perfume cujo vidro lacrado teve a compra lançada AQUI. Perfume que
+ * já era vendido antes do ERP não tem frasco registrado nem saldo — descontar
+ * dele criaria negativo a partir de um número que nunca existiu. Duas guardas
+ * garantem isso: os 609 pedidos anteriores à virada estão marcados como fora
+ * do controle, e a função pula item cuja base não tem compra lançada.
  */
 
 export interface ResultadoBaixaEstoque {
@@ -46,6 +53,10 @@ export async function baixarEstoqueDosFaturados(limite = 100): Promise<Resultado
     .select('id')
     .in('situacao', ['faturado', 'enviado', 'entregue'])
     .is('estoque_baixado_em', null)
+    // Pedido anterior à virada nunca baixa: o perfume dele saiu de um frasco
+    // que o ERP nunca viu, e descontá-lo criaria saldo negativo a partir de um
+    // número que jamais existiu.
+    .eq('estoque_fora_do_controle', false)
     .order('comprado_em', { ascending: true })
     .limit(limite)
   if (error) throw error
@@ -81,32 +92,4 @@ export async function baixarEstoqueDosFaturados(limite = 100): Promise<Resultado
 
   resultado.mlConsumido = Math.round(resultado.mlConsumido * 10) / 10
   return resultado
-}
-
-export interface AcertoHistorico {
-  pedidos: number
-  mlPorBase: { base: string; perfume: string; ml: number }[]
-  mlTotal: number
-}
-
-/**
- * Quanto ml as vendas antigas consumiram e o estoque nunca baixou.
- *
- * Só CALCULA — não escreve nada. O acerto de um passivo de meses é decisão de
- * quem responde pelo estoque, e um número desses precisa ser olhado antes de
- * virar movimentação. `baixarEstoqueDosFaturados` faz o lançamento quando a
- * operação mandar.
- */
-export async function calcularAcertoHistorico(): Promise<AcertoHistorico> {
-  if (!supabaseConfigurado()) throw new Error('O Supabase precisa estar configurado.')
-
-  const { data, error } = await supabaseServer().rpc('estoque_nao_baixado')
-  if (error) throw error
-
-  const linhas = (data ?? []) as { base_id: string; perfume: string; ml: number }[]
-  return {
-    pedidos: linhas.length ? Number((linhas[0] as unknown as { pedidos: number }).pedidos ?? 0) : 0,
-    mlPorBase: linhas.map((l) => ({ base: l.base_id, perfume: l.perfume, ml: Number(l.ml) })),
-    mlTotal: Math.round(linhas.reduce((s, l) => s + Number(l.ml), 0) * 10) / 10,
-  }
 }
