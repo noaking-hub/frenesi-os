@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 
-import { useEffect, useRef, useState, useTransition } from 'react'
+import { useState, useTransition } from 'react'
 
 import { COR } from '@/components/erp/tokens'
 import { plural } from '@/domain'
@@ -44,10 +44,6 @@ export function ImportarPedidos({
   const [ferramentas, setFerramentas] = useState(false)
   const [pendente, iniciarTransicao] = useTransition()
 
-  // A sincronia dispara sozinha ao abrir a tela quando a última importação
-  // passou de 30 minutos. Trinta, e não dez como no extrato, porque a
-  // importação da Yampi percorre páginas de pedidos — mais pesada que baixar
-  // um CSV — e a rotina de hora em hora já cobre o pano de fundo.
   const router = useRouter()
 
   /**
@@ -71,26 +67,6 @@ export function ImportarPedidos({
     router.refresh()
     return r
   }
-
-  const jaTentou = useRef(false)
-  useEffect(() => {
-    if (jaTentou.current) return
-    const min = sincronizadoEm
-      ? (Date.now() - Date.parse(sincronizadoEm)) / 60_000
-      : Infinity
-    if (min < 30) return
-    jaTentou.current = true
-    // Janela curta: o automático busca o que é novo; histórico é manual.
-    iniciarTransicao(async () => {
-      const { importacao } = await importarPelaRota(10)
-      if (importacao?.ok) {
-        setResumo(
-          `Sincronizado agora: ${plural(importacao.resultado.pedidos, 'pedido', 'pedidos')} conferidos, ${importacao.resultado.extratoLigado} movimento(s) do extrato ligados à venda.`,
-        )
-      }
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sincronizadoEm])
 
   const conferirYampiAgora = () =>
     iniciarTransicao(async () => {
@@ -190,9 +166,9 @@ export function ImportarPedidos({
   /**
    * O botão único: importa os pedidos novos e espelha os envios, nessa ordem.
    *
-   * Um clique, duas pontas — e no dia a dia nem ele é preciso: a tela
-   * sincroniza sozinha ao abrir e a rotina roda de hora em hora. O botão
-   * existe para quem acabou de fechar uma venda e quer ver agora.
+   * Um clique, duas pontas — e no dia a dia nem ele é preciso: a rotina de
+   * hora em hora faz o mesmo no servidor. O botão existe para quem acabou de
+   * fechar uma venda e quer ver agora, sem esperar a virada da hora.
    */
   const sincronizarTudo = () =>
     iniciarTransicao(async () => {
@@ -350,7 +326,7 @@ export function ImportarPedidos({
         >
           {total === 0
             ? 'Nenhum pedido no ERP ainda. A Yampi é o checkout: é dela que vêm CPF, data de entrega e o pagamento liquidado. A Shopify guarda um espelho sem esses três.'
-            : `${plural(total, 'pedido no ERP', 'pedidos no ERP')}. Importar da Yampi substitui o espelho da Shopify — as mesmas vendas com ids diferentes contariam duas vezes.`}
+            : `${plural(total, 'pedido no ERP', 'pedidos no ERP')} · ${idadeDaSincronia(sincronizadoEm)}.`}
         </span>
         {(erro || resumo) && (
           <span
@@ -485,4 +461,29 @@ function BotaoFerramenta({
       {rotulo}
     </button>
   )
+}
+
+
+/**
+ * Há quanto tempo a Yampi foi lida.
+ *
+ * Substitui a sincronia que disparava ao abrir a tela. Ela existia para manter
+ * o dado fresco sem depender de alguém clicar — mas o preço era a tela nascer
+ * carregando, com os números mudando debaixo do olho de quem estava lendo. A
+ * rotina de hora em hora já faz esse trabalho no servidor; o que faltava aqui
+ * era DIZER quando foi a última vez, para a operação decidir se precisa do
+ * botão.
+ *
+ * Sem essa frase, "os dados estão velhos?" só teria uma resposta: sincronizar
+ * de novo — que é justamente o que a tela fazia sozinha.
+ */
+function idadeDaSincronia(iso: string | null): string {
+  if (!iso) return 'nunca sincronizado com a Yampi'
+  const min = Math.floor((Date.now() - Date.parse(iso)) / 60_000)
+  if (!Number.isFinite(min) || min < 0) return 'sincronia em dia'
+  if (min < 2) return 'sincronizado agora'
+  if (min < 60) return `sincronizado há ${min} min`
+  const horas = Math.floor(min / 60)
+  if (horas < 24) return `sincronizado há ${plural(horas, 'hora', 'horas')}`
+  return `sincronizado há ${plural(Math.floor(horas / 24), 'dia', 'dias')}`
 }

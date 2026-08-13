@@ -10,9 +10,11 @@ export const dynamic = 'force-dynamic'
 /**
  * Quando a Yampi foi importada pela última vez.
  *
- * É o que permite à tela sincronizar sozinha ao abrir — sem isso, "manter em
- * dia" dependeria de alguém lembrar de clicar, e quem esquece não descobre
- * que esqueceu.
+ * A tela NÃO sincroniza mais ao abrir: quem mantém o dado em dia é a rotina de
+ * hora em hora, no servidor. O que a tela faz é DIZER quando foi a última
+ * leitura — sem essa informação, a única forma de responder "os dados estão
+ * velhos?" seria sincronizar de novo, que é exatamente o que ela fazia sozinha
+ * e deixava a tela nascer carregando.
  */
 async function ultimaSincroniaYampi(): Promise<string | null> {
   if (!supabaseConfigurado()) return null
