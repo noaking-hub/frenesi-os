@@ -513,3 +513,65 @@ export function situacaoDoPedido(dados: {
   const anterior = dados.atual && dados.atual !== 'cancelado' ? CICLO.indexOf(dados.atual) : -1
   return CICLO.indexOf(daYampi) >= anterior ? daYampi : (dados.atual as SituacaoPedido)
 }
+
+// ── SLA de expedição ───────────────────────────────────────────────────────
+
+export type EstadoSla = 'hoje' | 'amanha' | 'em-atraso' | 'entregue' | 'sem-previsao' | 'em-dia'
+
+export interface Sla {
+  estado: EstadoSla
+  /** Texto operacional: "Hoje", "Amanhã", "Em atraso", "Entregue 12/08". */
+  rotulo: string
+  /** Dias até o prazo. Negativo = dias ALÉM dele. */
+  dias: number | null
+}
+
+/**
+ * Prazo de EXPEDIÇÃO — despachar, não entregar.
+ *
+ * A conta parte da aprovação do pagamento, como o escopo define, porque é o
+ * único marco que existe em todo pedido. Prazo de ENTREGA seria outro número,
+ * e o ERP não tem previsão confiável de transportadora para calculá-lo: por
+ * isso "sem previsão" é resposta legítima aqui, e nunca uma data inventada.
+ *
+ * Pedido já enviado ou entregue sai da conta: cobrar prazo de expedição de
+ * quem já despachou encheria a fila de pendências com trabalho terminado.
+ */
+export function slaDeExpedicao(
+  p: { situacao: SituacaoPedido; compradoEm: string; entregueEm: string | null },
+  prazoDias = 2,
+  agora = new Date(),
+): Sla {
+  if (p.situacao === 'entregue') {
+    const quando = p.entregueEm ? new Date(p.entregueEm) : null
+    return {
+      estado: 'entregue',
+      rotulo: quando
+        ? `Entregue ${quando.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'America/Sao_Paulo' })}`
+        : 'Entregue',
+      dias: null,
+    }
+  }
+  if (p.situacao === 'cancelado') return { estado: 'sem-previsao', rotulo: 'Cancelado', dias: null }
+  if (p.situacao === 'enviado') return { estado: 'em-dia', rotulo: 'Despachado', dias: null }
+
+  const inicio = Date.parse(p.compradoEm)
+  if (!Number.isFinite(inicio)) return { estado: 'sem-previsao', rotulo: 'Sem previsão', dias: null }
+
+  // Dia inteiro, não hora a hora: quem opera pensa em "vence hoje", não em
+  // "vence daqui a 7 h". Comparar por data evita que um pedido das 18h pareça
+  // atrasado às 9h do dia seguinte.
+  const diaDe = (t: number) => Math.floor(t / 86_400_000)
+  const dias = diaDe(inicio) + prazoDias - diaDe(agora.getTime())
+
+  if (dias < 0) {
+    return {
+      estado: 'em-atraso',
+      rotulo: dias === -1 ? 'Em atraso · 1 dia' : `Em atraso · ${Math.abs(dias)} dias`,
+      dias,
+    }
+  }
+  if (dias === 0) return { estado: 'hoje', rotulo: 'Vence hoje', dias }
+  if (dias === 1) return { estado: 'amanha', rotulo: 'Amanhã', dias }
+  return { estado: 'em-dia', rotulo: `Em ${dias} dias`, dias }
+}

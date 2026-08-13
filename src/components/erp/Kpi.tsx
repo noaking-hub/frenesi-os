@@ -10,20 +10,28 @@ export interface Kpi {
    */
   hint: string
   tom?: Tom
+  /**
+   * Quando o número aponta para uma fila de trabalho, o cartão vira botão e
+   * leva até ela. Sem isso o operador lê "3 em atraso" e ainda precisa
+   * descobrir sozinho quais são os três.
+   */
+  aoClicar?: () => void
+  ativo?: boolean
 }
 
 export function CardKpi({ kpi }: { kpi: Kpi }) {
-  return (
-    <div
-      className="card-erp hover:border-ouro/25"
-      style={{
-        padding: '14px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 7,
-        minWidth: 0,
-      }}
-    >
+  const estilo = {
+    padding: '14px 16px',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: 7,
+    minWidth: 0,
+    textAlign: 'left' as const,
+    ...(kpi.ativo ? { borderColor: 'rgba(239,209,140,.45)' } : null),
+  }
+
+  const conteudo = (
+    <>
       <Rotulo>{kpi.label}</Rotulo>
       <span
         className="font-mono"
@@ -48,6 +56,26 @@ export function CardKpi({ kpi }: { kpi: Kpi }) {
       >
         {kpi.hint}
       </span>
+    </>
+  )
+
+  if (kpi.aoClicar) {
+    return (
+      <button
+        type="button"
+        onClick={kpi.aoClicar}
+        aria-pressed={kpi.ativo ?? false}
+        className="card-erp hover:border-ouro/40"
+        style={{ ...estilo, cursor: 'pointer' }}
+      >
+        {conteudo}
+      </button>
+    )
+  }
+
+  return (
+    <div className="card-erp hover:border-ouro/25" style={estilo}>
+      {conteudo}
     </div>
   )
 }

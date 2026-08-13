@@ -354,7 +354,8 @@ const repositorioSupabase: Repositorio = {
       .from('pedidos')
       .select(
         'id, canal, valor, frete, cashback, pagamento, envio, comprado_em, entregue_em, ' +
-          'destino, cep, logradouro, peso, dimensoes, gateway, rastreio, ' +
+          'destino, cep, logradouro, peso, dimensoes, gateway, rastreio, situacao, ' +
+          'servico_frete, rastreio_url, rastreio_lido_em, entrega_local, ' +
           'clientes(nome, email, cpf, telefone), pedido_itens(descricao, variante, preco)',
       )
       .order('comprado_em', { ascending: false })
@@ -389,8 +390,21 @@ const repositorioSupabase: Repositorio = {
         rua: p.logradouro ?? '',
         peso: p.peso ?? '',
         dimensoes: p.dimensoes ?? '',
-        gateway: p.gateway === 'frenet' ? 'Frenet' : 'Melhor Envio',
+        gateway: identificarFrete(p.servico_frete, p.rastreio).gateway,
         rastreio: p.rastreio,
+        // A tela do mockup mostra transportadora e rastreio na LINHA, sem
+        // abrir o pedido. Resolver aqui evita que cada tela repita a regra —
+        // e ela não é trivial: o rótulo do Melhor Envio não é nome de empresa.
+        situacao: (p.situacao ?? 'pago') as Pedido['situacao'],
+        transportadora: (() => {
+          const nome = identificarFrete(p.servico_frete, p.rastreio).transportadora
+          return nome === 'Não informada' ? null : nome
+        })(),
+        servicoFrete: p.servico_frete,
+        rastreioUrl: p.rastreio_url,
+        rastreioLidoEm: p.rastreio_lido_em,
+        entregaLocal: Boolean(p.entrega_local),
+        compradoEm: p.comprado_em,
         itens: itens.map((i) => ({
           perfume: i.descricao,
           marca: '',
@@ -1052,6 +1066,11 @@ interface LinhaPedido {
   dimensoes: string | null
   gateway: string | null
   rastreio: string | null
+  situacao: string | null
+  servico_frete: string | null
+  rastreio_url: string | null
+  rastreio_lido_em: string | null
+  entrega_local: boolean | null
   clientes: { nome: string; email: string; cpf: string | null; telefone: string } | null
   pedido_itens: { descricao: string; variante: number | null; preco: number | string }[]
 }

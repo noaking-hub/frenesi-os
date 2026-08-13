@@ -189,6 +189,9 @@ export const PEDIDOS: Pedido[] = [
     pagamento: 'pago', envio: 'Aguardando envio', diasDesdeEntrega: null, entregueEm: null,
     destino: 'São Paulo · SP', cep: '05435-000', rua: 'Rua Harmonia, 482 · Vila Madalena',
     peso: '0,42 kg', dimensoes: '18 × 12 × 9 cm', gateway: 'Frenet', rastreio: null,
+    situacao: 'faturado', transportadora: null, servicoFrete: null,
+    rastreioUrl: null, rastreioLidoEm: null, entregaLocal: false,
+    compradoEm: '2026-08-01T12:00:00.000Z',
     itens: [
       { perfume: 'Baccarat Rouge 540', marca: 'Maison Francis', variante: 10, preco: 289.0 },
       { perfume: 'Delina', marca: 'Parfums de Marly', variante: 5, preco: 100.0 },
@@ -200,6 +203,9 @@ export const PEDIDOS: Pedido[] = [
     pagamento: 'pago', envio: 'Enviado', diasDesdeEntrega: null, entregueEm: null,
     destino: 'Campinas · SP', cep: '13024-110', rua: 'Av. Andrade Neves, 1204 · Centro',
     peso: '0,28 kg', dimensoes: '16 × 10 × 8 cm', gateway: 'Melhor Envio', rastreio: 'OS4471120BR',
+    situacao: 'enviado', transportadora: 'Correios', servicoFrete: null,
+    rastreioUrl: null, rastreioLidoEm: null, entregaLocal: false,
+    compradoEm: '2026-08-01T12:00:00.000Z',
     itens: [{ perfume: 'Oud Wood', marca: 'Tom Ford', variante: 15, preco: 220.1 }],
   },
   {
@@ -208,6 +214,9 @@ export const PEDIDOS: Pedido[] = [
     pagamento: 'divergente', envio: 'Retido', diasDesdeEntrega: null, entregueEm: null,
     destino: 'Belo Horizonte · MG', cep: '30140-071', rua: 'Rua Pernambuco, 907 · Savassi',
     peso: '0,61 kg', dimensoes: '22 × 14 × 10 cm', gateway: 'Melhor Envio', rastreio: 'OS9981204BR',
+    situacao: 'enviado', transportadora: 'Correios', servicoFrete: null,
+    rastreioUrl: null, rastreioLidoEm: null, entregaLocal: false,
+    compradoEm: '2026-08-01T12:00:00.000Z',
     itens: [
       { perfume: 'Baccarat Rouge 540', marca: 'Maison Francis', variante: 10, preco: 268.5 },
       { perfume: 'Erba Pura', marca: 'Xerjoff', variante: 15, preco: 214.0 },
@@ -220,6 +229,9 @@ export const PEDIDOS: Pedido[] = [
     pagamento: 'pendente', envio: 'Não iniciado', diasDesdeEntrega: null, entregueEm: null,
     destino: 'Curitiba · PR', cep: '80420-090', rua: 'Al. Dr. Carlos de Carvalho, 318',
     peso: '0,34 kg', dimensoes: '17 × 11 × 9 cm', gateway: 'Frenet', rastreio: null,
+    situacao: 'pago', transportadora: null, servicoFrete: null,
+    rastreioUrl: null, rastreioLidoEm: null, entregaLocal: false,
+    compradoEm: '2026-08-01T12:00:00.000Z',
     itens: [{ perfume: 'Sauvage Elixir', marca: 'Dior', variante: 15, preco: 268.1 }],
   },
   {
@@ -228,6 +240,9 @@ export const PEDIDOS: Pedido[] = [
     pagamento: 'pago', envio: 'Entregue', diasDesdeEntrega: 5, entregueEm: '30/07/2026',
     destino: 'Rio de Janeiro · RJ', cep: '22071-020', rua: 'Rua Bulhões de Carvalho, 145 · Copacabana',
     peso: '0,45 kg', dimensoes: '19 × 12 × 9 cm', gateway: 'Frenet', rastreio: 'LGG88214077',
+    situacao: 'entregue', transportadora: 'Correios', servicoFrete: null,
+    rastreioUrl: null, rastreioLidoEm: null, entregaLocal: false,
+    compradoEm: '2026-08-01T12:00:00.000Z',
     itens: [
       { perfume: 'Baccarat Rouge 540', marca: 'Maison Francis', variante: 5, preco: 79.9 },
       { perfume: 'Oud Wood', marca: 'Tom Ford', variante: 10, preco: 169.9 },
@@ -241,6 +256,9 @@ export const PEDIDOS: Pedido[] = [
     pagamento: 'pago', envio: 'Aguardando envio', diasDesdeEntrega: null, entregueEm: null,
     destino: 'Santos · SP', cep: '11055-200', rua: 'Av. Ana Costa, 62 · Gonzaga',
     peso: '0,30 kg', dimensoes: '16 × 11 × 8 cm', gateway: 'Frenet', rastreio: null,
+    situacao: 'faturado', transportadora: null, servicoFrete: null,
+    rastreioUrl: null, rastreioLidoEm: null, entregaLocal: false,
+    compradoEm: '2026-08-01T12:00:00.000Z',
     itens: [{ perfume: 'Aventus', marca: 'Creed', variante: 15, preco: 329.6 }],
   },
   {
@@ -249,6 +267,9 @@ export const PEDIDOS: Pedido[] = [
     pagamento: 'pago', envio: 'Enviado', diasDesdeEntrega: null, entregueEm: null,
     destino: 'Goiânia · GO', cep: '74110-010', rua: 'Rua 9, 1130 · Setor Oeste',
     peso: '0,86 kg', dimensoes: '26 × 16 × 12 cm', gateway: 'Melhor Envio', rastreio: 'OS7712004BR',
+    situacao: 'enviado', transportadora: 'Correios', servicoFrete: null,
+    rastreioUrl: null, rastreioLidoEm: null, entregaLocal: false,
+    compradoEm: '2026-08-01T12:00:00.000Z',
     itens: [
       { perfume: 'Bleu de Chanel', marca: 'Chanel', variante: 10, preco: 468.9 },
       { perfume: 'Baccarat Rouge 540', marca: 'Maison Francis', variante: 10, preco: 196.0 },
@@ -261,6 +282,9 @@ export const PEDIDOS: Pedido[] = [
     pagamento: 'pendente', envio: 'Não iniciado', diasDesdeEntrega: null, entregueEm: null,
     destino: 'Porto Alegre · RS', cep: '90570-020', rua: 'Rua Mostardeiro, 274 · Moinhos de Vento',
     peso: '0,26 kg', dimensoes: '15 × 10 × 8 cm', gateway: 'Frenet', rastreio: null,
+    situacao: 'pago', transportadora: null, servicoFrete: null,
+    rastreioUrl: null, rastreioLidoEm: null, entregaLocal: false,
+    compradoEm: '2026-08-01T12:00:00.000Z',
     itens: [{ perfume: 'Bleu de Chanel', marca: 'Chanel', variante: 10, preco: 161.5 }],
   },
   {
@@ -269,6 +293,9 @@ export const PEDIDOS: Pedido[] = [
     pagamento: 'pago', envio: 'Entregue', diasDesdeEntrega: 32, entregueEm: '03/07/2026',
     destino: 'São Paulo · SP', cep: '04532-060', rua: 'Rua Jerônimo da Veiga, 45 · Itaim Bibi',
     peso: '0,44 kg', dimensoes: '19 × 12 × 9 cm', gateway: 'Frenet', rastreio: 'AZ7710455',
+    situacao: 'entregue', transportadora: 'Correios', servicoFrete: null,
+    rastreioUrl: null, rastreioLidoEm: null, entregaLocal: false,
+    compradoEm: '2026-08-01T12:00:00.000Z',
     itens: [
       { perfume: 'Erba Pura', marca: 'Xerjoff', variante: 5, preco: 86.9 },
       { perfume: 'Sauvage Elixir', marca: 'Dior', variante: 8, preco: 81.9 },
@@ -280,6 +307,9 @@ export const PEDIDOS: Pedido[] = [
     pagamento: 'pago', envio: 'Entregue', diasDesdeEntrega: 32, entregueEm: '03/07/2026',
     destino: 'Rio de Janeiro · RJ', cep: '22071-020', rua: 'Rua Bulhões de Carvalho, 145 · Copacabana',
     peso: '0,29 kg', dimensoes: '16 × 11 × 8 cm', gateway: 'Frenet', rastreio: 'AZ4471120',
+    situacao: 'entregue', transportadora: 'Correios', servicoFrete: null,
+    rastreioUrl: null, rastreioLidoEm: null, entregaLocal: false,
+    compradoEm: '2026-08-01T12:00:00.000Z',
     itens: [
       { perfume: 'Erba Pura', marca: 'Xerjoff', variante: 5, preco: 86.9 },
       { perfume: 'Sauvage Elixir', marca: 'Dior', variante: 8, preco: 81.9 },
@@ -291,6 +321,9 @@ export const PEDIDOS: Pedido[] = [
     pagamento: 'pago', envio: 'Enviado', diasDesdeEntrega: null, entregueEm: null,
     destino: 'Rio de Janeiro · RJ', cep: '22071-020', rua: 'Rua Bulhões de Carvalho, 145 · Copacabana',
     peso: '0,38 kg', dimensoes: '18 × 12 × 9 cm', gateway: 'Frenet', rastreio: 'LGG55120904',
+    situacao: 'enviado', transportadora: 'Correios', servicoFrete: null,
+    rastreioUrl: null, rastreioLidoEm: null, entregaLocal: false,
+    compradoEm: '2026-08-01T12:00:00.000Z',
     itens: [
       { perfume: 'Bleu de Chanel', marca: 'Chanel', variante: 10, preco: 118.9 },
       { perfume: 'Good Girl', marca: 'Carolina Herrera', variante: 15, preco: 171.0 },

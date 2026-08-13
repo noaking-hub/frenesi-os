@@ -167,6 +167,8 @@ export type StatusEnvio =
   | 'Retido'
   | 'Atrasado'
 
+import type { SituacaoPedido } from './entregas'
+
 export type Canal = 'Shopify' | 'Yampi' | 'WhatsApp' | 'Instagram'
 export type GatewayFrete = 'Frenet' | 'Melhor Envio'
 
@@ -202,6 +204,23 @@ export interface Pedido {
   gateway: GatewayFrete
   rastreio: string | null
   itens: ItemPedido[]
+  /**
+   * Onde o pedido está no ciclo: pago → faturado → enviado → entregue.
+   * Independente de `pagamento` e de `envio` — o escopo do módulo pede que os
+   * três coexistam em vez de um sobrescrever o outro.
+   */
+  situacao: SituacaoPedido
+  /** Nome da transportadora, resolvido. `null` quando não dá para saber. */
+  transportadora: string | null
+  /** Serviço contratado, como a Yampi informou. */
+  servicoFrete: string | null
+  /** Página do objeto na transportadora, com o código embutido. */
+  rastreioUrl: string | null
+  /** Última vez que a transportadora foi consultada para este código. */
+  rastreioLidoEm: string | null
+  /** Entrega em mãos: não é faturada, e a baixa acontece na entrega. */
+  entregaLocal: boolean
+  compradoEm: string
 }
 
 export type MotivoDevolucao = 'm1' | 'm2' | 'm3' | 'm4' | 'm5'

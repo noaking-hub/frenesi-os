@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { acoesDisponiveis, aferirItem, aguardaBaixaShopify, diasAlemDoPrazo, ehEntregaLocal, ehExcecao, emAberto, etapaDe, identificarFrete, resumirEnvios, resumirOcorrencias, situacaoDoPedido, triarDevolucao } from '..'
+import { acoesDisponiveis, aferirItem, aguardaBaixaShopify, diasAlemDoPrazo, ehEntregaLocal, ehExcecao, emAberto, etapaDe, identificarFrete, resumirEnvios, resumirOcorrencias, situacaoDoPedido, slaDeExpedicao, triarDevolucao } from '..'
 import type { Envio, Ocorrencia } from '..'
 
 const envio = (p: Partial<Envio>): Envio => ({
@@ -280,5 +280,43 @@ describe('entrega local', () => {
   it('pedido comum não vira local', () => {
     expect(ehEntregaLocal({ servicoFrete: 'FRENET_SEDEX_03220', destino: 'Recife · PE', rastreio: null })).toBe(false)
     expect(ehEntregaLocal({ servicoFrete: null, destino: null, rastreio: null })).toBe(false)
+  })
+})
+
+describe('SLA de expedição', () => {
+  const agora = new Date('2026-08-13T12:00:00Z')
+  const base = { situacao: 'pago' as const, entregueEm: null }
+
+  it('fala a língua da operação, não em horas', () => {
+    expect(slaDeExpedicao({ ...base, compradoEm: '2026-08-11T09:00:00Z' }, 2, agora).rotulo).toBe('Vence hoje')
+    expect(slaDeExpedicao({ ...base, compradoEm: '2026-08-12T09:00:00Z' }, 2, agora).rotulo).toBe('Amanhã')
+    expect(slaDeExpedicao({ ...base, compradoEm: '2026-08-09T09:00:00Z' }, 2, agora).rotulo).toBe('Em atraso · 2 dias')
+  })
+
+  it('compara por DIA, não por hora corrida', () => {
+    // Pedido das 18h não pode parecer atrasado às 9h do dia seguinte.
+    const tarde = slaDeExpedicao({ ...base, compradoEm: '2026-08-11T21:00:00Z' }, 2, agora)
+    expect(tarde.estado).toBe('hoje')
+  })
+
+  it('quem já despachou sai da fila de prazo', () => {
+    // Cobrar prazo de expedição de pedido enviado encheria as pendências de
+    // trabalho terminado.
+    expect(slaDeExpedicao({ ...base, situacao: 'enviado', compradoEm: '2026-07-01T00:00:00Z' }, 2, agora).estado).toBe('em-dia')
+  })
+
+  it('entregue mostra a data, cancelado não cobra prazo', () => {
+    const e = slaDeExpedicao(
+      { situacao: 'entregue', compradoEm: '2026-08-01T00:00:00Z', entregueEm: '2026-08-12T14:00:00Z' },
+      2,
+      agora,
+    )
+    expect(e.estado).toBe('entregue')
+    expect(e.rotulo).toContain('12/08')
+    expect(slaDeExpedicao({ ...base, situacao: 'cancelado', compradoEm: '2026-08-01T00:00:00Z' }, 2, agora).rotulo).toBe('Cancelado')
+  })
+
+  it('data ilegível vira "sem previsão", nunca uma data inventada', () => {
+    expect(slaDeExpedicao({ ...base, compradoEm: 'nada' }, 2, agora).estado).toBe('sem-previsao')
   })
 })

@@ -1,5 +1,8 @@
 'use server'
 
+import { confirmarEntregaLocal } from '@/data/baixa-estoque'
+import { OPERADOR } from '@/data/operador'
+
 import { revalidatePath } from 'next/cache'
 
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
@@ -226,4 +229,19 @@ export async function sincronizarEnvios(): Promise<RespostaEnvios> {
     console.error('[shopify] sincronia de envios falhou:', e)
     return { ok: false, erro: mensagemDe(e) }
   }
+}
+
+/**
+ * Confirma a entrega em mãos de um pedido local.
+ *
+ * É a única forma de um pedido de motoboy fechar o ciclo: ele não é faturado
+ * e nenhuma transportadora vai confirmar o que a própria operação entregou.
+ * A mesma ação baixa o estoque, na mesma transação do banco.
+ */
+export async function confirmarEntregaEmMaos(
+  pedidoId: string,
+): Promise<{ ok: true; mlConsumido: number } | { ok: false; erro: string }> {
+  const r = await confirmarEntregaLocal(pedidoId, OPERADOR)
+  if (r.ok) revalidatePath('/pedidos')
+  return r
 }
