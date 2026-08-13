@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { acoesDisponiveis, aferirItem, aguardaBaixaShopify, diasAlemDoPrazo, ehExcecao, emAberto, etapaDe, identificarFrete, resumirEnvios, resumirOcorrencias, situacaoDoPedido, triarDevolucao } from '..'
+import { acoesDisponiveis, aferirItem, aguardaBaixaShopify, diasAlemDoPrazo, ehEntregaLocal, ehExcecao, emAberto, etapaDe, identificarFrete, resumirEnvios, resumirOcorrencias, situacaoDoPedido, triarDevolucao } from '..'
 import type { Envio, Ocorrencia } from '..'
 
 const envio = (p: Partial<Envio>): Envio => ({
@@ -258,5 +258,27 @@ describe('situação do pedido', () => {
     // regredir para pago na nossa tela.
     expect(situacaoDoPedido({ ...base, statusYampi: 'paid', atual: 'enviado' })).toBe('enviado')
     expect(situacaoDoPedido({ ...base, statusYampi: 'invoiced', atual: 'entregue' })).toBe('entregue')
+  })
+})
+
+describe('entrega local', () => {
+  it('MOTOBOY é a convenção desde 01/08 e manda sobre o resto', () => {
+    expect(ehEntregaLocal({ servicoFrete: 'MOTOBOY', destino: 'São Paulo · SP', rastreio: null })).toBe(true)
+  })
+
+  it('antes da convenção, o destino é a única pista', () => {
+    expect(ehEntregaLocal({ servicoFrete: null, destino: 'Muriaé · MG', rastreio: null })).toBe(true)
+    expect(ehEntregaLocal({ servicoFrete: null, destino: 'Muriae · MG', rastreio: null })).toBe(true)
+  })
+
+  it('código de rastreio significa transportadora, não entrega em mãos', () => {
+    // Cliente de Muriaé que pediu envio pelos Correios não é entrega local —
+    // e tratá-lo como tal baixaria o estoque na hora errada.
+    expect(ehEntregaLocal({ servicoFrete: null, destino: 'Muriaé · MG', rastreio: 'AD1BR' })).toBe(false)
+  })
+
+  it('pedido comum não vira local', () => {
+    expect(ehEntregaLocal({ servicoFrete: 'FRENET_SEDEX_03220', destino: 'Recife · PE', rastreio: null })).toBe(false)
+    expect(ehEntregaLocal({ servicoFrete: null, destino: null, rastreio: null })).toBe(false)
   })
 })

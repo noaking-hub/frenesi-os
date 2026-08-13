@@ -16,7 +16,7 @@ import 'server-only'
  * lado da Yampi, e já provou ser instável quando um produto é recriado.
  */
 
-import { situacaoDoPedido as situacaoDeUmPedido, transacoesDoPedido } from '@/domain'
+import { ehEntregaLocal, situacaoDoPedido as situacaoDeUmPedido, transacoesDoPedido } from '@/domain'
 import type { SituacaoPedido } from '@/domain'
 
 import { supabaseConfigurado, supabaseServer } from './supabase'
@@ -535,6 +535,14 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
       // O alias CRU vai junto: derivação corrigida depois vale um UPDATE, e
       // não uma reimportação da Yampi inteira.
       status_yampi: [alias, nome].filter(Boolean).join(' · ') || null,
+      // Entrega local não é faturada: sem esta marca ela nunca alcançaria o
+      // momento que dispara a baixa de estoque, e o ml sairia do frasco sem
+      // sair do saldo.
+      entrega_local: ehEntregaLocal({
+        servicoFrete: p.shipment_service,
+        destino: endereco ? [endereco.city, endereco.state].filter(Boolean).join(' · ') : null,
+        rastreio: p.track_code,
+      }),
       situacao: situacaoDeUmPedido({
         statusYampi: `${alias} ${nome}`,
         pagamento: situacaoDoPedido(p),

@@ -135,6 +135,28 @@ export function entregaLocal(envio: Envio): boolean {
   return /muria[eé]/i.test(envio.destino)
 }
 
+/**
+ * O pedido é entrega local, olhando o que a Yampi gravou.
+ *
+ * A operação passou a marcar `MOTOBOY` no serviço em 01/08; antes disso os
+ * mesmos pedidos vinham sem serviço nenhum. O rótulo manda, e o destino é a
+ * rede para o período anterior à convenção.
+ *
+ * Isso importa muito além do rótulo na tela: entrega local NÃO é faturada —
+ * não sai nota — e por isso nunca alcança o momento que dispara a baixa de
+ * estoque. Sem identificá-la, o perfume sai do frasco e o saldo não cai.
+ */
+export function ehEntregaLocal(dados: {
+  servicoFrete: string | null | undefined
+  destino: string | null | undefined
+  rastreio: string | null | undefined
+}): boolean {
+  if (/motoboy|entrega local|local delivery/i.test(dados.servicoFrete ?? '')) return true
+  // Código de rastreio significa transportadora: não é entrega em mãos.
+  if (dados.rastreio) return false
+  return /muria[eé]/i.test(dados.destino ?? '')
+}
+
 /** Status que indicam problema com a transportadora. */
 export function ehExcecao(envio: Envio): boolean {
   if (entregaLocal(envio)) return false

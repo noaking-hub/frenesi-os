@@ -93,3 +93,32 @@ export async function baixarEstoqueDosFaturados(limite = 100): Promise<Resultado
   resultado.mlConsumido = Math.round(resultado.mlConsumido * 10) / 10
   return resultado
 }
+
+/**
+ * Confirma a entrega em mãos e baixa o estoque na mesma transação.
+ *
+ * Entrega local não passa por faturamento — não sai nota — e nenhuma
+ * transportadora vai confirmar o que a própria operação entregou. Sem esta
+ * ação o pedido fica parado em "pago" para sempre, e o perfume que saiu do
+ * frasco nunca sai do saldo. Eram 23 pedidos nessa situação quando o buraco
+ * foi encontrado.
+ */
+export async function confirmarEntregaLocal(
+  pedidoId: string,
+  operador = 'Operação',
+): Promise<{ ok: true; mlConsumido: number } | { ok: false; erro: string }> {
+  if (!supabaseConfigurado()) {
+    return { ok: false, erro: 'O Supabase precisa estar configurado.' }
+  }
+  if (!pedidoId.trim()) return { ok: false, erro: 'Informe o pedido.' }
+
+  const { data, error } = await supabaseServer().rpc('entregar_pedido_local', {
+    p_pedido_id: pedidoId,
+    p_operador: operador,
+  })
+  if (error) {
+    console.error('[estoque] entregar_pedido_local falhou:', error)
+    return { ok: false, erro: error.message || 'Falha ao confirmar a entrega.' }
+  }
+  return { ok: true, mlConsumido: Number(data) || 0 }
+}
