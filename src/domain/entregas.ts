@@ -92,6 +92,39 @@ export function identificarFrete(
 }
 
 /**
+ * A página onde o cliente acompanha o objeto, com o código já embutido.
+ *
+ * Duas casas, e a divisão segue quem emitiu a etiqueta: Correios e Jadlog saem
+ * pela Frenet, que publica o rastreio em `rastreio.frenet.com.br/{sigla}/{código}`;
+ * J&T, Total e Buslog saem pelo Melhor Envio, cuja página é o Melhor Rastreio.
+ *
+ * Mandar o cliente para o site da transportadora seria pior: ele teria que
+ * digitar o código de novo, e é exatamente isso que este link existe para
+ * evitar. Transportadora desconhecida devolve `null` — link que abre numa
+ * consulta vazia faz o cliente concluir que o pedido se perdeu.
+ */
+export function paginaDeRastreio(
+  transportadora: string | null | undefined,
+  codigo: string | null | undefined,
+): string | null {
+  const c = (codigo ?? '').trim()
+  if (!c) return null
+  const alvo = encodeURIComponent(c)
+  switch (transportadora) {
+    case 'Correios':
+      return `https://rastreio.frenet.com.br/COR/${alvo}`
+    case 'Jadlog':
+      return `https://rastreio.frenet.com.br/JAD/${alvo}`
+    case 'J&T Express':
+    case 'Total Express':
+    case 'Buslog':
+      return `https://melhorrastreio.com.br/rastreio/${alvo}`
+    default:
+      return null
+  }
+}
+
+/**
  * Entrega feita em mãos, na cidade da operação.
  *
  * Muriaé não passa por transportadora: o operador entrega e dá a baixa

@@ -111,98 +111,177 @@ export const ROTULO_EVENTO: Record<EventoNotificacao, string> = {
   cashback_expirando: 'Cashback expirando',
 }
 
-/** Primeiro nome, para a saudação. Nome completo em e-mail soa a cobrança. */
-function primeiroNome(cliente: string): string {
-  const nome = cliente.trim().split(/\s+/)[0] ?? ''
-  if (!nome) return 'Olá'
-  return nome.charAt(0).toUpperCase() + nome.slice(1).toLowerCase()
-}
-
-export interface ConteudoAviso {
-  assunto: string
-  titulo: string
-  saudacao: string
-  corpo: string[]
-  acao?: { texto: string; url: string }
-}
+// ── Modelo do aviso de envio ────────────────────────────────────────────────
 
 /**
- * O que o cliente lê em cada aviso.
+ * O e-mail que o cliente recebe quando o pedido sai daqui.
  *
- * Escrito para responder a pergunta que ele faria em seguida, e não para
- * anunciar um estado do sistema. "Seu pedido foi enviado" sem o código e sem
- * onde acompanhar é um e-mail que gera a mensagem no WhatsApp que ele deveria
- * ter evitado.
+ * Mesma moldura validada dos outros avisos da marca. O que muda é o miolo, e
+ * ele existe para responder às duas perguntas que o cliente faria em seguida:
+ * **qual é o código** e **onde eu acompanho**. Por isso o código aparece em
+ * destaque, monoespaçado e selecionável, e o botão leva direto à página da
+ * transportadora com ele embutido — sem digitar nada.
  *
- * Prazo não entra: a transportadora não nos dá data confiável, e prometer o
- * que não se controla é como se perde a confiança que este aviso existe para
- * construir.
+ * Placeholders: {nome}, {pedido}, {codigo}, {transportadora}, {link}.
  */
-export function conteudoDoAviso(dados: {
-  evento: EventoNotificacao
-  pedidoId: string
-  cliente: string
-  rastreio: string | null
-  transportadora: string | null
-  urlRastreio: string | null
-}): ConteudoAviso {
-  const { evento, pedidoId, cliente, rastreio, transportadora, urlRastreio } = dados
-  const assunto = ASSUNTO[evento].replace('{pedido}', pedidoId)
-  const saudacao = `${primeiroNome(cliente)}, tudo bem?`
-  const empresa = transportadora ?? 'a transportadora'
+export const MODELO_ENVIO_PADRAO = {
+  assunto: 'Seu pedido saiu para entrega · {pedido}',
+  titulo: '{nome}, seu pedido está a caminho.',
+  mensagem:
+    'Ele saiu daqui e já está com {transportadora}. O primeiro registro costuma aparecer em até um dia útil depois da postagem — até lá é normal a consulta não mostrar movimentação.',
+  textoBotao: 'Acompanhar entrega',
+  html: null as string | null,
+}
 
-  if (evento === 'pedido_enviado') {
-    const corpo = [
-      `Seu pedido <strong>${pedidoId}</strong> saiu daqui e já está com ${empresa}.`,
-    ]
-    if (rastreio) {
-      corpo.push(
-        `Código de rastreio: <strong style="letter-spacing:.04em">${rastreio}</strong>`,
-        'O primeiro registro costuma aparecer em até um dia útil depois da postagem — ' +
-          'até lá é normal a consulta não mostrar movimentação.',
-      )
-    } else {
-      // Sem código não há o que rastrear, e fingir que há é pior que admitir.
-      corpo.push('Assim que o código de rastreio for emitido, enviamos para você.')
-    }
-    corpo.push('Qualquer dúvida, é só responder este e-mail.')
-    return {
-      assunto,
-      titulo: 'Seu pedido está a caminho',
-      saudacao,
-      corpo,
-      acao: urlRastreio ? { texto: 'Acompanhar entrega', url: urlRastreio } : undefined,
-    }
+const escapa = (t: string) =>
+  t
+    .split('&').join('&amp;')
+    .split('<').join('&lt;')
+    .split('>').join('&gt;')
+    .split('"').join('&quot;')
+
+/**
+ * Monta o aviso de envio.
+ *
+ * Sem `link` o botão não é renderizado — botão que abre numa consulta vazia
+ * faz o cliente concluir que o pedido se perdeu, que é o oposto do que este
+ * e-mail existe para fazer. Sem `codigo`, o bloco do código também some, e o
+ * texto passa a prometer o código para depois em vez de exibir um espaço em
+ * branco onde ele deveria estar.
+ */
+export function emailEnvio(
+  d: {
+    nome: string | null
+    pedido: string
+    codigo: string | null
+    transportadora: string | null
+    link: string | null
+  },
+  modelo: typeof MODELO_ENVIO_PADRAO = MODELO_ENVIO_PADRAO,
+): { assunto: string; html: string } {
+  const nome = d.nome?.trim().split(/\s+/)[0] || 'Olá'
+  const transportadora = d.transportadora ?? 'a transportadora'
+  const preenche = (t: string) =>
+    t
+      .split('{nome}').join(escapa(nome))
+      .split('{pedido}').join(escapa(d.pedido))
+      .split('{codigo}').join(escapa(d.codigo ?? ''))
+      .split('{transportadora}').join(escapa(transportadora))
+
+  const assunto = preenche(modelo.assunto)
+
+  if (modelo.html && modelo.html.trim()) {
+    return { assunto, html: preenche(modelo.html).split('{link}').join(escapa(d.link ?? '#')) }
   }
 
-  if (evento === 'pedido_entregue') {
-    return {
-      assunto,
-      titulo: 'Seu pedido chegou',
-      saudacao,
-      corpo: [
-        `A entrega do pedido <strong>${pedidoId}</strong> foi confirmada.`,
-        'Se algo não estiver como você esperava, responda este e-mail — a gente resolve.',
-      ],
-    }
-  }
+  const paragrafos = modelo.mensagem
+    .split(/\n\s*\n|\n/)
+    .map((p) => preenche(p.trim()))
+    .filter(Boolean)
+    .map(
+      (p) =>
+        `<p style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:13.5px;line-height:1.65;color:#4C463A;">${p}</p>`,
+    )
+    .join('')
 
-  if (evento === 'pedido_pago') {
-    return {
-      assunto,
-      titulo: 'Pagamento confirmado',
-      saudacao,
-      corpo: [
-        `Recebemos o pagamento do pedido <strong>${pedidoId}</strong>.`,
-        'Agora ele entra na fila de preparo. Avisamos assim que sair para entrega.',
-      ],
-    }
-  }
+  const blocoCodigo = d.codigo
+    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 6px;border:1px dashed #B08D3E;border-radius:10px;">
+                  <tr>
+                    <td style="padding:16px 20px;text-align:center;">
+                      <p style="margin:0 0 6px;font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8A7440;">Código de rastreio · ${escapa(transportadora)}</p>
+                      <p style="margin:0;font-family:'Courier New',Courier,monospace;font-weight:bold;font-size:20px;letter-spacing:.08em;color:#1A1A1A;">${escapa(d.codigo)}</p>
+                    </td>
+                  </tr>
+                </table>`
+    : `<p style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:13.5px;line-height:1.65;color:#4C463A;">Assim que o código de rastreio for emitido, enviamos para você.</p>`
+
+  const botao = d.link
+    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td style="padding:24px 0 4px;text-align:center;">
+                      <a href="${escapa(d.link)}" style="display:inline-block;background:#141414;color:#EFD18C;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:bold;font-size:13px;letter-spacing:.08em;text-transform:uppercase;padding:15px 34px;border-radius:8px;">${escapa(preenche(modelo.textoBotao))}</a>
+                    </td>
+                  </tr>
+                </table>`
+    : ''
 
   return {
     assunto,
-    titulo: ROTULO_EVENTO[evento],
-    saudacao,
-    corpo: [`Atualização do seu pedido <strong>${pedidoId}</strong>.`],
+    html: molduraFrenesi({
+      titulo: preenche(modelo.titulo),
+      pedido: d.pedido,
+      miolo: `${paragrafos}${blocoCodigo}${botao}`,
+    }),
+  }
+}
+
+/**
+ * A moldura da marca, comum a todo aviso de pedido.
+ *
+ * Uma só, e não uma por e-mail: dois visuais diferentes no mesmo fluxo fazem o
+ * cliente duvidar do segundo. Tabela e estilo em linha porque cliente de
+ * e-mail ignora folha externa e boa parte ignora `<style>` no cabeçalho.
+ */
+function molduraFrenesi(d: { titulo: string; pedido: string; miolo: string }): string {
+  return `<!doctype html>
+<html lang="pt-BR">
+  <body style="margin:0;padding:0;background:#F6F1E7;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F6F1E7;padding:32px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+            <tr>
+              <td style="padding:0 0 22px;text-align:center;">
+                <p style="margin:0;font-family:Georgia,'Times New Roman',serif;font-size:26px;letter-spacing:.34em;color:#141414;">FRENESI</p>
+                <p style="margin:6px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:#8A7440;">decants de perfumaria</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="background:#FFFDF8;border:1px solid #EAE2CF;border-radius:14px;padding:34px 36px;">
+                <p style="margin:0 0 14px;font-family:Georgia,'Times New Roman',serif;font-size:21px;line-height:1.35;color:#1A1A1A;">${d.titulo}</p>
+                <p style="margin:0 0 18px;font-family:Arial,Helvetica,sans-serif;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:#8A7440;">Pedido ${escapa(d.pedido)}</p>
+                ${d.miolo}
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:20px 10px 0;text-align:center;">
+                <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.6;color:#9A927F;">
+                  Alguma dúvida sobre a entrega? É só responder este e-mail.<br>
+                  Você recebeu esta mensagem porque tem um pedido na FRENESI.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`
+}
+
+/**
+ * Aviso de entrega concluída, na mesma moldura.
+ *
+ * Sem botão: o pedido chegou, não há o que acompanhar. O que o cliente pode
+ * precisar é falar com a gente, e para isso basta responder.
+ */
+export function emailEntregue(d: { nome: string | null; pedido: string }): {
+  assunto: string
+  html: string
+} {
+  const nome = d.nome?.trim().split(/\s+/)[0] || 'Olá'
+  const paragrafo = (t: string) =>
+    `<p style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:13.5px;line-height:1.65;color:#4C463A;">${t}</p>`
+  return {
+    assunto: ASSUNTO.pedido_entregue.replace('{pedido}', d.pedido),
+    html: molduraFrenesi({
+      titulo: `${escapa(nome)}, seu pedido chegou.`,
+      pedido: d.pedido,
+      miolo:
+        paragrafo('A entrega foi confirmada pela transportadora.') +
+        paragrafo(
+          'Se algo não estiver como você esperava, é só responder este e-mail — a gente resolve.',
+        ),
+    }),
   }
 }

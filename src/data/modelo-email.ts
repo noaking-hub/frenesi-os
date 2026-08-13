@@ -2,6 +2,7 @@ import 'server-only'
 
 import {
   MODELO_CASHBACK_PADRAO,
+  MODELO_ENVIO_PADRAO,
   MODELO_GIFT_PADRAO,
   MODELO_PADRAO,
   type ModeloEmailRecuperacao,
@@ -15,12 +16,13 @@ import { supabaseConfigurado, supabaseServer } from './supabase'
  * padrão do domínio — a tela nunca abre vazia.
  */
 
-export type ChaveModelo = 'carrinho' | 'giftback' | 'cashback'
+export type ChaveModelo = 'carrinho' | 'giftback' | 'cashback' | 'envio'
 
 const PADROES: Record<ChaveModelo, ModeloEmailRecuperacao> = {
   carrinho: MODELO_PADRAO,
   giftback: MODELO_GIFT_PADRAO,
   cashback: MODELO_CASHBACK_PADRAO,
+  envio: MODELO_ENVIO_PADRAO,
 }
 
 export async function lerModeloEmail(chave: ChaveModelo): Promise<ModeloEmailRecuperacao> {

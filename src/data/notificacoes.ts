@@ -3,13 +3,16 @@ import 'server-only'
 import {
   ASSUNTO,
   avisosDe,
-  conteudoDoAviso,
+  emailEntregue,
+  emailEnvio,
   identificarFrete,
+  paginaDeRastreio,
   type AvisoPendente,
   type EventoNotificacao,
 } from '@/domain'
 
-import { emailConfigurado, entregar, montarHtml } from './email'
+import { emailConfigurado, entregar } from './email'
+import { lerModeloEmail } from './modelo-email'
 import { supabaseConfigurado, supabaseServer } from './supabase'
 
 /**
@@ -34,6 +37,8 @@ import { supabaseConfigurado, supabaseServer } from './supabase'
 
 /** Quais eventos o módulo cobre hoje. Os outros ficam para quando houver fonte. */
 const EVENTOS_ATIVOS: EventoNotificacao[] = ['pedido_enviado', 'pedido_entregue']
+
+type ModeloEnvio = Parameters<typeof emailEnvio>[1]
 
 export function avisosDePedidoLigados(): boolean {
   return process.env.AVISOS_DE_PEDIDO?.trim() === '1'
@@ -115,6 +120,9 @@ export async function enviarAvisosDePedido(opcoes?: {
   }
   if (pendentes.length === 0) return vazio
 
+  // Uma leitura por rodada, não uma por e-mail: o modelo é o mesmo para todos.
+  const modelo = (await lerModeloEmail('envio')) as ModeloEnvio
+
   // No teste nada é reservado: o ensaio não pode consumir o direito do cliente
   // de receber o aviso de verdade depois.
   if (teste) {
@@ -122,7 +130,7 @@ export async function enviarAvisosDePedido(opcoes?: {
     const r: ResultadoAvisos = { ...vazio, candidatos: amostra.length }
     for (const { aviso, pedido } of amostra) {
       try {
-        await entregar(mensagemDoAviso(aviso, pedido, teste))
+        await entregar(mensagemDoAviso(aviso, pedido, modelo, teste))
         r.enviados++
       } catch (e) {
         r.falhas.push({ pedido: aviso.pedidoId, erro: e instanceof Error ? e.message : String(e) })
@@ -157,7 +165,7 @@ export async function enviarAvisosDePedido(opcoes?: {
 
   for (const { aviso, pedido } of fila) {
     try {
-      const r = await entregar(mensagemDoAviso(aviso, pedido, null))
+      const r = await entregar(mensagemDoAviso(aviso, pedido, modelo, null))
       await sb
         .from('notificacoes_enviadas')
         .update({ estado: 'enviado', provedor_id: r.id, concluido_em: new Date().toISOString() })
@@ -179,23 +187,41 @@ export async function enviarAvisosDePedido(opcoes?: {
   return resultado
 }
 
+/**
+ * A mensagem pronta para um aviso.
+ *
+ * O link do botão sai de `paginaDeRastreio`, que escolhe a casa certa pela
+ * transportadora: Frenet para Correios e Jadlog, Melhor Rastreio para J&T,
+ * Total e Buslog — sempre com o código embutido, para o cliente não digitar
+ * nada. Quando a Frenet já devolveu a URL do objeto, ela tem precedência: é o
+ * endereço que a própria transportadora publicou.
+ */
 function mensagemDoAviso(
   aviso: AvisoPendente,
   pedido: LinhaPedidoAviso,
+  modelo: ModeloEnvio,
   destinoDeTeste: string | null,
 ) {
   const { transportadora } = identificarFrete(pedido.servico_frete, pedido.rastreio)
-  const conteudo = conteudoDoAviso({
-    evento: aviso.evento,
-    pedidoId: aviso.pedidoId,
-    cliente: aviso.cliente,
-    rastreio: pedido.rastreio,
-    transportadora: transportadora === 'Não informada' ? null : transportadora,
-    urlRastreio: pedido.rastreio_url,
-  })
+  const nome = transportadora === 'Não informada' ? null : transportadora
+
+  const conteudo =
+    aviso.evento === 'pedido_entregue'
+      ? emailEntregue({ nome: aviso.cliente, pedido: aviso.pedidoId })
+      : emailEnvio(
+          {
+            nome: aviso.cliente,
+            pedido: aviso.pedidoId,
+            codigo: pedido.rastreio,
+            transportadora: nome,
+            link: pedido.rastreio_url ?? paginaDeRastreio(nome, pedido.rastreio),
+          },
+          modelo,
+        )
+
   return {
     para: destinoDeTeste || aviso.email,
     assunto: destinoDeTeste ? `[TESTE] ${conteudo.assunto}` : conteudo.assunto,
-    html: montarHtml(conteudo),
+    html: conteudo.html,
   }
 }
