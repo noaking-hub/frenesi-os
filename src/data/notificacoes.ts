@@ -33,9 +33,17 @@ import { supabaseConfigurado, supabaseServer } from './supabase'
  *  3. **Desligado por padrão.** Sem `AVISOS_DE_PEDIDO=1` nada sai. Uma rotina
  *     que começa a escrever para clientes reais no primeiro deploy é o tipo de
  *     coisa que não dá para desfazer depois de acontecer.
+ *
+ * Desligado, a rotina ainda RODA — e registra cada fato como dispensado. Essa
+ * parte é o que torna a trava reversível com segurança: sem ela, os envios que
+ * acontecerem enquanto o módulo está desligado ficariam pendentes, e a
+ * primeira rodada depois de ligar despejaria semanas de avisos atrasados sobre
+ * pedidos que já chegaram.
  */
 
-/** Quais eventos o módulo cobre hoje. Os outros ficam para quando houver fonte. */
+/**
+ * Quais eventos o módulo cobre hoje. Os outros ficam para quando houver fonte.
+ */
 const EVENTOS_ATIVOS: EventoNotificacao[] = ['pedido_enviado', 'pedido_entregue']
 
 type ModeloEnvio = Parameters<typeof emailEnvio>[1]
@@ -82,9 +90,9 @@ export async function enviarAvisosDePedido(opcoes?: {
   const vazio: ResultadoAvisos = { candidatos: 0, enviados: 0, falhas: [], desligado: false }
 
   const teste = opcoes?.destinoDeTeste?.trim()
-  if (!teste && !avisosDePedidoLigados()) return { ...vazio, desligado: true }
+  const desligado = !teste && !avisosDePedidoLigados()
   if (!supabaseConfigurado()) throw new Error('O Supabase precisa estar configurado.')
-  if (!emailConfigurado()) {
+  if (!desligado && !emailConfigurado()) {
     throw new Error('Configure RESEND_API_KEY e EMAIL_REMETENTE para enviar avisos ao cliente.')
   }
 
@@ -118,7 +126,36 @@ export async function enviarAvisosDePedido(opcoes?: {
       if (EVENTOS_ATIVOS.includes(aviso.evento)) pendentes.push({ aviso, pedido: p })
     }
   }
-  if (pendentes.length === 0) return vazio
+  if (pendentes.length === 0) return { ...vazio, desligado }
+
+  // ── Módulo desligado: o fato entra no log, o e-mail não sai ──────────────
+  //
+  // Sem isto, cada envio que acontecesse com o módulo desligado ficaria como
+  // aviso PENDENTE. No dia em que a operação ligasse, a primeira rodada
+  // despejaria semanas de avisos atrasados de uma vez — clientes recebendo
+  // "seu pedido está a caminho" de pedidos que já chegaram.
+  //
+  // Registrar como dispensado mantém a promessa dos dois lados: nada sai
+  // agora, e ligar depois avisa apenas o que acontecer daí para frente.
+  if (desligado) {
+    const { data: registradas } = await sb
+      .from('notificacoes_enviadas')
+      .upsert(
+        pendentes.map(({ aviso }) => ({
+          chave: aviso.chave,
+          pedido_id: aviso.pedidoId,
+          evento: aviso.evento,
+          destinatario: aviso.email,
+          assunto: '(não enviado)',
+          estado: 'dispensado',
+          motivo: 'módulo de avisos desligado quando o fato aconteceu',
+          concluido_em: new Date().toISOString(),
+        })),
+        { onConflict: 'chave', ignoreDuplicates: true },
+      )
+      .select('chave')
+    return { ...vazio, candidatos: (registradas ?? []).length, desligado: true }
+  }
 
   // Uma leitura por rodada, não uma por e-mail: o modelo é o mesmo para todos.
   const modelo = (await lerModeloEmail('envio')) as ModeloEnvio

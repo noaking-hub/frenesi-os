@@ -194,7 +194,10 @@ export async function POST(req: Request) {
   try {
     const a = await enviarAvisosDePedido()
     relatorio.avisos = a.desligado
-      ? { pulado: 'AVISOS_DE_PEDIDO não está ligado' }
+      ? {
+          desligado: 'AVISOS_DE_PEDIDO não está ligado — nada foi enviado',
+          fatosRegistrados: a.candidatos,
+        }
       : { candidatos: a.candidatos, enviados: a.enviados, falhas: a.falhas.length }
   } catch (e) {
     relatorio.avisos = { erro: mensagemDe(e) }
