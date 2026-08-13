@@ -16,6 +16,26 @@
 
 ---
 
+## ⬅ O que precisamos de vocês
+
+Uma coisa só bloqueia a integração, e é rápida de responder:
+
+> ### Quais domínios exatos vão chamar o endpoint?
+>
+> Precisamos da lista completa, com `https://` e sem barra no fim, para liberar no CORS. Por exemplo:
+>
+> ```
+> https://frenesiperfumes.com.br
+> https://www.frenesiperfumes.com.br
+> https://frenesiperfumes.myshopify.com     ← incluir se forem testar por aqui antes de publicar
+> ```
+>
+> **Incluam tudo de onde a chamada pode partir**, inclusive ambiente de preview ou tema não publicado. Origem que faltar na lista é bloqueada pelo navegador, e o sintoma engana: o endpoint responde certo por servidor, os logs não acusam nada, e a página fica em branco. Sobra na lista não custa nada; falta custa uma tarde de depuração.
+
+E uma segunda, sem pressa: **quando vocês querem fazer a validação conjunta?** Proponho um pedido real de cada um dos quatro degraus da seção 4 — são estados diferentes de desenho, não variações do mesmo, e é melhor descobrir isso com a gente junto do que em produção.
+
+---
+
 ## 1 · O vínculo Yampi ↔ Shopify: o adendo acertou, e não há divergência
 
 Vocês acertaram onde o dado mora: `Pedido Yampi {numero}` no campo Observações (`note`) do pedido Shopify.
@@ -202,7 +222,7 @@ O 404 é deliberadamente ambíguo. Sugerimos que a mensagem ao cliente também s
 ### Cache e CORS
 
 - `Cache-Control: private, max-age=300`, como acordado.
-- CORS liberado só para as origens configuradas. **Confirmem quais domínios vão chamar** — incluindo o `.myshopify.com` se forem testar por lá antes de publicar. Origem não listada é bloqueada pelo navegador, e o sintoma engana: o endpoint responde certo por servidor e a página fica em branco.
+- CORS liberado só para as origens configuradas — a lista que pedimos no topo deste documento.
 
 ---
 
@@ -243,7 +263,7 @@ Ela é **semi-pública por natureza** — vai viver no JavaScript da loja, visí
 |---|---|---|
 | Publicar o endpoint | ERP | Código pronto e testado; sobe no próximo deploy |
 | DNS de `erp.frenesiperfumes.com.br` | FRENESI | Em andamento com o suporte da Netlify — CNAME para `erp-frenesi.netlify.app` |
-| Confirmar os domínios para o CORS | **Site** | Precisamos da lista antes de vocês integrarem |
+| **Lista de domínios para o CORS** | **Site** | ⬅ **Único item bloqueado em vocês.** Ver o pedido no topo |
 | Backfill do `shopify_numero` | ERP | Diagnóstico da leitura da Shopify em andamento |
 | Autorização OAuth do Melhor Envio | FRENESI | Destrava os 18 pedidos `TXAQ…tx`. Depende do DNS acima |
 
