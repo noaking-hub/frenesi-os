@@ -26,6 +26,10 @@ export function EmailsCliente({
 }) {
   const [editando, setEditando] = useState<ChaveModelo | null>(null)
 
+  // Cada cartão carrega o próprio modelo e os próprios dados de exemplo. Antes
+  // o modal escolhia por uma cadeia de ternários paralela a esta lista, e o
+  // quarto tipo caía no `else` — abrindo o editor de envio com o texto do
+  // cashback. Lista única: acrescentar um tipo não pede lembrar de outro lugar.
   const cartoes = [
     {
       chave: 'carrinho' as const,
@@ -33,6 +37,7 @@ export function EmailsCliente({
       onde: 'Enviado de CRM → Carrinhos abandonados, por clique ou em massa',
       modelo: carrinho,
       extras: 'aceita HTML do zero · lista de itens e cupom automáticos',
+      cupom: { codigo: 'VOLTA10-A7K2MB', pct: 10 } as { codigo: string; pct: number } | null,
     },
     {
       chave: 'giftback' as const,
@@ -40,6 +45,7 @@ export function EmailsCliente({
       onde: 'Enviado de CRM → Giftback ao presentear um aniversariante',
       modelo: giftback,
       extras: 'cupom-presente único criado na Yampi entra sozinho',
+      cupom: { codigo: 'NIVER15-A7K2MB', pct: 15 },
     },
     {
       chave: 'cashback' as const,
@@ -47,6 +53,8 @@ export function EmailsCliente({
       onde: 'Enviado de CRM → Cashback, para quem tem saldo perto de vencer',
       modelo: cashback,
       extras: 'saldo e data de validade do próprio cliente entram sozinhos',
+      // Cashback e envio não têm cupom — a prévia diz isso em vez de inventar um.
+      cupom: null,
     },
     {
       chave: 'envio' as const,
@@ -54,8 +62,11 @@ export function EmailsCliente({
       onde: 'Enviado sozinho quando o pedido ganha código de rastreio',
       modelo: envio,
       extras: 'código e transportadora entram sozinhos · o botão já abre a página do objeto',
+      cupom: null,
     },
   ]
+
+  const aberto = cartoes.find((c) => c.chave === editando)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -90,11 +101,11 @@ export function EmailsCliente({
         ))}
       </div>
 
-      {editando && (
+      {aberto && (
         <ModeloEmail
-          tipo={editando}
-          inicial={editando === 'carrinho' ? carrinho : editando === 'giftback' ? giftback : cashback}
-          cupom={editando === 'carrinho' ? { codigo: 'VOLTA10-A7K2MB', pct: 10 } : { codigo: 'NIVER15-A7K2MB', pct: 15 }}
+          tipo={aberto.chave}
+          inicial={aberto.modelo}
+          cupom={aberto.cupom}
           aoFechar={() => setEditando(null)}
         />
       )}

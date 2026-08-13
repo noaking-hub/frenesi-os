@@ -359,7 +359,16 @@ export function ModeloEmail({
             <Rotulo>Prévia — exatamente o que o cliente recebe</Rotulo>
             <div style={{ flex: 1 }} />
             <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>
-              dados de exemplo{cupom ? ` · cupom ${cupom.codigo}` : ' · sem cupom'}
+              {/* O que a prévia está simulando. Dizer "sem cupom" num aviso de
+                  envio confundiria: ali o dado de exemplo é outro. */}
+              dados de exemplo
+              {tipo === 'envio'
+                ? ' · AD778124948BR · Correios'
+                : tipo === 'cashback'
+                  ? ' · saldo R$ 47,90'
+                  : cupom
+                    ? ` · cupom ${cupom.codigo}`
+                    : ' · sem cupom'}
             </span>
           </div>
           <span
