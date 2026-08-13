@@ -4,14 +4,20 @@ Como a informação de entrega chega da Yampi e das transportadoras ao ERP, o qu
 
 | | |
 |---|---|
-| **Documento** | v4 · 12/08/2026 |
+| **Documento** | v5 · 13/08/2026 |
 | **Origem dos dados** | Yampi API v2 (dooki) + Frenet |
 | **Banco do ERP** | PostgreSQL 17 · Supabase |
-| **Base atual** | 592 pedidos · 395 com código |
+| **Base atual** | 602 pedidos · 395 com código |
 
-> **O que mudou da v3 para a v4**
+> **O que mudou da v4 para a v5**
 >
-> A timeline da transportadora **saiu do papel**: o ERP já lê e guarda os escaneamentos reais (§3 e §3b). Isso muda o campo `eventos` do contrato de "vazio por enquanto" para **populado** na maior parte dos envios — o site pode programar contando com ele. Duas correções de fato também entram aqui: a Jadlog **não** devolve histórico, e o vínculo com o número do pedido da loja **não existe** na prática (§8). O endpoint público de §7 continua sendo o único item ainda por implementar.
+> Esta versão responde ao documento **"Respostas às decisões de §9" (r2)** do desenvolvimento do site. Três mudanças:
+>
+> 1. **O endpoint de §7 existe.** Foi implementado com as cinco decisões já incorporadas — busca por documento com pedido opcional, lista de até 10, `descricaoResumida`, entrega local fechando com "Entregue em {data}". Falta só publicar e emitir a chave.
+> 2. **A divergência de 16 × 10 dígitos do adendo r2 não existe** — era erro do exemplo da v4, e a verificação está em §8. O `note` carrega exatamente a chave que o ERP já usa. Nenhuma das hipóteses (a), (b) ou (c) precisa ser testada.
+> 3. **O `shopify_gid` passou a ser guardado**, como o adendo pediu.
+>
+> Da v3 para a v4, para quem está entrando agora: a timeline da transportadora saiu do papel e o campo `eventos` deixou de ser promessa (§3 e §3b).
 
 ---
 
@@ -229,30 +235,40 @@ Três consequências para o desenho da tela: **entrega local** (motoboy) nunca t
 
 ---
 
-## §7 · API proposta para o site ⏳ a implementar
+## §7 · API para o site ✅ implementada, aguardando publicação
 
 > **Situação**
 >
-> Este endpoint **ainda não existe**. O contrato abaixo é a proposta para o desenvolvedor revisar; assim que estiver acordado, implemento e publico — é trabalho de poucas horas, porque os dados já estão no banco.
+> O endpoint **existe**, com as cinco decisões do documento de respostas já incorporadas. Ele está construído e testado; falta subir para produção e emitir a chave para o site. `RASTREIO_API_KEY` e `RASTREIO_ORIGENS` são as duas variáveis de ambiente que faltam definir.
 
 ### Requisição
 
+Duas formas, conforme a Decisão 1 do site — **o documento é obrigatório nas duas**, o número do pedido é o filtro opcional:
+
 ```http
-GET https://{erp}/api/publico/rastreio
-      ?pedido={numero}          # número do pedido na loja OU na Yampi
-      &documento={cpf|email}    # 2º fator do cliente
+GET https://{erp}/api/publico/rastreio?documento={cpf|email}
+      → os últimos 10 pedidos do cliente
+
+GET https://{erp}/api/publico/rastreio?documento={cpf|email}&pedido={numero}
+      → um pedido. Aceita YP-1510190959842609, 1510190959842609, SH-1885 ou #1885
 
 Headers:
   X-API-Key: <chave emitida para o site>
 ```
 
+O `?pedido=` é normalizado no ERP: dezesseis dígitos é Yampi, número curto é loja, com ou sem prefixo, com ou sem `#`. O site manda o que tiver em mãos e não precisa perguntar nada ao cliente.
+
 O segundo fator não é burocracia: sem ele, quem souber a sequência dos números consegue varrer os pedidos da loja inteira e ler destino e status de outras pessoas. Com CPF ou e-mail exigido, a consulta só responde a quem já tem o dado.
+
+> **Detalhe da implementação que vale registrar**: cliente **sem CPF cadastrado** não é liberado por qualquer sequência de onze dígitos. Sem essa guarda, as centenas de clientes sem CPF na base virariam pedidos abertos a qualquer chute — a conferência exige que o dado exista dos dois lados.
 
 ### Resposta 200
 
+A resposta é sempre `{ "pedidos": [ … ] }` — array, mesmo quando o `?pedido=` foi informado e ele traz um item só. Uma forma só para os dois modos evita o `if` no site.
+
 ```json
 {
-  "pedido": {
+  "pedidos": [{
     "referencia":     "YP-1510190164",
     "numeroYampi":    "1510190164",
     "numeroLoja":     "1042",
@@ -275,20 +291,28 @@ O segundo fator não é burocracia: sem ele, quem souber a sequência dos númer
     { "quando": null, "titulo": "Código de rastreio emitido", "onde": "Correios" }
   ],
   "eventos": [
-    { "quando": "2026-08-12T11:12:00-03:00", "descricao": "Objeto entregue ao destinatário",
+    { "quando": "2026-08-12T11:12:00-03:00",
+      "descricao": "Objeto entregue ao destinatário - Queremos te ouvir! Responda a uma pesquisa rápida e nos ajude a melhorar a sua experiência: https://survey3.medallia.com/?correios-nps",
+      "descricaoResumida": "Objeto entregue ao destinatário",
       "local": "CATAGUASES-MG", "entregue": true },
-    { "quando": "2026-08-12T09:00:00-03:00", "descricao": "Objeto saiu para entrega ao destinatário",
+    { "quando": "2026-08-12T09:00:00-03:00",
+      "descricao": "Objeto saiu para entrega ao destinatário - É preciso ter alguém no endereço",
+      "descricaoResumida": "Objeto saiu para entrega ao destinatário",
       "local": "CATAGUASES-MG", "entregue": false },
-    { "quando": "2026-08-10T14:43:00-03:00", "descricao": "Objeto postado",
+    { "quando": "2026-08-10T14:43:00-03:00",
+      "descricao": "Objeto postado", "descricaoResumida": "Objeto postado",
       "local": "Muriae-MG", "entregue": false }
   ],
-  "atualizadoEm": "2026-08-12T17:45:00-03:00"
+  "atualizadoEm": "2026-08-13T17:45:00-03:00"
+  }]
 }
 ```
 
-`marcos` são os fatos que o ERP conhece pela Yampi e sempre vêm preenchidos. `eventos` é a timeline da transportadora — **na v3 este campo era uma promessa vazia; agora vem populado** nos envios de Correios e J&T, do mais recente para o mais antigo. Cada evento tem a forma `{ "quando", "descricao", "local", "entregue" }`.
+`marcos` são os fatos que o ERP conhece pela Yampi e sempre vêm preenchidos. `eventos` é a timeline da transportadora — **na v3 este campo era uma promessa vazia; agora vem populado** nos envios de Correios e J&T, do mais recente para o mais antigo.
 
-`descricao` é o texto da transportadora **sem reescrita** — inclusive com os apêndices que os Correios anexam (link de pesquisa de satisfação, por exemplo). Se a loja quiser texto mais limpo, o tratamento é do lado do site, ou eu acrescento uma versão resumida no contrato; diga qual prefere.
+**`descricaoResumida` foi implementada**, como o site pediu: tira URLs soltas e os apêndices que vêm depois do travessão ("Queremos te ouvir…", "por favor aguarde", "É preciso ter alguém no endereço"). Ela **nunca volta vazia** — se a limpeza comer o texto todo, o valor é a descrição crua, porque ver algo estranho é melhor que ver nada.
+
+`descricao` continua ao lado, crua, sem reescrita. Confirmando o que o site pediu para registrar: **ela pode conter URLs de terceiros** — os Correios anexam link de pesquisa de satisfação. Não renderizar como HTML é a decisão certa.
 
 > ⚠️ **Dois campos parecidos, propósitos diferentes**
 >
@@ -307,17 +331,16 @@ O 404 é deliberadamente ambíguo entre "não existe" e "documento errado": dist
 
 ### Operação
 
-- **CORS**: liberado apenas para o domínio da loja.
-- **Cache**: `Cache-Control: private, max-age=300` — o dado de origem muda no máximo de hora em hora.
-- **Chave**: emitida por variável de ambiente do ERP; se vazar, troco e o site atualiza. Ela dá acesso somente a esta leitura.
+- **CORS**: liberado apenas para as origens em `RASTREIO_ORIGENS`. Sem a variável definida, **nenhum** cabeçalho de CORS é emitido — abrir para `*` por padrão faria de qualquer site uma fachada para consultar pedidos da FRENESI. O `OPTIONS` de preflight responde 403 para origem não listada.
+- **Cache**: `Cache-Control: private, max-age=300`, como o site aprovou.
+- **Chave**: `RASTREIO_API_KEY`. **Sem ela definida a rota fica fechada, respondendo 401 a tudo** — uma rota pública que libera geral porque alguém esqueceu de configurar é pior que uma rota que não existe.
+- **Teto por IP**: 60 consultas/min, contadas na memória de cada instância. Registrando a limitação honestamente: não é rate limit distribuído — um atacante com muitos IPs passa. Ele resolve o caso que importa, que é script único varrendo documentos. Se a rota virar alvo de verdade, a contagem migra para o banco.
 
-### Decisão pendente: atualidade do dado
+### Atualidade — decidido: mista (A + B em trânsito)
 
-- **Opção A — espelho (padrão)**: responde do banco do ERP. Rápido (<100 ms), sem consumir cota de ninguém, com até 1 h de defasagem.
-- **Opção B — ao vivo**: para o pedido consultado, o ERP pergunta à Frenet na hora. Sempre atual, ~300–800 ms, e consome cota da Frenet a cada visita de cliente.
-- **Recomendação**: A, com B só quando o pedido está `em-transito` — que é quando o cliente volta na página com mais frequência.
+O site aceitou a recomendação. **A implementação atual é a opção A pura**: responde sempre do espelho no banco. A opção B para pedidos `em-transito` fica registrada como próximo passo, e há um motivo para não fazê-la já — o site previu, corretamente, que "a mista degenere naturalmente para sempre A" quando o webhook da Frenet estiver cadastrado. Com o webhook, cada escaneamento chega em minutos, e o custo de consultar a Frenet a cada visita de cliente deixa de se pagar.
 
-A defasagem de 1 h vale menos do que parece agora que o webhook da Frenet está previsto: com ele, cada escaneamento chega empurrado em minutos e a opção A passa a ser praticamente tempo real. Falta só o cadastro da URL, que a Frenet faz por chamado (§9).
+**Proposta**: publicar com A, cadastrar o webhook, medir. Se a defasagem incomodar na prática, ligo o B em trânsito — é uma mudança pequena e não altera o contrato.
 
 ---
 
@@ -327,41 +350,65 @@ Três chaves possíveis, em ordem de preferência:
 
 | Chave | Campo no ERP | Situação |
 |---|---|---|
-| Número do pedido na loja | `shopify_numero` | ❌ **indisponível** — *Correção da v3:* este campo está nulo nos 592 pedidos. A Yampi não informa o vínculo nesta loja, e a rotina que tenta descobri-lo cruzando as duas plataformas não produziu nenhuma correspondência. **O site não deve contar com esta chave** enquanto isso não mudar. |
+| E-mail ou CPF do cliente | `clientes.email` · `cpf` | ✅ **chave primária de busca**, como o site decidiu. Mesmo modelo do Portal de Devoluções, que o cliente já conhece. |
 | Número do pedido na Yampi | `id` (`YP-…`) | ✅ **confiável** — presente em 100% dos pedidos. É o número que aparece nos e-mails da Yampi ao cliente. |
-| E-mail ou CPF do cliente | `clientes.email` · `cpf` | ✅ **confiável** — usado hoje pelo Portal de Devoluções para o cliente achar o próprio pedido. |
+| Número do pedido na loja | `shopify_numero` | ⏳ **vazio, mas destravável** — está nulo nos 602 pedidos. O adendo r2 achou a causa; ver abaixo. |
 
-O endpoint aceitará **qualquer um dos dois números** em `?pedido=` e resolverá internamente — mas, com o vínculo da loja vazio, na prática hoje só o número da Yampi resolve. **Se o site tiver apenas o número da loja em mãos, esta é a primeira coisa a resolver**, e a resposta do desenvolvedor sobre qual identificador ele realmente possui vira a decisão mais importante da lista de §9.
+### O vínculo: confirmado, e sem a divergência que o adendo temia ✅
+
+O adendo r2 acertou onde o dado mora: a integração Yampi→Shopify escreve `Pedido Yampi {numero}` no campo **Observações** (`note`) do pedido da loja.
+
+**A divergência de comprimento não existe.** O adendo comparou os 16 dígitos do `note` (`1510190959842609`) com um `YP-1510190975` de 10 dígitos tirado do exemplo da v4 — e **aquele exemplo era fictício, escrito à mão neste documento**. Verificação no banco, agora:
+
+- os **602** pedidos do ERP têm chave de **16 dígitos**, sem uma única exceção;
+- `YP-1510190959842609` **existe**, é do cliente `isabellic.morato@gmail.com`, comprado em 11/08/2026 às 21h08 — bate com o `SH-1885` de 11/08 que o adendo inspecionou.
+
+Ou seja: o `note` carrega **exatamente** a chave que o ERP já usa. As hipóteses (a), (b) e (c) do adendo podem ser descartadas, e o critério de aceite de 20 pedidos vira conferência de rotina, não investigação. O erro foi do exemplo neste documento, e está corrigido nesta versão.
+
+**Sobre a rotina não ter achado nada:** ela **já procura no `note`** — a expressão varre `sourceIdentifier`, `note` e `customAttributes` atrás de qualquer sequência de 6+ dígitos e casa com a chave da Yampi. Logo, a regra de casamento não é o problema; a falha está antes, na leitura dos pedidos da Shopify (escopo, credencial ou janela de datas). Para não ficar no chute, a rodada agora informa **quantos pedidos foram lidos** e **quantos traziam referência** — dois números que separam "a Shopify não devolveu nada" de "devolveu e nenhum casou", que hoje produziam a mesma mensagem inútil na tela.
+
+**`shopify_gid` foi adicionado**, como o adendo recomendou: o `name` é rótulo de exibição e muda se a loja for renumerada; o GID é o identificador estável que a Admin API aceita, e é dele que o espelhamento de fulfillment precisa.
+
+O endpoint já aceita `?pedido=SH-1885` — ele passa a resolver assim que a coluna estiver preenchida, sem mudança no site.
 
 ### Já disponível sem API nenhuma
 
-Quando o ERP espelha o envio na loja, ele cria o *fulfillment* com o código de rastreio (`tracking_number`) no próprio pedido da Shopify — o tema pode ler isso nativamente, sem integração. Três ressalvas: o espelhamento depende do vínculo da linha 1 acima, que hoje não existe; ele traz o código, não a timeline; e não traz o status normalizado nem a confirmação de entrega — que é justamente o que a API de §7 acrescenta.
+Quando o ERP espelha o envio na loja, ele cria o *fulfillment* com o código de rastreio (`tracking_number`) no próprio pedido da Shopify — o tema pode ler isso nativamente, sem integração. É o caminho que atende a conta de clientes hospedada pela Shopify, onde o tema não injeta código. Duas ressalvas: depende do vínculo acima; e traz o código, não a timeline nem o status normalizado — que é o que a API de §7 acrescenta na página "Rastreie seu pedido".
 
 ---
 
-## §9 · O que precisa ser decidido
+## §9 · Decisões — todas respondidas ✅
 
-A lista encurtou: a decisão da timeline saiu (caminho B, implementado) e a pergunta à Empreender deixou de fazer sentido. Restam **cinco** pontos que dependem de resposta do desenvolvedor antes de eu implementar o endpoint:
+As cinco decisões foram respondidas pelo desenvolvimento do site e **já estão implementadas**:
 
-1. **Formato do identificador** ❗**crítico** — o site tem em mãos o número da loja, o da Yampi, ou os dois? Como o vínculo com a loja está vazio (§8), *esta resposta define se o endpoint é viável do jeito proposto*. Se o site só tiver o número da loja, o caminho passa a ser buscar por e-mail do cliente, ou resolver o vínculo antes.
-2. **Segundo fator**: CPF, e-mail, ou o cliente já está logado (e nesse caso o site autentica e envia só o e-mail da sessão)?
-3. **Atualidade**: opção A, B ou a mista de §7?
-4. **Link externo**: quem monta a URL de rastreio — o ERP devolve pronta em `url` e `rastreioUrl`, ou o site prefere montar a partir de `codigo` + `transportadora`?
-5. **Entrega local**: como a loja quer comunicar os pedidos de motoboy (22 hoje), que nunca terão código?
+| # | Decisão | Resposta do site | Como ficou |
+|---|---|---|---|
+| 1 | Identificador | Documento como chave primária, pedido opcional; aceitar os dois números | ✅ Duas formas de chamada, `?pedido=` normaliza `YP-`, `SH-`, `#` ou número cru |
+| 2 | Segundo fator | E-mail **ou** CPF, os dois aceitos | ✅ Igual ao Portal de Devoluções, com a guarda do cadastro sem CPF |
+| 3 | Atualidade | Mista (A padrão, B em trânsito) | ⏳ A implementado; B fica para depois de medir com o webhook ligado (§7) |
+| 4 | Link externo | ERP devolve pronto | ✅ `url` e `rastreioUrl`. Transportadora desconhecida devolve `null`, não link genérico |
+| 5 | Entrega local | Flag basta; fechar com "Entregue em {data}" igual aos demais | ✅ `entregaLocal` no contrato e rótulo idêntico ao das transportadoras |
+| — | `descricaoResumida` | Pediram o campo opcional | ✅ Implementado, com fallback para a crua |
 
-### Do lado da operação, não do desenvolvedor
+### A ordem de precedência que o site propôs está correta
 
-| Providência | Situação | O que falta |
+`eventos` → senão `rastreioUrl` → senão `url` → senão "ainda não escaneado". É exatamente o que o ERP faz na tela interna, e por isso ela está registrada aqui como parte do contrato, não como sugestão.
+
+### O que falta, e de quem depende
+
+| Providência | De quem | Situação |
 |---|---|---|
-| Token de API da Frenet | ✅ feito | Já em uso. Convém rotacionar por higiene. |
-| Webhook de tracking da Frenet | ⏳ a pedir | Não é autoatendimento: o cadastro da URL é feito **pelo suporte da Frenet**, por chamado. URL a informar: `https://erp.frenesiperfumes.com.br/api/frenet/tracking`, com um par nome/valor de token. A rota já está no ar e fica fechada até o token estar definido. |
-| Aplicativo OAuth2 do Melhor Envio | ⏳ quase | Client id e secret já criados e configurados. Falta uma autorização no navegador, em Configurações → Integrações, e conferir se a URL de redirecionamento cadastrada bate com o domínio em uso. |
-| Domínio `erp.frenesiperfumes.com.br` | ❌ pendente | Ainda não aponta para o ERP. O webhook da Frenet e o retorno do OAuth do Melhor Envio referenciam este endereço. |
+| Publicar o endpoint e emitir `RASTREIO_API_KEY` | ERP | ⏳ Código pronto; sobe no próximo deploy. A chave e as origens de CORS vão por variável de ambiente |
+| Backfill do `shopify_numero` pelo `note` | ERP | ⏳ Depende do diagnóstico de por que a leitura da Shopify não devolve pedidos (§8) |
+| Token de API da Frenet | Operação | ✅ Em uso. Convém rotacionar por higiene |
+| Webhook de tracking da Frenet | Operação | ⏳ Não é autoatendimento: o cadastro da URL é feito **pelo suporte da Frenet**, por chamado. URL: `https://erp.frenesiperfumes.com.br/api/frenet/tracking`, com um par nome/valor de token |
+| Autorização OAuth do Melhor Envio | Operação | ⏳ Client id e secret configurados; falta a autorização no navegador, em Configurações → Integrações |
+| DNS de `erp.frenesiperfumes.com.br` | Operação | ❌ Ainda não aponta para o ERP. Bloqueia o webhook da Frenet e o retorno do OAuth — e é o domínio que o site vai chamar |
 
 > **Próximo passo**
 >
-> Com as cinco decisões acima — em especial a primeira — implemento o endpoint de §7, publico numa URL de teste com pedidos reais e devolvo a chave de acesso para o desenvolvedor integrar. Os dados que ele vai servir já estão no banco: é só a porta que falta.
+> Publicar o endpoint, mandar a chave e a URL para o desenvolvedor, e validar juntos com pedidos reais das quatro situações: timeline completa (Correios), timeline completa (J&T), só link (Jadlog) e entrega local (motoboy). São os quatro degraus que a página precisa saber desenhar.
 
 ---
 
-*FRENESI ERP · documento técnico de integração · v4, 12/08/2026. Escrito a partir do código em produção, da base de dados e de respostas reais da API da Frenet, consultada com códigos de pedidos desta loja na data acima.*
+*FRENESI ERP · documento técnico de integração · v5, 13/08/2026. Escrito a partir do código em produção, da base de dados, de respostas reais da API da Frenet e do documento de respostas r2 do desenvolvimento do site.*

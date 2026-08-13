@@ -109,6 +109,14 @@ export function EnviosCliente({
             ? `${x.semEspelho.length} pedido(s) ficaram sem par na Shopify — ou a venda só existe na Yampi, ou é mais antiga que a janela de ~60 dias que a API da Shopify deixa ler (ex.: ${x.semEspelho.slice(0, 3).join(', ')}).`
             : '',
           x.erroVinculo ? `O vínculo automático com a Shopify falhou: ${x.erroVinculo}` : '',
+          // Zero vínculos tem duas causas opostas, e sem estes números as duas
+          // apareciam iguais na tela: a Shopify não devolveu pedido nenhum, ou
+          // devolveu e nenhum trazia a referência da Yampi na observação.
+          !x.vinculados && !x.erroVinculo && x.semEspelho.length
+            ? x.vinculoExaminados === 0
+              ? 'A Shopify não devolveu pedido nenhum para casar — verifique o escopo read_orders e a janela de datas do app.'
+              : `Foram lidos ${x.vinculoExaminados} pedido(s) da Shopify, ${x.vinculoComReferencia} com referência da Yampi na observação, e nenhum casou com os pendentes.`
+            : '',
           ...x.ignorados.slice(0, 5).map((i) => `${i.pedido}: ${i.motivo}`),
         ]
           .filter(Boolean)

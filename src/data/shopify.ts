@@ -1436,6 +1436,7 @@ const CONSULTA_PEDIDOS_VINCULO = /* GraphQL */ `
         endCursor
       }
       nodes {
+        id
         name
         createdAt
         email
@@ -1465,6 +1466,8 @@ const CONSULTA_PEDIDOS_VINCULO_SEM_EMAIL = (() => {
 })()
 
 interface PedidoVinculoShopify {
+  /** GID da Shopify — identificador estável do pedido, para o fulfillment. */
+  id: string
   name: string
   createdAt: string
   email: string | null
@@ -1484,6 +1487,15 @@ export interface ResultadoVinculo {
   ambiguos: number
   /** A loja não liberou o e-mail do pedido; só o vínculo por referência rodou. */
   semEmailShopify: boolean
+  /**
+   * Quantos dos pedidos lidos traziam "Pedido Yampi {n}" na observação.
+   *
+   * Existe para separar duas falhas que produzem o mesmo zero na tela: "a
+   * Shopify não devolveu pedido nenhum" (janela, escopo ou credencial) e "os
+   * pedidos vieram, mas nenhum tinha a referência" (o campo mudou de lugar).
+   * Sem este número, as duas viravam a mesma mensagem inútil.
+   */
+  comReferencia: number
 }
 
 /**
@@ -1526,7 +1538,14 @@ export async function vincularPedidosShopify(): Promise<ResultadoVinculo> {
     cliente_id: string | null
   }[]
   if (pendentes.length === 0) {
-    return { pendentes: 0, examinados: 0, vinculados: 0, ambiguos: 0, semEmailShopify: false }
+    return {
+      pendentes: 0,
+      examinados: 0,
+      vinculados: 0,
+      ambiguos: 0,
+      semEmailShopify: false,
+      comReferencia: 0,
+    }
   }
 
   const { data: donos, error: erroClientes } = await sb.from('clientes').select('id, email')
@@ -1591,19 +1610,27 @@ export async function vincularPedidosShopify(): Promise<ResultadoVinculo> {
   }
 
   // 1º casamento: o número Yampi citado em algum campo do pedido Shopify.
+  //
+  // O desenvolvedor do site confirmou onde ele mora: a integração
+  // Yampi→Shopify escreve "Pedido Yampi {numero}" no campo Observações
+  // (`note`) de todo pedido importado. O número é exatamente o mesmo que o ERP
+  // usa como chave — 16 dígitos, conferido nos 602 pedidos da base.
   const pedidoPorNumero = new Map(pendentes.map((p) => [p.id.replace(/^YP-/, ''), p]))
-  const vinculo = new Map<string, string>() // id do ERP → número Shopify (sem '#')
+  const vinculo = new Map<string, { numero: string; gid: string }>()
   const usados = new Set<string>() // names da Shopify já reivindicados
+  let comReferencia = 0
   for (const o of daLoja) {
     const texto = [
       o.sourceIdentifier ?? '',
       o.note ?? '',
       ...o.customAttributes.flatMap((a) => [a.key, a.value ?? '']),
     ].join(' ')
-    for (const trecho of texto.match(/\d{6,}/g) ?? []) {
+    const numeros = texto.match(/\d{6,}/g) ?? []
+    if (numeros.length) comReferencia++
+    for (const trecho of numeros) {
       const par = pedidoPorNumero.get(trecho)
       if (par && !vinculo.has(par.id) && !usados.has(o.name)) {
-        vinculo.set(par.id, o.name.replace(/^#/, ''))
+        vinculo.set(par.id, { numero: o.name.replace(/^#/, ''), gid: o.id })
         usados.add(o.name)
         break
       }
@@ -1635,7 +1662,7 @@ export async function vincularPedidosShopify(): Promise<ResultadoVinculo> {
         new Date(meus[0].comprado_em).getTime() - new Date(deles[0].createdAt).getTime(),
       )
       if (distancia <= DEZ_DIAS) {
-        vinculo.set(meus[0].id, deles[0].name.replace(/^#/, ''))
+        vinculo.set(meus[0].id, { numero: deles[0].name.replace(/^#/, ''), gid: deles[0].id })
         usados.add(deles[0].name)
       }
     } else if (deles.length > 0) {
@@ -1645,10 +1672,13 @@ export async function vincularPedidosShopify(): Promise<ResultadoVinculo> {
 
   for (const parte of emLotes([...vinculo.entries()], 20)) {
     await Promise.all(
-      parte.map(([id, numeroShopify]) =>
+      parte.map(([id, achado]) =>
         sb
           .from('pedidos')
-          .update({ shopify_numero: numeroShopify })
+          // O GID vai junto: ele é o identificador ESTÁVEL do pedido na
+          // Shopify, e é o que o espelhamento de fulfillment precisa. O
+          // `name` muda se alguém renumerar a loja; o GID, não.
+          .update({ shopify_numero: achado.numero, shopify_gid: achado.gid })
           .eq('id', id)
           .then(({ error: e }) => {
             if (e) throw e
@@ -1663,6 +1693,7 @@ export async function vincularPedidosShopify(): Promise<ResultadoVinculo> {
     vinculados: vinculo.size,
     ambiguos,
     semEmailShopify,
+    comReferencia,
   }
 }
 

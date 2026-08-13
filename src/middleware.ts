@@ -22,6 +22,9 @@ const ABERTO = [
   '/api/auth',
   // Portal do cliente: quem abre devolução não tem — nem deve ter — conta.
   '/devolucoes',
+  // Rastreio para o site da loja: autentica por chave no cabeçalho e exige o
+  // documento do titular, com teto por IP. Ver api/publico/rastreio.
+  '/api/publico',
   // Webhooks e rotinas: autenticam por token próprio no cabeçalho, não por
   // sessão de navegador. Exigir cookie aqui quebraria as integrações.
   '/api/frenet',

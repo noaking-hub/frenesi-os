@@ -114,6 +114,15 @@ export interface ResultadoBaixa {
   vinculados: number
   /** O vínculo automático falhou (a baixa dos já vinculados seguiu normal). */
   erroVinculo: string | null
+  /**
+   * Por que o vínculo achou o que achou.
+   *
+   * Zero vínculos tem duas causas opostas e a tela mostrava a mesma coisa nas
+   * duas: a Shopify não devolveu pedido nenhum, ou devolveu e nenhum trazia a
+   * referência da Yampi. São problemas diferentes, com soluções diferentes.
+   */
+  vinculoExaminados: number
+  vinculoComReferencia: number
 }
 
 /**
@@ -167,10 +176,15 @@ export async function baixarNaShopify(pedidoIds?: string[]): Promise<Resposta<{ 
     // lendo os pedidos da própria Shopify e casando com os da Yampi. Só
     // depois do vínculo é que "sem espelho" vira um veredito.
     let vinculados = 0
+    let vinculoExaminados = 0
+    let vinculoComReferencia = 0
     let erroVinculo: string | null = null
     if (linhas.some((p) => !p.shopify_numero)) {
       try {
-        vinculados = (await vincularPedidosShopify()).vinculados
+        const v = await vincularPedidosShopify()
+        vinculados = v.vinculados
+        vinculoExaminados = v.examinados
+        vinculoComReferencia = v.comReferencia
       } catch (e) {
         erroVinculo = mensagemDe(e)
       }
@@ -198,7 +212,17 @@ export async function baixarNaShopify(pedidoIds?: string[]): Promise<Resposta<{ 
     if (alvos.length === 0) {
       return {
         ok: true,
-        resultado: { enviados: 0, entregues: 0, fechados: 0, ignorados: [], semEspelho, vinculados, erroVinculo },
+        resultado: {
+          enviados: 0,
+          entregues: 0,
+          fechados: 0,
+          ignorados: [],
+          semEspelho,
+          vinculados,
+          erroVinculo,
+          vinculoExaminados,
+          vinculoComReferencia,
+        },
       }
     }
 
@@ -219,7 +243,10 @@ export async function baixarNaShopify(pedidoIds?: string[]): Promise<Resposta<{ 
     }
 
     revalidatePath('/', 'layout')
-    return { ok: true, resultado: { ...r, semEspelho, vinculados, erroVinculo } }
+    return {
+      ok: true,
+      resultado: { ...r, semEspelho, vinculados, erroVinculo, vinculoExaminados, vinculoComReferencia },
+    }
   } catch (e) {
     console.error('[envios] baixar na Shopify falhou:', e)
     return { ok: false, erro: mensagemDe(e) }
