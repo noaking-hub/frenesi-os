@@ -113,7 +113,7 @@ export function Topbar({
           }}
         />
         <input
-          placeholder="Buscar pedido, cliente, perfume…"
+          placeholder="Buscar pedido, cliente, CPF, rastreio, produto…"
           aria-label="Buscar"
           className="font-sans"
           style={{

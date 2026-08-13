@@ -65,7 +65,12 @@ export function identificarFrete(
   rastreio: string | null | undefined,
 ): { transportadora: string; gateway: GatewayFrete } {
   const s = (servico ?? '').toLowerCase()
-  if (/correio|sedex|pac\b|mini envios/.test(s)) return { transportadora: 'Correios', gateway: 'Frenet' }
+  // `pac` sem \b dos dois lados: o rótulo real é FRENET_PAC_03298, e depois de
+  // "pac" vem "_" — que é caractere de palavra, então `pac\b` NUNCA casava e o
+  // rótulo cru vazava para a tela como se fosse nome de empresa.
+  if (/correio|sedex|(^|[^a-z])pac([^a-z]|$)|mini envios/.test(s)) {
+    return { transportadora: 'Correios', gateway: 'Frenet' }
+  }
   if (/jadlog|\.package|\.com\b/.test(s)) return { transportadora: 'Jadlog', gateway: 'Frenet' }
   if (/j&t|jet|j&amp;t/.test(s)) return { transportadora: 'J&T Express', gateway: 'Melhor Envio' }
   if (/total/.test(s)) return { transportadora: 'Total Express', gateway: 'Melhor Envio' }
@@ -83,12 +88,48 @@ export function identificarFrete(
     return { transportadora: 'Jadlog', gateway: doMelhorEnvio ? 'Melhor Envio' : 'Frenet' }
   }
 
-  return {
-    // Rótulo do Melhor Envio não é nome de transportadora — dizer "não
-    // informada" é mais honesto que exibir o código do serviço como empresa.
-    transportadora: doMelhorEnvio ? 'Não informada' : servico?.trim() || 'Não informada',
-    gateway: 'Melhor Envio',
-  }
+  // Nenhum rótulo cru sai daqui como nome de empresa: "FRENET_PAC_03298" na
+  // coluna Transportadora foi exatamente o defeito que esta função existe
+  // para impedir. Sem match, a resposta honesta é "não informada".
+  return { transportadora: 'Não informada', gateway: 'Melhor Envio' }
+}
+
+/**
+ * O serviço contratado em palavras, não em código.
+ *
+ * "ME_STANDARD_35" e "FRENET_PAC_03298" são identificadores de máquina; a
+ * ficha do pedido é lida por gente. O código original continua guardado — é
+ * ele que as integrações usam — mas o que a tela mostra é a tradução.
+ */
+export function servicoLegivel(servico: string | null | undefined): string | null {
+  const s = (servico ?? '').trim()
+  if (!s) return null
+  if (/^motoboy$/i.test(s)) return 'Motoboy'
+
+  const baixo = s.toLowerCase()
+  const gateway = /^me[_ ]/.test(baixo) ? 'Melhor Envio' : /^frenet/.test(baixo) ? 'Frenet' : null
+  const modalidade = /sedex/.test(baixo)
+    ? 'SEDEX'
+    : /(^|[^a-z])pac([^a-z]|$)/.test(baixo)
+      ? 'PAC'
+      : /mini envios/.test(baixo)
+        ? 'Mini Envios'
+        : /package/.test(baixo)
+          ? 'Jadlog Package'
+          : /\.com\b/.test(baixo)
+            ? 'Jadlog .Com'
+            : /express/.test(baixo)
+              ? 'Express'
+              : /standard/.test(baixo)
+                ? 'Standard'
+                : /econom/.test(baixo)
+                  ? 'Econômico'
+                  : null
+
+  if (gateway && modalidade) return `${gateway} · ${modalidade}`
+  if (gateway) return gateway
+  // Rótulo que ninguém mapeou aparece como veio — esconder seria pior.
+  return s
 }
 
 /**

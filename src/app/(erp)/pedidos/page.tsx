@@ -3,7 +3,7 @@ import { shopifyConfigurada } from '@/data/shopify'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 
 import { ImportarPedidos } from './ImportarPedidos'
-import { PedidosCliente } from './PedidosCliente'
+import { PedidosCliente, type Fila } from './PedidosCliente'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,16 +29,34 @@ async function ultimaSincroniaYampi(): Promise<string | null> {
   return (data?.executada_em as string) ?? null
 }
 
-export default async function Pedidos() {
-  const [itens, sincronizadoEm] = await Promise.all([carregarPedidos(), ultimaSincroniaYampi()])
+/** `?fila=` na URL abre direto numa fila — é o que torna as filas linkáveis. */
+const FILA_POR_SLUG: Record<string, Fila> = {
+  aguardando: 'Aguardando envio',
+  transito: 'Em trânsito',
+  'saiu-para-entrega': 'Saiu para entrega',
+  entregues: 'Entregues',
+  ocorrencia: 'Com ocorrência',
+  devolucoes: 'Devoluções',
+}
+
+export default async function Pedidos({
+  searchParams,
+}: {
+  searchParams: Promise<{ fila?: string }>
+}) {
+  const [itens, sincronizadoEm, { fila }] = await Promise.all([
+    carregarPedidos(),
+    ultimaSincroniaYampi(),
+    searchParams,
+  ])
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <ImportarPedidos
         configurada={shopifyConfigurada()}
         total={itens.length}
         sincronizadoEm={sincronizadoEm}
       />
-      <PedidosCliente itens={itens} />
+      <PedidosCliente itens={itens} filaInicial={fila ? FILA_POR_SLUG[fila] : undefined} />
     </div>
   )
 }

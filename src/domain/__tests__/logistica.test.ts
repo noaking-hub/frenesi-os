@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   HORAS_SEM_ATUALIZACAO,
+  statusOperacional,
   ROTULO_LOGISTICO,
   ehOcorrencia,
   ehTerminal,
@@ -9,6 +10,8 @@ import {
   resumirEvento,
   situacaoLogistica,
   statusDoEvento,
+  type SituacaoLogistica,
+  type StatusLogistico,
 } from '../logistica'
 
 /**
@@ -185,6 +188,62 @@ describe('classificação', () => {
     for (const [chave, rotulo] of Object.entries(ROTULO_LOGISTICO)) {
       expect(rotulo, chave).toMatch(/\S/)
     }
+  })
+})
+
+describe('statusOperacional — a coluna de status da tela', () => {
+  const log = (status: StatusLogistico): SituacaoLogistica => ({
+    status,
+    desde: null,
+    original: null,
+    local: null,
+    tentativas: 0,
+    horasSemAtualizacao: null,
+  })
+
+  it('a exceção logística vence o trânsito', () => {
+    expect(statusOperacional({ situacao: 'enviado', slaEmAtraso: false, log: log('tentativa') }))
+      .toEqual({ rotulo: 'Tentativa de entrega', tom: 'erro' })
+    expect(statusOperacional({ situacao: 'enviado', slaEmAtraso: false, log: log('aguardando-retirada') }).rotulo)
+      .toBe('Aguardando retirada')
+  })
+
+  it('depois do despacho, quem fala é a transportadora', () => {
+    expect(statusOperacional({ situacao: 'enviado', slaEmAtraso: false, log: log('em-transito') }).rotulo)
+      .toBe('Em trânsito')
+    expect(statusOperacional({ situacao: 'enviado', slaEmAtraso: false, log: log('saiu-para-entrega') }).rotulo)
+      .toBe('Saiu para entrega')
+  })
+
+  it('antes do despacho, o atraso vence a fila', () => {
+    expect(statusOperacional({ situacao: 'pago', slaEmAtraso: true, log: log('sem-rastreio') }))
+      .toEqual({ rotulo: 'Em atraso', tom: 'erro' })
+    expect(statusOperacional({ situacao: 'pago', slaEmAtraso: false, log: log('sem-rastreio') }).rotulo)
+      .toBe('Aguardando envio')
+  })
+
+  it('despachado com atraso de expedição NÃO volta a ser "em atraso"', () => {
+    // O atraso de expedição ficou para trás no momento do despacho; cobrar
+    // aqui encheria a lista de vermelho por um problema já resolvido.
+    expect(statusOperacional({ situacao: 'enviado', slaEmAtraso: true, log: log('etiqueta') }).rotulo)
+      .toBe('Enviado')
+  })
+
+  it('entrega local pendente é fila própria, não "aguardando envio" nem atraso', () => {
+    expect(
+      statusOperacional({ situacao: 'pago', slaEmAtraso: true, log: log('sem-rastreio'), entregaLocal: true }),
+    ).toEqual({ rotulo: 'Entrega local', tom: 'atencao' })
+    // Depois de confirmada, entrega local é entrega como qualquer outra.
+    expect(
+      statusOperacional({ situacao: 'entregue', slaEmAtraso: false, log: log('sem-rastreio'), entregaLocal: true }).rotulo,
+    ).toBe('Entregue')
+  })
+
+  it('entregue e cancelado são terminais', () => {
+    expect(statusOperacional({ situacao: 'entregue', slaEmAtraso: true, log: log('tentativa') }).rotulo)
+      .toBe('Entregue')
+    expect(statusOperacional({ situacao: 'cancelado', slaEmAtraso: true, log: log('em-transito') }).rotulo)
+      .toBe('Cancelado')
   })
 })
 

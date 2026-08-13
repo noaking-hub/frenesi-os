@@ -295,89 +295,45 @@ export function ImportarPedidos({
     )
   }
 
+  // A faixa é UMA linha discreta, não um banner: no mockup a sincronia vive no
+  // rodapé do menu ("Sincronizado agora") — aqui ela ocupa o mínimo que ainda
+  // deixa o botão manual e as ferramentas de diagnóstico alcançáveis.
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: 16,
-        padding: '15px 17px',
-        borderRadius: 13,
-        background: 'rgba(239,209,140,.045)',
-        border: '1px solid var(--color-borda-ouro)',
-      }}
-    >
-      <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          flexWrap: 'wrap',
+          minHeight: 30,
+        }}
+      >
         <span
           className="font-sans"
-          style={{
-            fontWeight: 600,
-            fontSize: 10,
-            letterSpacing: '.12em',
-            textTransform: 'uppercase',
-            color: 'rgba(239,209,140,.6)',
-          }}
+          style={{ fontSize: 11, color: 'rgba(242,237,227,.55)', textWrap: 'pretty' }}
         >
-          Pedidos
-        </span>
-        <span
-          className="font-sans"
-          style={{ fontSize: 11, lineHeight: 1.55, color: 'rgba(242,237,227,.68)', textWrap: 'pretty' }}
-        >
+          <span
+            aria-hidden
+            style={{
+              display: 'inline-block',
+              width: 6,
+              height: 6,
+              borderRadius: 999,
+              marginRight: 7,
+              verticalAlign: 'middle',
+              background: sincronizadoEm ? COR.ok : COR.atencao,
+            }}
+          />
           {total === 0
-            ? 'Nenhum pedido no ERP ainda. A Yampi é o checkout: é dela que vêm CPF, data de entrega e o pagamento liquidado. A Shopify guarda um espelho sem esses três.'
-            : `${plural(total, 'pedido no ERP', 'pedidos no ERP')} · ${idadeDaSincronia(sincronizadoEm)}.`}
+            ? 'Nenhum pedido no ERP ainda — a Yampi é o checkout, e é dela que vêm CPF e pagamento.'
+            : `${plural(total, 'pedido no ERP', 'pedidos no ERP')} · ${idadeDaSincronia(sincronizadoEm)}`}
         </span>
-        {(erro || resumo) && (
-          <span
-            className="font-sans"
-            style={{ fontSize: 11, lineHeight: 1.5, color: erro ? COR.erro : COR.ok, textWrap: 'pretty' }}
-          >
-            {erro ?? resumo}
-          </span>
-        )}
-        {diagnostico && (
-          <span
-            className="font-sans"
-            style={{ fontSize: 10.5, lineHeight: 1.5, color: 'rgba(242,237,227,.75)', textWrap: 'pretty' }}
-          >
-            {diagnostico}
-          </span>
-        )}
-        {aviso && (
-          <span
-            className="font-sans"
-            style={{ fontSize: 10.5, lineHeight: 1.5, color: COR.atencao, textWrap: 'pretty' }}
-          >
-            {aviso}
-          </span>
-        )}
-      </span>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end', flex: 'none' }}>
-        <button
-          type="button"
-          onClick={sincronizarTudo}
-          disabled={pendente}
-          className="botao-ouro font-sans hover:brightness-[1.07]"
-          style={{
-            height: 36,
-            padding: '0 18px',
-            fontWeight: 700,
-            fontSize: 11.5,
-            lineHeight: 1,
-            borderRadius: 9,
-            whiteSpace: 'nowrap',
-            cursor: pendente ? 'wait' : 'pointer',
-            opacity: pendente ? 0.6 : 1,
-          }}
-        >
-          {pendente ? 'Sincronizando…' : 'Sincronizar agora'}
-        </button>
+        <span style={{ flex: 1 }} />
         <button
           type="button"
           onClick={() => setFerramentas((v) => !v)}
-          className="font-sans"
+          className="font-sans hover:text-ouro"
           style={{
             border: 0,
             background: 'transparent',
@@ -391,9 +347,57 @@ export function ImportarPedidos({
         >
           {ferramentas ? '− Ferramentas' : '+ Ferramentas'}
         </button>
+        <button
+          type="button"
+          onClick={sincronizarTudo}
+          disabled={pendente}
+          className="font-sans hover:brightness-110"
+          style={{
+            height: 30,
+            padding: '0 13px',
+            fontWeight: 600,
+            fontSize: 11,
+            lineHeight: 1,
+            borderRadius: 8,
+            border: '1px solid rgba(239,209,140,.45)',
+            background: 'rgba(239,209,140,.1)',
+            color: COR.ouro,
+            whiteSpace: 'nowrap',
+            cursor: pendente ? 'wait' : 'pointer',
+            opacity: pendente ? 0.6 : 1,
+          }}
+        >
+          {pendente ? 'Sincronizando…' : 'Sincronizar agora'}
+        </button>
+      </div>
 
-        {ferramentas && (
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+      {(erro || resumo) && (
+        <span
+          className="font-sans"
+          style={{ fontSize: 11, lineHeight: 1.5, color: erro ? COR.erro : COR.ok, textWrap: 'pretty' }}
+        >
+          {erro ?? resumo}
+        </span>
+      )}
+      {diagnostico && (
+        <span
+          className="font-sans"
+          style={{ fontSize: 10.5, lineHeight: 1.5, color: 'rgba(242,237,227,.75)', textWrap: 'pretty' }}
+        >
+          {diagnostico}
+        </span>
+      )}
+      {aviso && (
+        <span
+          className="font-sans"
+          style={{ fontSize: 10.5, lineHeight: 1.5, color: COR.atencao, textWrap: 'pretty' }}
+        >
+          {aviso}
+        </span>
+      )}
+
+      {ferramentas && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <select
               value={dias}
               onChange={(e) => setDias(Number(e.target.value))}
@@ -422,8 +426,7 @@ export function ImportarPedidos({
             <BotaoFerramenta rotulo="Conferir permissões" onClick={diagnosticar} pendente={pendente} />
             <BotaoFerramenta rotulo="Importar da Shopify" onClick={importar} pendente={pendente} />
           </div>
-        )}
-      </div>
+      )}
     </div>
   )
 }

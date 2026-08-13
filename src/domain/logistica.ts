@@ -202,6 +202,62 @@ export function paradoDemais(s: SituacaoLogistica): boolean {
 }
 
 /**
+ * O status operacional da linha — a resposta de "onde este pedido está AGORA".
+ *
+ * As três dimensões (financeira, operacional, logística) continuam guardadas
+ * separadas, como o escopo exige. Esta função só decide qual delas é a MAIS
+ * INFORMATIVA para a coluna de status: depois do despacho, quem sabe do pedido
+ * é a transportadora; antes dele, o que importa é a fila interna e o prazo.
+ *
+ * A precedência é a da urgência, não a do ciclo: tentativa de entrega vence
+ * "em trânsito" porque é ela que precisa de alguém; "em atraso" vence
+ * "aguardando envio" porque é o atraso que o escopo manda destacar.
+ */
+export interface StatusOperacional {
+  rotulo: string
+  tom: 'ok' | 'atencao' | 'erro' | 'info' | 'ouro' | 'neutro'
+}
+
+export function statusOperacional(dados: {
+  situacao: 'pago' | 'em_producao' | 'faturado' | 'enviado' | 'entregue' | 'cancelado'
+  /** Estado do SLA de expedição — só interessa o atraso. */
+  slaEmAtraso: boolean
+  log: SituacaoLogistica
+  /** Motoboy: nunca despacha, nunca fatura — o ciclo fecha na confirmação. */
+  entregaLocal?: boolean
+}): StatusOperacional {
+  const { situacao, slaEmAtraso, log } = dados
+
+  if (situacao === 'cancelado') return { rotulo: 'Cancelado', tom: 'neutro' }
+  if (situacao === 'entregue' || log.status === 'entregue') return { rotulo: 'Entregue', tom: 'ok' }
+
+  // Entrega local pendente é uma fila PRÓPRIA, não "aguardando envio": não há
+  // envio a aguardar, e chamá-la de atrasada por prazo de expedição encheria o
+  // cartão de vermelho com pedidos que o motoboy entregou há meses e ninguém
+  // confirmou no sistema.
+  if (dados.entregaLocal) return { rotulo: 'Entrega local', tom: 'atencao' }
+
+  // Exceções logísticas primeiro: são as linhas que o escopo manda gritar.
+  if (log.status === 'devolucao') return { rotulo: 'Devolução', tom: 'erro' }
+  if (log.status === 'extraviado') return { rotulo: 'Extraviado', tom: 'erro' }
+  if (log.status === 'tentativa') return { rotulo: 'Tentativa de entrega', tom: 'erro' }
+  if (log.status === 'aguardando-retirada') return { rotulo: 'Aguardando retirada', tom: 'atencao' }
+  if (log.status === 'saiu-para-entrega') return { rotulo: 'Saiu para entrega', tom: 'ouro' }
+  if (log.status === 'em-transito' || log.status === 'postado') {
+    return { rotulo: 'Em trânsito', tom: 'info' }
+  }
+
+  // Despachado sem leitura de transportadora ainda: o fato mais recente é o
+  // despacho — e não o atraso de expedição, que ficou para trás.
+  if (situacao === 'enviado') return { rotulo: 'Enviado', tom: 'info' }
+
+  if (slaEmAtraso) return { rotulo: 'Em atraso', tom: 'erro' }
+  if (situacao === 'em_producao') return { rotulo: 'Em produção', tom: 'ouro' }
+  if (situacao === 'faturado') return { rotulo: 'Faturado', tom: 'ouro' }
+  return { rotulo: 'Aguardando envio', tom: 'info' }
+}
+
+/**
  * Limpa a mensagem da transportadora para caber numa linha.
  *
  * Os Correios anexam uma pesquisa de satisfação com URL ao evento de entrega;

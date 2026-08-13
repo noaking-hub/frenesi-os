@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 /**
@@ -89,19 +89,19 @@ export function Gaveta({
 }
 
 /**
- * Gaveta INFERIOR de largura total.
+ * Painel INFERIOR ancorado — a ficha do pedido do mockup.
  *
- * O escopo do módulo de Pedidos pede explicitamente esta forma no desktop, e o
- * motivo é o rastreamento: a ficha tem seis blocos lado a lado e duas linhas
- * do tempo. Num diálogo central de 900 px eles viram uma coluna de rolagem
- * infinita; ocupando a largura da tela, cabem todos de uma vez.
+ * Não é modal, e isso é o desenho: a lista continua visível E CLICÁVEL acima,
+ * sem véu escuro. É o que permite abrir um pedido, ler, e clicar no próximo da
+ * fila sem fechar nada — o painel só troca de conteúdo. Esc fecha; clique fora
+ * não, porque "fora" é a própria lista em uso.
  *
- * A lista continua visível acima — é isso que permite passar de um pedido para
- * o próximo sem perder o lugar na fila.
+ * Começa depois do menu lateral (var --sidebar-w, publicada pela Sidebar)
+ * para não engolir a navegação, como no mockup.
  */
-export function GavetaInferior({
+export function PainelInferior({
   titulo,
-  altura = '72vh',
+  altura = '62vh',
   aoFechar,
   children,
 }: {
@@ -111,40 +111,60 @@ export function GavetaInferior({
   aoFechar: () => void
   children: ReactNode
 }) {
-  const montado = useDialogoAberto(aoFechar)
+  const [montado, setMontado] = useState(false)
+  const ref = useRef<HTMLElement>(null)
+  useEffect(() => setMontado(true), [])
+
+  useEffect(() => {
+    const aoTeclar = (e: KeyboardEvent) => {
+      // Esc fecha uma camada por vez: com um menu suspenso aberto, o Esc é
+      // dele — fechar o painel junto tiraria da tela justamente o que a
+      // pessoa estava lendo.
+      if (e.key === 'Escape' && !document.querySelector('[data-camada="menu"]')) aoFechar()
+    }
+    document.addEventListener('keydown', aoTeclar)
+    return () => document.removeEventListener('keydown', aoTeclar)
+  }, [aoFechar])
+
+  // O painel é fixo e cobre o pé da página; sem compensar, as últimas linhas
+  // da lista ficariam para sempre atrás dele — visíveis de relance, mas
+  // impossíveis de alcançar rolando. O corpo ganha o respiro equivalente.
+  useEffect(() => {
+    if (!montado) return
+    const altura = ref.current?.offsetHeight ?? 0
+    const anterior = document.body.style.paddingBottom
+    document.body.style.paddingBottom = `${altura + 16}px`
+    return () => {
+      document.body.style.paddingBottom = anterior
+    }
+  }, [montado])
+
   if (!montado) return null
 
   return createPortal(
-    <div
-      onClick={aoFechar}
+    <section
+      ref={ref}
+      role="dialog"
+      aria-label={titulo}
+      className="erp animate-[fr-sobe_.24s_ease_both]"
       style={{
         position: 'fixed',
-        inset: 0,
-        zIndex: 70,
+        left: 'var(--sidebar-w, 244px)',
+        right: 0,
+        bottom: 0,
+        zIndex: 60,
+        maxHeight: altura,
         display: 'flex',
-        alignItems: 'flex-end',
-        background: 'rgba(5,5,4,.5)',
+        flexDirection: 'column',
+        background: 'linear-gradient(180deg,#141317,#0E0D0F)',
+        borderTop: '1px solid rgba(239,209,140,.26)',
+        boxShadow: '0 -26px 70px rgba(0,0,0,.6)',
+        // Acompanha a animação de recolher da Sidebar, senão a borda salta.
+        transition: 'left .2s ease',
       }}
     >
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-label={titulo}
-        onClick={(e) => e.stopPropagation()}
-        className="erp animate-[fr-sobe_.24s_ease_both]"
-        style={{
-          width: '100%',
-          maxHeight: altura,
-          display: 'flex',
-          flexDirection: 'column',
-          background: 'linear-gradient(180deg,#17161A,#0F0E10)',
-          borderTop: '1px solid rgba(239,209,140,.24)',
-          boxShadow: '0 -24px 60px rgba(0,0,0,.55)',
-        }}
-      >
-        {children}
-      </section>
-    </div>,
+      {children}
+    </section>,
     document.body,
   )
 }

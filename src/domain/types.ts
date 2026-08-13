@@ -221,6 +221,15 @@ export interface Pedido {
   /** Entrega em mãos: não é faturada, e a baixa acontece na entrega. */
   entregaLocal: boolean
   compradoEm: string
+  /**
+   * Fatos de integração, para a coluna "Informações adicionais" da ficha.
+   * Opcionais porque as fixtures de demonstração não os simulam — a ficha
+   * mostra só o que existe.
+   */
+  producaoEm?: string | null
+  enviadoShopifyEm?: string | null
+  estoqueBaixadoEm?: string | null
+  estoqueBaixadoMl?: number | null
 }
 
 export type MotivoDevolucao = 'm1' | 'm2' | 'm3' | 'm4' | 'm5'

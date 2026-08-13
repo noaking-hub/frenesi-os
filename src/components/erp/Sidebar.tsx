@@ -21,6 +21,13 @@ export function Sidebar({ origem }: { origem: 'supabase' | 'fixtures' }) {
     setRecolhida(localStorage.getItem(CHAVE_MENU) === '1')
   }, [])
 
+  // A largura vira variável global porque os painéis ancorados (a ficha do
+  // pedido) são portais no `body`: eles precisam começar DEPOIS do menu para
+  // não cobri-lo, e não têm como saber a largura de um flex-item alheio.
+  useEffect(() => {
+    document.documentElement.style.setProperty('--sidebar-w', recolhida ? '62px' : '244px')
+  }, [recolhida])
+
   const alternarMenu = () => {
     setRecolhida((v) => {
       localStorage.setItem(CHAVE_MENU, v ? '0' : '1')

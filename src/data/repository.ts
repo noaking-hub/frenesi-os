@@ -356,6 +356,7 @@ const repositorioSupabase: Repositorio = {
         'id, canal, valor, frete, cashback, pagamento, envio, comprado_em, entregue_em, ' +
           'destino, cep, logradouro, peso, dimensoes, gateway, rastreio, situacao, ' +
           'servico_frete, rastreio_url, rastreio_lido_em, entrega_local, ' +
+          'producao_em, enviado_shopify_em, estoque_baixado_em, estoque_baixado_ml, ' +
           'clientes(nome, email, cpf, telefone), pedido_itens(descricao, variante, preco)',
       )
       .order('comprado_em', { ascending: false })
@@ -405,6 +406,10 @@ const repositorioSupabase: Repositorio = {
         rastreioLidoEm: p.rastreio_lido_em,
         entregaLocal: Boolean(p.entrega_local),
         compradoEm: p.comprado_em,
+        producaoEm: p.producao_em,
+        enviadoShopifyEm: p.enviado_shopify_em,
+        estoqueBaixadoEm: p.estoque_baixado_em,
+        estoqueBaixadoMl: p.estoque_baixado_ml === null ? null : Number(p.estoque_baixado_ml),
         itens: itens.map((i) => ({
           perfume: i.descricao,
           marca: '',
@@ -1071,6 +1076,10 @@ interface LinhaPedido {
   rastreio_url: string | null
   rastreio_lido_em: string | null
   entrega_local: boolean | null
+  producao_em: string | null
+  enviado_shopify_em: string | null
+  estoque_baixado_em: string | null
+  estoque_baixado_ml: number | string | null
   clientes: { nome: string; email: string; cpf: string | null; telefone: string } | null
   pedido_itens: { descricao: string; variante: number | null; preco: number | string }[]
 }

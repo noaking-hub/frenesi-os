@@ -264,6 +264,62 @@ export async function linhaDoTempoDoPedido(pedidoId: string): Promise<EventoTran
   }
 }
 
+export type RespostaProducao =
+  | { ok: true; marcados: number; recusados: { pedido: string; motivo: string }[] }
+  | { ok: false; erro: string }
+
+/**
+ * Marca os pedidos selecionados como "em produção".
+ *
+ * É o único degrau do ciclo que é NOSSO — pago, faturado e enviado vêm da
+ * Yampi. A validação é individual, como o escopo exige das ações em massa:
+ * pedido que já passou de pago não regride, e o retorno diz exatamente quais
+ * ficaram de fora e por quê.
+ */
+export async function marcarEmProducao(ids: string[]): Promise<RespostaProducao> {
+  if (ids.length === 0) return { ok: false, erro: 'Selecione ao menos um pedido.' }
+  if (!supabaseConfigurado()) {
+    return { ok: false, erro: 'O Supabase precisa estar configurado.' }
+  }
+  try {
+    const sb = supabaseServer()
+    // Em lotes de 100: um `.in()` com 600 ids estoura o tamanho da URL do
+    // PostgREST — e truncar a seleção em silêncio seria mentir para quem
+    // clicou "selecionar todos".
+    const porId = new Map<string, string>()
+    for (let i = 0; i < ids.length; i += 100) {
+      const lote = ids.slice(i, i + 100)
+      const { data, error } = await sb.from('pedidos').select('id, situacao').in('id', lote)
+      if (error) throw error
+      for (const p of data ?? []) porId.set(p.id as string, (p.situacao as string) ?? 'pago')
+    }
+    const elegiveis: string[] = []
+    const recusados: { pedido: string; motivo: string }[] = []
+    for (const id of ids) {
+      const situacao = porId.get(id)
+      if (situacao === undefined) recusados.push({ pedido: id, motivo: 'não encontrado' })
+      else if (situacao !== 'pago') {
+        recusados.push({ pedido: id, motivo: `já está ${situacao.replace('_', ' ')}` })
+      } else elegiveis.push(id)
+    }
+
+    const agora = new Date().toISOString()
+    for (let i = 0; i < elegiveis.length; i += 100) {
+      const { error: erroMarca } = await sb
+        .from('pedidos')
+        .update({ situacao: 'em_producao', producao_em: agora })
+        .in('id', elegiveis.slice(i, i + 100))
+      if (erroMarca) throw erroMarca
+    }
+
+    revalidatePath('/pedidos')
+    return { ok: true, marcados: elegiveis.length, recusados }
+  } catch (e) {
+    console.error('[pedidos] marcar em produção falhou:', e)
+    return { ok: false, erro: mensagemDe(e) }
+  }
+}
+
 export type RespostaRastreio =
   | { ok: true; consultados: number; eventos: number; falhas: number; aviso?: string }
   | { ok: false; erro: string }
