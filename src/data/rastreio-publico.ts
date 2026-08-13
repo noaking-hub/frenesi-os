@@ -12,6 +12,7 @@ import {
   type StatusRastreio,
 } from '@/domain'
 
+import { frenetConfigurada, gravarEventosRastreio, rastrearNaFrenet } from './frenet'
 import { supabaseServer } from './supabase'
 
 /**
@@ -26,6 +27,16 @@ import { supabaseServer } from './supabase'
 /** Teto de pedidos devolvidos na busca só por documento. */
 const MAXIMO_NA_LISTA = 10
 
+/**
+ * Idade a partir da qual um pedido em trânsito é reconsultado ao vivo.
+ *
+ * Trinta minutos, e não zero, porque o cliente que recarrega a página cinco
+ * vezes seguidas não pode virar cinco chamadas à transportadora. Trinta e não
+ * sessenta porque a varredura já roda de hora em hora — se fosse igual, esta
+ * consulta nunca acrescentaria nada.
+ */
+const IDADE_PARA_CONSULTAR_AO_VIVO_MS = 30 * 60 * 1000
+
 /** Dias de compra sem entrega a partir dos quais o pedido vira exceção. */
 const DIAS_PARA_EXCECAO = 15
 
@@ -36,7 +47,9 @@ interface LinhaPedido {
   envio: string
   rastreio: string | null
   servico_frete: string | null
+  rastreio_servico: string | null
   rastreio_url: string | null
+  rastreio_lido_em: string | null
   comprado_em: string
   entregue_em: string | null
   destino: string | null
@@ -45,8 +58,8 @@ interface LinhaPedido {
 }
 
 const COLUNAS =
-  'id, shopify_numero, pagamento, envio, rastreio, servico_frete, rastreio_url, ' +
-  'comprado_em, entregue_em, destino, enviado_shopify_em, cliente_id'
+  'id, shopify_numero, pagamento, envio, rastreio, servico_frete, rastreio_servico, ' +
+  'rastreio_url, rastreio_lido_em, comprado_em, entregue_em, destino, enviado_shopify_em, cliente_id'
 
 /** Entrega feita pela equipe, na cidade da operação — nunca terá código. */
 function ehEntregaLocal(servico: string | null, rastreio: string | null): boolean {
@@ -185,6 +198,52 @@ function montar(
   }
 }
 
+/**
+ * Pergunta à transportadora AGORA, para um pedido que o cliente está olhando.
+ *
+ * Existe porque o webhook da Frenet não serve a esta operação: a URL de
+ * notificação é um campo do pedido, informado na hora de criar a etiqueta pela
+ * API — e aqui as etiquetas saem do painel. Sem push, a única forma de o
+ * cliente ver o evento de hoje é perguntar quando ele abre a página.
+ *
+ * Três limites, e nenhum é decorativo. Só pedido em trânsito (entregue não
+ * muda mais, e sem código não há o que perguntar). Só quando a última leitura
+ * passou de meia hora. E só na consulta de UM pedido — na lista, dez pedidos
+ * virariam dez chamadas à Frenet numa requisição de visitante anônimo.
+ *
+ * Falha aqui é silenciosa de propósito: página de rastreio que devolve erro
+ * porque a transportadora está lenta é pior que página com o dado de uma hora
+ * atrás. O espelho responde de qualquer jeito.
+ */
+async function atualizarAoVivo(p: LinhaPedido, agora: Date): Promise<void> {
+  if (!frenetConfigurada() || !p.rastreio) return
+  if (p.entregue_em || p.envio !== 'enviado') return
+  const lido = p.rastreio_lido_em ? Date.parse(p.rastreio_lido_em) : 0
+  if (agora.getTime() - lido < IDADE_PARA_CONSULTAR_AO_VIVO_MS) return
+
+  try {
+    const leitura = await rastrearNaFrenet(p.rastreio, p.rastreio_servico ?? p.servico_frete)
+    if (leitura.eventos.length) await gravarEventosRastreio(leitura.eventos)
+    await supabaseServer()
+      .from('pedidos')
+      .update({
+        rastreio_lido_em: agora.toISOString(),
+        ...(leitura.url ? { rastreio_url: leitura.url } : {}),
+        ...(leitura.servico ? { rastreio_servico: leitura.servico } : {}),
+      })
+      .eq('id', p.id)
+    if (leitura.url) p.rastreio_url = leitura.url
+  } catch (e) {
+    // Marca a leitura mesmo na falha: sem isso, um código que a Frenet recusa
+    // seria reconsultado a cada visita do cliente, sem nunca dar em nada.
+    console.error('[rastreio publico] consulta ao vivo falhou:', e)
+    await supabaseServer()
+      .from('pedidos')
+      .update({ rastreio_lido_em: agora.toISOString() })
+      .eq('id', p.id)
+  }
+}
+
 export type ResultadoPublico =
   | { ok: true; pedidos: RastreioPublico[] }
   /** Pedido inexistente OU documento que não confere — deliberadamente o mesmo. */
@@ -245,7 +304,10 @@ export async function rastreioPublico(
   const linhas = (data ?? []) as unknown as LinhaPedido[]
   if (linhas.length === 0) return { ok: false, motivo: 'nao_encontrado' }
 
-  const eventos = await eventosDe(linhas.map((p) => p.id))
   const agora = new Date()
+  // Consulta ao vivo só no pedido único — nunca na lista. Ver `atualizarAoVivo`.
+  if (linhas.length === 1 && pedido?.trim()) await atualizarAoVivo(linhas[0], agora)
+
+  const eventos = await eventosDe(linhas.map((p) => p.id))
   return { ok: true, pedidos: linhas.map((p) => montar(p, eventos.get(p.id) ?? [], agora)) }
 }

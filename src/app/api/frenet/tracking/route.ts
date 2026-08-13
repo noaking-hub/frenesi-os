@@ -4,17 +4,28 @@ import { eventoDaFrenet, gravarEventosRastreio } from '@/data/frenet'
 import type { EventoTransportadora } from '@/domain'
 
 /**
- * Webhook de tracking da Frenet.
+ * Webhook de tracking da Frenet — INATIVO nesta operação.
  *
- * A Frenet chama esta URL a cada nova ocorrência dos objetos da conta — é o
- * que faz o cliente ver "saiu para entrega" em minutos, e não na próxima
- * varredura. O corpo traz o código do objeto e a ocorrência; o formato varia
- * conforme a transportadora, então o leitor procura os campos por candidatos,
- * igual ao da consulta.
+ * A Frenet chamaria esta URL a cada nova ocorrência, e era isso que faria o
+ * cliente ver "saiu para entrega" em minutos em vez de na próxima varredura.
+ * Só que o suporte deles esclareceu (13/08/2026) como o webhook realmente
+ * funciona, e ele não serve aqui:
  *
- * A autenticação é o par nome/valor de token que se cadastra junto da URL no
- * painel da Frenet. Sem ela, esta rota seria um endereço público capaz de
- * escrever na linha do tempo dos pedidos.
+ *   A URL não se cadastra em lugar nenhum — nem no painel, nem por chamado.
+ *   Ela é um CAMPO DO PEDIDO (`TrackingNotificationUrl`), informado no momento
+ *   em que a etiqueta é criada pela API de pedidos da Frenet. Quem gera
+ *   etiqueta pelo painel, como esta operação faz, nunca preenche esse campo —
+ *   e a Frenet não tem para onde notificar.
+ *
+ * Ligar o webhook exigiria mudar a rotina da operação: emitir as etiquetas
+ * pela API em vez do painel. É uma decisão de processo, não de código, e não
+ * vale só pela latência — a varredura de hora em hora cobre os 57 pedidos
+ * vivos numa rodada só.
+ *
+ * A rota fica de pé por dois motivos: ela é a única peça pronta caso a emissão
+ * por API aconteça um dia, e apagá-la faria a próxima pessoa reabrir a mesma
+ * investigação do zero. Sem FRENET_WEBHOOK_TOKEN_VALOR definido ela recusa
+ * tudo — que é o estado atual.
  *
  *     POST /api/frenet/tracking
  *     <FRENET_WEBHOOK_TOKEN_NOME>: <FRENET_WEBHOOK_TOKEN_VALOR>

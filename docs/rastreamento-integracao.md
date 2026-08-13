@@ -4,18 +4,20 @@ Como a informação de entrega chega da Yampi e das transportadoras ao ERP, o qu
 
 | | |
 |---|---|
-| **Documento** | v5 · 13/08/2026 |
+| **Documento** | v6 · 13/08/2026 |
 | **Origem dos dados** | Yampi API v2 (dooki) + Frenet |
 | **Banco do ERP** | PostgreSQL 17 · Supabase |
 | **Base atual** | 602 pedidos · 395 com código |
 
-> **O que mudou da v4 para a v5**
+> **O que mudou da v4 para cá**
 >
 > Esta versão responde ao documento **"Respostas às decisões de §9" (r2)** do desenvolvimento do site. Três mudanças:
 >
 > 1. **O endpoint de §7 existe.** Foi implementado com as cinco decisões já incorporadas — busca por documento com pedido opcional, lista de até 10, `descricaoResumida`, entrega local fechando com "Entregue em {data}". Falta só publicar e emitir a chave.
 > 2. **A divergência de 16 × 10 dígitos do adendo r2 não existe** — era erro do exemplo da v4, e a verificação está em §8. O `note` carrega exatamente a chave que o ERP já usa. Nenhuma das hipóteses (a), (b) ou (c) precisa ser testada.
 > 3. **O `shopify_gid` passou a ser guardado**, como o adendo pediu.
+>
+> **v6, no mesmo dia:** o suporte da Frenet respondeu como o webhook realmente funciona, e **ele não serve a esta operação** (§3c). Isso derruba a premissa de que a defasagem viraria "praticamente tempo real", e por isso a **opção B foi implementada** — o pedido em trânsito é reconsultado ao vivo quando o cliente abre a página (§7).
 >
 > Da v3 para a v4, para quem está entrando agora: a timeline da transportadora saiu do papel e o campo `eventos` deixou de ser promessa (§3 e §3b).
 
@@ -103,10 +105,10 @@ Quem já coleta esses escaneamentos é o **Rastreio.net** (Empreender), instalad
 
 | Gateway | Leitura | Push | Autenticação |
 |---|---|---|---|
-| Frenet | `POST /tracking/trackinginfo`: ocorrências de Correios e J&T. Jadlog volta vazia — ver §3b | Webhook *Atualização de Tracking*, cadastrado pelo suporte da Frenet, não pelo painel | Header com token da conta |
+| Frenet | `POST /tracking/trackinginfo`: ocorrências de Correios e J&T. Jadlog volta vazia — ver §3b | ❌ Indisponível nesta operação — ver §3c | Header com token da conta |
 | Melhor Envio | Endpoint de rastreio dos envios da conta | Webhooks disponíveis — confirmar cobertura de eventos de rastreio | OAuth2 (token de 30 dias, renovado por refresh) |
 
-O webhook da Frenet é o desenho ideal: em vez de o ERP perguntar de tempos em tempos por centenas de códigos, cada evento chega empurrado assim que acontece — o cliente vê a atualização em minutos, e não na próxima varredura.
+O webhook da Frenet seria o desenho ideal — cada evento chegando empurrado em vez de o ERP perguntar por centenas de códigos. **Ele está fora de alcance por um motivo estrutural, não por falta de cadastro**; §3c explica.
 
 > **Sobre "sem o cliente digitar código"**
 >
@@ -145,6 +147,32 @@ O ERP consulta `POST https://api.frenet.com.br/tracking/trackinginfo`, guarda ca
 > ⚠️ **Consequência direta para o desenho da tela**
 >
 > `eventos` pode vir **vazio com o pedido perfeitamente normal**. A tela não pode tratar lista vazia como erro nem como "sem informação": quando o campo `rastreioUrl` vier preenchido, o certo é oferecer o link da transportadora. É exatamente o que o ERP faz internamente hoje.
+
+---
+
+## §3c · O webhook da Frenet está fora de alcance ❌
+
+Registrado porque as duas versões anteriores deste documento afirmaram o contrário, e a informação circulou.
+
+O suporte da Frenet respondeu em **13/08/2026**:
+
+> *"Sobre Webhook, a URL para receber notificações é enviada no momento da criação do pedido, todos os endpoints que geram pedidos (post orders, orders/oneclick, shipments e shipments/oneclick) possuem esses dois campos para que a plataforma envie o link que o webhook vai atualizar. Sendo assim só é possível usar o Webhook a partir do momento que gere uma etiqueta aqui na Frenet via API."*
+
+A URL **não se cadastra em lugar nenhum** — nem no painel, nem por chamado. Ela é um campo do pedido (`TrackingNotificationUrl`), informado no momento em que a etiqueta é criada **pela API de pedidos da Frenet**.
+
+**Consequência para a FRENESI:** as etiquetas são emitidas **pelo painel**, à mão. Nenhum pedido carrega a URL, e a Frenet não tem para onde notificar. Nem os pedidos já existentes, nem os futuros — enquanto a emissão for manual.
+
+### O que isso muda
+
+| | Antes (premissa errada) | Agora |
+|---|---|---|
+| Como o evento chega | Empurrado pela Frenet, em minutos | Perguntado pelo ERP |
+| Defasagem máxima | Minutos | Até 1 h pela varredura — **ou segundos**, com a consulta ao vivo de §7 |
+| Providência da operação | Abrir chamado na Frenet | Nenhuma. **Não abra o chamado** |
+
+Ligar o webhook exigiria mudar a rotina da operação: emitir as etiquetas pela API em vez do painel. É decisão de processo, não de código, e não se justifica só pela latência — a varredura cobre os 57 pedidos vivos numa rodada, e a consulta ao vivo cobre o cliente que está olhando a página agora.
+
+A rota `/api/frenet/tracking` continua de pé, fechada, como a peça pronta caso a emissão por API aconteça um dia.
 
 ---
 
@@ -336,11 +364,19 @@ O 404 é deliberadamente ambíguo entre "não existe" e "documento errado": dist
 - **Chave**: `RASTREIO_API_KEY`. **Sem ela definida a rota fica fechada, respondendo 401 a tudo** — uma rota pública que libera geral porque alguém esqueceu de configurar é pior que uma rota que não existe.
 - **Teto por IP**: 60 consultas/min, contadas na memória de cada instância. Registrando a limitação honestamente: não é rate limit distribuído — um atacante com muitos IPs passa. Ele resolve o caso que importa, que é script único varrendo documentos. Se a rota virar alvo de verdade, a contagem migra para o banco.
 
-### Atualidade — decidido: mista (A + B em trânsito)
+### Atualidade — mista (A + B em trânsito) ✅ implementada
 
-O site aceitou a recomendação. **A implementação atual é a opção A pura**: responde sempre do espelho no banco. A opção B para pedidos `em-transito` fica registrada como próximo passo, e há um motivo para não fazê-la já — o site previu, corretamente, que "a mista degenere naturalmente para sempre A" quando o webhook da Frenet estiver cadastrado. Com o webhook, cada escaneamento chega em minutos, e o custo de consultar a Frenet a cada visita de cliente deixa de se pagar.
+O site aceitou a recomendação, com a previsão de que "a mista degenere naturalmente para sempre A" quando o webhook estivesse ligado. **Essa previsão caiu junto com o webhook** (§3c): sem push, o espelho puro deixaria o cliente vendo o estado de até uma hora atrás — justamente na hora em que ele abre a página para ver se o pedido andou.
 
-**Proposta**: publicar com A, cadastrar o webhook, medir. Se a defasagem incomodar na prática, ligo o B em trânsito — é uma mudança pequena e não altera o contrato.
+Por isso o **B está implementado**, com três limites que impedem a rota anônima de virar amplificador contra a nossa própria cota:
+
+- só pedido **em trânsito** — entregue não muda mais, e sem código não há o que perguntar;
+- só quando a última leitura passou de **30 minutos** — quem recarrega a página cinco vezes não vira cinco chamadas à Frenet;
+- só na consulta de **um pedido**, nunca na lista — dez pedidos virariam dez chamadas numa requisição só.
+
+Falha na consulta ao vivo é **silenciosa**: o espelho responde de qualquer jeito. Página de rastreio que devolve erro porque a transportadora está lenta é pior que página com o dado de uma hora atrás.
+
+Na prática: pedido em trânsito que o cliente abre responde com o dado de agora; todo o resto vem do espelho, em menos de 100 ms.
 
 ---
 
@@ -401,7 +437,7 @@ As cinco decisões foram respondidas pelo desenvolvimento do site e **já estão
 | Publicar o endpoint e emitir `RASTREIO_API_KEY` | ERP | ⏳ Código pronto; sobe no próximo deploy. A chave e as origens de CORS vão por variável de ambiente |
 | Backfill do `shopify_numero` pelo `note` | ERP | ⏳ Depende do diagnóstico de por que a leitura da Shopify não devolve pedidos (§8) |
 | Token de API da Frenet | Operação | ✅ Em uso. Convém rotacionar por higiene |
-| Webhook de tracking da Frenet | Operação | ⏳ Não é autoatendimento: o cadastro da URL é feito **pelo suporte da Frenet**, por chamado. URL: `https://erp.frenesiperfumes.com.br/api/frenet/tracking`, com um par nome/valor de token |
+| ~~Webhook de tracking da Frenet~~ | — | ❌ **Saiu da lista.** Não existe cadastro de URL na Frenet: ela é campo do pedido criado por API, e aqui as etiquetas saem do painel (§3c). **Não abrir chamado.** A consulta ao vivo de §7 cobre a latência |
 | Autorização OAuth do Melhor Envio | Operação | ⏳ Client id e secret configurados; falta a autorização no navegador, em Configurações → Integrações |
 | DNS de `erp.frenesiperfumes.com.br` | Operação | ❌ Ainda não aponta para o ERP. Bloqueia o webhook da Frenet e o retorno do OAuth — e é o domínio que o site vai chamar |
 
@@ -411,4 +447,4 @@ As cinco decisões foram respondidas pelo desenvolvimento do site e **já estão
 
 ---
 
-*FRENESI ERP · documento técnico de integração · v5, 13/08/2026. Escrito a partir do código em produção, da base de dados, de respostas reais da API da Frenet e do documento de respostas r2 do desenvolvimento do site.*
+*FRENESI ERP · documento técnico de integração · v6, 13/08/2026. Escrito a partir do código em produção, da base de dados, de respostas reais da API da Frenet, do documento de respostas r2 do desenvolvimento do site e do esclarecimento do suporte da Frenet sobre o webhook.*
