@@ -17,10 +17,12 @@ export function EmailsCliente({
   carrinho,
   giftback,
   cashback,
+  envio,
 }: {
   carrinho: ModeloEmailRecuperacao
   giftback: ModeloEmailRecuperacao
   cashback: ModeloEmailRecuperacao
+  envio: ModeloEmailRecuperacao
 }) {
   const [editando, setEditando] = useState<ChaveModelo | null>(null)
 
@@ -45,6 +47,13 @@ export function EmailsCliente({
       onde: 'Enviado de CRM → Cashback, para quem tem saldo perto de vencer',
       modelo: cashback,
       extras: 'saldo e data de validade do próprio cliente entram sozinhos',
+    },
+    {
+      chave: 'envio' as const,
+      nome: 'Aviso de envio',
+      onde: 'Enviado sozinho quando o pedido ganha código de rastreio',
+      modelo: envio,
+      extras: 'código e transportadora entram sozinhos · o botão já abre a página do objeto',
     },
   ]
 

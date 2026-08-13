@@ -11,7 +11,9 @@ import type { ChaveModelo } from '@/data/modelo-email'
 import {
   HTML_BASE_RECUPERACAO,
   aplicarSite,
+  HTML_VALIDADO_ENVIO,
   emailCashback,
+  emailEnvio,
   emailGiftback,
   emailRecuperacao,
   type ModeloEmailRecuperacao,
@@ -69,12 +71,28 @@ export function ModeloEmail({
   const router = useRouter()
 
   const abrirModoHtml = () => {
-    if (!htmlProprio.trim()) setHtmlProprio(HTML_BASE_RECUPERACAO)
+    // Cada tipo abre com a SUA base validada, não com a do carrinho: editar em
+    // cima da moldura errada é começar refazendo.
+    if (!htmlProprio.trim()) {
+      setHtmlProprio(tipo === 'envio' ? HTML_VALIDADO_ENVIO : HTML_BASE_RECUPERACAO)
+    }
     setModoHtml(true)
   }
 
   const previa = useMemo(() => {
     const modelo = { assunto, titulo, mensagem, textoBotao, html: modoHtml ? htmlProprio : null }
+    if (tipo === 'envio') {
+      return emailEnvio(
+        {
+          nome: 'Marina Fontes',
+          pedido: 'YP-1510190959842609',
+          codigo: 'AD778124948BR',
+          transportadora: 'Correios',
+          link: 'https://rastreio.frenet.com.br/COR/AD778124948BR',
+        },
+        modelo,
+      )
+    }
     if (tipo === 'cashback') {
       return emailCashback(
         { nome: 'Marina Fontes', saldo: 47.9, validade: '30/09/2026', lojaUrl: '#' },
@@ -160,7 +178,9 @@ export function ModeloEmail({
           ? 'Modelo do e-mail de aniversário'
           : tipo === 'cashback'
             ? 'Modelo do aviso de cashback'
-            : 'Modelo do e-mail de recuperação'
+            : tipo === 'envio'
+              ? 'Modelo do aviso de envio'
+              : 'Modelo do e-mail de recuperação'
       }
       largura={980}
       aoFechar={aoFechar}
@@ -197,7 +217,18 @@ export function ModeloEmail({
                   : 'O documento inteiro é seu. Campos vivos: '}
                 <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{nome}'}</span>
                 {', '}
-                {tipo === 'cashback' ? (
+                {tipo === 'envio' ? (
+                  <>
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{pedido}'}</span>
+                    {', '}
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{codigo}'}</span>
+                    {' (o rastreio), '}
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{transportadora}'}</span>
+                    {' e '}
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{link}'}</span>
+                    {', que já vem apontando para a página da transportadora com o código embutido. Use tabela e estilo inline — Gmail ignora CSS de cabeçalho.'}
+                  </>
+                ) : tipo === 'cashback' ? (
                   <>
                     <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{saldo}'}</span>
                     {' (o valor em reais), '}
@@ -246,7 +277,16 @@ export function ModeloEmail({
                 {'Escreva como a marca fala. '}
                 <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{nome}'}</span>
                 {' vira o primeiro nome do cliente (e some quando não há nome); '}
-                {tipo === 'cashback' ? (
+                {tipo === 'envio' ? (
+                  <>
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{pedido}'}</span>
+                    {', '}
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{codigo}'}</span>
+                    {' e '}
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{transportadora}'}</span>
+                    {' viram o pedido, o rastreio e quem leva. O quadro do código e o rodapé entram sozinhos.'}
+                  </>
+                ) : tipo === 'cashback' ? (
                   <>
                     <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{saldo}'}</span>
                     {' e '}

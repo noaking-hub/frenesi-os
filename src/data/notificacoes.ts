@@ -207,7 +207,7 @@ function mensagemDoAviso(
 
   const conteudo =
     aviso.evento === 'pedido_entregue'
-      ? emailEntregue({ nome: aviso.cliente, pedido: aviso.pedidoId })
+      ? emailEntregue({ nome: aviso.cliente, pedido: aviso.pedidoId, transportadora: nome })
       : emailEnvio(
           {
             nome: aviso.cliente,

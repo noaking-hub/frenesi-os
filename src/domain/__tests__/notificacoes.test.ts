@@ -97,27 +97,37 @@ describe('e-mail de envio', () => {
     link: 'https://rastreio.frenet.com.br/COR/AD778124948BR',
   }
 
+  it('usa a moldura validada da marca, com logomarca e redes', () => {
+    // A primeira versão tinha moldura própria, clara e sem logo — e na caixa
+    // de entrada parecia outro remetente.
+    const { html } = emailEnvio(base)
+    expect(html).toContain('cdn.brandfetch.io')
+    expect(html).toContain('background-color:#070605')
+    expect(html).toContain('marca/icon-instagram.png')
+  })
+
   it('traz o código em destaque e o botão apontando para a página certa', () => {
     const { assunto, html } = emailEnvio(base)
     expect(assunto).toContain('YP-1510190959842609')
     expect(html).toContain('AD778124948BR')
     expect(html).toContain('href="https://rastreio.frenet.com.br/COR/AD778124948BR"')
-    expect(html).toContain('Acompanhar entrega')
     // Só o primeiro nome: nome completo em e-mail soa a cobrança.
-    expect(html).toContain('Isabel,')
+    expect(html).toContain('Isabel, seu pedido')
     expect(html).not.toContain('Isabel Cristina')
   })
 
-  it('sem link não renderiza botão', () => {
+  it('sem link o botão cai na loja, não numa consulta vazia', () => {
     const { html } = emailEnvio({ ...base, link: null })
-    expect(html).not.toContain('Acompanhar entrega')
-    expect(html).toContain('AD778124948BR')
+    expect(html).toContain('href="https://frenesiperfumes.com.br"')
+    expect(html).not.toContain('{link}')
   })
 
-  it('sem código promete o código em vez de deixar o espaço vazio', () => {
-    const { html } = emailEnvio({ ...base, codigo: null, link: null })
-    expect(html).toContain('Assim que o código de rastreio for emitido')
-    expect(html).not.toContain('Código de rastreio ·')
+  it('nenhum placeholder sobra no HTML entregue', () => {
+    // Chave não substituída aparece crua na caixa do cliente.
+    const { html } = emailEnvio(base)
+    for (const chave of ['{nome}', '{pedido}', '{codigo}', '{transportadora}', '{link}']) {
+      expect(html).not.toContain(chave)
+    }
   })
 
   it('escapa o que veio de fora', () => {
@@ -127,12 +137,21 @@ describe('e-mail de envio', () => {
 })
 
 describe('e-mail de entrega', () => {
-  it('usa a mesma moldura e não oferece botão', () => {
-    // O pedido chegou: não há o que acompanhar, e um botão ali só confunde.
-    const { assunto, html } = emailEntregue({ nome: 'Rafael', pedido: 'YP-1' })
+  it('usa a mesma moldura, sem código e apontando para a loja', () => {
+    const { assunto, html } = emailEntregue({
+      nome: 'Rafael',
+      pedido: 'YP-1',
+      transportadora: 'Correios',
+    })
     expect(assunto).toContain('YP-1')
-    expect(html).toContain('FRENESI')
-    expect(html).toContain('Rafael, seu pedido chegou.')
-    expect(html).not.toContain('<a href')
+    expect(html).toContain('cdn.brandfetch.io')
+    expect(html).toContain('Rafael, seu pedido chegou')
+    expect(html).toContain('ENTREGA CONFIRMADA')
+    expect(html).toContain('href="https://frenesiperfumes.com.br"')
+    // Não há o que rastrear num pedido entregue.
+    expect(html).not.toContain('C&Oacute;DIGO DE RASTREIO')
+    for (const chave of ['{nome}', '{pedido}', '{transportadora}', '{link}', '{codigo}']) {
+      expect(html).not.toContain(chave)
+    }
   })
 })

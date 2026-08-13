@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 
 import { emailConfigurado, entregar } from '@/data/email'
 import { gravarModeloEmail, type ChaveModelo } from '@/data/modelo-email'
-import { aplicarSite, emailCashback, emailGiftback, emailRecuperacao } from '@/domain'
+import { aplicarSite, emailCashback, emailEnvio, emailGiftback, emailRecuperacao } from '@/domain'
 import type { ModeloEmailRecuperacao } from '@/domain'
 
 /**
@@ -37,6 +37,14 @@ export async function salvarModelo(
       erro: 'O HTML precisa conter {itens} — sem ele o cliente recebe um e-mail de carrinho sem os produtos.',
     }
   }
+  // O código de rastreio é a razão de existir deste aviso: sem ele o cliente
+  // recebe "seu pedido está a caminho" e continua sem saber onde ele está.
+  if (chave === 'envio' && html && !/\{codigo\}/.test(html)) {
+    return {
+      ok: false,
+      erro: 'O HTML precisa conter {codigo} — sem ele o aviso de envio vai sem o rastreio.',
+    }
+  }
   try {
     await gravarModeloEmail(chave, {
       assunto: m.assunto.trim(),
@@ -50,6 +58,7 @@ export async function salvarModelo(
   }
   revalidatePath('/crm/emails')
   revalidatePath('/crm/carrinhos')
+  revalidatePath('/pedidos/envios')
   return { ok: true }
 }
 
@@ -69,7 +78,18 @@ export async function enviarTeste(
   }
   try {
     const r =
-      chave === 'cashback'
+      chave === 'envio'
+        ? emailEnvio(
+            {
+              nome: 'Marina Fontes',
+              pedido: 'YP-1510190959842609',
+              codigo: 'AD778124948BR',
+              transportadora: 'Correios',
+              link: 'https://rastreio.frenet.com.br/COR/AD778124948BR',
+            },
+            m,
+          )
+        : chave === 'cashback'
         ? emailCashback(
             {
               nome: 'Marina Fontes',
