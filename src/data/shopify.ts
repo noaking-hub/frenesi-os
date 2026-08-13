@@ -1445,6 +1445,7 @@ const CONSULTA_PEDIDOS_VINCULO = /* GraphQL */ `
         email
         sourceIdentifier
         note
+        tags
         customAttributes {
           key
           value
@@ -1476,6 +1477,7 @@ interface PedidoVinculoShopify {
   email: string | null
   sourceIdentifier: string | null
   note: string | null
+  tags: string[] | null
   customAttributes: { key: string; value: string | null }[]
   totalPriceSet: { shopMoney: { amount: string } }
 }
@@ -1629,9 +1631,14 @@ export async function vincularPedidosShopify(): Promise<ResultadoVinculo> {
   const usados = new Set<string>() // names da Shopify já reivindicados
   let comReferencia = 0
   for (const o of daLoja) {
+    // As TAGS entram na busca porque é onde o número mora nos pedidos de
+    // motoboy: a integração grava a referência da Yampi como tag, não na
+    // observação — e sem lê-las os 41 pedidos locais ficavam "sem par na
+    // loja" com o par na cara.
     const texto = [
       o.sourceIdentifier ?? '',
       o.note ?? '',
+      ...(o.tags ?? []),
       ...o.customAttributes.flatMap((a) => [a.key, a.value ?? '']),
     ].join(' ')
     const numeros = texto.match(/\d{6,}/g) ?? []
@@ -1824,6 +1831,150 @@ const CONSULTA_ANULADOS = /* GraphQL */ `
  * O estorno pelo Mercado Pago também marca (via extrato), mas chega com
  * horas de atraso; a Shopify diz na hora.
  */
+// ── Entregas locais: a loja confirma, o ERP escuta ─────────────────────────
+
+const CONSULTA_ENTREGA_POR_GID = /* GraphQL */ `
+  query ($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Order {
+        id
+        name
+        displayFulfillmentStatus
+        fulfillments(first: 5) {
+          deliveredAt
+          displayStatus
+        }
+      }
+    }
+  }
+`
+
+interface EntregaShopify {
+  id: string
+  name: string
+  displayFulfillmentStatus: string | null
+  fulfillments: { deliveredAt: string | null; displayStatus: string | null }[]
+}
+
+export interface ResultadoEntregasLocais {
+  /** Rodada de vínculo que roda antes — é ela que dá GID aos pedidos novos. */
+  vinculados: number
+  /** Pedidos locais pendentes consultados na loja. */
+  consultados: number
+  /** Confirmados como entregues nesta rodada. */
+  entregues: number
+  mlConsumido: number
+  falhas: { pedido: string; erro: string }[]
+}
+
+/**
+ * Puxa da Shopify a entrega dos pedidos de motoboy.
+ *
+ * O fluxo real da operação é o INVERSO do resto do módulo: para pedido de
+ * transportadora, o ERP marca a entrega na loja; para entrega local, é a
+ * OPERAÇÃO que marca "entregue" na Shopify quando o motoboy volta — e o ERP
+ * ficava surdo a isso, com dezenas de pedidos entregues parados em "pago",
+ * cada um esperando um clique manual que a Shopify já tinha dado.
+ *
+ * A consulta é dirigida pelo ERP: só os pedidos locais pendentes com GID
+ * conhecido, por id — nada de varrer a loja atrás de um filtro que não
+ * existe (MOTOBOY é forma de entrega, e a busca de pedidos não filtra por
+ * ela). A confirmação usa a MESMA transação do botão "Confirmar entrega em
+ * mãos": marca entregue e baixa o estoque juntos, e grava a data real da
+ * entrega que a loja informou — é ela que abre a janela de devolução.
+ */
+export async function importarEntregasLocaisDaShopify(): Promise<ResultadoEntregasLocais> {
+  if (!supabaseConfigurado()) {
+    throw new Error('O Supabase precisa estar configurado.')
+  }
+  const { loja } = credenciais()
+  if (!loja) throw new Error('SHOPIFY_LOJA precisa estar no .env.local')
+
+  // O vínculo primeiro: pedido local recém-importado ainda não tem GID, e sem
+  // GID não há o que consultar. É a mesma rodada que casa pelos números nas
+  // tags.
+  let vinculados = 0
+  try {
+    vinculados = (await vincularPedidosShopify()).vinculados
+  } catch (e) {
+    console.error('[shopify] vínculo antes das entregas locais falhou:', e)
+  }
+
+  const sb = supabaseServer()
+  const { data, error } = await sb
+    .from('pedidos')
+    .select('id, shopify_gid')
+    .eq('entrega_local', true)
+    .neq('situacao', 'entregue')
+    .not('shopify_gid', 'is', null)
+    .limit(200)
+  if (error) throw error
+
+  const pendentes = (data ?? []) as { id: string; shopify_gid: string }[]
+  const resultado: ResultadoEntregasLocais = {
+    vinculados,
+    consultados: pendentes.length,
+    entregues: 0,
+    mlConsumido: 0,
+    falhas: [],
+  }
+  if (pendentes.length === 0) return resultado
+
+  const token = await tokenDeAcesso(loja)
+  const porGid = new Map(pendentes.map((p) => [p.shopify_gid, p.id]))
+
+  for (const lote of emLotes(pendentes, 50)) {
+    const dados: { nodes: (EntregaShopify | null)[] } = await chamarShopify(
+      loja,
+      token,
+      CONSULTA_ENTREGA_POR_GID,
+      { ids: lote.map((p) => p.shopify_gid) },
+      'ler a entrega dos pedidos locais',
+      'read_orders',
+    )
+
+    for (const node of dados.nodes) {
+      if (!node) continue
+      const pedidoId = porGid.get(node.id)
+      if (!pedidoId) continue
+
+      const entregueEm =
+        node.fulfillments.find((f) => f.deliveredAt)?.deliveredAt ??
+        (node.fulfillments.some((f) => f.displayStatus === 'DELIVERED')
+          ? new Date().toISOString()
+          : null)
+      if (!entregueEm) continue
+
+      try {
+        // A mesma transação do botão manual: entregue + baixa de estoque, ou
+        // nada. Pedido fora do controle de estoque entrega com 0 ml — regra
+        // da operação, não falha.
+        const { data: ml, error: erroRpc } = await sb.rpc('entregar_pedido_local', {
+          p_pedido_id: pedidoId,
+          p_operador: 'Entrega confirmada na Shopify',
+        })
+        if (erroRpc) throw erroRpc
+
+        // A data REAL da loja substitui o "agora" da transação: é dela que a
+        // janela de devolução conta. E `entrega_shopify_em` fecha a fila de
+        // baixa — a loja já sabe da entrega, foi ela quem contou.
+        await sb
+          .from('pedidos')
+          .update({ entregue_em: entregueEm, entrega_shopify_em: entregueEm })
+          .eq('id', pedidoId)
+
+        resultado.entregues++
+        resultado.mlConsumido += Number(ml) || 0
+      } catch (e) {
+        resultado.falhas.push({ pedido: pedidoId, erro: mensagemDe(e) })
+      }
+    }
+  }
+
+  resultado.mlConsumido = Math.round(resultado.mlConsumido * 10) / 10
+  return resultado
+}
+
 export async function marcarAnuladosDaShopify(
   dias = 45,
 ): Promise<{ anulados: number; marcados: number }> {

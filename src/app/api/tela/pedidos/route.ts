@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { importarDaYampi, sincronizarEnvios } from '@/app/(erp)/pedidos/actions'
+import { importarEntregasLocaisDaShopify, mensagemDe, shopifyConfigurada } from '@/data/shopify'
 
 /**
  * Sincronia de pedidos para a tela, como rota — fora da fila de Server
@@ -16,5 +17,15 @@ export async function POST(req: Request) {
 
   const importacao = dias > 0 ? await importarDaYampi(dias) : null
   const envios = corpo.espelhar ? await sincronizarEnvios() : null
-  return NextResponse.json({ importacao, envios })
+  // As entregas locais vêm no mesmo clique: quem sincroniza quer ver o pedido
+  // do motoboy fechar aqui também, não só na virada da hora.
+  let entregasLocais: unknown = null
+  if (corpo.espelhar && shopifyConfigurada()) {
+    try {
+      entregasLocais = await importarEntregasLocaisDaShopify()
+    } catch (e) {
+      entregasLocais = { erro: mensagemDe(e) }
+    }
+  }
+  return NextResponse.json({ importacao, envios, entregasLocais })
 }

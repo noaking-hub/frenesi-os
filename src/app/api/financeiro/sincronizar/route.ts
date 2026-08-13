@@ -7,6 +7,7 @@ import { baixarEstoqueDosFaturados } from '@/data/baixa-estoque'
 import { enviarAvisosDePedido } from '@/data/notificacoes'
 import {
   aplicarEstoqueCalculado,
+  importarEntregasLocaisDaShopify,
   marcarAnuladosDaShopify,
   mensagemDe,
   shopifyConfigurada,
@@ -153,6 +154,22 @@ export async function POST(req: Request) {
       relatorio.anulados = await marcarAnuladosDaShopify()
     } catch (e) {
       relatorio.anulados = { erro: mensagemDe(e) }
+    }
+    // Entrega local: a operação marca "entregue" na SHOPIFY quando o motoboy
+    // volta — e é daqui que o ERP escuta, fecha o pedido e baixa o estoque.
+    // Antes disso, dezenas de pedidos entregues ficavam parados em "pago"
+    // esperando um clique manual que a loja já tinha dado.
+    try {
+      const el = await importarEntregasLocaisDaShopify()
+      relatorio.entregasLocais = {
+        vinculados: el.vinculados,
+        consultados: el.consultados,
+        entregues: el.entregues,
+        mlConsumido: el.mlConsumido,
+        falhas: el.falhas.length,
+      }
+    } catch (e) {
+      relatorio.entregasLocais = { erro: mensagemDe(e) }
     }
     try {
       const s = await aplicarEstoqueCalculado()

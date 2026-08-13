@@ -57,6 +57,7 @@ export function ImportarPedidos({
   ): Promise<{
     importacao: Awaited<ReturnType<typeof importarDaYampi>> | null
     envios: Awaited<ReturnType<typeof sincronizarEnvios>> | null
+    entregasLocais: { entregues?: number; mlConsumido?: number; erro?: string } | null
   }> => {
     const resposta = await fetch('/api/tela/pedidos', {
       method: 'POST',
@@ -176,7 +177,7 @@ export function ImportarPedidos({
       setResumo(null)
       setAviso(null)
       setDiagnostico(null)
-      const { importacao, envios } = await importarPelaRota(10, true)
+      const { importacao, envios, entregasLocais } = await importarPelaRota(10, true)
       const r = importacao
       if (!r || !r.ok) {
         setErro(r ? r.erro : 'A importação não respondeu.')
@@ -190,6 +191,13 @@ export function ImportarPedidos({
             : '') +
           (e.ok && e.enviados
             ? ` · ${plural(e.enviados, 'envio espelhado', 'envios espelhados')} na Shopify`
+            : '') +
+          // A ponta inversa: entrega de motoboy marcada na LOJA fecha aqui.
+          (entregasLocais?.entregues
+            ? ` · ${plural(entregasLocais.entregues, 'entrega local confirmada', 'entregas locais confirmadas')} pela Shopify` +
+              (entregasLocais.mlConsumido
+                ? ` (${entregasLocais.mlConsumido.toFixed(1).replace('.', ',')} ml baixados)`
+                : '')
             : '') +
           '.',
       )
