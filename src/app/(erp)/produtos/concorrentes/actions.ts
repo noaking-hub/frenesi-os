@@ -3,7 +3,6 @@
 import { revalidatePath } from 'next/cache'
 
 import {
-  coletarConcorrente,
   diagnosticarLoja,
   dominioNormalizado,
   mensagemDe,
@@ -59,80 +58,18 @@ export async function removerConcorrente(id: string): Promise<Resposta> {
   return { ok: true }
 }
 
+/**
+ * O resumo de uma leitura, como a tela mostra.
+ *
+ * A varredura em si não é mais Server Action: ela roda em fatias pela rota
+ * `/api/tela/concorrentes` — a chamada única, de minutos, era cortada pela
+ * Netlify e derrubava a página inteira.
+ */
 export interface ResumoColeta {
   fonte: string
   lidos: number
   casados: number
   erro: string | null
-}
-
-/**
- * Lê todas as fontes automáticas.
- *
- * Uma fonte que falha NÃO derruba as outras: cada uma reporta o próprio
- * resultado. Preço de mercado com três lojas de quatro continua servindo para
- * decidir — desde que a tela diga quais três.
- */
-export async function vascularPrecos(): Promise<Resposta<{ resumo: ResumoColeta[] }>> {
-  const bloqueio = exigeSupabase('coletar preços')
-  if (bloqueio) return bloqueio
-
-  const { data, error } = await supabaseServer()
-    .from('concorrentes')
-    .select('id, nome')
-    .eq('ativo', true)
-    .neq('coleta', 'manual')
-  if (error) return { ok: false, erro: error.message }
-  if (!data?.length) {
-    return { ok: false, erro: 'Nenhuma fonte com leitura automática cadastrada.' }
-  }
-
-  const resumo: ResumoColeta[] = []
-  for (const f of data) {
-    try {
-      const r = await coletarConcorrente(f.id)
-      resumo.push({ fonte: f.nome, lidos: r.lidos, casados: r.casados, erro: null })
-    } catch (e) {
-      resumo.push({ fonte: f.nome, lidos: 0, casados: 0, erro: mensagemDe(e) })
-    }
-  }
-
-  revalidatePath('/', 'layout')
-  return { ok: true, resumo }
-}
-
-/**
- * Lê UMA loja.
- *
- * Vasculhar todas leva minutos — são centenas de páginas por loja, lidas
- * devagar de propósito. Quando só uma mudou de preço, ou só uma estava fora do
- * ar na rodada anterior, reler as outras é espera à toa.
- */
-export async function vascularConcorrente(
-  id: string,
-): Promise<Resposta<{ resumo: ResumoColeta }>> {
-  const bloqueio = exigeSupabase('coletar preços')
-  if (bloqueio) return bloqueio
-
-  const { data, error } = await supabaseServer()
-    .from('concorrentes')
-    .select('id, nome, coleta')
-    .eq('id', id)
-    .maybeSingle()
-  if (error) return { ok: false, erro: error.message }
-  if (!data) return { ok: false, erro: 'Concorrente não encontrado.' }
-  if (data.coleta === 'manual') {
-    return { ok: false, erro: `${data.nome} está como leitura manual — lance os preços à mão.` }
-  }
-
-  try {
-    const r = await coletarConcorrente(id)
-    revalidatePath('/', 'layout')
-    return { ok: true, resumo: { fonte: data.nome, lidos: r.lidos, casados: r.casados, erro: null } }
-  } catch (e) {
-    revalidatePath('/', 'layout')
-    return { ok: false, erro: `${data.nome}: ${mensagemDe(e)}` }
-  }
 }
 
 /**

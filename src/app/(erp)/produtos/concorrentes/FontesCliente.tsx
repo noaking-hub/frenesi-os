@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 
-import { useEffect, useRef, useState, useTransition } from 'react'
+import { useState, useTransition } from 'react'
 
 import { Modal } from '@/components/erp/Modal'
 import { BotaoOuro, BotaoSecundario, EstadoVazio, Rotulo, TituloSecao, Valor } from '@/components/erp/primitivos'
@@ -17,8 +17,6 @@ import {
   lancarPrecoManual,
   recasarPendentes,
   removerConcorrente,
-  vascularConcorrente,
-  vascularPrecos,
   type ResumoColeta,
 } from './actions'
 
@@ -78,56 +76,108 @@ export function FontesCliente({ fontes, bases, semDono, variantes }: Props) {
   // Qual loja está sendo lida agora. `pendente` sozinho não diz: ele fica
   // verdadeiro para qualquer ação, e o "Lendo…" apareceria em todas as linhas.
   const [lendo, setLendo] = useState<string | null>(null)
+  const [varrendoTudo, setVarrendoTudo] = useState(false)
+  const [progresso, setProgresso] = useState<string | null>(null)
   const [pendente, iniciarTransicao] = useTransition()
 
   const automaticas = fontes.filter((f) => f.coleta !== 'manual')
 
-  // Coleta com mais de 24 h dispara sozinha ao abrir: a rotina agendada só
-  // roda no deploy, e rodando local ninguém deveria precisar lembrar do botão.
-  const jaTentou = useRef(false)
-  useEffect(() => {
-    if (jaTentou.current || automaticas.length === 0) return
-    const ultima = automaticas
-      .map((f) => (f.lidaEm ? new Date(f.lidaEm).getTime() : 0))
-      .reduce((a, b) => Math.max(a, b), 0)
-    if (Date.now() - ultima < 24 * 3_600_000) return
-    jaTentou.current = true
-    vascular()
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- roda uma vez, ao abrir
-  }, [])
+  // A varredura NÃO dispara mais sozinha ao abrir a tela: quem lê todo dia é
+  // o agendador do banco, em fatias. O disparo automático chamava a leitura
+  // inteira numa requisição de minutos — a Netlify cortava no meio e a página
+  // caía em erro de navegador toda vez que alguém a abria.
 
   const router = useRouter()
-  const vascular = () =>
+
+  interface RespostaFatia {
+    ok: boolean
+    erro?: string
+    lidos?: number
+    casados?: number
+    restantes?: number
+    total?: number
+    concluido?: boolean
+  }
+
+  // Teto de segurança, não de trabalho: ~60 fatias de 14 s cobrem a maior
+  // loja com folga; passar disso é sinal de leitura que não converge.
+  const TETO_DE_VOLTAS = 60
+
+  // Avança a leitura fatia a fatia até a passada fechar. Cada chamada cabe no
+  // tempo que a Netlify dá a uma função — era a chamada única, de minutos,
+  // que derrubava a página ao ser cortada no meio. Rota, não Server Action: a
+  // varredura abre dezenas de requisições e uma action pendente seguraria
+  // toda navegação da aba.
+  const lerFonte = async (f: FonteConcorrente): Promise<ResumoColeta> => {
+    for (let volta = 0; volta < TETO_DE_VOLTAS; volta++) {
+      let r: RespostaFatia
+      try {
+        const resposta = await fetch('/api/tela/concorrentes', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ id: f.id }),
+        })
+        r = (await resposta.json()) as RespostaFatia
+      } catch {
+        return {
+          fonte: f.nome,
+          lidos: 0,
+          casados: 0,
+          erro: 'a conexão caiu no meio da leitura — vasculhe de novo para continuar de onde parou',
+        }
+      }
+      if (!r.ok) return { fonte: f.nome, lidos: 0, casados: 0, erro: r.erro ?? 'erro desconhecido' }
+      if (r.concluido) return { fonte: f.nome, lidos: r.lidos ?? 0, casados: r.casados ?? 0, erro: null }
+      const total = r.total ?? 0
+      setProgresso(`${f.nome} · ${total - (r.restantes ?? 0)} de ${total} páginas`)
+    }
+    return {
+      fonte: f.nome,
+      lidos: 0,
+      casados: 0,
+      erro: 'a leitura não fechou nesta rodada — vasculhe de novo para continuar de onde parou',
+    }
+  }
+
+  const vascular = () => {
+    // Uma varredura já andando: segundo clique só somaria fatias repetidas.
+    if (pendente) return
     iniciarTransicao(async () => {
       setErro(null)
       setResumo(null)
       setDiagnostico(null)
-      // Rota, não Server Action: a varredura abre dezenas de requisições e
-      // uma action pendente seguraria toda navegação da aba.
-      const resposta = await fetch('/api/tela/concorrentes', { method: 'POST' })
-      const r = (await resposta.json()) as Awaited<ReturnType<typeof vascularPrecos>>
-      if (!r.ok) {
-        setErro(r.erro)
-        return
+      setVarrendoTudo(true)
+      // Uma fonte que falha NÃO derruba as outras: cada uma reporta o próprio
+      // resultado, e o resumo cresce conforme as leituras fecham.
+      const linhas: ResumoColeta[] = []
+      for (const f of automaticas) {
+        setLendo(f.id)
+        setProgresso(`${f.nome} · abrindo a loja…`)
+        linhas.push(await lerFonte(f))
+        setResumo([...linhas])
       }
-      setResumo(r.resumo)
+      setLendo(null)
+      setProgresso(null)
+      setVarrendoTudo(false)
       router.refresh()
     })
+  }
 
-  const vascularUma = (f: FonteConcorrente) =>
+  const vascularUma = (f: FonteConcorrente) => {
+    if (pendente) return
     iniciarTransicao(async () => {
       setErro(null)
       setResumo(null)
       setDiagnostico(null)
       setLendo(f.id)
-      const r = await vascularConcorrente(f.id)
+      setProgresso(`${f.nome} · abrindo a loja…`)
+      const r = await lerFonte(f)
       setLendo(null)
-      if (!r.ok) {
-        setErro(r.erro)
-        return
-      }
-      setResumo([r.resumo])
+      setProgresso(null)
+      setResumo([r])
+      router.refresh()
     })
+  }
 
   const diagnosticar = (f: FonteConcorrente) =>
     iniciarTransicao(async () => {
@@ -176,7 +226,7 @@ export function FontesCliente({ fontes, bases, semDono, variantes }: Props) {
         </BotaoSecundario>
         <BotaoOuro altura={34} onClick={vascular}>
           {/* "Todas" precisa se distinguir do botão por linha, que lê uma. */}
-          {pendente && !lendo
+          {varrendoTudo
             ? 'Vasculhando…'
             : automaticas.length === 1
               ? 'Vasculhar a loja'
@@ -298,6 +348,12 @@ export function FontesCliente({ fontes, bases, semDono, variantes }: Props) {
             )
           })}
         </div>
+      )}
+
+      {progresso && (
+        <span className="font-sans" style={{ fontSize: 11, color: 'var(--color-terciario)' }}>
+          {progresso}
+        </span>
       )}
 
       {erro && (

@@ -204,7 +204,9 @@ async function texto(url: string, oQue: string): Promise<string> {
         'User-Agent': 'FRENESI-OS/1.0 (comparador de precos)',
       },
       cache: 'no-store',
-      signal: AbortSignal.timeout(20_000),
+      // 10 s, não 20: a leitura roda em fatias com orçamento de tempo, e o
+      // pior caso de UMA página lenta precisa caber na sobra da fatia.
+      signal: AbortSignal.timeout(10_000),
     })
   } catch (e) {
     throw new LeituraBloqueada(`não foi possível ${oQue} (${url}) — ${mensagemDe(e)}`)
@@ -256,11 +258,22 @@ export async function urlsDeProduto(dominio: string): Promise<string[]> {
   return encontradas.slice(0, MAX_PRODUTOS_NUVEMSHOP)
 }
 
-async function lerLojaNuvemshop(dominio: string): Promise<PrecoObservado[]> {
-  const urls = await urlsDeProduto(dominio)
+/**
+ * Lê um trecho das páginas de produto, de `desde` até o prazo estourar.
+ *
+ * A loja inteira leva minutos e a Netlify corta a função em ~26 s — foi esse
+ * corte que derrubava a tela de Concorrentes no meio da varredura. Quem chama
+ * guarda o `proximo` e continua na chamada seguinte, de onde parou.
+ */
+async function lerPaginasNuvemshop(
+  urls: string[],
+  desde: number,
+  prazoAte: number,
+): Promise<{ observados: PrecoObservado[]; proximo: number }> {
   const observados: PrecoObservado[] = []
+  let i = desde
 
-  for (let i = 0; i < urls.length; i += PARALELAS) {
+  while (i < urls.length && Date.now() < prazoAte) {
     const lote = await Promise.all(
       urls.slice(i, i + PARALELAS).map(async (url) => {
         try {
@@ -319,26 +332,14 @@ async function lerLojaNuvemshop(dominio: string): Promise<PrecoObservado[]> {
         })
       }
     }
+
+    i += PARALELAS
   }
 
-  if (observados.length === 0) {
-    throw new LeituraBloqueada(
-      `${dominio} abriu, mas nenhuma página trouxe preço em JSON-LD. Rode o diagnóstico: ` +
-        'ele mostra o que veio, e dá para ajustar a leitura sem adivinhar.',
-    )
-  }
-  return observados
+  return { observados, proximo: Math.min(i, urls.length) }
 }
 
 export type Estrategia = 'shopify' | 'nuvemshop' | 'manual'
-
-/** Despacha para o leitor da plataforma da loja. */
-export async function lerLoja(dominio: string, estrategia: Estrategia): Promise<PrecoObservado[]> {
-  if (estrategia === 'manual') {
-    throw new Error('Fonte manual não é lida automaticamente.')
-  }
-  return estrategia === 'shopify' ? lerLojaShopify(dominio) : lerLojaNuvemshop(dominio)
-}
 
 /**
  * O que a loja devolve, cru.
@@ -504,19 +505,74 @@ export interface ResultadoColeta {
   lidos: number
   /** Preços cujo título casou com uma base do catálogo. */
   casados: number
-  /** Variantes em ml que o ERP não fraciona (50 ml, kit) — ignoradas. */
-  semVariante: number
+  /** Passada fechada? Falso = ainda há páginas — chame de novo para avançar. */
+  concluido: boolean
+  /** Páginas que ainda faltam ler nesta passada. */
+  restantes: number
+  /** Total de páginas da passada — é o que deixa a tela mostrar progresso. */
+  total: number
 }
 
 /**
- * Lê uma loja e grava os preços.
+ * Uma passada abandonada (deploy no meio, loja que saiu do ar) não pode
+ * prender o cursor para sempre: mais velha que isto, recomeça do zero.
+ */
+const PASSADA_VALIDA_MS = 6 * 3_600_000
+
+interface LinhaPreco {
+  concorrente_id: string
+  chave: string
+  base_id: string | null
+  casado_por: 'apelido' | 'titulo' | null
+  variante: VarianteMl
+  titulo: string
+  preco: number
+  url: string | null
+  lido_em: string
+}
+
+type ObservadoComMl = PrecoObservado & { variante: VarianteMl }
+
+/**
+ * A falha é gravada na fonte: a tela mostra o motivo em vez de um card parado
+ * dizendo que tudo foi lido. O cursor zera junto — a próxima vasculhada
+ * recomeça a passada em vez de retomar uma leitura doente.
+ */
+async function gravarBloqueio(
+  sb: ReturnType<typeof supabaseServer>,
+  concorrenteId: string,
+  e: unknown,
+) {
+  await sb
+    .from('concorrentes')
+    .update({
+      ultima_leitura: new Date().toISOString(),
+      ultimo_status: 'bloqueada',
+      ultimo_erro: mensagemDe(e).slice(0, 400),
+      coleta_indice: null,
+      coleta_iniciada_em: null,
+      coleta_observados: 0,
+    })
+    .eq('id', concorrenteId)
+}
+
+/**
+ * Lê uma loja e grava os preços — em fatias que cabem no tempo de execução.
  *
  * O casamento com o catálogo acontece aqui, e o que não casa é gravado do
  * mesmo jeito com `base_id` nulo. Descartar o não casado esconderia o tamanho
  * do buraco: a tela precisa poder dizer "212 preços lidos, 47 sem dono" para
  * alguém decidir ensinar os nomes.
+ *
+ * Com `prazoMs`, a chamada lê o que couber no prazo e devolve
+ * `concluido: false` com o quanto falta; o cursor fica na própria fonte e a
+ * chamada seguinte continua de onde parou. Os preços valendo só são trocados
+ * quando a passada FECHA — uma leitura pela metade nunca vira comparação.
  */
-export async function coletarConcorrente(concorrenteId: string): Promise<ResultadoColeta> {
+export async function coletarConcorrente(
+  concorrenteId: string,
+  opcoes?: { prazoMs?: number },
+): Promise<ResultadoColeta> {
   if (!supabaseConfigurado()) {
     throw new Error('O Supabase precisa estar configurado para coletar preços.')
   }
@@ -524,7 +580,7 @@ export async function coletarConcorrente(concorrenteId: string): Promise<Resulta
 
   const { data: fonte, error: erroFonte } = await sb
     .from('concorrentes')
-    .select('id, dominio, coleta')
+    .select('id, dominio, coleta, coleta_indice, coleta_iniciada_em, coleta_observados')
     .eq('id', concorrenteId)
     .maybeSingle()
   if (erroFonte) throw erroFonte
@@ -544,52 +600,8 @@ export async function coletarConcorrente(concorrenteId: string): Promise<Resulta
   const catalogo = (bases ?? []) as { id: string; nome: string; marca: string }[]
   const ensinados = new Map((apelidos ?? []).map((a) => [a.titulo_normalizado, a.base_id]))
 
-  let observados: PrecoObservado[]
-  try {
-    observados = await lerLoja(fonte.dominio, fonte.coleta as Estrategia)
-  } catch (e) {
-    // A falha é gravada na fonte: a tela mostra o motivo em vez de um card
-    // parado dizendo que tudo foi lido.
-    await sb
-      .from('concorrentes')
-      .update({
-        ultima_leitura: new Date().toISOString(),
-        ultimo_status: 'bloqueada',
-        ultimo_erro: mensagemDe(e).slice(0, 400),
-      })
-      .eq('id', concorrenteId)
-    throw e
-  }
-
-  const comVariante = observados.filter((o) => o.variante !== null)
-
-  // A loja respondeu e nada tinha tamanho: é falha, não silêncio. Sem esta
-  // trava a coleta gravava zero linha, marcava "parcial" e não dizia por quê —
-  // que foi exatamente o que aconteceu na primeira leitura de verdade.
-  if (observados.length > 0 && comVariante.length === 0) {
-    const amostra = observados
-      .slice(0, 3)
-      .map((o) => o.titulo)
-      .join(' · ')
-    const motivo =
-      `li ${observados.length} preços em ${fonte.dominio}, mas nenhum trazia o tamanho em ml ` +
-      `(3, 5, 8, 10 ou 15). Nesta loja o ml provavelmente é variação do produto, e o JSON-LD ` +
-      `publica só um preço por página. Exemplos do que veio: ${amostra}`
-    await sb
-      .from('concorrentes')
-      .update({
-        ultima_leitura: new Date().toISOString(),
-        ultimo_status: 'parcial',
-        ultimo_erro: motivo.slice(0, 400),
-        precos_lidos: 0,
-      })
-      .eq('id', concorrenteId)
-    throw new LeituraBloqueada(motivo)
-  }
-
-  const linhas = comVariante.map((o) => {
-    const chaveEnsinada = normalizarTitulo(o.titulo)
-    const ensinado = ensinados.get(chaveEnsinada) ?? null
+  const paraLinha = (o: ObservadoComMl): LinhaPreco => {
+    const ensinado = ensinados.get(normalizarTitulo(o.titulo)) ?? null
     const baseId = ensinado ?? casarTitulo(o.titulo, catalogo)?.baseId ?? null
     return {
       concorrente_id: concorrenteId,
@@ -604,13 +616,194 @@ export async function coletarConcorrente(concorrenteId: string): Promise<Resulta
       url: o.url,
       lido_em: new Date().toISOString(),
     }
-  })
+  }
 
+  // A trava do "nada tinha tamanho": a loja respondeu e nenhum preço trazia o
+  // ml — é falha, não silêncio. Sem ela a coleta gravava zero linha, marcava
+  // "parcial" e não dizia por quê.
+  const motivoSemMl = (quantos: number, amostra: string) =>
+    `li ${quantos} preços em ${fonte.dominio}, mas nenhum trazia o tamanho em ml ` +
+    `(3, 5, 8, 10 ou 15). Nesta loja o ml provavelmente é variação do produto, e o JSON-LD ` +
+    `publica só um preço por página.${amostra ? ` Exemplos do que veio: ${amostra}` : ''}`
+
+  if (fonte.coleta === 'shopify') {
+    // Shopify entrega o catálogo em até dez requisições: cabe numa chamada só,
+    // sem cursor — o fatiamento existe para a leitura página a página.
+    let observados: PrecoObservado[]
+    try {
+      observados = await lerLojaShopify(fonte.dominio)
+    } catch (e) {
+      await gravarBloqueio(sb, concorrenteId, e)
+      throw e
+    }
+
+    const comVariante = observados.filter((o): o is ObservadoComMl => o.variante !== null)
+    if (observados.length > 0 && comVariante.length === 0) {
+      const motivo = motivoSemMl(
+        observados.length,
+        observados.slice(0, 3).map((o) => o.titulo).join(' · '),
+      )
+      await sb
+        .from('concorrentes')
+        .update({
+          ultima_leitura: new Date().toISOString(),
+          ultimo_status: 'parcial',
+          ultimo_erro: motivo.slice(0, 400),
+          precos_lidos: 0,
+        })
+        .eq('id', concorrenteId)
+      throw new LeituraBloqueada(motivo)
+    }
+
+    const r = await concluirPassada(sb, concorrenteId, comVariante.map(paraLinha))
+    return { ...r, concluido: true, restantes: 0, total: observados.length }
+  }
+
+  // ── Nuvemshop: a loja não cabe numa execução — a passada avança em fatias.
+  const prazoAte = Date.now() + (opcoes?.prazoMs ?? 20 * 60_000)
+
+  const passadaViva =
+    fonte.coleta_indice !== null &&
+    fonte.coleta_iniciada_em !== null &&
+    Date.now() - new Date(fonte.coleta_iniciada_em as string).getTime() < PASSADA_VALIDA_MS
+  const indice = passadaViva ? (fonte.coleta_indice as number) : 0
+  let observadosNaPassada = passadaViva ? ((fonte.coleta_observados as number) ?? 0) : 0
+  const iniciadaEm = passadaViva ? (fonte.coleta_iniciada_em as string) : new Date().toISOString()
+
+  if (!passadaViva) {
+    // Restos de uma passada abandonada não podem contaminar a nova.
+    const { error } = await sb
+      .from('concorrente_precos_coleta')
+      .delete()
+      .eq('concorrente_id', concorrenteId)
+    if (error) throw error
+  }
+
+  // O sitemap é relido a cada fatia (uma ou duas requisições): guardar
+  // centenas de URLs no banco custaria mais que reler, e a ordem dele é
+  // estável no intervalo entre fatias.
+  let urls: string[]
+  try {
+    urls = await urlsDeProduto(fonte.dominio)
+  } catch (e) {
+    await gravarBloqueio(sb, concorrenteId, e)
+    throw e
+  }
+
+  const { observados, proximo } = await lerPaginasNuvemshop(urls, indice, prazoAte)
+  observadosNaPassada += observados.length
+
+  // Dedup por chave DENTRO da fatia: o upsert recusa a mesma chave duas vezes
+  // no mesmo lote. Entre fatias, o conflito resolve no banco pela chave.
+  const daFatia = new Map<string, LinhaPreco>()
+  for (const o of observados) {
+    if (o.variante === null) continue
+    const l = paraLinha(o as ObservadoComMl)
+    const atual = daFatia.get(l.chave)
+    if (!atual || l.preco < atual.preco) daFatia.set(l.chave, l)
+  }
+  const linhasDaFatia = [...daFatia.values()]
+  for (let i = 0; i < linhasDaFatia.length; i += 500) {
+    const { error } = await sb
+      .from('concorrente_precos_coleta')
+      .upsert(linhasDaFatia.slice(i, i + 500), { onConflict: 'concorrente_id,chave' })
+    if (error) throw error
+  }
+
+  if (proximo < urls.length) {
+    // Fatia do meio: só o cursor anda. `ultima_leitura` e o status ficam da
+    // última passada completa — a tela não troca dado bom por metade.
+    const { error } = await sb
+      .from('concorrentes')
+      .update({
+        coleta_indice: proximo,
+        coleta_iniciada_em: iniciadaEm,
+        coleta_observados: observadosNaPassada,
+      })
+      .eq('id', concorrenteId)
+    if (error) throw error
+    return {
+      lidos: linhasDaFatia.length,
+      casados: linhasDaFatia.filter((l) => l.base_id !== null).length,
+      concluido: false,
+      restantes: urls.length - proximo,
+      total: urls.length,
+    }
+  }
+
+  // Passada completa: o acumulado das fatias substitui os preços valendo.
+  const { data: acumulado, error: erroAcumulado } = await sb
+    .from('concorrente_precos_coleta')
+    .select('chave, base_id, casado_por, variante, titulo, preco, url')
+    .eq('concorrente_id', concorrenteId)
+  if (erroAcumulado) throw erroAcumulado
+
+  const todas: LinhaPreco[] = (acumulado ?? []).map((a) => ({
+    concorrente_id: concorrenteId,
+    chave: a.chave as string,
+    base_id: (a.base_id as string | null) ?? null,
+    casado_por: (a.casado_por as 'apelido' | 'titulo' | null) ?? null,
+    variante: a.variante as VarianteMl,
+    titulo: a.titulo as string,
+    preco: Number(a.preco),
+    url: (a.url as string | null) ?? null,
+    lido_em: new Date().toISOString(),
+  }))
+
+  if (todas.length === 0) {
+    const motivo =
+      observadosNaPassada > 0
+        ? motivoSemMl(
+            observadosNaPassada,
+            observados.slice(0, 3).map((o) => o.titulo).join(' · '),
+          )
+        : `${fonte.dominio} abriu, mas nenhuma página trouxe preço em JSON-LD. Rode o ` +
+          'diagnóstico: ele mostra o que veio, e dá para ajustar a leitura sem adivinhar.'
+    await sb
+      .from('concorrentes')
+      .update({
+        ultima_leitura: new Date().toISOString(),
+        ultimo_status: observadosNaPassada > 0 ? 'parcial' : 'bloqueada',
+        ultimo_erro: motivo.slice(0, 400),
+        precos_lidos: 0,
+        coleta_indice: null,
+        coleta_iniciada_em: null,
+        coleta_observados: 0,
+      })
+      .eq('id', concorrenteId)
+    throw new LeituraBloqueada(motivo)
+  }
+
+  const r = await concluirPassada(sb, concorrenteId, todas)
+
+  const { error: erroLimparColeta } = await sb
+    .from('concorrente_precos_coleta')
+    .delete()
+    .eq('concorrente_id', concorrenteId)
+  if (erroLimparColeta) throw erroLimparColeta
+  const { error: erroCursor } = await sb
+    .from('concorrentes')
+    .update({ coleta_indice: null, coleta_iniciada_em: null, coleta_observados: 0 })
+    .eq('id', concorrenteId)
+  if (erroCursor) throw erroCursor
+
+  return { ...r, concluido: true, restantes: 0, total: urls.length }
+}
+
+/**
+ * Fecha a passada: dedup, registro do que mudou e substituição dos preços
+ * valendo — tudo de uma vez, nunca no meio de uma leitura.
+ */
+async function concluirPassada(
+  sb: ReturnType<typeof supabaseServer>,
+  concorrenteId: string,
+  linhas: LinhaPreco[],
+): Promise<{ lidos: number; casados: number }> {
   // Uma loja vende UM preço por perfume e tamanho. Ler três é sinal de que o
   // mesmo produto apareceu em URLs diferentes — e três linhas contraditórias
   // fariam a tela exibir dezenove "concorrentes" onde há um. Vale o menor:
   // é o que o cliente pagaria naquela loja.
-  const porProduto = new Map<string, (typeof linhas)[number]>()
+  const porProduto = new Map<string, LinhaPreco>()
   for (const l of linhas) {
     const chave = `${l.base_id ?? l.titulo}|${l.variante}`
     const atual = porProduto.get(chave)
@@ -622,7 +815,7 @@ export async function coletarConcorrente(concorrenteId: string): Promise<Resulta
   // página com o mesmo rótulo geram a mesma chave, e o insert inteiro morria
   // com violação de chave duplicada — a loja aparecia com "Erro desconhecido"
   // e nenhum preço.
-  const porChave = new Map<string, (typeof linhas)[number]>()
+  const porChave = new Map<string, LinhaPreco>()
   for (const l of porProduto.values()) {
     const atual = porChave.get(l.chave)
     if (!atual || l.preco < atual.preco) porChave.set(l.chave, l)
@@ -697,7 +890,7 @@ export async function coletarConcorrente(concorrenteId: string): Promise<Resulta
     })
     .eq('id', concorrenteId)
 
-  return { lidos: unicas.length, casados, semVariante: observados.length - comVariante.length }
+  return { lidos: unicas.length, casados }
 }
 
 /** Mesma normalização que a tabela de apelidos guarda. */
