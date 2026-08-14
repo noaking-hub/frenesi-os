@@ -667,7 +667,7 @@ export function PortalDevolucoes({
               {/* A cópia é derivada da mesma regra que valida o passo. */}
               <Corpo>
                 {danificado
-                  ? 'Como o frasco chegou com defeito, só a foto do nível é obrigatória. A do dano acelera a análise.'
+                  ? 'Precisamos ver o dano e o lacre do decant. As duas fotos são obrigatórias.'
                   : 'Precisamos ver que o decant não foi usado. As duas fotos são obrigatórias.'}
               </Corpo>
             </div>
@@ -683,13 +683,13 @@ export function PortalDevolucoes({
               />
               <UploadFoto
                 marca="2"
-                titulo={danificado ? 'Frasco danificado' : 'Lacre (recrave) do decant'}
+                titulo={danificado ? 'Lacre (recrave) e o dano no frasco' : 'Lacre (recrave) do decant'}
                 descricao={
                   danificado
-                    ? 'Mostre o vazamento ou a parte danificada. Como o frasco chegou com defeito, não exigimos o lacre intacto.'
+                    ? 'De perto, mostrando o recrave e o ponto do vazamento ou da avaria.'
                     : 'De perto, mostrando o recrave sem sinais de abertura.'
                 }
-                obrigatoria={!danificado}
+                obrigatoria
                 arquivo={arquivos.lacre}
                 aoEscolher={(f) => setArquivos((s) => ({ ...s, lacre: f }))}
               />

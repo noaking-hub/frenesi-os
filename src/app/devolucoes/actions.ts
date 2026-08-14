@@ -207,8 +207,8 @@ export async function abrirDevolucao(
     return { ok: false, erro: 'Informe o motivo da devolução.' }
   }
 
-  // Fotos: nível sempre; lacre dispensado só quando o frasco chegou
-  // danificado — a MESMA regra da tela (`fotosCompletas`).
+  // Nível e lacre, sempre — a MESMA regra da tela (`fotosCompletas`). Esta
+  // é a barreira que vale: a tela pode ser burlada, o servidor não.
   const arquivoNivel = form.get('fotoNivel')
   const arquivoLacre = form.get('fotoLacre')
   const fotos = {

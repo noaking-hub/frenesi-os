@@ -62,24 +62,29 @@ export function statusDoPedido(pedido: Pedido): StatusDevolucao {
 }
 
 /**
- * "Frasco chegou danificado ou vazando" — único motivo que dispensa o lacre
- * intacto, e por isso torna a segunda foto opcional.
+ * "Frasco chegou danificado ou vazando".
+ *
+ * Muda o que a segunda foto precisa mostrar — o dano, além do recrave — e o
+ * tipo da solicitação aberta no ERP. NÃO dispensa a foto: dispensava, e era
+ * exatamente por aí que a má-fé entrava. O cliente alegava vazamento, pedia
+ * reembolso sem mostrar o lacre e depois não devolvia o frasco.
  */
 export function ehDanificado(motivo: MotivoDevolucao | ''): boolean {
   return motivo === 'm3'
 }
 
 /**
- * Quais fotos bastam.
+ * Quais fotos bastam: as duas, sempre.
  *
- * A cópia mostrada ao cliente é derivada desta mesma regra — nunca afirmar
- * "as duas fotos são obrigatórias" quando o sistema aceita uma.
+ * Nível e lacre são as duas provas que sustentam uma recusa — sem elas não há
+ * como contestar depois. O motivo escolhido pelo cliente muda o enquadramento
+ * pedido, nunca a exigência.
  */
 export function fotosCompletas(
-  motivo: MotivoDevolucao | '',
+  _motivo: MotivoDevolucao | '',
   fotos: { nivel: boolean; lacre: boolean },
 ): boolean {
-  return fotos.nivel && (ehDanificado(motivo) || fotos.lacre)
+  return fotos.nivel && fotos.lacre
 }
 
 export const MOTIVOS: { id: MotivoDevolucao; label: string; desc: string }[] = [
@@ -96,7 +101,7 @@ export const MOTIVOS: { id: MotivoDevolucao; label: string; desc: string }[] = [
   {
     id: 'm3',
     label: 'Frasco chegou danificado ou vazando',
-    desc: 'Nesse caso não precisamos do lacre intacto',
+    desc: 'Fotografe o frasco e o lacre mostrando o dano',
   },
   {
     id: 'm4',

@@ -407,10 +407,12 @@ describe('devoluções', () => {
     expect(fotosCompletas('m1', { nivel: true, lacre: true })).toBe(true)
   })
 
-  it('dispensa a foto do lacre quando o frasco chegou danificado', () => {
-    expect(fotosCompletas('m3', { nivel: true, lacre: false })).toBe(true)
-    // a foto do nível continua obrigatória em qualquer motivo
+  it('exige o lacre também quando o frasco chegou danificado', () => {
+    // Dispensava, e a dispensa virou porta de má-fé: alegar vazamento,
+    // receber reembolso sem mostrar o lacre e nunca devolver o frasco.
+    expect(fotosCompletas('m3', { nivel: true, lacre: false })).toBe(false)
     expect(fotosCompletas('m3', { nivel: false, lacre: true })).toBe(false)
+    expect(fotosCompletas('m3', { nivel: true, lacre: true })).toBe(true)
   })
 })
 
