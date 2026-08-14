@@ -31,7 +31,6 @@ const ABERTO = [
   '/api/melhorenvio',
   '/api/crm',
   '/api/financeiro',
-  '/api/concorrentes',
   '/api/tela',
   '/api/pedidos/pulso',
 ]

@@ -149,20 +149,6 @@ export async function estadoDasIntegracoes(): Promise<EstadoIntegracao[]> {
       testavel: false,
     },
     {
-      id: 'concorrentes',
-      sigla: 'CC',
-      nome: 'Lojas concorrentes',
-      papel: 'Preço de mercado',
-      configurada: supabaseConfigurado(),
-      faltando: (process.env.CRON_SEGREDO ?? '').trim()
-        ? []
-        : ['CRON_SEGREDO (sem ele a coleta diária fica sem proteção e não deve ser agendada)'],
-      detalhe: 'Leitura diária do preço das lojas cadastradas, para sustentar a decisão de preço.',
-      ultimaAtividade: atividades.concorrentes,
-      atividade: 'última loja vasculhada',
-      testavel: false,
-    },
-    {
       id: 'olist',
       sigla: 'OL',
       nome: 'Olist ERP',
@@ -182,7 +168,6 @@ interface Atividades {
   pedido: string | null
   shopify: string | null
   mercadopago: string | null
-  concorrentes: string | null
   rastreio: string | null
 }
 
@@ -192,13 +177,12 @@ async function ultimasAtividades(): Promise<Atividades> {
     pedido: null,
     shopify: null,
     mercadopago: null,
-    concorrentes: null,
     rastreio: null,
   }
   if (!supabaseConfigurado()) return vazio
 
   const sb = supabaseServer()
-  const [pedido, sincronia, extratoMp, concorrente, rastreio] = await Promise.all([
+  const [pedido, sincronia, extratoMp, rastreio] = await Promise.all([
     sb.from('pedidos').select('comprado_em').order('comprado_em', { ascending: false }).limit(1),
     sb
       .from('sincronizacoes')
@@ -212,12 +196,6 @@ async function ultimasAtividades(): Promise<Atividades> {
       .order('lido_em', { ascending: false })
       .limit(1),
     sb
-      .from('concorrentes')
-      .select('ultima_leitura')
-      .not('ultima_leitura', 'is', null)
-      .order('ultima_leitura', { ascending: false })
-      .limit(1),
-    sb
       .from('rastreio_eventos')
       .select('criado_em')
       .order('criado_em', { ascending: false })
@@ -228,7 +206,6 @@ async function ultimasAtividades(): Promise<Atividades> {
     pedido: pedido.data?.[0]?.comprado_em ?? null,
     shopify: sincronia.data?.[0]?.executada_em ?? null,
     mercadopago: extratoMp.data?.[0]?.lido_em ?? null,
-    concorrentes: concorrente.data?.[0]?.ultima_leitura ?? null,
     rastreio: rastreio.data?.[0]?.criado_em ?? null,
   }
 }

@@ -8,8 +8,6 @@ import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { PARAMETROS_PADRAO, calcularPreco } from '@/domain'
 import type { ParametrosPrecificacao, VarianteMl } from '@/domain'
 
-import { buscarPrecos } from '../concorrentes/busca'
-
 export type RespostaPrecos =
   | {
       ok: true
@@ -255,108 +253,4 @@ export async function historicoDePublicacoes(baseId: string): Promise<Publicacao
     resultado: r.resultado as PublicacaoRegistrada['resultado'],
     detalhe: (r.detalhe as string | null) ?? null,
   }))
-}
-
-export interface PrecoDeMercado {
-  variante: VarianteMl
-  /** Menor preço encontrado entre os concorrentes. */
-  menor: number
-  fonte: string
-  /** Quantas lojas têm esta variante deste perfume. */
-  lojas: number
-  /**
-   * Confiança do vínculo que sustenta o menor preço: 'alta' quando alguém
-   * ensinou o nome à mão; 'auto' quando foi casamento por título; 'baixa'
-   * quando veio de busca textual — o escopo manda destacar essa diferença
-   * antes de alguém decidir preço em cima.
-   */
-  confianca: 'alta' | 'auto' | 'baixa'
-}
-
-/**
- * O menor preço do mercado para este perfume, por variante.
- *
- * O caminho principal é o vínculo que a COLETA já gravou: `base_id` em cada
- * preço lido, casado por título ou ensinado à mão. A busca textual não serve
- * aqui — ela exige que TODA palavra do nosso nome apareça no título do
- * concorrente, e nomes como "Erba Pura Unissex Eau de Parfum" nunca casam
- * porque loja nenhuma escreve "unissex". Era isso que deixava a coluna
- * inteira em "sem leitura". O texto fica de reserva, para base que a coleta
- * ainda não casou.
- */
-export async function mercadoDaBase(baseId: string): Promise<PrecoDeMercado[]> {
-  if (!supabaseConfigurado()) return []
-  const sb = supabaseServer()
-
-  const { data: casados } = await sb
-    .from('concorrente_precos')
-    .select('variante, preco, casado_por, concorrentes(nome)')
-    .eq('base_id', baseId)
-    .not('variante', 'is', null)
-
-  const observados = ((casados ?? []) as unknown as {
-    variante: number
-    preco: number | string
-    casado_por: string | null
-    concorrentes: { nome: string } | null
-  }[]).map((p) => ({
-    variante: p.variante as VarianteMl,
-    preco: Number(p.preco),
-    fonte: p.concorrentes?.nome ?? '—',
-    ensinado: p.casado_por === 'apelido',
-  }))
-
-  if (observados.length > 0) {
-    const porVariante = new Map<VarianteMl, Map<string, { preco: number; ensinado: boolean }>>()
-    for (const o of observados) {
-      if (!(o.preco > 0)) continue
-      const fontes = porVariante.get(o.variante) ?? new Map<string, { preco: number; ensinado: boolean }>()
-      const atual = fontes.get(o.fonte)
-      // Mesma loja com dois preços para o tamanho: vale o menor, que é o que
-      // o cliente pagaria lá.
-      if (atual === undefined || o.preco < atual.preco) {
-        fontes.set(o.fonte, { preco: o.preco, ensinado: o.ensinado })
-      }
-      porVariante.set(o.variante, fontes)
-    }
-    return [...porVariante.entries()]
-      .map(([variante, fontes]) => {
-        const [fonte, dono] = [...fontes.entries()].sort((a, b) => a[1].preco - b[1].preco)[0]
-        return {
-          variante,
-          menor: dono.preco,
-          fonte,
-          lojas: fontes.size,
-          confianca: (dono.ensinado ? 'alta' : 'auto') as PrecoDeMercado['confianca'],
-        }
-      })
-      .sort((a, b) => a.variante - b.variante)
-  }
-
-  // Nenhum preço casado com esta base: tenta pelo nome, do jeito da tela de
-  // Concorrentes. Acha menos, mas acha algo para base recém-cadastrada.
-  const { data: base } = await sb
-    .from('perfumes_base')
-    .select('nome')
-    .eq('id', baseId)
-    .maybeSingle()
-  if (!base?.nome) return []
-
-  const r = await buscarPrecos(String(base.nome))
-  if (!r) return []
-
-  return r.linhas
-    .filter((l) => l.menor !== null)
-    .map((l) => {
-      const barata = Object.values(l.porFonte).sort((a, b) => a.preco - b.preco)[0]
-      return {
-        variante: l.variante,
-        menor: l.menor as number,
-        fonte: barata?.fonte ?? '—',
-        lojas: Object.keys(l.porFonte).length,
-        // Busca textual é o caminho reserva — comparação de baixa confiança,
-        // e a tela diz isso em vez de fingir vínculo.
-        confianca: 'baixa' as const,
-      }
-    })
 }

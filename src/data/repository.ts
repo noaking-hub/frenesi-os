@@ -15,7 +15,6 @@ import type { ClienteCrm, SolicitacaoErp } from './fixtures'
 import type {
   CategoriaFinanceira,
   ContaBancaria,
-  FonteConcorrente,
   ContagemInventario,
   Envio,
   Lancamento,
@@ -65,7 +64,6 @@ export interface Repositorio {
   contas(): Promise<ContaBancaria[]>
   repasses(): Promise<Repasse[]>
   categorias(): Promise<CategoriaFinanceira[]>
-  concorrentesFontes(): Promise<FonteConcorrente[]>
   clientes(): Promise<ClienteCrm[]>
 }
 
@@ -135,9 +133,6 @@ const repositorioFixtures: Repositorio = {
   },
   async categorias() {
     return fixtures.CATEGORIAS
-  },
-  async concorrentesFontes() {
-    return fixtures.CONCORRENTES_FONTES
   },
   async clientes() {
     return fixtures.CLIENTES
@@ -927,26 +922,6 @@ const repositorioSupabase: Repositorio = {
     })
   },
 
-  async concorrentesFontes() {
-    const { data, error } = await supabaseServer()
-      .from('concorrentes')
-      .select('id, nome, dominio, coleta, ultimo_status, ultima_leitura, ultimo_erro, precos_lidos')
-      .order('nome')
-    if (error) throw error
-    return (data ?? []).map(
-      (c): FonteConcorrente => ({
-        id: c.id as string,
-        nome: c.nome as string,
-        dominio: c.dominio as string,
-        coleta: c.coleta as 'shopify' | 'manual',
-        status: c.ultimo_status as FonteConcorrente['status'],
-        quando: c.ultima_leitura ? dataCurta(c.ultima_leitura as string) : '',
-        lidaEm: (c.ultima_leitura as string | null) ?? null,
-        itensLidos: Number(c.precos_lidos ?? 0),
-        erro: (c.ultimo_erro as string | null) ?? null,
-      }),
-    )
-  },
 
   /**
    * O cliente do CRM é DERIVADO dos pedidos, não uma tabela paralela.

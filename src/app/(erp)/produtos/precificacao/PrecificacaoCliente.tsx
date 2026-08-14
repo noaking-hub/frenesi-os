@@ -21,8 +21,8 @@ import {
 } from '@/domain'
 import type { ParametrosPrecificacao, PerfumeBase, VarianteMl } from '@/domain'
 
-import { historicoDePublicacoes, mercadoDaBase, publicarPrecos } from './actions'
-import type { PrecoDeMercado, PublicacaoRegistrada } from './actions'
+import { historicoDePublicacoes, publicarPrecos } from './actions'
+import type { PublicacaoRegistrada } from './actions'
 
 interface Props {
   bases: PerfumeBase[]
@@ -43,8 +43,6 @@ interface Linha {
   unidades: number
   /** Menor preço permitido — abaixo dele a margem mínima não fecha. */
   piso: number
-  /** Menor preço entre os concorrentes, quando a busca acha esta variante. */
-  mercado: PrecoDeMercado | null
   /** O que será publicado: o digitado à mão, ou o sugerido. */
   aPublicar: number
   /** Verdadeiro quando o preço foi digitado, não calculado. */
@@ -90,33 +88,13 @@ export function PrecificacaoCliente({ bases, parametros, precos, baseInicial }: 
   // Preço digitado à mão, por variante. Sobrepõe o sugerido só nesta base:
   // trocar de perfume limpa, senão o número de um vazaria para o outro.
   const [manuais, setManuais] = useState<Partial<Record<VarianteMl, string>>>({})
-  const [mercado, setMercado] = useState<PrecoDeMercado[]>([])
-  const [lendoMercado, setLendoMercado] = useState(false)
 
   const base = modoLivre ? BASE_LIVRE : (bases.find((b) => b.id === baseId) ?? bases[0] ?? BASE_LIVRE)
 
-  // O preço de mercado é do perfume selecionado: trocar de base tem de
-  // limpar o anterior, senão a tela compara o preço de um com o do outro.
+  // Preço digitado é daquele perfume: trocar de base tem de limpar o que foi
+  // digitado, senão o número de um vaza para o outro.
   useEffect(() => {
-    let atual = true
-    setMercado([])
     setManuais({})
-    if (!base.id) {
-      // Calculadora: não há perfume para procurar no mercado.
-      setLendoMercado(false)
-      return
-    }
-    setLendoMercado(true)
-    mercadoDaBase(base.id)
-      .then((r) => {
-        if (atual) setMercado(r)
-      })
-      .finally(() => {
-        if (atual) setLendoMercado(false)
-      })
-    return () => {
-      atual = false
-    }
   }, [base.id])
 
   // Os campos editáveis recalculam tudo na hora: preço, margem e composição
@@ -140,7 +118,6 @@ export function PrecificacaoCliente({ bases, parametros, precos, baseInicial }: 
       praticado: precos[base.id]?.[v] ?? null,
       unidades: Math.floor(base.volumeMl / v),
       piso: c.piso,
-      mercado: mercado.find((m) => m.variante === v) ?? null,
       aPublicar: manual ? parseNum(digitado) : c.sugerido,
       manual,
     }
@@ -217,67 +194,6 @@ export function PrecificacaoCliente({ bases, parametros, precos, baseInicial }: 
           {`${l.unidades} un`}
         </Valor>
       ),
-    },
-    {
-      chave: 'mercado',
-      titulo: 'Menor do mercado',
-      largura: '118px',
-      alinhamento: 'right',
-      render: (l) => {
-        if (!l.mercado) {
-          return (
-            <span
-              className="font-sans"
-              style={{ fontSize: 10, lineHeight: 1.3, color: 'rgba(242,237,227,.3)' }}
-            >
-              {lendoMercado ? 'lendo…' : 'sem leitura'}
-            </span>
-          )
-        }
-        // A diferença contra o que VAMOS publicar, não contra o ideal: é essa
-        // a decisão em cima da mesa quando se olha o concorrente.
-        const dif = l.aPublicar - l.mercado.menor
-        return (
-          <span style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-end' }}>
-            <Valor tamanho={12} peso={400}>
-              {brl(l.mercado.menor)}
-            </Valor>
-            <span
-              className="font-sans"
-              style={{
-                fontSize: 9.5,
-                lineHeight: 1.3,
-                color: dif > 0 ? COR.atencao : COR.ok,
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {dif > 0 ? `estamos ${brl(dif)} acima` : `estamos ${brl(Math.abs(dif))} abaixo`}
-            </span>
-            <span
-              className="font-mono"
-              style={{
-                fontSize: 9,
-                // Baixa confiança pede destaque: o vínculo veio de busca por
-                // texto, não de mapeamento — decidir preço em cima exige olhar.
-                color:
-                  l.mercado.confianca === 'baixa' ? COR.atencao : 'rgba(242,237,227,.3)',
-                whiteSpace: 'nowrap',
-              }}
-              title={
-                l.mercado.confianca === 'alta'
-                  ? 'Vínculo ensinado à mão — confiança alta'
-                  : l.mercado.confianca === 'auto'
-                    ? 'Casado automaticamente pelo título'
-                    : 'Comparação por busca textual — baixa confiança'
-              }
-            >
-              {`${l.mercado.fonte} · ${plural(l.mercado.lojas, 'loja', 'lojas')}${
-                l.mercado.confianca === 'alta' ? ' · ✓ ensinado' : l.mercado.confianca === 'baixa' ? ' · baixa confiança' : ''
-              }`}
-            </span>
-          </span>
-        )
-      },
     },
     {
       chave: 'aPublicar',

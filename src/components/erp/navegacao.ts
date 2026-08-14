@@ -40,7 +40,6 @@ export const NAV: GrupoNav[] = [
     telas: [
       { id: 'catalogo', label: 'Catálogo', href: '/produtos', pronta: true },
       { id: 'precificacao', label: 'Precificação', href: '/produtos/precificacao', pronta: true },
-      { id: 'concorrentes', label: 'Concorrentes', href: '/produtos/concorrentes', pronta: true },
     ],
   },
   {

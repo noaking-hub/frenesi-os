@@ -10,7 +10,6 @@
 import { aferirItem } from '@/domain'
 import type {
   CategoriaFinanceira,
-  FonteConcorrente,
   ContaBancaria,
   ContagemInventario,
   EstadoLacre,
@@ -80,14 +79,6 @@ export const PRECO_PRATICADO: Record<string, Partial<Record<VarianteMl, number>>
   blu: { 5: 74.9, 10: 118.9 },
   gg: { 5: 58.9, 10: 104.9 },
 }
-
-/** Fontes de coleta de preço dos concorrentes. */
-export const CONCORRENTES_FONTES: FonteConcorrente[] = [
-  { id: 'a', nome: 'Decants do Bruno', dominio: 'decantsdobruno.com.br', coleta: 'nuvemshop', status: 'lida', quando: 'hoje 06:12', itensLidos: 148, erro: null },
-  { id: 'b', nome: 'Essência Rara', dominio: 'essenciararaperfumes.com', coleta: 'nuvemshop', status: 'lida', quando: 'hoje 06:14', itensLidos: 212, erro: null },
-  { id: 'c', nome: 'Frações Nobres', dominio: 'fracoesnobres.com.br', coleta: 'nuvemshop', status: 'parcial', quando: 'hoje 06:18', itensLidos: 63, erro: null },
-  { id: 'd', nome: 'Perfume Lab', dominio: 'perfumelab.store', coleta: 'manual', status: 'bloqueada', quando: 'ontem 22:40', itensLidos: 0, erro: 'a loja recusou a leitura (403)' },
-]
 
 const saida = (data: string, ref: string, unidades: number, variante: VarianteMl) => ({
   // Fixture não tem linha no banco: sem id, a tela esconde as ações de
