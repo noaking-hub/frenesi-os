@@ -32,7 +32,7 @@ import type {
 } from '@/domain'
 
 import * as fixtures from './fixtures'
-import { supabaseConfigurado, supabaseServer } from './supabase'
+import { supabaseConfigurado, supabaseServer, tudoDe } from './supabase'
 
 /**
  * Única porta de entrada para dados. As telas nunca importam fixtures nem o
@@ -131,28 +131,6 @@ const repositorioFixtures: Repositorio = {
   async clientes() {
     return fixtures.CLIENTES
   },
-}
-
-/**
- * O PostgREST devolve no máximo 1.000 linhas por requisição — com 2.000+
- * variantes, uma leitura sem paginação enxergaria metade do catálogo e as
- * telas mostrariam dados truncados sem avisar. Este helper pagina até o fim.
- */
-async function tudoDe<T>(
-  tabela: string,
-  pagina: (de: number, ate: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
-): Promise<T[]> {
-  const TAMANHO = 1000
-  const linhas: T[] = []
-  for (let de = 0; ; de += TAMANHO) {
-    const { data, error } = await pagina(de, de + TAMANHO - 1)
-    if (error) throw error
-    const parte = data ?? []
-    linhas.push(...parte)
-    if (parte.length < TAMANHO) break
-    if (de > 100_000) throw new Error(`Paginação de ${tabela} passou de 100 mil linhas`)
-  }
-  return linhas
 }
 
 const CAMPOS_BASE =

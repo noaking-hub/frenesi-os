@@ -3,7 +3,7 @@ import 'server-only'
 import { mapearCatalogo, parseVarianteMl } from '@/domain'
 import type { CatalogoMapeado, ProdutoShopify } from '@/domain'
 
-import { supabaseConfigurado, supabaseServer } from './supabase'
+import { supabaseConfigurado, supabaseServer, tudoDe } from './supabase'
 
 /**
  * Cliente da Admin API da Shopify (GraphQL) e a rotina de importação do
@@ -358,12 +358,18 @@ export async function importarCatalogoShopify(): Promise<ResultadoImportacao> {
     if (error) throw error
   }
 
-  const { data: derivadosExistentes, error: erroDerivados } = await sb
-    .from('produtos_derivados')
-    .select('base_id, variante, envasadas, reservadas')
-  if (erroDerivados) throw erroDerivados
+  // Paginado por necessidade: o que não vier nesta leitura é reescrito logo
+  // abaixo com envasadas e reservadas em zero. Truncar em mil linhas zeraria
+  // silenciosamente metade do catálogo a cada importação.
+  type DerivadoAtual = { base_id: string; variante: number; envasadas: number; reservadas: number }
+  const derivadosExistentes = await tudoDe<DerivadoAtual>('produtos_derivados', (de, ate) =>
+    sb
+      .from('produtos_derivados')
+      .select('base_id, variante, envasadas, reservadas')
+      .range(de, ate) as unknown as PromiseLike<{ data: DerivadoAtual[] | null; error: unknown }>,
+  )
   const derivadoPorChave = new Map(
-    (derivadosExistentes ?? []).map((d) => [`${d.base_id}|${d.variante}`, d]),
+    derivadosExistentes.map((d) => [`${d.base_id}|${d.variante}`, d]),
   )
 
   const linhasDerivados = catalogo.variantes.map((v) => {
@@ -1031,12 +1037,15 @@ export async function importarPedidosShopify(dias = 60): Promise<ResultadoPedido
 
   // Variante da loja → base e tamanho no ERP. Sem esse mapa o item entra como
   // linha de texto: aparece no pedido, mas não baixa estoque de ninguém.
-  const { data: derivados, error: erroDerivados } = await sb
-    .from('produtos_derivados')
-    .select('base_id, variante, shopify_variant_id')
-  if (erroDerivados) throw erroDerivados
+  type DerivadoDaLoja = { base_id: string; variante: number; shopify_variant_id: string | null }
+  const derivados = await tudoDe<DerivadoDaLoja>('produtos_derivados', (de, ate) =>
+    sb
+      .from('produtos_derivados')
+      .select('base_id, variante, shopify_variant_id')
+      .range(de, ate) as unknown as PromiseLike<{ data: DerivadoDaLoja[] | null; error: unknown }>,
+  )
   const porVariante = new Map(
-    (derivados ?? [])
+    derivados
       .filter((d) => d.shopify_variant_id)
       .map((d) => [
         d.shopify_variant_id as string,
@@ -1050,13 +1059,13 @@ export async function importarPedidosShopify(dias = 60): Promise<ResultadoPedido
   // pedidos antigos guardam o id antigo para sempre. Sem esta volta, uma
   // reorganização do catálogo apagaria meses de histórico de venda — os itens
   // continuariam no pedido, mas sem base, sem consumo e sem baixa de estoque.
-  const { data: basesPorNome, error: erroBases } = await sb
-    .from('perfumes_base')
-    .select('id, nome')
-  if (erroBases) throw erroBases
-  const porNome = new Map(
-    (basesPorNome ?? []).map((b) => [normalizarNome(b.nome as string), b.id as string]),
+  const basesPorNome = await tudoDe<{ id: string; nome: string }>('perfumes_base', (de, ate) =>
+    sb.from('perfumes_base').select('id, nome').range(de, ate) as unknown as PromiseLike<{
+      data: { id: string; nome: string }[] | null
+      error: unknown
+    }>,
   )
+  const porNome = new Map(basesPorNome.map((b) => [normalizarNome(b.nome), b.id]))
 
   // Cliente é identificado por e-mail: é o que a Shopify garante e o que o
   // portal de devolução usa para o cliente se encontrar.

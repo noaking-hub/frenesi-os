@@ -31,3 +31,27 @@ export function supabaseServer(): SupabaseClient {
   }
   return cached
 }
+
+/**
+ * O PostgREST devolve no máximo 1.000 linhas por requisição — com 2.000+
+ * variantes, uma leitura sem paginação enxerga metade do catálogo e não avisa
+ * nada: o retorno é um 200 com uma lista curta. Foi assim que o casamento de
+ * item por SKU perdeu 56% dos itens de pedido, todos com SKU depois da
+ * milésima linha. Toda leitura de tabela grande passa por aqui.
+ */
+export async function tudoDe<T>(
+  tabela: string,
+  pagina: (de: number, ate: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+): Promise<T[]> {
+  const TAMANHO = 1000
+  const linhas: T[] = []
+  for (let de = 0; ; de += TAMANHO) {
+    const { data, error } = await pagina(de, de + TAMANHO - 1)
+    if (error) throw error
+    const parte = data ?? []
+    linhas.push(...parte)
+    if (parte.length < TAMANHO) break
+    if (de > 100_000) throw new Error(`Paginação de ${tabela} passou de 100 mil linhas`)
+  }
+  return linhas
+}

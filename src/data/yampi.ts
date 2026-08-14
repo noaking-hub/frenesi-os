@@ -19,7 +19,7 @@ import 'server-only'
 import { ehEntregaLocal, situacaoDoPedido as situacaoDeUmPedido, transacoesDoPedido } from '@/domain'
 import type { SituacaoPedido } from '@/domain'
 
-import { supabaseConfigurado, supabaseServer } from './supabase'
+import { supabaseConfigurado, supabaseServer, tudoDe } from './supabase'
 
 const BASE = 'https://api.dooki.com.br/v2'
 
@@ -462,13 +462,23 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
 
   // Ponte entre as plataformas: o SKU. O id de variante é da Shopify e não
   // existe do lado da Yampi.
-  const { data: derivados, error: erroDerivados } = await sb
-    .from('produtos_derivados')
-    .select('base_id, variante, sku')
-    .not('sku', 'is', null)
-  if (erroDerivados) throw erroDerivados
+  // Paginado, e não é detalhe: sem isto o mapa nascia com as primeiras mil
+  // variantes de duas mil, e todo item cujo SKU caísse na outra metade
+  // entrava no pedido sem base e sem tamanho — invisível para o estoque.
+  const derivados = await tudoDe<{ base_id: string; variante: number; sku: string }>(
+    'produtos_derivados',
+    (de, ate) =>
+      sb
+        .from('produtos_derivados')
+        .select('base_id, variante, sku')
+        .not('sku', 'is', null)
+        .range(de, ate) as unknown as PromiseLike<{
+        data: { base_id: string; variante: number; sku: string }[] | null
+        error: unknown
+      }>,
+  )
   const porSku: MapaVariante = new Map(
-    (derivados ?? []).map((d) => [
+    derivados.map((d) => [
       String(d.sku).trim().toLowerCase(),
       { baseId: d.base_id as string, variante: d.variante as number },
     ]),
