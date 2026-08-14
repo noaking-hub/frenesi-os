@@ -960,15 +960,49 @@ function FichaDevolucao({
                     ))}
                   </span>
                 )}
-                {/* Booleans, não arquivos: o portal confirma que a foto foi
-                    tirada, mas ainda não recebe upload — fingir galeria aqui
-                    seria mentir. */}
                 <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)', marginTop: 4 }}>
-                  Fotos confirmadas pelo cliente
+                  Fotos enviadas pelo cliente
                 </span>
-                {d.fotos.length === 0 ? (
-                  <Nota>Nenhuma foto confirmada — peça mais fotos antes de decidir.</Nota>
-                ) : (
+                {(d.fotosArquivos ?? []).length > 0 ? (
+                  // As fotos de verdade, vindas do portal — clicar abre em
+                  // tamanho cheio numa aba (URL assinada de vida curta).
+                  <span style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {(d.fotosArquivos ?? []).map((f) => (
+                      <a
+                        key={f.rotulo}
+                        href={f.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={`${f.rotulo} — abrir em tamanho cheio`}
+                        className="hover:border-ouro/50"
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 4,
+                          textDecoration: 'none',
+                        }}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={f.url}
+                          alt={f.rotulo}
+                          style={{
+                            width: 96,
+                            height: 96,
+                            objectFit: 'cover',
+                            borderRadius: 9,
+                            border: '1px solid rgba(255,255,255,.12)',
+                            background: '#121114',
+                          }}
+                        />
+                        <span className="font-sans" style={{ fontSize: 9.5, color: 'var(--color-terciario)' }}>
+                          {f.rotulo}
+                        </span>
+                      </a>
+                    ))}
+                  </span>
+                ) : d.fotos.length > 0 ? (
+                  // Solicitação anterior ao upload: só a confirmação existe.
                   <span style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                     {d.fotos.map((f) => (
                       <span
@@ -990,6 +1024,8 @@ function FichaDevolucao({
                       </span>
                     ))}
                   </span>
+                ) : (
+                  <Nota>Nenhuma foto enviada — peça mais fotos antes de decidir.</Nota>
                 )}
               </div>
             </div>

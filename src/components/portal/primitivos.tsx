@@ -86,17 +86,22 @@ export function BotaoPrimario({
       type="button"
       onClick={ativo ? onClick : undefined}
       disabled={!ativo}
-      className="font-sans"
+      className={ativo ? 'font-sans hover:brightness-110' : 'font-sans'}
       style={{
         height: 50,
-        border: 0,
-        background: ativo ? PORTAL.header : 'rgba(36,31,24,.09)',
+        border: ativo ? '1px solid rgba(239,209,140,.28)' : 0,
+        background: ativo
+          ? 'linear-gradient(180deg, #241F18, #16120D)'
+          : 'rgba(36,31,24,.09)',
         color: ativo ? PORTAL.ouroClaro : 'rgba(36,31,24,.32)',
         fontWeight: 700,
         fontSize: 13.5,
+        letterSpacing: '.02em',
         lineHeight: 1,
         borderRadius: 12,
         cursor: ativo ? 'pointer' : 'not-allowed',
+        boxShadow: ativo ? '0 10px 24px -12px rgba(26,23,20,.55)' : 'none',
+        transition: 'filter .15s ease, box-shadow .15s ease',
         ...style,
       }}
     >
@@ -118,7 +123,7 @@ export function BotaoSecundario({
     <button
       type="button"
       onClick={onClick}
-      className="font-sans"
+      className="font-sans hover:border-[#B08D4B]"
       style={{
         height: 50,
         padding: '0 18px',
@@ -131,6 +136,7 @@ export function BotaoSecundario({
         borderRadius: 12,
         cursor: 'pointer',
         whiteSpace: 'nowrap',
+        transition: 'border-color .15s ease',
         ...style,
       }}
     >

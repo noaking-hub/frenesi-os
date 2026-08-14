@@ -579,6 +579,8 @@ export interface SolicitacaoErp {
   reverso: string
   lacre: EstadoLacre
   fotos: string[]
+  /** Fotos enviadas pelo portal, já com URL assinada para a ficha exibir. */
+  fotosArquivos?: { rotulo: string; url: string }[]
   /** A conferência: volume medido de cada item recebido. Vazia antes de chegar. */
   itens: ItemAferido[]
   /** O que o cliente marcou no portal. É contra esta lista que se confere. */

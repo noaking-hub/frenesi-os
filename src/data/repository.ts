@@ -664,7 +664,7 @@ const repositorioSupabase: Repositorio = {
       .from('solicitacoes_devolucao')
       .select(
         'protocolo, pedido_id, tipo, motivo, comentario, itens, fotos, status, aberta_em, ' +
-          'reverso, lacre, conferencia, ' +
+          'reverso, lacre, conferencia, foto_nivel, foto_lacre, ' +
           'pedidos(valor, destino, gateway, rastreio, entregue_em, entrega_prevista_em, situacao, clientes(nome, email, telefone, cpf))',
       )
       .order('aberta_em', { ascending: false })
@@ -673,6 +673,19 @@ const repositorioSupabase: Repositorio = {
 
     const linhas = (data ?? []) as unknown as LinhaSolicitacao[]
     const dia = 24 * 60 * 60 * 1000
+
+    // As fotos vivem num bucket privado: a ficha as exibe por URL assinada de
+    // vida curta, geradas num lote só — uma chamada, não duas por solicitação.
+    const caminhos = linhas.flatMap((s) => [s.foto_nivel, s.foto_lacre].filter(Boolean) as string[])
+    const urlAssinada = new Map<string, string>()
+    if (caminhos.length) {
+      const { data: assinadas } = await supabaseServer()
+        .storage.from('devolucoes')
+        .createSignedUrls(caminhos, 60 * 60)
+      for (const a of assinadas ?? []) {
+        if (a.path && a.signedUrl) urlAssinada.set(a.path, a.signedUrl)
+      }
+    }
 
     return linhas.map((s): SolicitacaoErp => {
       const cliente = s.pedidos?.clientes
@@ -715,12 +728,18 @@ const repositorioSupabase: Repositorio = {
         etiquetaIda: s.pedidos?.rastreio ?? '',
         reverso: s.reverso,
         lacre: s.lacre,
-        // O portal ainda não recebe arquivo: o que existe é a confirmação de
-        // que o cliente tirou cada foto obrigatória.
         fotos: [
           s.fotos?.nivel ? 'Volume no frasco (confirmada)' : '',
           s.fotos?.lacre ? 'Lacre / recrave (confirmada)' : '',
         ].filter(Boolean),
+        fotosArquivos: [
+          s.foto_nivel && urlAssinada.get(s.foto_nivel)
+            ? { rotulo: 'Nível do líquido', url: urlAssinada.get(s.foto_nivel)! }
+            : null,
+          s.foto_lacre && urlAssinada.get(s.foto_lacre)
+            ? { rotulo: 'Lacre / dano', url: urlAssinada.get(s.foto_lacre)! }
+            : null,
+        ].filter(Boolean) as { rotulo: string; url: string }[],
         itens: (s.conferencia ?? []).map((i) =>
           aferirItem(i.perfume, i.variante, Number(i.medido_ml), i.observacao ?? ''),
         ),
@@ -1193,6 +1212,8 @@ interface LinhaSolicitacao {
   reverso: string
   lacre: SolicitacaoErp['lacre']
   conferencia: { perfume: string; variante: VarianteMl; medido_ml: number | string; observacao?: string }[]
+  foto_nivel: string | null
+  foto_lacre: string | null
   pedidos: {
     valor: number | string
     destino: string | null
