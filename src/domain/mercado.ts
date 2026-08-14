@@ -600,6 +600,12 @@ export function precosDeReferencia(html: string): number[] {
           principal = p
         }
       }
+      // O "mais parecido" precisa CONDIZER com a página. No tema novo da Eau
+      // de Leon o produto da página vira WebPage no JSON-LD e os Products são
+      // só o carrossel: o menos diferente (um terço das palavras) virava
+      // referência, validava o payload do vizinho, e o Erba Pura saiu gravado
+      // com os preços do Asad. Referência que não fala da página não serve.
+      if (melhorScore < 0.5) return []
     } else {
       principal = produtos.slice().sort((a, b) => b.ofertas.length - a.ofertas.length)[0]
     }
@@ -637,6 +643,24 @@ export function variantesDoHtml(html: string): VarianteLida[] {
   const payloads = candidatos.map(lerPayload).filter((p) => p.lidas.length > 0)
   if (payloads.length === 0) return []
 
+  // A âncora mais forte é o ID, quando a página o declara: `LS.product.id`
+  // diz de qual produto a página é, e cada variação do payload carrega o
+  // `product_id` dono. É determinístico — nenhuma heurística de preço ou de
+  // nome desempata melhor que "é o mesmo produto".
+  const idPagina = idDoProdutoDaPagina(html)
+  if (idPagina !== null) {
+    const daPagina = payloads.filter((p) => p.donos.has(idPagina))
+    if (daPagina.length > 0) {
+      let melhor: VarianteLida[] = []
+      for (const p of daPagina) if (p.lidas.length > melhor.length) melhor = p.lidas
+      return melhor
+    }
+    // Todos os payloads declaram dono e nenhum é a página: são os cards do
+    // carrossel. Foi assim que o Erba Pura saiu gravado com os preços do
+    // Asad — gravar "o maior" aqui seria repetir o estrago.
+    if (payloads.every((p) => p.donos.size > 0)) return []
+  }
+
   // O payload precisa FALAR DA PÁGINA para valer. Numa loja, o payload com
   // mais variações era um widget presente em toda página — e 510 preços de
   // outro produto entraram com o nome do produto da página. Quando o JSON-LD
@@ -657,14 +681,28 @@ export function variantesDoHtml(html: string): VarianteLida[] {
   return melhor
 }
 
+/**
+ * O id que a página declara para o PRÓPRIO produto (`LS.product.id`).
+ *
+ * É a única identidade que um card de carrossel não tem como usurpar: cada
+ * variação de payload diz de qual `product_id` ela é, e ou bate com o da
+ * página, ou é vizinho.
+ */
+export function idDoProdutoDaPagina(html: string): number | null {
+  const m = html.match(/LS\.product\s*=\s*\{[\s\S]{0,300}?\bid\s*:\s*(\d+)/i)
+  return m ? Number(m[1]) : null
+}
+
 interface Payload {
   lidas: VarianteLida[]
   /** Todo número com cara de preço no payload — é contra ele que se valida. */
   possiveis: number[]
+  /** `product_id` das variações: de quais produtos este payload fala. */
+  donos: Set<number>
 }
 
 function lerPayload(bruto: string): Payload {
-  const vazio: Payload = { lidas: [], possiveis: [] }
+  const vazio: Payload = { lidas: [], possiveis: [], donos: new Set() }
   let dado: unknown
   try {
     dado = JSON.parse(desescapar(bruto))
@@ -679,8 +717,12 @@ function lerPayload(bruto: string): Payload {
 
   const lidas: VarianteLida[] = []
   const possiveis: number[] = []
+  const donos = new Set<number>()
   for (const v of lista as Record<string, unknown>[]) {
     if (!v || typeof v !== 'object') continue
+
+    const dono = Number(v.product_id)
+    if (Number.isInteger(dono) && dono > 0) donos.add(dono)
 
     // Para a validação valem TODOS os campos de preço: o JSON-LD pode
     // publicar o promocional enquanto a leitura usa o cheio, e a diferença
@@ -706,7 +748,23 @@ function lerPayload(bruto: string): Payload {
 
     lidas.push({ rotulo, preco })
   }
-  return { lidas, possiveis }
+  return { lidas, possiveis, donos }
+}
+
+/**
+ * O nome de um bloco da página condiz com o nome DA página?
+ *
+ * Menos da metade das palavras em comum é vizinho de carrossel, não o
+ * produto — e observação de carrossel grava o preço de OUTRO perfume com a
+ * URL desta página.
+ */
+export function nomeCondiz(candidato: string, daPagina: string): boolean {
+  const alvo = tokensDe(daPagina)
+  const meus = tokensDe(candidato)
+  if (meus.size === 0 || alvo.size === 0) return false
+  let acertos = 0
+  for (const t of meus) if (alvo.has(t)) acertos++
+  return acertos / meus.size >= 0.5
 }
 
 

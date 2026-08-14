@@ -3,6 +3,7 @@ import 'server-only'
 import {
   casarTitulo,
   ehPaginaDeProduto,
+  nomeCondiz,
   nomeDaPagina,
   parseVarianteMl,
   precoDe,
@@ -288,12 +289,14 @@ async function lerPaginasNuvemshop(
     for (const pagina of lote) {
       if (!pagina) continue
 
+      const nomePagina = nomeDaPagina(pagina.html)
+
       // O caminho bom: as variações trazem o ml e o preço de cada tamanho.
       const variacoes = variantesDoHtml(pagina.html)
       if (variacoes.length > 0) {
         // O nome vem do documento, não do primeiro Product da página: entre os
         // blocos JSON-LD estão os relacionados do carrossel.
-        const nome = nomeDaPagina(pagina.html) ?? produtosDoJsonLd(pagina.html)[0]?.nome
+        const nome = nomePagina ?? produtosDoJsonLd(pagina.html)[0]?.nome
         if (!nome) continue
         for (const v of variacoes) {
           const variante = parseVarianteMl(v.rotulo)
@@ -311,6 +314,10 @@ async function lerPaginasNuvemshop(
       }
 
       for (const p of produtosDoJsonLd(pagina.html)) {
+        // Só o Product que fala DESTA página entra: no tema novo da Eau de
+        // Leon os Products do JSON-LD são os 8 do carrossel, e gravá-los aqui
+        // punha o preço do vizinho com a URL desta página.
+        if (nomePagina && !nomeCondiz(p.nome, nomePagina)) continue
         // Sem oferta nomeada, a página inteira é um preço só.
         const ofertas = p.ofertas.length ? p.ofertas : [{} as OfertaLd]
         ofertas.forEach((o, indice) => {

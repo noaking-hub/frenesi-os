@@ -249,3 +249,59 @@ describe('validação do payload contra o JSON-LD do produto principal', () => {
     expect(precosDeReferencia(html)).toEqual([34.9, 139.9])
   })
 })
+
+describe('tema que esconde o produto da página do JSON-LD (só WebPage)', () => {
+  // O caso real da Eau de Leon: o produto da página vira @type WebPage, e os
+  // ÚNICOS Products do JSON-LD são os oito do carrossel. A validação por
+  // preço elegia o "menos diferente" (o Asad, um terço das palavras) como
+  // referência, validava o payload dele, e o Erba Pura saiu gravado com
+  // "5ml R$50,90 · 10ml R$86,90" — tamanhos e preços de OUTRO perfume.
+  const attr = (variantes: unknown) =>
+    `<div data-variants="${JSON.stringify(variantes).replace(/"/g, '&quot;')}"></div>`
+  const ldAsad = `<script type="application/ld+json">${JSON.stringify({
+    '@type': 'Product',
+    name: 'Lattafa - Asad Eau de Parfum (decant)',
+    offers: { price: '25.90' },
+  })}</script>`
+  const doProduto = [
+    { product_id: 256, option0: '2ml', price: '84.90' },
+    { product_id: 256, option0: '5ml', price: '205.90' },
+  ]
+  const doCarrossel = [
+    { product_id: 999, option0: '2ml', price: '25.90' },
+    { product_id: 999, option0: '5ml', price: '50.90' },
+    { product_id: 999, option0: '10ml', price: '86.90' },
+  ]
+  const ls = `<script>LS.product = { id : 256, name : 'Erba Pura' }</script>`
+
+  it('o payload certo vem pelo id da página, mesmo com o carrossel maior', () => {
+    const html = `
+      <meta property="og:title" content="Xerjoff - Erba Pura Eau de Parfum (decant)">
+      ${ls}
+      ${ldAsad}
+      ${attr(doCarrossel)}
+      ${attr(doProduto)}`
+    expect(variantesDoHtml(html)).toEqual([
+      { rotulo: '2ml', preco: 84.9 },
+      { rotulo: '5ml', preco: 205.9 },
+    ])
+  })
+
+  it('id declarado e nenhum payload da página: vazio, não o vizinho', () => {
+    const html = `<script>LS.product = { id : 111 }</script>${attr(doCarrossel)}`
+    expect(variantesDoHtml(html)).toEqual([])
+  })
+
+  it('carrossel não vira referência: nome que não condiz devolve vazio', () => {
+    const ldAventus = `<script type="application/ld+json">${JSON.stringify({
+      '@type': 'Product',
+      name: 'Creed - Aventus Eau de Parfum (decant)',
+      offers: { price: '109.90' },
+    })}</script>`
+    const html = `
+      <meta property="og:title" content="Xerjoff - Erba Pura Eau de Parfum (decant)">
+      ${ldAsad}
+      ${ldAventus}`
+    expect(precosDeReferencia(html)).toEqual([])
+  })
+})
