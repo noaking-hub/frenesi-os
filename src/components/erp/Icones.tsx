@@ -63,7 +63,7 @@ export const ICONES: Record<string, ReactNode> = {
       <path d="M3.5 16 12 20.5 20.5 16" />
     </Icone>
   ),
-  producao: (
+  envase: (
     // Erlenmeyer com nível de líquido: a bancada de envase.
     <Icone>
       <path d="M9.5 3.5h5" />

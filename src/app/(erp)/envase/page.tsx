@@ -113,7 +113,10 @@ export default async function Envase() {
                 {`${i.necessario}`}
               </span>
               <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
-                {i.nome.replace('Frasco de vidro', 'frascos').replace('Válvula spray', 'válvulas').replace('Tampa', 'tampas')}
+                {i.nome
+                  .replace('Frasco de vidro', 'frascos de')
+                  .replace('Válvula spray', 'válvulas')
+                  .replace('Tampa', 'tampas')}
               </span>
               {i.falta > 0 && (
                 <span className="font-sans" style={{ fontSize: 9.5, color: '#e06d6d' }}>

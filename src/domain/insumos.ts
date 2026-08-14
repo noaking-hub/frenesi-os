@@ -49,18 +49,23 @@ export interface InsumoAvaliado {
 /**
  * Quantas unidades de cada insumo um conjunto de decants consome.
  *
- * Um de cada por decant: um frasco, uma válvula, uma tampa. A conta é
- * simples de propósito — se um dia houver receita mais complexa (etiqueta
- * por variante, caixa por pedido), ela entra aqui e em nenhum outro lugar.
+ * Um de cada por decant: um frasco, uma válvula, uma tampa. Só o FRASCO
+ * depende do tamanho — a válvula e a tampa são as mesmas nos dois, então
+ * levam o total do pedido, não a fatia por tamanho.
  */
 export function insumosDoEnvase(itens: { variante: VarianteMl; unidades: number }[]): Map<string, number> {
   const consumo = new Map<string, number>()
+  let total = 0
   for (const i of itens) {
-    const frasco = frascoDe(i.variante)
-    for (const tipo of ['frasco', 'valvula', 'tampa'] as const) {
-      const id = `${tipo}-${frasco}`
-      consumo.set(id, (consumo.get(id) ?? 0) + i.unidades)
-    }
+    const id = `frasco-${frascoDe(i.variante)}`
+    consumo.set(id, (consumo.get(id) ?? 0) + i.unidades)
+    total += i.unidades
+  }
+  if (total > 0) {
+    // Os ids guardam o sufixo antigo por causa do histórico já gravado; o
+    // que a tela mostra é o nome, e ele diz "Válvula spray" e "Tampa".
+    consumo.set('valvula-8', total)
+    consumo.set('tampa-8', total)
   }
   return consumo
 }
