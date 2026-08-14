@@ -445,9 +445,10 @@ async function consultarAlvos(alvos: AlvoRastreio[]): Promise<RodadaRastreio> {
       // topo da fila e a varredura gira em falso sobre os mesmos dez pedidos.
       await sb.from('pedidos').update({ rastreio_lido_em: agora }).eq('id', p.id)
     }
-    // Espaçamento entre consultas: são dezenas por rodada e o limite da
-    // Frenet é por minuto.
-    await new Promise((r) => setTimeout(r, 250))
+    // Espaçamento entre consultas: o limite da Frenet é por minuto. 150 ms
+    // bastam para 15 códigos — e cada segundo aqui disputa com o teto de
+    // tempo que a Netlify impõe à rodada inteira.
+    await new Promise((r) => setTimeout(r, 150))
   }
 
   return resultado

@@ -15,10 +15,9 @@ export async function POST(req: Request) {
   const corpo = (await req.json().catch(() => ({}))) as { dias?: number; espelhar?: boolean }
   const dias = Math.max(0, Math.min(365, Math.round(corpo.dias ?? 10)))
 
-  const importacao = dias > 0 ? await importarDaYampi(dias) : null
-  const envios = corpo.espelhar ? await sincronizarEnvios() : null
-  // As entregas locais vêm no mesmo clique: quem sincroniza quer ver o pedido
-  // do motoboy fechar aqui também, não só na virada da hora.
+  // As entregas locais vêm PRIMEIRO, e a ordem é defesa: a Netlify corta a
+  // função por tempo, e a importação da Yampi é o passo lento. Atrás dela,
+  // esta etapa — que é barata — morria junto quando o corte chegava.
   let entregasLocais: unknown = null
   if (corpo.espelhar && shopifyConfigurada()) {
     try {
@@ -27,5 +26,7 @@ export async function POST(req: Request) {
       entregasLocais = { erro: mensagemDe(e) }
     }
   }
+  const importacao = dias > 0 ? await importarDaYampi(dias) : null
+  const envios = corpo.espelhar ? await sincronizarEnvios() : null
   return NextResponse.json({ importacao, envios, entregasLocais })
 }

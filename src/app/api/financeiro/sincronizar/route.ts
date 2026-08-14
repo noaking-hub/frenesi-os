@@ -108,12 +108,37 @@ export async function POST(req: Request) {
     relatorio.yampi = { pulado: 'credenciais da Yampi não estão definidas' }
   }
 
+  // Entrega local logo depois dos pedidos, e ANTES das etapas lentas: a
+  // Netlify corta a função por tempo, e os carimbos mostram a corrente
+  // morrendo no meio a cada duas ou três rodadas. A operação marca "entregue"
+  // na SHOPIFY quando o motoboy volta — esta etapa escuta, fecha o pedido e
+  // baixa o estoque; deixá-la atrás da varredura era condená-la ao corte.
+  if (shopifyConfigurada()) {
+    try {
+      const el = await importarEntregasLocaisDaShopify()
+      relatorio.entregasLocais = {
+        vinculados: el.vinculados,
+        consultados: el.consultados,
+        entregues: el.entregues,
+        mlConsumido: el.mlConsumido,
+        falhas: el.falhas.length,
+      }
+    } catch (e) {
+      relatorio.entregasLocais = { erro: mensagemDe(e) }
+    }
+  } else {
+    relatorio.entregasLocais = { pulado: 'credenciais da Shopify não estão definidas' }
+  }
+
   // Rastreio logo depois dos pedidos: a importação acabou de trazer códigos
   // novos, e eles entram nesta mesma rodada em vez de esperar a próxima hora.
   // É a rede de segurança do webhook — que se perde em queda, deploy ou 500.
   if (frenetConfigurada()) {
     try {
-      const r = await varrerRastreiosFrenet(60)
+      // 15 por rodada, não 60: com o corte de tempo da Netlify, a varredura
+      // grande morria no meio e NENHUM evento era gravado. 15 cabem — e
+      // 15 × 24 rodadas cobrem os ~55 códigos vivos várias vezes por dia.
+      const r = await varrerRastreiosFrenet(15)
       relatorio.rastreio = {
         consultados: r.consultados,
         eventos: r.eventos,
@@ -154,22 +179,6 @@ export async function POST(req: Request) {
       relatorio.anulados = await marcarAnuladosDaShopify()
     } catch (e) {
       relatorio.anulados = { erro: mensagemDe(e) }
-    }
-    // Entrega local: a operação marca "entregue" na SHOPIFY quando o motoboy
-    // volta — e é daqui que o ERP escuta, fecha o pedido e baixa o estoque.
-    // Antes disso, dezenas de pedidos entregues ficavam parados em "pago"
-    // esperando um clique manual que a loja já tinha dado.
-    try {
-      const el = await importarEntregasLocaisDaShopify()
-      relatorio.entregasLocais = {
-        vinculados: el.vinculados,
-        consultados: el.consultados,
-        entregues: el.entregues,
-        mlConsumido: el.mlConsumido,
-        falhas: el.falhas.length,
-      }
-    } catch (e) {
-      relatorio.entregasLocais = { erro: mensagemDe(e) }
     }
     try {
       const s = await aplicarEstoqueCalculado()
