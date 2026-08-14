@@ -18,7 +18,18 @@ import {
   situacaoLogistica,
   statusDoPedido,
 } from '@/domain'
-import type { ApuracaoLote, CoberturaBase, EventoLido, PerdaReal, ResumoSync } from '@/domain'
+import { avaliarInsumo, insumosDoEnvase } from '@/domain'
+import type {
+  ApuracaoLote,
+  CoberturaBase,
+  EventoLido,
+  Insumo,
+  InsumoAvaliado,
+  PerdaReal,
+  ResumoSync,
+  TipoInsumo,
+  VarianteMl,
+} from '@/domain'
 
 import { resumoDoExtrato } from './extrato'
 import { origemDados, repositorio } from './repository'
@@ -579,9 +590,19 @@ export interface PerfumeNaFila {
   faltaMl: number
 }
 
+export interface InsumoDaFila {
+  id: string
+  nome: string
+  necessario: number
+  emEstoque: number
+  falta: number
+}
+
 export interface FilaDeEnvase {
   porPerfume: PerfumeNaFila[]
   porPedido: PedidoNaFila[]
+  /** O que a fila consome de frasco, válvula e tampa. */
+  insumos: InsumoDaFila[]
   pedidos: number
   mlTotal: number
   perfumes: number
@@ -606,6 +627,7 @@ export async function carregarFilaDeEnvase(): Promise<FilaDeEnvase> {
   const vazia: FilaDeEnvase = {
     porPerfume: [],
     porPedido: [],
+    insumos: [],
     pedidos: 0,
     mlTotal: 0,
     perfumes: 0,
@@ -732,13 +754,126 @@ export async function carregarFilaDeEnvase(): Promise<FilaDeEnvase> {
     (a, b) => new Date(a.compradoEm).getTime() - new Date(b.compradoEm).getTime(),
   )
 
+  // O que esta fila consome de embalagem — a bancada precisa disso junto
+  // com o perfume, senão descobre a falta de tampa com o frasco na mão.
+  const consumo = insumosDoEnvase(
+    listaPedidos.flatMap((p) => p.itens.map((i) => ({ variante: i.variante as VarianteMl, unidades: i.unidades }))),
+  )
+  const { data: emEstoque } = await sb.from('insumos').select('id, nome, unidades')
+  const insumos: InsumoDaFila[] = [...consumo.entries()]
+    .map(([id, necessario]) => {
+      const linha = ((emEstoque ?? []) as unknown as { id: string; nome: string; unidades: number }[]).find(
+        (i) => i.id === id,
+      )
+      const saldo = linha?.unidades ?? 0
+      return {
+        id,
+        nome: linha?.nome ?? id,
+        necessario,
+        emEstoque: saldo,
+        falta: Math.max(0, necessario - saldo),
+      }
+    })
+    .sort((a, b) => b.falta - a.falta || b.necessario - a.necessario)
+
   return {
     porPerfume: listaPerfumes,
     porPedido: listaPedidos,
+    insumos,
     pedidos: listaPedidos.length,
     mlTotal: listaPerfumes.reduce((a, p) => a + p.mlAEnvasar, 0),
     perfumes: listaPerfumes.length,
     bloqueados: listaPedidos.filter((p) => p.bloqueios.length > 0).length,
+    semBanco: false,
+  }
+}
+
+// ── Insumos de envase ──────────────────────────────────────────────────────
+
+export interface PainelInsumos {
+  itens: InsumoAvaliado[]
+  totalUnidades: number
+  valorEmEstoque: number
+  /** Itens que não cobrem a fila já vendida. */
+  insuficientes: number
+  abaixoDoMinimo: number
+  semBanco: boolean
+}
+
+/**
+ * Insumos com a demanda da fila já descontada.
+ *
+ * O saldo sozinho engana: 80 tampas parecem muitas até se ver que os
+ * pedidos pagos de hoje consomem 120. A tela precisa das duas coisas na
+ * mesma linha.
+ */
+export async function carregarInsumos(): Promise<PainelInsumos> {
+  const vazio: PainelInsumos = {
+    itens: [],
+    totalUnidades: 0,
+    valorEmEstoque: 0,
+    insuficientes: 0,
+    abaixoDoMinimo: 0,
+    semBanco: false,
+  }
+  if (!supabaseConfigurado()) return { ...vazio, semBanco: true }
+
+  const sb = supabaseServer()
+  const [{ data: linhas }, fila, { data: consumo }] = await Promise.all([
+    sb.from('insumos').select('*').eq('ativo', true).order('frasco_ml').order('tipo'),
+    carregarFilaDeEnvase(),
+    // Consumo diário dos últimos 30 dias, para a cobertura.
+    sb
+      .from('insumo_movimentacoes')
+      .select('insumo_id, unidades')
+      .eq('tipo', 'saida')
+      .gte('ocorrida_em', new Date(Date.now() - 30 * 86_400_000).toISOString()),
+  ])
+
+  const insumos = ((linhas ?? []) as unknown as {
+    id: string
+    nome: string
+    tipo: TipoInsumo
+    frasco_ml: number | null
+    unidades: number
+    custo_unitario: number | string
+    minimo: number
+    ativo: boolean
+  }[]).map(
+    (i): Insumo => ({
+      id: i.id,
+      nome: i.nome,
+      tipo: i.tipo,
+      frascoMl: (i.frasco_ml as 8 | 15 | null) ?? null,
+      unidades: i.unidades,
+      custoUnitario: Number(i.custo_unitario),
+      minimo: i.minimo,
+      ativo: i.ativo,
+    }),
+  )
+
+  // A fila diz quantas unidades de cada variante estão vendidas e não saíram;
+  // `insumosDe` traduz isso em frascos, válvulas e tampas.
+  const itensDaFila = fila.porPedido.flatMap((p) =>
+    p.itens.map((i) => ({ variante: i.variante as VarianteMl, unidades: i.unidades })),
+  )
+  const necessario = insumosDoEnvase(itensDaFila)
+
+  const saidas = new Map<string, number>()
+  for (const m of (consumo ?? []) as unknown as { insumo_id: string; unidades: number }[]) {
+    saidas.set(m.insumo_id, (saidas.get(m.insumo_id) ?? 0) + Math.abs(m.unidades))
+  }
+
+  const itens = insumos.map((i) =>
+    avaliarInsumo(i, necessario.get(i.id) ?? 0, (saidas.get(i.id) ?? 0) / 30),
+  )
+
+  return {
+    itens,
+    totalUnidades: itens.reduce((a, i) => a + i.insumo.unidades, 0),
+    valorEmEstoque: itens.reduce((a, i) => a + i.valorEmEstoque, 0),
+    insuficientes: itens.filter((i) => i.estado === 'insuficiente' || i.estado === 'zerado').length,
+    abaixoDoMinimo: itens.filter((i) => i.estado === 'baixo').length,
     semBanco: false,
   }
 }

@@ -89,6 +89,46 @@ export default async function Envase() {
         </LinkSecundario>
       </div>
 
+      {/* Embalagem ao lado do líquido: descobrir que faltou tampa com o
+          frasco na mão é o pior momento possível. */}
+      {fila.insumos.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 14,
+            flexWrap: 'wrap',
+            padding: '13px 16px',
+            border: `1px solid ${fila.insumos.some((i) => i.falta > 0) ? 'rgba(224,109,109,.3)' : 'rgba(255,255,255,.07)'}`,
+            borderRadius: 12,
+            background: fila.insumos.some((i) => i.falta > 0) ? 'rgba(224,109,109,.05)' : 'rgba(255,255,255,.015)',
+          }}
+        >
+          <span className="font-sans" style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-secundario)' }}>
+            Esta fila consome
+          </span>
+          {fila.insumos.map((i) => (
+            <span key={i.id} style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+              <span className="font-mono" style={{ fontSize: 12, color: i.falta > 0 ? '#e06d6d' : 'var(--color-corrente)' }}>
+                {`${i.necessario}`}
+              </span>
+              <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
+                {i.nome.replace('Frasco de vidro', 'frascos').replace('Válvula spray', 'válvulas').replace('Tampa', 'tampas')}
+              </span>
+              {i.falta > 0 && (
+                <span className="font-sans" style={{ fontSize: 9.5, color: '#e06d6d' }}>
+                  {`(faltam ${i.falta})`}
+                </span>
+              )}
+            </span>
+          ))}
+          <div style={{ flex: 1 }} />
+          <LinkSecundario href="/estoque/insumos" altura={30}>
+            Ver insumos
+          </LinkSecundario>
+        </div>
+      )}
+
       {fila.pedidos === 0 ? (
         <EstadoVazio
           titulo="Nada na fila"

@@ -52,6 +52,8 @@ export const NAV: GrupoNav[] = [
       { id: 'lotes', label: 'Lotes e perda real', href: '/estoque/lotes', pronta: true },
       { id: 'sync', label: 'Sincronia Shopify', href: '/estoque/sincronia', pronta: true },
       { id: 'inventario', label: 'Inventário', href: '/estoque/inventario', pronta: true },
+      // Frasco, válvula e tampa: o decant não sai só com perfume.
+      { id: 'insumos', label: 'Insumos', href: '/estoque/insumos', pronta: true },
     ],
   },
   // "Produção" virou "Envase": a tela não abre mais ordem nem baixa estoque
