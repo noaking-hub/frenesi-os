@@ -7,6 +7,8 @@
  * relatório fica persistido no banco e a rodada seguinte importa o arquivo
  * já gerado — o desenho tolera exatamente esse corte.
  */
+// Nota de manutenção: mudar este arquivo força o reempacote do bundle — é o
+// único jeito de a função enxergar variável de ambiente nova (CRON_SEGREDO).
 export default async function sincronizar() {
   // URL é injetada pela Netlify com o endereço público do site.
   const resposta = await fetch(`${process.env.URL}/api/financeiro/sincronizar`, {

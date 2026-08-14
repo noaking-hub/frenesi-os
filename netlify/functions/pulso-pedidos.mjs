@@ -6,6 +6,11 @@
  * é o dado que não pode esperar a sorte da próxima hora. Este pulso dispara a
  * rota fininha que só traz pedidos novos e goteja o espelho de envios.
  */
+// Nota de manutenção: mudar QUALQUER coisa neste arquivo força a Netlify a
+// reempacotar a função. Isso importa porque o bundle congela o ambiente:
+// criar/alterar uma variável (como o CRON_SEGREDO) não chega a uma função
+// agendada cujo bundle veio do cache — foi assim que todas rodaram meses
+// sem o segredo, recebendo 401 em silêncio.
 export default async function pulsar() {
   // URL é injetada pela Netlify com o endereço público do site.
   const resposta = await fetch(`${process.env.URL}/api/pedidos/pulso`, {

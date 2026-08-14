@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { sincronizarEnvios } from '@/app/(erp)/pedidos/actions'
 import { mensagemDe, shopifyConfigurada } from '@/data/shopify'
-import { supabaseConfigurado } from '@/data/supabase'
+import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { importarPedidosYampi, yampiConfigurada } from '@/data/yampi'
 
 /**
@@ -65,6 +65,25 @@ export async function POST(req: Request) {
     } catch (e) {
       relatorio.espelhoEnvios = { erro: mensagemDe(e) }
     }
+  }
+
+  // A batida no banco é o que torna esta rotina AUDITÁVEL: as funções
+  // agendadas falharam em silêncio por dias (segredo ausente → 401 → nada
+  // gravado em lugar nenhum) e o defeito só apareceu quando alguém estranhou
+  // um "sincronizado há 5 horas". Com a batida, "o pulso está vivo?" é uma
+  // consulta — inclusive nas rodadas em que a Yampi falha, porque o erro vai
+  // junto nos detalhes. Guarda só as últimas 48 h: é sinal vital, não acervo.
+  try {
+    const sb = supabaseServer()
+    await sb
+      .from('sincronizacoes')
+      .delete()
+      .eq('origem', 'pulso')
+      .lt('executada_em', new Date(Date.now() - 48 * 3600_000).toISOString())
+    await sb.from('sincronizacoes').insert({ origem: 'pulso', tipo: 'batida', detalhes: relatorio })
+  } catch {
+    // Sem batida ainda há resposta — o pulso não deixa de trabalhar por
+    // causa do próprio termômetro.
   }
 
   return NextResponse.json(relatorio)
