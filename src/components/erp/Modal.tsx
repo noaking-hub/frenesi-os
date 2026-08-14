@@ -117,10 +117,18 @@ export function PainelInferior({
 
   useEffect(() => {
     const aoTeclar = (e: KeyboardEvent) => {
-      // Esc fecha uma camada por vez: com um menu suspenso aberto, o Esc é
-      // dele — fechar o painel junto tiraria da tela justamente o que a
-      // pessoa estava lendo.
-      if (e.key === 'Escape' && !document.querySelector('[data-camada="menu"]')) aoFechar()
+      // Esc fecha uma camada por vez: com um menu ou um modal aberto por
+      // cima, o Esc é deles — fechar o painel junto tiraria da tela
+      // justamente o que a pessoa estava usando. (E o modal PRECISA desta
+      // guarda: quando o painel fecha no mesmo Esc, o re-render do React
+      // reinscreve o listener do modal durante o próprio dispatch e o Esc
+      // dele se perde — sobraria o modal aberto sem o painel de baixo.)
+      if (
+        e.key === 'Escape' &&
+        !document.querySelector('[data-camada="menu"], [data-camada="modal"]')
+      ) {
+        aoFechar()
+      }
     }
     document.addEventListener('keydown', aoTeclar)
     return () => document.removeEventListener('keydown', aoTeclar)
@@ -190,6 +198,7 @@ export function Modal({
   return createPortal(
     <div
       onClick={aoFechar}
+      data-camada="modal"
       style={{
         position: 'fixed',
         inset: 0,

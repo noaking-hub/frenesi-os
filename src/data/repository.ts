@@ -693,6 +693,7 @@ const repositorioSupabase: Repositorio = {
           hour: '2-digit',
           minute: '2-digit',
         }),
+        abertaEmIso: s.aberta_em,
         tipo: s.tipo,
         motivo: s.motivo,
         comentario: s.comentario,

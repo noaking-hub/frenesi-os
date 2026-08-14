@@ -751,7 +751,7 @@ function fatosDeIntegracao(p: Pedido): Fato[] {
 
 // ── peças ──────────────────────────────────────────────────────────────────
 
-function Bloco({
+export function Bloco({
   titulo,
   largo,
   children,
@@ -830,7 +830,7 @@ function RotuloCampo({ children }: { children: ReactNode }) {
   )
 }
 
-function Campo({
+export function Campo({
   rotulo,
   valor,
   mono,
@@ -863,7 +863,7 @@ function Campo({
 }
 
 /** Um ponto na linha do tempo: bolinha colorida, título, detalhe e hora. */
-function Momento({
+export function Momento({
   quando,
   tom,
   titulo,
@@ -922,7 +922,7 @@ function Momento({
   )
 }
 
-function Selo({ tom, children }: { tom: Tom; children: ReactNode }) {
+export function Selo({ tom, children }: { tom: Tom; children: ReactNode }) {
   return (
     <span
       className="font-sans"
@@ -945,7 +945,7 @@ function Selo({ tom, children }: { tom: Tom; children: ReactNode }) {
   )
 }
 
-function Nota({ children }: { children: ReactNode }) {
+export function Nota({ children }: { children: ReactNode }) {
   return (
     <p
       className="font-sans"
@@ -956,7 +956,7 @@ function Nota({ children }: { children: ReactNode }) {
   )
 }
 
-function BotaoFicha({
+export function BotaoFicha({
   children,
   icone,
   primario,

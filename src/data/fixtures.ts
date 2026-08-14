@@ -565,6 +565,8 @@ export interface SolicitacaoErp {
   email: string
   telefone: string
   abertura: string
+  /** Abertura em ISO, para janelas de período e ordenação — a formatada não serve para conta. */
+  abertaEmIso: string
   tipo: TipoSolicitacao
   motivo: string
   comentario: string
@@ -593,13 +595,14 @@ export const SOLICITACOES: SolicitacaoErp[] = [
   {
     id: 'DEV-1042', pedidoId: '#10480', cliente: 'Juliana Prado', destino: 'Belo Horizonte · MG',
     identificacao: 'CPF 041.***.***-22', email: 'ju.prado@email.com', telefone: '31 98003-1177',
-    abertura: 'hoje 08:12', tipo: 'Defeito', motivo: 'Produto avariado no transporte',
+    abertura: 'hoje 08:12', abertaEmIso: '2026-08-14T08:12:00-03:00', tipo: 'Defeito', motivo: 'Produto avariado no transporte',
     comentario:
       'A caixa chegou amassada e um dos frascos estava trincado, vazou dentro do estojo. Tenho fotos do frasco e da embalagem.',
     valor: 612.5, prazo: '28 dias restantes · defeito (30 dias)', prazoOk: true,
     status: 'Nova', gateway: 'Melhor Envio', etiquetaIda: 'OS9981204BR', reverso: '',
     lacre: 'rompido-no-transporte',
     fotos: ['Volume no frasco', 'Lacre / recrave', 'Frasco trincado', 'Estojo com vazamento'],
+    itensSolicitados: ['Baccarat Rouge 540 · 5 ml', 'Delina · 5 ml', 'Aventus · 5 ml'],
     itens: [
       aferirItem('Baccarat Rouge 540', 5, 4.9, 'Frasco trincado'),
       aferirItem('Delina', 5, 1.2, 'Vazou no transporte'),
@@ -609,12 +612,13 @@ export const SOLICITACOES: SolicitacaoErp[] = [
   {
     id: 'DEV-1041', pedidoId: '#10474', cliente: 'Ana Clara Mota', destino: 'São Paulo · SP',
     identificacao: 'E-mail verificado', email: 'ana.mota@email.com', telefone: '11 97001-5540',
-    abertura: 'ontem 17:40', tipo: 'Arrependimento', motivo: 'Desistência da compra',
+    abertura: 'ontem 17:40', abertaEmIso: '2026-08-13T17:40:00-03:00', tipo: 'Arrependimento', motivo: 'Desistência da compra',
     comentario: 'Comprei por impulso e não abri o lacre. Gostaria de devolver os dois itens.',
     valor: 168.8, prazo: '5 dias restantes · CDC (7 dias)', prazoOk: false,
     status: 'Em análise', gateway: 'Frenet', etiquetaIda: 'AZ7710455', reverso: '',
     lacre: 'intacto',
     fotos: ['Volume no frasco', 'Lacre / recrave'],
+    itensSolicitados: ['Erba Pura · 5 ml', 'Sauvage Elixir · 8 ml'],
     itens: [
       aferirItem('Erba Pura', 5, 5, 'Lacre intacto'),
       aferirItem('Sauvage Elixir', 8, 7.6, 'Lacre intacto'),
@@ -623,7 +627,7 @@ export const SOLICITACOES: SolicitacaoErp[] = [
   {
     id: 'DEV-1040', pedidoId: '#10465', cliente: 'Vitor Hugo Rezende', destino: 'Londrina · PR',
     identificacao: 'CPF 118.***.***-40', email: 'vitor.rezende@email.com', telefone: '43 99820-6611',
-    abertura: '02/08 14:10', tipo: 'Arrependimento', motivo: 'Não gostei da fragrância',
+    abertura: '02/08 14:10', abertaEmIso: '2026-08-02T14:10:00-03:00', tipo: 'Arrependimento', motivo: 'Não gostei da fragrância',
     comentario: 'Não é o que eu esperava. Usei só uma borrifada para testar.',
     valor: 352.0, prazo: '2 dias restantes · CDC (7 dias)', prazoOk: false,
     // Ainda em análise: a triagem reprova o volume, então a decisão está de pé.
@@ -631,6 +635,7 @@ export const SOLICITACOES: SolicitacaoErp[] = [
     status: 'Em análise', gateway: 'Frenet', etiquetaIda: 'LGG55120904', reverso: '',
     lacre: 'violado',
     fotos: ['Volume no frasco', 'Lacre / recrave'],
+    itensSolicitados: ['Oud Wood · 5 ml'],
     itens: [
       // 3,9 de 5 ml = 78%, abaixo do mínimo de 4,5 → arrependimento bloqueado.
       aferirItem('Oud Wood', 5, 3.9, 'Lacre rompido pelo cliente'),
@@ -639,23 +644,25 @@ export const SOLICITACOES: SolicitacaoErp[] = [
   {
     id: 'DEV-1039', pedidoId: '#10471', cliente: 'Bruno Sampaio', destino: 'Recife · PE',
     identificacao: 'E-mail verificado', email: 'bruno.sampaio@email.com', telefone: '81 98120-4477',
-    abertura: '30/07 09:40', tipo: 'Defeito', motivo: 'Frasco chegou vazando',
+    abertura: '30/07 09:40', abertaEmIso: '2026-07-30T09:40:00-03:00', tipo: 'Defeito', motivo: 'Frasco chegou vazando',
     comentario: 'Chegou com a tampa solta e metade do conteúdo tinha vazado na caixa.',
     valor: 289.0, prazo: 'dentro do prazo · defeito (30 dias)', prazoOk: true,
     status: 'Em trânsito reverso', gateway: 'Frenet', etiquetaIda: 'AZ4471120', reverso: 'RV4471120BR',
     lacre: 'rompido-no-transporte',
     fotos: ['Volume no frasco', 'Tampa solta', 'Caixa com vazamento'],
+    itensSolicitados: ['Bleu de Chanel · 10 ml'],
     itens: [aferirItem('Bleu de Chanel', 10, 4.2, 'Vazou no transporte')],
   },
   {
     id: 'DEV-1038', pedidoId: '#10452', cliente: 'Diego Matos', destino: 'Belém · PA',
     identificacao: 'CPF 330.***.***-17', email: 'diego.matos@email.com', telefone: '91 98221-3390',
-    abertura: '28/07 11:05', tipo: 'Erro de envio', motivo: 'Recebi produto diferente do pedido',
+    abertura: '28/07 11:05', abertaEmIso: '2026-07-28T11:05:00-03:00', tipo: 'Erro de envio', motivo: 'Recebi produto diferente do pedido',
     comentario: 'Pedi Good Girl 5 ml e veio outro perfume.',
     valor: 245.0, prazo: 'resolvido', prazoOk: true,
     status: 'Concluída', gateway: 'Melhor Envio', etiquetaIda: 'JD3390017', reverso: 'RV7710455BR',
     lacre: 'intacto',
     fotos: ['Volume no frasco', 'Lacre / recrave'],
+    itensSolicitados: ['Good Girl · 5 ml'],
     itens: [aferirItem('Good Girl', 5, 5, 'Lacre intacto · perfume trocado')],
   },
 ]
