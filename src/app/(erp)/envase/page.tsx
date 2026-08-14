@@ -39,7 +39,7 @@ export default async function Envase() {
     {
       label: 'Pedidos na fila',
       valor: pad2(fila.pedidos),
-      hint: fila.pedidos ? 'Pagos, aguardando envase e despacho' : 'Nada pago esperando envase',
+      hint: fila.pedidos ? 'Pagos, ainda não faturados' : 'Nenhum pedido pago esperando envase',
       tom: fila.pedidos ? 'atencao' : 'ok',
     },
     {
@@ -75,10 +75,11 @@ export default async function Envase() {
           className="font-sans"
           style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
         >
-          {/* A regra que evita a baixa dupla precisa estar escrita na tela:
-              quem envasa não deve procurar um botão de "concluir" aqui. */}
-          A fila sai dos pedidos pagos que ainda não saíram. Envasar não baixa estoque por aqui — o
-          volume sai do frasco quando o pedido é faturado, uma vez só.
+          {/* As duas condições ficam escritas porque a ausência delas gerou
+              fila fantasma: pedido faturado em julho e perfume sem lote. */}
+          Entra aqui o pedido pago que ainda não foi faturado, de perfume com compra de frasco
+          registrada. Envasar não baixa estoque por aqui — o volume sai do frasco no faturamento,
+          uma vez só.
         </span>
         <div style={{ flex: 1 }} />
         <LinkSecundario href="/pedidos" altura={34}>
@@ -135,7 +136,7 @@ export default async function Envase() {
       {fila.pedidos === 0 ? (
         <EstadoVazio
           titulo="Nada na fila"
-          instrucao="Quando um pedido for pago, ele aparece aqui com os frascos a pegar e o volume a tirar de cada um."
+          instrucao="Fila vazia é o esperado quando todo pedido pago já foi faturado. Um pedido só aparece aqui se ainda não foi faturado e o perfume dele tiver compra de frasco registrada em Estoque."
         />
       ) : (
         <FilaCliente fila={fila} />
