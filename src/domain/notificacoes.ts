@@ -198,34 +198,36 @@ const LOJA = 'https://frenesiperfumes.com.br'
  * Confirmação de que a solicitação existe do outro lado.
  *
  * O bloco em destaque é o PROTOCOLO — o número que o cliente vai ditar para o
- * atendimento. Placeholders: {nome}, {pedido}, {protocolo}, {motivo}.
+ * atendimento. Placeholders: {nome}, {pedido}, {protocolo}.
  */
 export const MODELO_DEVOLUCAO_ABERTA_PADRAO: ModeloEmailRecuperacao = {
   assunto: 'Recebemos sua solicitação de devolução · {protocolo}',
-  titulo: '{nome}, recebemos sua solicitação',
+  titulo: '{nome}, sua solicitação foi registrada',
   mensagem:
-    'Nossa equipe analisa a devolução em até 1 dia útil. Você não precisa fazer nada agora — guarde o produto na embalagem original, com o lacre como está.',
+    'Mantenha o produto na embalagem original, com o lacre como está. Você não precisa fazer nada agora — nossa equipe conduz a análise e retorna com o resultado.',
   textoBotao: 'Falar com o atendimento',
   html: HTML_VALIDADO_DEVOLUCAO_ABERTA,
 }
 
 /**
  * Aprovação com o código de postagem reversa em destaque — é o e-mail que o
- * cliente leva à agência. Placeholders: {nome}, {protocolo}, {plataforma},
- * {reverso}.
+ * cliente leva à agência. A agência é fixa: a postagem reversa sai SEMPRE
+ * pelos Correios (regra da operação); a plataforma da etiqueta (Frenet) nunca
+ * aparece — não significa nada para quem recebe.
+ * Placeholders: {nome}, {protocolo}, {reverso}.
  */
 export const MODELO_DEVOLUCAO_APROVADA_PADRAO: ModeloEmailRecuperacao = {
   assunto: 'Devolução aprovada · código de postagem · {protocolo}',
   titulo: '{nome}, sua devolução foi aprovada',
   mensagem:
-    'Leve o decant na embalagem original, com o lacre como está, e apresente o código abaixo no balcão da agência. A postagem não tem custo para você.',
-  textoBotao: 'Tirar dúvida no WhatsApp',
+    'Leve o produto na embalagem original, com o lacre como está, a uma agência dos Correios e apresente o código abaixo no balcão. Não é preciso imprimir etiqueta.',
+  textoBotao: 'Tirar dúvidas no WhatsApp',
   html: HTML_VALIDADO_DEVOLUCAO_APROVADA,
 }
 
 /** Monta a confirmação de devolução aberta. */
 export function emailDevolucaoAberta(
-  d: { nome: string | null; pedido: string; protocolo: string; motivo: string },
+  d: { nome: string | null; pedido: string; protocolo: string },
   modelo: ModeloEmailRecuperacao = MODELO_DEVOLUCAO_ABERTA_PADRAO,
 ): { assunto: string; html: string } {
   const nome = d.nome?.trim().split(/\s+/)[0] || 'Olá'
@@ -234,7 +236,6 @@ export function emailDevolucaoAberta(
       .split('{nome}').join(escapa(nome))
       .split('{pedido}').join(escapa(d.pedido))
       .split('{protocolo}').join(escapa(d.protocolo))
-      .split('{motivo}').join(escapa(d.motivo || 'Devolução'))
   return {
     assunto: preenche(modelo.assunto),
     html: preenche(modelo.html || HTML_VALIDADO_DEVOLUCAO_ABERTA),
@@ -246,7 +247,7 @@ export function emailDevolucaoAberta(
  * garante; um "código: em breve" na caixa de destaque seria pior que esperar.
  */
 export function emailDevolucaoAprovada(
-  d: { nome: string | null; protocolo: string; plataforma: string; reverso: string },
+  d: { nome: string | null; protocolo: string; reverso: string },
   modelo: ModeloEmailRecuperacao = MODELO_DEVOLUCAO_APROVADA_PADRAO,
 ): { assunto: string; html: string } {
   const nome = d.nome?.trim().split(/\s+/)[0] || 'Olá'
@@ -254,7 +255,6 @@ export function emailDevolucaoAprovada(
     t
       .split('{nome}').join(escapa(nome))
       .split('{protocolo}').join(escapa(d.protocolo))
-      .split('{plataforma}').join(escapa(d.plataforma))
       .split('{reverso}').join(escapa(d.reverso))
   return {
     assunto: preenche(modelo.assunto),

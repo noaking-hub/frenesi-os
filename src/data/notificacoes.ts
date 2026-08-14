@@ -283,8 +283,6 @@ async function avisarDevolucao(
     nome: string | null
     email: string
     pedido: string
-    motivo: string
-    gateway: string
     reverso: string
   }) => { assunto: string; html: string } | null,
 ): Promise<void> {
@@ -294,7 +292,7 @@ async function avisarDevolucao(
 
     const { data } = await sb
       .from('solicitacoes_devolucao')
-      .select('protocolo, pedido_id, motivo, reverso, pedidos(servico_frete, rastreio, clientes(nome, email))')
+      .select('protocolo, pedido_id, motivo, reverso, pedidos(clientes(nome, email))')
       .eq('protocolo', protocolo)
       .maybeSingle()
     const s = data as unknown as {
@@ -303,8 +301,6 @@ async function avisarDevolucao(
       motivo: string
       reverso: string
       pedidos: {
-        servico_frete: string | null
-        rastreio: string | null
         clientes: { nome: string | null; email: string | null } | null
       } | null
     } | null
@@ -315,9 +311,6 @@ async function avisarDevolucao(
       nome: s.pedidos?.clientes?.nome ?? null,
       email,
       pedido: s.pedido_id,
-      motivo: s.motivo,
-      gateway: identificarFrete(s.pedidos?.servico_frete ?? null, s.pedidos?.rastreio ?? null)
-        .gateway,
       reverso: s.reverso,
     })
     if (!mensagem) return
@@ -383,10 +376,7 @@ async function avisarDevolucao(
 export async function avisarDevolucaoAberta(protocolo: string): Promise<void> {
   const modelo = await lerModeloEmail('devolucao-aberta').catch(() => undefined)
   await avisarDevolucao(protocolo, 'devolucao_aberta', (d) =>
-    emailDevolucaoAberta(
-      { nome: d.nome, pedido: d.pedido, protocolo, motivo: d.motivo },
-      modelo,
-    ),
+    emailDevolucaoAberta({ nome: d.nome, pedido: d.pedido, protocolo }, modelo),
   )
 }
 
@@ -396,10 +386,7 @@ export async function avisarDevolucaoAprovada(protocolo: string): Promise<void> 
   await avisarDevolucao(protocolo, 'devolucao_aprovada', (d) =>
     // Sem reverso não há o que apresentar na agência — o e-mail não sai.
     d.reverso
-      ? emailDevolucaoAprovada(
-          { nome: d.nome, protocolo, plataforma: d.gateway, reverso: d.reverso },
-          modelo,
-        )
+      ? emailDevolucaoAprovada({ nome: d.nome, protocolo, reverso: d.reverso }, modelo)
       : null,
   )
 }

@@ -880,8 +880,14 @@ export const HTML_VALIDADO_ENTREGUE = `<!DOCTYPE html>
  * pelo mesmo motivo do aviso de entrega — derivado por substituição quebraria
  * em silêncio na primeira edição do modelo de envio.
  *
- * Placeholders da aberta: {nome}, {pedido}, {protocolo}, {motivo}.
- * Placeholders da aprovada: {nome}, {protocolo}, {plataforma}, {reverso}.
+ * Tom sóbrio de propósito: nada de "vamos cuidar disso" — a linguagem casual
+ * já foi reprovada pela operação no portal, e e-mail transacional é o lugar
+ * mais formal da relação. Na aprovada, a agência é FIXA — a postagem reversa
+ * sai sempre pelos Correios, regra da operação — e a plataforma da etiqueta
+ * (Frenet) nunca aparece: não significa nada para quem recebe.
+ *
+ * Placeholders da aberta: {nome}, {pedido}, {protocolo}.
+ * Placeholders da aprovada: {nome}, {protocolo}, {reverso}. A ag&ecirc;ncia &eacute; fixa: a reversa sai SEMPRE pelos Correios.
  */
 export const HTML_VALIDADO_DEVOLUCAO_ABERTA = `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -890,7 +896,7 @@ export const HTML_VALIDADO_DEVOLUCAO_ABERTA = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="color-scheme" content="light dark" />
 <meta name="supported-color-schemes" content="light dark" />
-<title>FRENESI &mdash; recebemos sua devolu&ccedil;&atilde;o</title>
+<title>FRENESI &mdash; solicita&ccedil;&atilde;o de devolu&ccedil;&atilde;o registrada</title>
 <!--[if mso]>
 <xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml>
 <![endif]-->
@@ -938,9 +944,9 @@ export const HTML_VALIDADO_DEVOLUCAO_ABERTA = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:26px 50px 0 50px;">
-                  <div style="font-family:Georgia,'Times New Roman',serif; font-size:38px; line-height:48px; mso-line-height-rule:exactly; color:#F2ECDF;">{nome}, recebemos sua solicita&ccedil;&atilde;o</div>
-                  <div style="font-family:Georgia,'Times New Roman',serif; font-size:24px; line-height:32px; font-style:italic; mso-line-height-rule:exactly; color:#D4AF6A; padding-top:8px;">vamos cuidar disso</div>
-                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:15px; line-height:25px; mso-line-height-rule:exactly; color:#A2957F; padding-top:20px;">Nossa equipe analisa a devolu&ccedil;&atilde;o em at&eacute; 1 dia &uacute;til. Voc&ecirc; n&atilde;o precisa fazer nada agora &mdash; guarde o produto na embalagem original, com o lacre como est&aacute;.</div>
+                  <div style="font-family:Georgia,'Times New Roman',serif; font-size:38px; line-height:48px; mso-line-height-rule:exactly; color:#F2ECDF;">{nome}, sua solicita&ccedil;&atilde;o foi registrada</div>
+                  <div style="font-family:Georgia,'Times New Roman',serif; font-size:24px; line-height:32px; font-style:italic; mso-line-height-rule:exactly; color:#D4AF6A; padding-top:8px;">devolu&ccedil;&atilde;o em an&aacute;lise</div>
+                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:15px; line-height:25px; mso-line-height-rule:exactly; color:#A2957F; padding-top:20px;">Mantenha o produto na embalagem original, com o lacre como est&aacute;. Voc&ecirc; n&atilde;o precisa fazer nada agora &mdash; nossa equipe conduz a an&aacute;lise e retorna com o resultado.</div>
                 </td>
               </tr>
 
@@ -955,11 +961,11 @@ export const HTML_VALIDADO_DEVOLUCAO_ABERTA = `<!DOCTYPE html>
                     <tr>
                       <td align="center" style="padding:28px 30px 30px 30px;">
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#D4AF6A;">PROTOCOLO DA DEVOLU&Ccedil;&Atilde;O</div>
-                        <div style="font-family:Georgia,'Times New Roman',serif; font-size:26px; line-height:34px; mso-line-height-rule:exactly; color:#F2ECDF; padding-top:14px;">{motivo}</div>
+                        <div style="font-family:Georgia,'Times New Roman',serif; font-size:26px; line-height:34px; mso-line-height-rule:exactly; color:#F2ECDF; padding-top:14px;">Pedido {pedido}</div>
                         <div style="padding-top:18px;">
                           <span class="cod" style="display:inline-block; font-family:'Courier New',Courier,monospace; font-size:30px; line-height:38px; letter-spacing:3px; mso-line-height-rule:exactly; color:#E7CE9B; border:1px dashed #6B5836; border-radius:8px; padding:14px 30px;">{protocolo}</span>
                         </div>
-                        <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#A2957F; padding-top:16px;">&Eacute; por este n&uacute;mero que encontramos o seu caso &mdash; guarde-o</div>
+                        <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#A2957F; padding-top:16px;">Guarde este n&uacute;mero &mdash; &eacute; por ele que acompanhamos o seu caso</div>
                       </td>
                     </tr>
                   </table>
@@ -985,8 +991,20 @@ export const HTML_VALIDADO_DEVOLUCAO_ABERTA = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:32px 50px 0 50px;">
-                  <div style="font-family:Georgia,'Times New Roman',serif; font-size:19px; line-height:26px; font-style:italic; mso-line-height-rule:exactly; color:#D4AF6A;">Aprovada a devolu&ccedil;&atilde;o, voc&ecirc; recebe o c&oacute;digo de postagem &mdash; sem custo.</div>
-                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:22px; mso-line-height-rule:exactly; color:#A2957F; padding-top:10px;">Depois da confer&ecirc;ncia do produto, o reembolso ou a troca sai em at&eacute; 5 dias &uacute;teis.</div>
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="470" class="win" style="width:470px;">
+                    <tr>
+                      <td width="30" valign="top" style="width:30px; padding-bottom:16px;"><div style="width:22px; height:22px; border:1px solid #6B5836; border-radius:50%; font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:22px; color:#D4AF6A; text-align:center;">1</div></td>
+                      <td valign="top" align="left" style="font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:22px; mso-line-height-rule:exactly; color:#A2957F; padding-bottom:16px; padding-left:12px;"><span style="color:#F2ECDF;">An&aacute;lise da solicita&ccedil;&atilde;o</span> em at&eacute; 1 dia &uacute;til</td>
+                    </tr>
+                    <tr>
+                      <td width="30" valign="top" style="width:30px; padding-bottom:16px;"><div style="width:22px; height:22px; border:1px solid #6B5836; border-radius:50%; font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:22px; color:#D4AF6A; text-align:center;">2</div></td>
+                      <td valign="top" align="left" style="font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:22px; mso-line-height-rule:exactly; color:#A2957F; padding-bottom:16px; padding-left:12px;"><span style="color:#F2ECDF;">C&oacute;digo de postagem</span> enviado ap&oacute;s a aprova&ccedil;&atilde;o, sem custo</td>
+                    </tr>
+                    <tr>
+                      <td width="30" valign="top" style="width:30px;"><div style="width:22px; height:22px; border:1px solid #6B5836; border-radius:50%; font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:22px; color:#D4AF6A; text-align:center;">3</div></td>
+                      <td valign="top" align="left" style="font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:22px; mso-line-height-rule:exactly; color:#A2957F; padding-left:12px;"><span style="color:#F2ECDF;">Reembolso ou troca</span> em at&eacute; 5 dias &uacute;teis ap&oacute;s a confer&ecirc;ncia</td>
+                    </tr>
+                  </table>
                 </td>
               </tr>
 
@@ -1030,7 +1048,7 @@ export const HTML_VALIDADO_DEVOLUCAO_ABERTA = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:16px 40px 40px 40px;">
-                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:18px; mso-line-height-rule:exactly; color:#6E6350;">Voc&ecirc; recebeu este e-mail porque abriu uma devolu&ccedil;&atilde;o na FRENESI.</div>
+                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:18px; mso-line-height-rule:exactly; color:#6E6350;">Voc&ecirc; recebeu este e-mail porque registrou uma devolu&ccedil;&atilde;o na FRENESI.</div>
                 </td>
               </tr>
 
@@ -1100,8 +1118,8 @@ export const HTML_VALIDADO_DEVOLUCAO_APROVADA = `<!DOCTYPE html>
               <tr>
                 <td align="center" class="pad" style="padding:26px 50px 0 50px;">
                   <div style="font-family:Georgia,'Times New Roman',serif; font-size:38px; line-height:48px; mso-line-height-rule:exactly; color:#F2ECDF;">{nome}, sua devolu&ccedil;&atilde;o foi aprovada</div>
-                  <div style="font-family:Georgia,'Times New Roman',serif; font-size:24px; line-height:32px; font-style:italic; mso-line-height-rule:exactly; color:#D4AF6A; padding-top:8px;">hora de postar</div>
-                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:15px; line-height:25px; mso-line-height-rule:exactly; color:#A2957F; padding-top:20px;">Leve o decant na embalagem original, com o lacre como est&aacute;, e apresente o c&oacute;digo abaixo no balc&atilde;o da ag&ecirc;ncia. A postagem n&atilde;o tem custo para voc&ecirc;.</div>
+                  <div style="font-family:Georgia,'Times New Roman',serif; font-size:24px; line-height:32px; font-style:italic; mso-line-height-rule:exactly; color:#D4AF6A; padding-top:8px;">postagem sem custo</div>
+                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:15px; line-height:25px; mso-line-height-rule:exactly; color:#A2957F; padding-top:20px;">Leve o produto na embalagem original, com o lacre como est&aacute;, a uma ag&ecirc;ncia dos Correios e apresente o c&oacute;digo abaixo no balc&atilde;o. N&atilde;o &eacute; preciso imprimir etiqueta.</div>
                 </td>
               </tr>
 
@@ -1116,11 +1134,11 @@ export const HTML_VALIDADO_DEVOLUCAO_APROVADA = `<!DOCTYPE html>
                     <tr>
                       <td align="center" style="padding:28px 30px 30px 30px;">
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#D4AF6A;">C&Oacute;DIGO DE POSTAGEM REVERSA</div>
-                        <div style="font-family:Georgia,'Times New Roman',serif; font-size:26px; line-height:34px; mso-line-height-rule:exactly; color:#F2ECDF; padding-top:14px;">{plataforma}</div>
+                        <div style="font-family:Georgia,'Times New Roman',serif; font-size:26px; line-height:34px; mso-line-height-rule:exactly; color:#F2ECDF; padding-top:14px;">Ag&ecirc;ncia dos Correios</div>
                         <div style="padding-top:18px;">
                           <span class="cod" style="display:inline-block; font-family:'Courier New',Courier,monospace; font-size:30px; line-height:38px; letter-spacing:3px; mso-line-height-rule:exactly; color:#E7CE9B; border:1px dashed #6B5836; border-radius:8px; padding:14px 30px;">{reverso}</span>
                         </div>
-                        <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#A2957F; padding-top:16px;">Apresente este c&oacute;digo no balc&atilde;o &mdash; n&atilde;o precisa imprimir etiqueta</div>
+                        <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#A2957F; padding-top:16px;">Apresente este c&oacute;digo no balc&atilde;o da ag&ecirc;ncia</div>
                       </td>
                     </tr>
                   </table>
@@ -1137,7 +1155,7 @@ export const HTML_VALIDADO_DEVOLUCAO_APROVADA = `<!DOCTYPE html>
                   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="598" class="win" style="width:598px;">
                     <tr>
                       <td bgcolor="#D4AF6A" align="center" style="background-color:#D4AF6A; background-image:linear-gradient(180deg,#EAC97E,#C89A4E); border-radius:10px; padding:19px 20px;">
-                        <a href="https://wa.me/5532998661887" style="display:block; font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:18px; mso-line-height-rule:exactly; letter-spacing:2.5px; color:#14100A; text-decoration:none; font-weight:bold;">TIRAR D&Uacute;VIDA NO WHATSAPP</a>
+                        <a href="https://wa.me/5532998661887" style="display:block; font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:18px; mso-line-height-rule:exactly; letter-spacing:2.5px; color:#14100A; text-decoration:none; font-weight:bold;">TIRAR D&Uacute;VIDAS NO WHATSAPP</a>
                       </td>
                     </tr>
                   </table>
@@ -1146,8 +1164,8 @@ export const HTML_VALIDADO_DEVOLUCAO_APROVADA = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:32px 50px 0 50px;">
-                  <div style="font-family:Georgia,'Times New Roman',serif; font-size:19px; line-height:26px; font-style:italic; mso-line-height-rule:exactly; color:#D4AF6A;">Chegando aqui, o produto passa pela confer&ecirc;ncia final.</div>
-                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:22px; mso-line-height-rule:exactly; color:#A2957F; padding-top:10px;">Depois da confer&ecirc;ncia, o reembolso ou a troca sai em at&eacute; 5 dias &uacute;teis.</div>
+                  <div style="font-family:Georgia,'Times New Roman',serif; font-size:19px; line-height:26px; font-style:italic; mso-line-height-rule:exactly; color:#D4AF6A;">Recebido aqui, o produto passa pela confer&ecirc;ncia final.</div>
+                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:22px; mso-line-height-rule:exactly; color:#A2957F; padding-top:10px;">O reembolso ou a troca &eacute; conclu&iacute;do em at&eacute; 5 dias &uacute;teis ap&oacute;s a confer&ecirc;ncia.</div>
                 </td>
               </tr>
 
@@ -1191,7 +1209,7 @@ export const HTML_VALIDADO_DEVOLUCAO_APROVADA = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:16px 40px 40px 40px;">
-                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:18px; mso-line-height-rule:exactly; color:#6E6350;">Voc&ecirc; recebeu este e-mail porque abriu uma devolu&ccedil;&atilde;o na FRENESI.</div>
+                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:18px; mso-line-height-rule:exactly; color:#6E6350;">Voc&ecirc; recebeu este e-mail porque registrou uma devolu&ccedil;&atilde;o na FRENESI.</div>
                 </td>
               </tr>
 
