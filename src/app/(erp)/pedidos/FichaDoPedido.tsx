@@ -514,9 +514,15 @@ export function FichaDoPedido({
                   >
                     {i.perfume}
                   </span>
-                  <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
-                    {i.variante} ml
-                  </span>
+                  {/* Sem tamanho não é falha: kit e frasco lacrado não são
+                      fracionados, e o nome deles já diz o que são. A linha
+                      some em vez de inventar um "5 ml", que era o que ela
+                      fazia — e quem envasa acreditava. */}
+                  {i.variante !== null && (
+                    <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
+                      {`${i.variante} ml`}
+                    </span>
+                  )}
                 </span>
                 <span
                   className="font-mono"

@@ -443,13 +443,21 @@ const repositorioSupabase: Repositorio = {
         entregaPrevistaEm: p.entrega_prevista_em,
         estoqueBaixadoEm: p.estoque_baixado_em,
         estoqueBaixadoMl: p.estoque_baixado_ml === null ? null : Number(p.estoque_baixado_ml),
-        itens: itens.map((i) => ({
-          perfume: i.descricao,
-          marca: '',
-          variante: (i.variante ?? 5) as VarianteMl,
-          preco: Number(i.preco),
-          imagem: imagemDe(i.base_id, i.descricao),
-        })),
+        itens: itens.map((i) => {
+          const variante = (i.variante ?? null) as VarianteMl | null
+          return {
+            // A descrição da Yampi repete o tamanho no fim ("... (Decant)
+            // 3ml"). Com o tamanho em campo próprio, o sufixo só duplicaria
+            // — e duplicata é onde uma das duas fica desatualizada.
+            perfume: variante
+              ? i.descricao.replace(new RegExp(`\\s*${variante}\\s*ml\\s*$`, 'i'), '')
+              : i.descricao,
+            marca: '',
+            variante,
+            preco: Number(i.preco),
+            imagem: imagemDe(i.base_id, i.descricao),
+          }
+        }),
       }
     })
   },

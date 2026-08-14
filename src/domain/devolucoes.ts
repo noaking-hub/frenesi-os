@@ -124,7 +124,8 @@ export function plataformaReverso(pedido: Pedido): Pedido['gateway'] {
 export interface ItemPortal {
   perfume: string
   marca: string
-  variante: VarianteMl
+  /** Nulo em kit e frasco lacrado — o que não é fracionado não tem variante. */
+  variante: VarianteMl | null
   preco: number
   imagem: string | null
 }

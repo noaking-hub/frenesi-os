@@ -144,7 +144,10 @@ export async function buscarPedidos(
       itens: (p.pedido_itens ?? []).map((i) => ({
         perfume: i.descricao,
         marca: '',
-        variante: (i.variante ?? 5) as VarianteMl,
+        // Kit e frasco lacrado não têm fracionamento. O `?? 5` que ficava
+        // aqui dizia ao cliente que o vidro de 100 ml dele era um decant de
+        // 5 ml — e a conferência de volume mediria contra esse número.
+        variante: (i.variante ?? null) as VarianteMl | null,
         preco: Number(i.preco),
         imagem: imagemDe(i.base_id, i.descricao),
       })),

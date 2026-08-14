@@ -67,6 +67,17 @@ export async function POST(req: Request) {
     }
   }
 
+  // Manutenção do estoque, depois da importação e por um bom motivo de
+  // ordem: o pedido que acabou de chegar precisa ter os itens casados com o
+  // catálogo ANTES de a reserva tentar enxergá-los. Uma chamada, três
+  // etapas, tudo no banco — cabe de sobra no tempo da função.
+  try {
+    const { data, error } = await supabaseServer().rpc('manutencao_do_estoque')
+    relatorio.estoque = error ? { erro: error.message } : data
+  } catch (e) {
+    relatorio.estoque = { erro: mensagemDe(e) }
+  }
+
   // A batida no banco é o que torna esta rotina AUDITÁVEL: as funções
   // agendadas falharam em silêncio por dias (segredo ausente → 401 → nada
   // gravado em lugar nenhum) e o defeito só apareceu quando alguém estranhou

@@ -133,7 +133,9 @@ export function PortalDevolucoes({
     form.set('pedidoId', pedido.id)
     form.set('motivo', motivo)
     form.set('comentario', comentario)
-    for (const i of selecionados) form.append('item', `${i.perfume} · ${i.variante} ml`)
+    for (const i of selecionados) {
+      form.append('item', i.variante === null ? i.perfume : `${i.perfume} · ${i.variante} ml`)
+    }
     if (arquivos.nivel) form.set('fotoNivel', arquivos.nivel)
     if (arquivos.lacre) form.set('fotoLacre', arquivos.lacre)
     iniciarEnvio(async () => {
@@ -493,13 +495,17 @@ export function PortalDevolucoes({
                           {item.marca}
                         </span>
                       )}
-                      {/* O frasco vem da regra de fracionamento, não do texto do pedido. */}
-                      <span
-                        className="font-sans"
-                        style={{ fontSize: 11.5, lineHeight: 1.35, color: 'rgba(36,31,24,.52)' }}
-                      >
-                        {descreveVariante(item.variante)}
-                      </span>
+                      {/* O frasco vem da regra de fracionamento, não do texto
+                          do pedido — e some quando o item não é fracionado,
+                          como kit e vidro lacrado. */}
+                      {item.variante !== null && (
+                        <span
+                          className="font-sans"
+                          style={{ fontSize: 11.5, lineHeight: 1.35, color: 'rgba(36,31,24,.52)' }}
+                        >
+                          {descreveVariante(item.variante)}
+                        </span>
+                      )}
                     </span>
                     <span
                       className="font-mono"

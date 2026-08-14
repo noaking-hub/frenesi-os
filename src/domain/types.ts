@@ -191,7 +191,12 @@ export type GatewayFrete = 'Frenet' | 'Melhor Envio'
 export interface ItemPedido {
   perfume: string
   marca: string
-  variante: VarianteMl
+  /**
+   * Nulo quando o SKU vendido não existe mais no catálogo e o tamanho não é
+   * legível nele. Já foi `?? 5`, e um chute na tela vira 5 ml na cabeça de
+   * quem envasa — melhor a tela dizer que não sabe.
+   */
+  variante: VarianteMl | null
   preco: number
   /** Foto do perfume no catálogo (Shopify). Nem todo item antigo casa. */
   imagem?: string | null
