@@ -1,6 +1,7 @@
 import { frascoDe } from './fracionamento'
 import { PRAZO_DEVOLUCAO_DIAS, TOLERANCIA_VOLUME } from './types'
 import type { FrascoMl, MotivoDevolucao, Pedido, VarianteMl } from './types'
+import type { SituacaoPedido } from './entregas'
 
 export type Elegibilidade = 'elegivel' | 'aguardando-entrega' | 'fora-do-prazo'
 
@@ -110,6 +111,36 @@ export const MOTIVOS: { id: MotivoDevolucao; label: string; desc: string }[] = [
  */
 export function plataformaReverso(pedido: Pedido): Pedido['gateway'] {
   return pedido.gateway
+}
+
+/**
+ * O pedido como o PORTAL PÚBLICO o vê — e nada além disso.
+ *
+ * O portal roda sem login: quem souber um e-mail consegue listar as compras
+ * dele. O recorte existe para que esse alguém veja o MÍNIMO — nunca CPF,
+ * telefone ou endereço. Todo campo novo aqui precisa responder "o cliente
+ * precisa disso para abrir a devolução?".
+ */
+export interface ItemPortal {
+  perfume: string
+  marca: string
+  variante: VarianteMl
+  preco: number
+  imagem: string | null
+}
+
+export interface PedidoPortal {
+  id: string
+  /** dd/MM/aaaa da compra, já formatada. */
+  data: string
+  valor: number
+  situacao: SituacaoPedido
+  entregueEm: string | null
+  /** Dias desde a entrega (real ou, na falta dela, a prometida). */
+  diasDesdeEntrega: number | null
+  /** Plataforma da etiqueta de ida — de onde sai o reverso. */
+  gateway: 'Frenet' | 'Melhor Envio'
+  itens: ItemPortal[]
 }
 
 // ── Triagem (lado ERP) ─────────────────────────────────────────────────────

@@ -22,7 +22,7 @@ import {
   plural,
   statusDevolucao,
 } from '@/domain'
-import type { MotivoDevolucao, Pedido } from '@/domain'
+import type { MotivoDevolucao, PedidoPortal } from '@/domain'
 
 import { abrirDevolucao, buscarPedidos } from './actions'
 
@@ -64,7 +64,7 @@ export function PortalDevolucoes({
   const [passo, setPasso] = useState(1)
   const [metodo, setMetodo] = useState<Metodo>('email')
   const [ident, setIdent] = useState('')
-  const [pedidos, setPedidos] = useState<Pedido[]>([])
+  const [pedidos, setPedidos] = useState<PedidoPortal[]>([])
   const [buscando, iniciarBusca] = useTransition()
   const [pedidoId, setPedidoId] = useState<string | null>(null)
   const [itens, setItens] = useState<string[]>([])
@@ -93,6 +93,12 @@ export function PortalDevolucoes({
   })
 
   const voltar = () => setPasso((p) => Math.max(1, p - 1))
+
+  // Cada passo começa do topo: avançar depois de uma lista longa no celular
+  // deixava o passo novo aberto no meio da rolagem.
+  useEffect(() => {
+    window.scrollTo({ top: 0 })
+  }, [passo])
 
   const buscar = () => {
     iniciarBusca(async () => {
@@ -720,8 +726,9 @@ export function PortalDevolucoes({
                 Solicitação enviada
               </h1>
               <Corpo>
-                {`Protocolo ${protocolo ?? '—'} aberto para o pedido ${pedido.id}. Guarde este número: é por ele que encontramos a sua solicitação.`}
+                {`Sua solicitação para o pedido ${pedido.id} foi registrada. Guarde o protocolo: é por ele que encontramos o seu caso.`}
               </Corpo>
+              <CaixaProtocolo protocolo={protocolo ?? '—'} />
             </div>
 
             <div
@@ -1008,6 +1015,57 @@ function Etapas({ passo }: { passo: number }) {
   )
 }
 
+/** O protocolo em destaque, copiável num toque — é o número que o cliente
+    vai precisar ditar para o atendimento. */
+function CaixaProtocolo({ protocolo }: { protocolo: string }) {
+  const [copiado, setCopiado] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(protocolo)
+          setCopiado(true)
+          setTimeout(() => setCopiado(false), 1800)
+        } catch {
+          // Sem clipboard (navegador antigo), o número continua legível.
+        }
+      }}
+      title="Copiar protocolo"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 12,
+        padding: '12px 18px',
+        margin: '4px auto 0',
+        border: '1px solid rgba(176,141,75,.4)',
+        background: 'rgba(176,141,75,.07)',
+        borderRadius: 12,
+        cursor: 'pointer',
+      }}
+    >
+      <span
+        className="font-mono"
+        style={{ fontWeight: 700, fontSize: 19, letterSpacing: '.04em', color: PORTAL.link }}
+      >
+        {protocolo}
+      </span>
+      <span
+        className="font-sans"
+        style={{
+          fontWeight: 600,
+          fontSize: 10,
+          letterSpacing: '.08em',
+          textTransform: 'uppercase',
+          color: copiado ? PORTAL.ok : 'rgba(36,31,24,.45)',
+        }}
+      >
+        {copiado ? 'Copiado ✓' : 'Copiar'}
+      </span>
+    </button>
+  )
+}
+
 function Passo({
   children,
   padding = '26px 22px 32px',
@@ -1075,7 +1133,7 @@ function CartaoPedido({
   selecionado,
   aoEscolher,
 }: {
-  pedido: Pedido
+  pedido: PedidoPortal
   selecionado: boolean
   aoEscolher: () => void
 }) {

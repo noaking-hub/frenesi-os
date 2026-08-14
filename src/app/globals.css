@@ -312,3 +312,13 @@
     padding-right: 40px !important;
   }
 }
+
+/* Acessibilidade e acabamento do portal: quem navega por teclado vê onde
+   está, e a seleção de texto veste a cor da casa. */
+.portal :is(button, a, input, textarea, select):focus-visible {
+  outline: 2px solid #b08d4b;
+  outline-offset: 2px;
+}
+.portal ::selection {
+  background: rgba(176, 141, 75, 0.28);
+}
