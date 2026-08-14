@@ -162,7 +162,7 @@ async function tudoDe<T>(
 }
 
 const CAMPOS_BASE =
-  'id, nome, marca, genero, genero_manual, custo_por_ml, volume_ml, ' +
+  'id, nome, marca, genero, genero_manual, custo_por_ml, volume_ml, reservado_ml, ' +
   'consumo_diario_ml, imagem_url, ativo, shopify_product_id, shopify_handle'
 
 /** Forma da linha de `perfumes_base`, conferida contra `supabase/migrations`. */
@@ -174,6 +174,7 @@ interface LinhaPerfumeBase {
   genero_manual: boolean | null
   custo_por_ml: number | string
   volume_ml: number | string
+  reservado_ml: number | string | null
   consumo_diario_ml: number | string
   imagem_url: string | null
   ativo: boolean | null
@@ -220,6 +221,7 @@ async function lerPerfumesBase({ apenasAtivos }: { apenasAtivos: boolean }) {
     generoManual: b.genero_manual ?? false,
     custoPorMl: Number(b.custo_por_ml),
     volumeMl: Number(b.volume_ml),
+    reservadoMl: Number(b.reservado_ml ?? 0),
     consumoDiarioMl: Number(b.consumo_diario_ml),
     imagemUrl: b.imagem_url ?? undefined,
     ativo: b.ativo ?? true,
@@ -473,10 +475,13 @@ const repositorioSupabase: Repositorio = {
       .from('movimentacoes')
       .select(
         'id, base_id, tipo, ocorrida_em, volume_ml, liquido_ml, ref, descricao, ' +
-          'responsavel, saldo_ml, perfumes_base(nome)',
+          'responsavel, saldo_ml, saldo_anterior_ml, reserva_ml, saldo_reservado_ml, ' +
+          'pedido_id, perfumes_base(nome)',
       )
       .order('ocorrida_em', { ascending: false })
-      .limit(200)
+      // O ledger cresce rápido com reserva e liberação por pedido: 600 linhas
+      // cobrem semanas de operação sem estourar a leitura.
+      .limit(600)
     if (error) throw error
     const linhas = (data ?? []) as unknown as LinhaMovimentacao[]
     return linhas.map(
@@ -494,6 +499,15 @@ const repositorioSupabase: Repositorio = {
         motivo: m.descricao,
         responsavel: m.responsavel ?? '—',
         saldoMl: m.saldo_ml === null ? null : Number(m.saldo_ml),
+        saldoAnteriorMl: m.saldo_anterior_ml === null || m.saldo_anterior_ml === undefined
+          ? null
+          : Number(m.saldo_anterior_ml),
+        reservaMl: m.reserva_ml === null || m.reserva_ml === undefined ? null : Number(m.reserva_ml),
+        saldoReservadoMl:
+          m.saldo_reservado_ml === null || m.saldo_reservado_ml === undefined
+            ? null
+            : Number(m.saldo_reservado_ml),
+        pedidoId: m.pedido_id ?? null,
       }),
     )
   },
@@ -522,17 +536,21 @@ const repositorioSupabase: Repositorio = {
     if (erroAberto) throw erroAberto
     if (!aberto) return []
 
+    // A apuração vem da view: é ela que soma o que se moveu DEPOIS do
+    // congelamento. Ler a contagem crua faria a tela comparar o contado com
+    // um saldo antigo e inventar divergência a cada venda do dia.
     const { data, error } = await supabaseServer()
-      .from('inventario_contagens')
-      .select('base_id, sistema_ml, contado_ml, responsavel, contado_em, perfumes_base(nome)')
+      .from('inventario_apuracao')
+      .select('base_id, perfume, sistema_ml, movimentos_ml, contado_ml, responsavel, contado_em')
       .eq('inventario_id', aberto.id)
     if (error) throw error
     const linhas = (data ?? []) as unknown as LinhaInventarioDb[]
     return linhas.map(
       (i): ContagemInventario => ({
         baseId: i.base_id,
-        perfume: i.perfumes_base?.nome ?? i.base_id,
+        perfume: i.perfume ?? i.base_id,
         sistemaMl: Number(i.sistema_ml),
+        movimentosMl: Number(i.movimentos_ml ?? 0),
         contadoMl: i.contado_ml === null ? null : Number(i.contado_ml),
         responsavel: i.responsavel,
         quando: i.contado_em,
@@ -1157,16 +1175,22 @@ interface LinhaMovimentacao {
   descricao: string
   responsavel: string | null
   saldo_ml: number | string | null
+  saldo_anterior_ml: number | string | null
+  reserva_ml: number | string | null
+  saldo_reservado_ml: number | string | null
+  pedido_id: string | null
   perfumes_base: { nome: string } | null
 }
 
+/** Forma da linha de `inventario_apuracao`, a view que soma os movimentos. */
 interface LinhaInventarioDb {
   base_id: string
+  perfume: string | null
   sistema_ml: number | string
+  movimentos_ml: number | string | null
   contado_ml: number | string | null
   responsavel: string | null
   contado_em: string | null
-  perfumes_base: { nome: string } | null
 }
 
 function capitalizaCanal(canal: string): Pedido['canal'] {

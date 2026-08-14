@@ -5,6 +5,16 @@ import { repositorio } from '@/data/repository'
 import { CompraFrasco } from './CompraFrasco'
 import { LotesCliente } from './LotesCliente'
 
+/**
+ * Estoque nunca pode vir do cache do build.
+ *
+ * Sem isto a página é pré-renderizada no deploy e congela: reserva muda a
+ * cada pedido pago, baixa muda a cada faturamento, e a tela mostraria o
+ * saldo de horas atrás com cara de saldo atual.
+ */
+export const dynamic = 'force-dynamic'
+
+
 export default async function LotesEPerdaReal() {
   const repo = repositorio()
   const [lotes, bases, parametros, { perda, conciliacao }] = await Promise.all([

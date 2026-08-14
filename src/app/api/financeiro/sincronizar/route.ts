@@ -198,29 +198,13 @@ export async function POST(req: Request) {
     relatorio.rastreioMelhorEnvio = { pulado: 'Melhor Envio ainda não foi conectado' }
   }
 
-  // O estoque publicado na Shopify vem logo depois dos pedidos: a importação
-  // acabou de recalcular as reservas, e é agora que a loja pode estar
-  // oferecendo decants que a venda de hoje comprometeu. Escrever aqui é o que
-  // dispensa alguém de abrir a tela de Sincronia e clicar em "Aplicar".
+  // Venda anulada pela Shopify sai da receita nesta mesma rodada.
   if (shopifyConfigurada()) {
-    // Venda anulada pela Shopify sai da receita nesta mesma rodada.
     try {
       relatorio.anulados = await marcarAnuladosDaShopify()
     } catch (e) {
       relatorio.anulados = { erro: mensagemDe(e) }
     }
-    try {
-      const s = await aplicarEstoqueCalculado()
-      relatorio.shopifyEstoque = {
-        aplicadas: s.aplicadas,
-        recusadas: s.ignoradas.length,
-        semIdDaLoja: s.pulados,
-      }
-    } catch (e) {
-      relatorio.shopifyEstoque = { erro: mensagemDe(e) }
-    }
-  } else {
-    relatorio.shopifyEstoque = { pulado: 'credenciais da Shopify não estão definidas' }
   }
 
   // Cada etapa é isolada: uma falha de rede no gateway não pode impedir a
@@ -257,6 +241,27 @@ export async function POST(req: Request) {
     }
   } catch (e) {
     relatorio.baixaDeEstoque = { erro: mensagemDe(e) }
+  }
+
+  // A loja é atualizada por ÚLTIMO, e a ordem é o ponto.
+  //
+  // Rodando antes da baixa, a Shopify recebia um volume que ainda não tinha
+  // perdido os faturados daquela hora: a loja ficava sempre uma rodada
+  // otimista — publicando unidades que o estoque já não tinha. Depois da
+  // reserva e da baixa, o disponível que vai para a vitrine é o real.
+  if (shopifyConfigurada()) {
+    try {
+      const s = await aplicarEstoqueCalculado()
+      relatorio.shopifyEstoque = {
+        aplicadas: s.aplicadas,
+        recusadas: s.ignoradas.length,
+        semIdDaLoja: s.pulados,
+      }
+    } catch (e) {
+      relatorio.shopifyEstoque = { erro: mensagemDe(e) }
+    }
+  } else {
+    relatorio.shopifyEstoque = { pulado: 'credenciais da Shopify não estão definidas' }
   }
 
   // Os avisos vêm DEPOIS do rastreio: a varredura acabou de confirmar

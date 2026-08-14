@@ -35,8 +35,16 @@ export interface PerfumeBase {
   genero?: 'Masculino' | 'Feminino' | 'Unissex'
   /** Custo de aquisição do perfume base, por ml. */
   custoPorMl: number
-  /** Volume disponível em estoque, em ml. Fonte autoritativa. */
+  /** Volume FÍSICO em estoque, em ml. Fonte autoritativa do que existe. */
   volumeMl: number
+  /**
+   * Ml comprometidos por pedidos pagos que ainda não saíram.
+   *
+   * Reduz o disponível sem tocar no físico — o líquido só some do frasco
+   * quando a produção consome. Fica separado de propósito: somar reserva no
+   * físico faria o inventário divergir de tudo que se conta na prateleira.
+   */
+  reservadoMl?: number
   /** Consumo médio diário em ml, derivado do histórico de produção. */
   consumoDiarioMl: number
   /** Foto do produto na Shopify, importada com o catálogo. */

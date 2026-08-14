@@ -375,14 +375,14 @@ export const MOVIMENTACOES: Movimentacao[] = [
 
 /** Contagem física de agosto, ainda aberta. */
 export const INVENTARIO: ContagemInventario[] = [
-  { baseId: 'bac', perfume: 'Baccarat Rouge 540', sistemaMl: 640, contadoMl: 640, responsavel: 'Pedro A.', quando: 'hoje 07:40' },
-  { baseId: 'sau', perfume: 'Sauvage Elixir', sistemaMl: 1180, contadoMl: 1174, responsavel: 'Pedro A.', quando: 'hoje 07:52' },
-  { baseId: 'erb', perfume: 'Erba Pura', sistemaMl: 520, contadoMl: 520, responsavel: 'Marina F.', quando: 'hoje 08:05' },
-  { baseId: 'blu', perfume: 'Bleu de Chanel', sistemaMl: 760, contadoMl: 768, responsavel: 'Marina F.', quando: 'hoje 08:18' },
-  { baseId: 'ave', perfume: 'Aventus', sistemaMl: 410, contadoMl: 398, responsavel: 'Pedro A.', quando: 'hoje 08:30' },
-  { baseId: 'del', perfume: 'Delina', sistemaMl: 90, contadoMl: 90, responsavel: 'Marina F.', quando: 'hoje 08:41' },
-  { baseId: 'gg', perfume: 'Good Girl', sistemaMl: 340, contadoMl: null, responsavel: null, quando: null },
-  { baseId: 'oud', perfume: 'Oud Wood', sistemaMl: 0, contadoMl: 0, responsavel: 'Pedro A.', quando: 'hoje 08:52' },
+  { baseId: 'bac', perfume: 'Baccarat Rouge 540', sistemaMl: 640, movimentosMl: 0, contadoMl: 640, responsavel: 'Pedro A.', quando: 'hoje 07:40' },
+  { baseId: 'sau', perfume: 'Sauvage Elixir', sistemaMl: 1180, movimentosMl: 0, contadoMl: 1174, responsavel: 'Pedro A.', quando: 'hoje 07:52' },
+  { baseId: 'erb', perfume: 'Erba Pura', sistemaMl: 520, movimentosMl: 0, contadoMl: 520, responsavel: 'Marina F.', quando: 'hoje 08:05' },
+  { baseId: 'blu', perfume: 'Bleu de Chanel', sistemaMl: 760, movimentosMl: 0, contadoMl: 768, responsavel: 'Marina F.', quando: 'hoje 08:18' },
+  { baseId: 'ave', perfume: 'Aventus', sistemaMl: 410, movimentosMl: 0, contadoMl: 398, responsavel: 'Pedro A.', quando: 'hoje 08:30' },
+  { baseId: 'del', perfume: 'Delina', sistemaMl: 90, movimentosMl: 0, contadoMl: 90, responsavel: 'Marina F.', quando: 'hoje 08:41' },
+  { baseId: 'gg', perfume: 'Good Girl', sistemaMl: 340, movimentosMl: 0, contadoMl: null, responsavel: null, quando: null },
+  { baseId: 'oud', perfume: 'Oud Wood', sistemaMl: 0, movimentosMl: 0, contadoMl: 0, responsavel: 'Pedro A.', quando: 'hoje 08:52' },
 ]
 
 /**

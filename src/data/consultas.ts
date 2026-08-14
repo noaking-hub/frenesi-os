@@ -74,27 +74,40 @@ async function eventosPorPedido(): Promise<Map<string, EventoLido[]>> {
 export async function carregarEstoque(): Promise<{
   coberturas: CoberturaBase[]
   volumeTotalMl: number
+  reservadoTotalMl: number
+  disponivelTotalMl: number
   comEstoque: number
   esgotados: number
   semCarga: number
+  semGiro: number
   criticos: number
+  /** Bases cuja reserva passou do que existe no frasco. */
+  comExcedente: number
   valorReposicao: number
 }> {
   const bases = await repositorio().perfumesBase()
+  // Quem acaba antes primeiro. Sem consumo não tem "antes": vai para o fim,
+  // porque não há urgência calculável — não porque acabe hoje.
   const coberturas = bases
     .map(coberturaDe)
-    .sort((a, b) => a.dias - b.dias)
+    .sort((a, b) => (a.dias ?? Number.POSITIVE_INFINITY) - (b.dias ?? Number.POSITIVE_INFINITY))
 
   return {
     coberturas,
-    volumeTotalMl: bases.reduce((a, b) => a + b.volumeMl, 0),
+    volumeTotalMl: coberturas.reduce((a, c) => a + c.fisicoMl, 0),
+    reservadoTotalMl: coberturas.reduce((a, c) => a + c.reservadoMl, 0),
+    disponivelTotalMl: coberturas.reduce((a, c) => a + c.disponivelMl, 0),
     comEstoque: bases.filter((b) => b.volumeMl > 0).length,
     // Esgotado é o que acabou: já teve compra, tem custo, e zerou. O que
     // nunca recebeu carga é outra coisa e tem sua própria contagem.
     esgotados: coberturas.filter((c) => c.criticidade === 'zero').length,
     semCarga: coberturas.filter((c) => c.criticidade === 'sem_carga').length,
+    semGiro: coberturas.filter((c) => c.criticidade === 'sem_giro').length,
     criticos: coberturas.filter((c) => c.criticidade === 'atencao' || c.criticidade === 'urgente')
       .length,
+    comExcedente: coberturas.filter((c) => c.excedenteMl > 0).length,
+    // Valor do que está no frasco, ao custo de reposição — o físico, não o
+    // disponível: reserva não tira o líquido do estoque.
     valorReposicao: bases.reduce((a, b) => a + b.volumeMl * b.custoPorMl, 0),
   }
 }

@@ -87,13 +87,26 @@ export function InventarioCliente({ inv, aberto }: Props) {
     },
     {
       chave: 'sistema',
-      titulo: 'Sistema',
-      largura: '112px',
+      titulo: 'Esperado agora',
+      largura: '150px',
       alinhamento: 'right',
+      // Congelado + o que se moveu depois. Comparar contra o congelado puro
+      // inventava divergência a cada venda faturada durante a contagem.
       render: (i) => (
-        <Valor tamanho={12} peso={400} tom="var(--color-secundario)">
-          {volume(i.sistemaMl)}
-        </Valor>
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
+          <Valor tamanho={12} peso={400} tom="var(--color-secundario)">
+            {volume(i.esperadoMl)}
+          </Valor>
+          {i.movimentosMl !== 0 && (
+            <span
+              className="font-sans"
+              style={{ fontSize: 9, lineHeight: 1.3, color: COR.atencao, whiteSpace: 'nowrap' }}
+              title="Houve movimentação depois do congelamento — o esperado já a considera"
+            >
+              {`${volume(i.sistemaMl)} congelado · ${i.movimentosMl > 0 ? '+' : '−'}${volume(Math.abs(i.movimentosMl))} no meio`}
+            </span>
+          )}
+        </span>
       ),
     },
     {
@@ -264,7 +277,8 @@ function ModalContagem({
 
   const vazio = texto.trim() === ''
   const contado = parseNum(texto)
-  const diferenca = contado - linha.sistemaMl
+  // Contra o ESPERADO (congelado + movimentos), não contra o congelado.
+  const diferenca = contado - linha.esperadoMl
 
   const salvar = () =>
     iniciarTransicao(async () => {
@@ -326,7 +340,9 @@ function ModalContagem({
         }}
       >
         <span className="font-sans" style={{ fontSize: 11, color: 'var(--color-secundario)' }}>
-          {`Sistema diz ${volume(linha.sistemaMl)}`}
+          {linha.movimentosMl === 0
+            ? `Sistema diz ${volume(linha.esperadoMl)}`
+            : `Sistema diz ${volume(linha.esperadoMl)} · ${volume(linha.sistemaMl)} congelados ${linha.movimentosMl > 0 ? '+' : '−'} ${volume(Math.abs(linha.movimentosMl))} movimentados durante a contagem`}
         </span>
         <Valor tamanho={12.5} tom={vazio ? 'var(--color-apagado)' : diferenca === 0 ? 'ok' : 'erro'}>
           {vazio

@@ -6,11 +6,12 @@ import { useMemo, useState } from 'react'
 import { Barra, Rotulo, Valor } from '@/components/erp/primitivos'
 import { CelulaDupla, Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR, type Tom } from '@/components/erp/tokens'
-import { plural, volume } from '@/domain'
-import type { CoberturaBase } from '@/domain'
+import { alertasDaBase, brl, plural, volume } from '@/domain'
+import type { AlertaEstoque, CoberturaBase } from '@/domain'
 
 const TOM: Record<CoberturaBase['criticidade'], Tom> = {
   sem_carga: 'neutro',
+  sem_giro: 'neutro',
   zero: 'erro',
   urgente: 'erro',
   atencao: 'atencao',
@@ -18,52 +19,72 @@ const TOM: Record<CoberturaBase['criticidade'], Tom> = {
   ok: 'ok',
 }
 
-type Filtro = 'todos' | 'com_estoque' | 'critico' | 'esgotado' | 'sem_carga'
+type Filtro = 'todos' | 'com_estoque' | 'critico' | 'esgotado' | 'excedente' | 'sem_giro' | 'sem_carga'
 
 const FILTROS: { id: Filtro; rotulo: string; cabe: (c: CoberturaBase) => boolean }[] = [
   { id: 'todos', rotulo: 'Todos', cabe: () => true },
-  { id: 'com_estoque', rotulo: 'Com estoque', cabe: (c) => c.base.volumeMl > 0 },
+  { id: 'com_estoque', rotulo: 'Com estoque', cabe: (c) => c.fisicoMl > 0 },
   {
     id: 'critico',
     rotulo: 'Crítico',
     cabe: (c) => c.criticidade === 'urgente' || c.criticidade === 'atencao',
   },
   { id: 'esgotado', rotulo: 'Esgotado', cabe: (c) => c.criticidade === 'zero' },
-  { id: 'sem_carga', rotulo: 'Sem carga', cabe: (c) => c.criticidade === 'sem_carga' },
+  // Demanda acima do estoque: o pedido já foi pago e o volume não cobre.
+  { id: 'excedente', rotulo: 'Reserva excedente', cabe: (c) => c.excedenteMl > 0 },
+  { id: 'sem_giro', rotulo: 'Sem consumo', cabe: (c) => c.criticidade === 'sem_giro' },
+  { id: 'sem_carga', rotulo: 'Fora do controle', cabe: (c) => c.criticidade === 'sem_carga' },
 ]
 
-type Ordem = 'acaba' | 'nome' | 'volume' | 'consumo'
+type Ordem = 'acaba' | 'nome' | 'volume' | 'consumo' | 'reservado' | 'valor'
+
+/** Sem consumo não tem "acaba antes": vai para o fim, não para o topo. */
+const SEM_PRAZO = Number.POSITIVE_INFINITY
 
 const ORDENS: { id: Ordem; rotulo: string; compara: (a: CoberturaBase, b: CoberturaBase) => number }[] =
   [
-    // O padrão é a urgência: quem acaba antes aparece antes. Base sem carga
-    // não tem "acaba em", então vai para o fim em vez de fingir zero dias.
     {
       id: 'acaba',
       rotulo: 'Acaba antes',
       compara: (a, b) => {
+        // Base sem carga não tem "acaba em" — o ERP não sabe o que há nela.
         const peso = (c: CoberturaBase) => (c.criticidade === 'sem_carga' ? 1 : 0)
-        return peso(a) - peso(b) || a.dias - b.dias
+        return peso(a) - peso(b) || (a.dias ?? SEM_PRAZO) - (b.dias ?? SEM_PRAZO)
       },
     },
     { id: 'nome', rotulo: 'Nome', compara: (a, b) => a.base.nome.localeCompare(b.base.nome, 'pt-BR') },
-    { id: 'volume', rotulo: 'Mais volume', compara: (a, b) => b.base.volumeMl - a.base.volumeMl },
+    { id: 'volume', rotulo: 'Mais volume', compara: (a, b) => b.disponivelMl - a.disponivelMl },
     {
       id: 'consumo',
       rotulo: 'Mais vendido',
       compara: (a, b) => b.base.consumoDiarioMl - a.base.consumoDiarioMl,
+    },
+    { id: 'reservado', rotulo: 'Mais reservado', compara: (a, b) => b.reservadoMl - a.reservadoMl },
+    {
+      id: 'valor',
+      rotulo: 'Maior valor parado',
+      compara: (a, b) => b.fisicoMl * b.base.custoPorMl - a.fisicoMl * a.base.custoPorMl,
     },
   ]
 
 /** Quantas linhas por vez. 412 de uma vez é rolagem sem fim. */
 const PAGINA = 50
 
+const TOM_ALERTA: Record<AlertaEstoque['grau'], string> = {
+  erro: COR.erro,
+  atencao: COR.atencao,
+  info: 'rgba(242,237,227,.4)',
+}
+
 /**
- * Perfumes base, com busca e filtro.
+ * Perfumes base: físico, reservado e disponível, lado a lado.
+ *
+ * Os três números são diferentes e a tela nunca os mistura. Físico é o que
+ * está no frasco; reservado é o que já foi vendido e ainda não saiu;
+ * disponível é o que se pode vender hoje. Mostrar só um deles foi o que
+ * deixou a loja vender 355 unidades sem lastro.
  *
  * A tela é leitura: quem move estoque é a compra, a produção e o inventário.
- * O que ela precisa fazer bem é achar UM perfume entre centenas — daí a busca
- * primeiro e o filtro logo ao lado.
  */
 export function PerfumesBaseCliente({ coberturas }: { coberturas: CoberturaBase[] }) {
   const [busca, setBusca] = useState('')
@@ -78,7 +99,11 @@ export function PerfumesBaseCliente({ coberturas }: { coberturas: CoberturaBase[
     const compara = ORDENS.find((o) => o.id === ordem)!.compara
     return coberturas
       .filter((c) => cabe(c))
-      .filter((c) => !termo || `${c.base.nome} ${c.base.marca}`.toLowerCase().includes(termo))
+      .filter(
+        (c) =>
+          !termo ||
+          `${c.base.nome} ${c.base.marca} ${c.base.id}`.toLowerCase().includes(termo),
+      )
       .slice()
       .sort(compara)
   }, [coberturas, filtro, ordem, termo])
@@ -100,50 +125,138 @@ export function PerfumesBaseCliente({ coberturas }: { coberturas: CoberturaBase[
     {
       chave: 'perfume',
       titulo: 'Perfume base',
-      largura: 'minmax(0,1fr)',
-      render: (c) => <CelulaDupla principal={c.base.nome} secundaria={c.base.marca} />,
+      largura: 'minmax(0,1.4fr)',
+      render: (c) => {
+        const alertas = alertasDaBase(c)
+        return (
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+            <CelulaDupla principal={c.base.nome} secundaria={c.base.marca} />
+            {alertas.length > 0 && (
+              <span style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                {alertas.slice(0, 2).map((a) => (
+                  <span
+                    key={a.chave}
+                    className="font-sans"
+                    style={{
+                      fontSize: 9,
+                      lineHeight: 1.4,
+                      color: TOM_ALERTA[a.grau],
+                      border: `1px solid ${TOM_ALERTA[a.grau]}33`,
+                      borderRadius: 'var(--radius-pill)',
+                      padding: '1px 6px',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      maxWidth: 240,
+                    }}
+                    title={a.texto}
+                  >
+                    {a.texto}
+                  </span>
+                ))}
+              </span>
+            )}
+          </span>
+        )
+      },
+    },
+    {
+      chave: 'fisico',
+      titulo: 'Físico',
+      largura: '92px',
+      alinhamento: 'right',
+      render: (c) => (
+        <Valor tamanho={12} peso={400} tom="rgba(242,237,227,.62)">
+          {volume(c.fisicoMl)}
+        </Valor>
+      ),
+    },
+    {
+      chave: 'reservado',
+      titulo: 'Reservado',
+      largura: '104px',
+      alinhamento: 'right',
+      render: (c) =>
+        c.reservadoMl > 0 ? (
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
+            <Valor tamanho={12} peso={400} tom={c.excedenteMl > 0 ? 'erro' : 'atencao'}>
+              {volume(c.reservadoMl)}
+            </Valor>
+            {c.excedenteMl > 0 && (
+              <span className="font-sans" style={{ fontSize: 9, color: COR.erro, whiteSpace: 'nowrap' }}>
+                {`${volume(c.excedenteMl)} sem lastro`}
+              </span>
+            )}
+          </span>
+        ) : (
+          <Valor tamanho={12} peso={400} tom="rgba(242,237,227,.28)">
+            —
+          </Valor>
+        ),
     },
     {
       chave: 'disponivel',
       titulo: 'Disponível',
-      largura: '118px',
+      largura: '104px',
       alinhamento: 'right',
       render: (c) => (
         <Valor tamanho={12.5} tom={TOM[c.criticidade]}>
-          {volume(c.base.volumeMl)}
+          {volume(c.disponivelMl)}
         </Valor>
       ),
     },
     {
       chave: 'consumo',
       titulo: 'Consumo 30d',
-      largura: '118px',
+      largura: '104px',
       alinhamento: 'right',
       // Derivado do consumo diário, não um campo à parte.
       render: (c) => (
         <Valor tamanho={12} peso={400} tom="rgba(242,237,227,.65)">
-          {volume(c.base.consumoDiarioMl * 30)}
+          {c.base.consumoDiarioMl > 0 ? volume(c.base.consumoDiarioMl * 30) : '—'}
         </Valor>
       ),
     },
     {
       chave: 'acaba',
-      titulo: 'Acaba em',
-      largura: '140px',
+      titulo: 'Cobertura',
+      largura: '132px',
       alinhamento: 'right',
       render: (c) => (
         <span style={{ display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'flex-end' }}>
           <Valor tamanho={11.5} tom={TOM[c.criticidade]}>
             {c.cobertura}
           </Valor>
-          {/* 60 dias é a régua: o que passa disso enche a barra. */}
-          {c.criticidade !== 'sem_carga' && (
+          {/* Barra só quando há prazo real: sem consumo não há régua. */}
+          {c.dias !== null && (
             <span style={{ width: '100%' }}>
+              {/* 60 dias é a régua: o que passa disso enche a barra. */}
               <Barra pct={Math.min(100, (c.dias / 60) * 100)} tom={TOM[c.criticidade]} />
+            </span>
+          )}
+          {c.dias === null && c.criticidade !== 'sem_carga' && (
+            <span className="font-sans" style={{ fontSize: 9, color: 'rgba(242,237,227,.3)' }}>
+              sem histórico de venda
             </span>
           )}
         </span>
       ),
+    },
+    {
+      chave: 'valor',
+      titulo: 'Valor',
+      largura: '104px',
+      alinhamento: 'right',
+      render: (c) =>
+        c.base.custoPorMl > 0 ? (
+          <Valor tamanho={12} peso={400} tom="rgba(242,237,227,.62)">
+            {brl(c.fisicoMl * c.base.custoPorMl)}
+          </Valor>
+        ) : (
+          <span className="font-sans" style={{ fontSize: 9.5, color: COR.atencao }}>
+            sem custo
+          </span>
+        ),
     },
     {
       chave: 'acao',
@@ -164,11 +277,12 @@ export function PerfumesBaseCliente({ coberturas }: { coberturas: CoberturaBase[
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}
+            title={c.acao}
           >
             {c.acao}
           </span>
           <Link
-            href={c.base.volumeMl === 0 ? '/estoque/lotes' : '/producao'}
+            href={c.disponivelMl === 0 ? '/estoque/lotes' : '/producao'}
             className="font-sans hover:bg-[rgba(239,209,140,.13)]"
             style={{
               display: 'inline-flex',
@@ -197,7 +311,7 @@ export function PerfumesBaseCliente({ coberturas }: { coberturas: CoberturaBase[
         <input
           value={busca}
           onChange={(e) => trocar(() => setBusca(e.target.value))}
-          placeholder="Buscar perfume ou marca…"
+          placeholder="Buscar perfume, marca ou identificador…"
           aria-label="Buscar perfume base"
           className="font-sans focus:border-ouro/45"
           style={{
@@ -217,6 +331,9 @@ export function PerfumesBaseCliente({ coberturas }: { coberturas: CoberturaBase[
         <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {FILTROS.map((f) => {
             const ativo = filtro === f.id
+            // Filtro que não pega nada some da barra — menos ruído, e a
+            // ausência já diz que o problema não existe hoje.
+            if (contagem[f.id] === 0 && f.id !== 'todos' && !ativo) return null
             return (
               <button
                 key={f.id}
@@ -274,7 +391,7 @@ export function PerfumesBaseCliente({ coberturas }: { coberturas: CoberturaBase[
         itens={visiveis.slice(0, mostrar)}
         chaveDe={(c) => c.base.id}
         bandeiraDe={(c) =>
-          c.criticidade === 'zero' || c.criticidade === 'urgente'
+          c.excedenteMl > 0 || c.criticidade === 'zero' || c.criticidade === 'urgente'
             ? 'erro'
             : c.criticidade === 'atencao'
               ? 'atencao'

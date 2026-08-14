@@ -5,21 +5,48 @@ import { brl, pad2, volume } from '@/domain'
 
 import { PerfumesBaseCliente } from './PerfumesBaseCliente'
 
+/**
+ * Estoque nunca pode vir do cache do build.
+ *
+ * Sem isto a página é pré-renderizada no deploy e congela: reserva muda a
+ * cada pedido pago, baixa muda a cada faturamento, e a tela mostraria o
+ * saldo de horas atrás com cara de saldo atual.
+ */
+export const dynamic = 'force-dynamic'
+
+
 export default async function PerfumesBase() {
-  const { coberturas, volumeTotalMl, comEstoque, esgotados, semCarga, criticos, valorReposicao } =
-    await carregarEstoque()
+  const {
+    coberturas,
+    volumeTotalMl,
+    reservadoTotalMl,
+    disponivelTotalMl,
+    esgotados,
+    semCarga,
+    criticos,
+    comExcedente,
+    valorReposicao,
+  } = await carregarEstoque()
 
   const kpis: Kpi[] = [
     {
-      label: 'Volume total',
+      label: 'Volume físico',
       valor: volume(volumeTotalMl),
       hint: `${coberturas.length} perfumes base`,
     },
     {
-      label: 'Com estoque',
-      valor: pad2(comEstoque),
-      hint: comEstoque ? 'Volume declarado no ERP' : 'Nenhuma base tem volume ainda',
-      tom: comEstoque ? 'ok' : 'erro',
+      // Reserva não some do frasco — some do que se pode vender. Os dois
+      // números juntos evitam a leitura de que o estoque "sumiu".
+      label: 'Reservado',
+      valor: volume(reservadoTotalMl),
+      hint: reservadoTotalMl ? 'Pedidos pagos aguardando produção' : 'Nenhum pedido pago na fila',
+      tom: reservadoTotalMl ? 'atencao' : 'neutro',
+    },
+    {
+      label: 'Disponível para venda',
+      valor: volume(disponivelTotalMl),
+      hint: 'Físico menos o que já foi vendido',
+      tom: disponivelTotalMl ? 'ok' : 'erro',
     },
     {
       label: 'Estoque crítico',
@@ -34,6 +61,16 @@ export default async function PerfumesBase() {
       tom: esgotados ? 'erro' : 'ok',
     },
     {
+      // Demanda acima do estoque aparece como pendência, nunca como estoque
+      // negativo: o pedido foi pago e o volume não cobre.
+      label: 'Reserva sem lastro',
+      valor: pad2(comExcedente),
+      hint: comExcedente
+        ? 'Bases com pedido pago acima do volume físico'
+        : 'Toda reserva tem volume que a cubra',
+      tom: comExcedente ? 'erro' : 'ok',
+    },
+    {
       // Esgotado e sem carga davam o mesmo zero e pediam coisas opostas: um
       // pede recompra, o outro pede que alguém diga quanto tem na gaveta.
       label: 'Fora do controle de estoque',
@@ -44,7 +81,7 @@ export default async function PerfumesBase() {
     {
       label: 'Valor em estoque',
       valor: brl(valorReposicao),
-      hint: 'Custo de reposição do volume atual',
+      hint: 'Custo de reposição do volume físico',
       tom: 'ouro',
     },
   ]

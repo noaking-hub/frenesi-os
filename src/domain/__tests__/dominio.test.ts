@@ -92,7 +92,7 @@ describe('estoque em ml, venda em unidades', () => {
     const v = sincronizarVariante(0, 5, 0, TETO_SHOPIFY)
     expect(v.acao).toBe('esgotar')
     expect(v.novoValor).toBe(0)
-    expect(v.detalhe).toBe('sem volume para fracionar')
+    expect(v.detalhe).toBe('sem volume disponível para fracionar')
   })
 
   it('reduz ao possível quando o publicado está acima', () => {

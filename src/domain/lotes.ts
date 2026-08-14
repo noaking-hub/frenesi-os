@@ -19,6 +19,10 @@ export interface ApuracaoLote {
   perdaPct: number | null
   /** Perda real acima do parâmetro em uso. */
   acimaDoParametro: boolean
+  /** Dias desde a entrada. Frasco aberto tempo demais evapora e oxida. */
+  diasAberto: number
+  /** Aberto além do razoável — o escopo pede o alerta de "lote antigo". */
+  antigo: boolean
 }
 
 /**
@@ -28,7 +32,21 @@ export interface ApuracaoLote {
  * mensurável. Quando o operador declara o frasco vazio, a diferença entre
  * comprado e envasado passa a ser a perda real.
  */
-export function apurarLote(lote: Lote, p: ParametrosPrecificacao): ApuracaoLote {
+/**
+ * Quantos dias um frasco pode ficar aberto antes de merecer atenção.
+ *
+ * Não é regra contábil: é física. Álcool evapora, e um lote que fica meio
+ * ano na bancada perde volume sem ninguém ter vendido nada — a perda real
+ * dele vai sair alta, e é melhor investigar antes de encerrar.
+ */
+export const DIAS_LOTE_ANTIGO = 180
+
+export function apurarLote(
+  lote: Lote,
+  p: ParametrosPrecificacao,
+  /** Data de referência — recebida para o cálculo ser testável. */
+  hoje = new Date(),
+): ApuracaoLote {
   // O ml manda: uma saída de 7 ml vendidos antes do ERP não tem decant, e
   // contá-la como zero faria esses 7 ml reaparecerem como perda técnica.
   const consumidoMl = lote.saidas.reduce((a, s) => a + s.ml, 0)
@@ -36,6 +54,11 @@ export function apurarLote(lote: Lote, p: ParametrosPrecificacao): ApuracaoLote 
   const aberto = !lote.encerradoEm
   const diferencaMl = lote.volumeMl - consumidoMl
   const perdaPct = aberto || lote.volumeMl === 0 ? null : (diferencaMl / lote.volumeMl) * 100
+
+  const entrada = new Date(lote.entrada.split('/').reverse().join('-'))
+  const diasAberto = Number.isNaN(entrada.getTime())
+    ? 0
+    : Math.max(0, Math.floor((hoje.getTime() - entrada.getTime()) / 86_400_000))
 
   return {
     id: lote.id,
@@ -47,6 +70,8 @@ export function apurarLote(lote: Lote, p: ParametrosPrecificacao): ApuracaoLote 
     diferencaMl,
     perdaPct,
     acimaDoParametro: perdaPct !== null && perdaPct > p.perdaPct,
+    diasAberto,
+    antigo: aberto && diasAberto > DIAS_LOTE_ANTIGO,
   }
 }
 

@@ -3,6 +3,16 @@ import { repositorio } from '@/data/repository'
 
 import { ProducaoCliente } from './ProducaoCliente'
 
+/**
+ * Estoque nunca pode vir do cache do build.
+ *
+ * Sem isto a página é pré-renderizada no deploy e congela: reserva muda a
+ * cada pedido pago, baixa muda a cada faturamento, e a tela mostraria o
+ * saldo de horas atrás com cara de saldo atual.
+ */
+export const dynamic = 'force-dynamic'
+
+
 export default async function Producao() {
   const repo = repositorio()
   const [ordens, bases, parametros, movimentacoes, { perda }] = await Promise.all([

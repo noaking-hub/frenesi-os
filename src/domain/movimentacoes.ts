@@ -1,6 +1,21 @@
 import type { VarianteMl } from './types'
 
-export type TipoMovimentacao = 'entrada' | 'saida' | 'ajuste' | 'devolucao'
+/**
+ * Os tipos do ledger.
+ *
+ * `reserva` e `liberacao` NÃO movem líquido: elas comprometem e descomprometem
+ * ml para pedidos pagos. Ficam no mesmo livro porque quem audita precisa ver
+ * por que o disponível caiu sem o frasco esvaziar.
+ */
+export type TipoMovimentacao =
+  | 'entrada'
+  | 'saida'
+  | 'ajuste'
+  | 'devolucao'
+  | 'reserva'
+  | 'liberacao'
+  | 'perda'
+  | 'estorno'
 
 export interface Movimentacao {
   id: string
@@ -19,9 +34,16 @@ export interface Movimentacao {
   ref: string
   motivo: string
   responsavel: string
-  /** Saldo da base logo após a movimentação. */
   /** Saldo da base logo após o lançamento. `null` quando não foi congelado. */
   saldoMl: number | null
+  /** Saldo imediatamente ANTES — o outro lado do "antes e depois". */
+  saldoAnteriorMl?: number | null
+  /** Ml reservados (+) ou liberados (−). Só em `reserva`/`liberacao`. */
+  reservaMl?: number | null
+  /** Reservado total da base depois desta linha. */
+  saldoReservadoMl?: number | null
+  /** Pedido que originou a linha, quando houver. */
+  pedidoId?: string | null
 }
 
 /**
@@ -95,8 +117,16 @@ export function resumirMovimentacoes(movs: Movimentacao[]): ResumoMovimentacoes 
 export interface ContagemInventario {
   baseId: string
   perfume: string
-  /** O que o ERP diz que existe. */
+  /** Saldo congelado na ABERTURA da contagem. Referência auditável. */
   sistemaMl: number
+  /**
+   * Ml que entraram ou saíram DEPOIS do congelamento.
+   *
+   * Sem isto, uma venda faturada no meio da contagem virava divergência
+   * inventada: o ml saiu do sistema e não da prateleira de quem contava, e o
+   * ajuste "corrigia" o saldo para um número errado.
+   */
+  movimentosMl: number
   /** O que o operador contou. `null` enquanto ninguém contou. */
   contadoMl: number | null
   responsavel: string | null
@@ -105,15 +135,18 @@ export interface ContagemInventario {
 
 export interface LinhaInventario extends ContagemInventario {
   contado: boolean
-  /** Contado menos sistema. Positivo sobrou, negativo faltou. */
+  /** Snapshot + movimentos: o que deveria estar na prateleira agora. */
+  esperadoMl: number
+  /** Contado menos ESPERADO. Positivo sobrou, negativo faltou. */
   diferencaMl: number
   divergente: boolean
 }
 
 export function apurarContagem(c: ContagemInventario): LinhaInventario {
   const contado = c.contadoMl !== null && c.responsavel !== null
-  const diferencaMl = contado ? c.contadoMl! - c.sistemaMl : 0
-  return { ...c, contado, diferencaMl, divergente: contado && diferencaMl !== 0 }
+  const esperadoMl = c.sistemaMl + c.movimentosMl
+  const diferencaMl = contado ? c.contadoMl! - esperadoMl : 0
+  return { ...c, contado, esperadoMl, diferencaMl, divergente: contado && diferencaMl !== 0 }
 }
 
 export interface ResumoInventario {
@@ -125,6 +158,8 @@ export interface ResumoInventario {
   divergentes: number
   /** Soma das diferenças. É o que o fechamento vai lançar em Movimentações. */
   diferencaLiquidaMl: number
+  /** Bases que se moveram durante a contagem — divergência não é erro nelas. */
+  comMovimento: number
 }
 
 export function apurarInventario(contagens: ContagemInventario[]): ResumoInventario {
@@ -139,24 +174,47 @@ export function apurarInventario(contagens: ContagemInventario[]): ResumoInventa
     semDivergencia: contadas.filter((l) => !l.divergente).length,
     divergentes: contadas.filter((l) => l.divergente).length,
     diferencaLiquidaMl: contadas.reduce((a, l) => a + l.diferencaMl, 0),
+    comMovimento: linhas.filter((l) => l.movimentosMl !== 0).length,
   }
 }
 
-// ── Produtos derivados ─────────────────────────────────────────────────────
+// ── Disponibilidade por variante ───────────────────────────────────────────
+//
+// A Frenesi envasa sob demanda: não há decant pronto na prateleira esperando
+// pedido. Por isso esta apuração responde "quantos DÁ para vender", e não
+// "quantos existem" — e mantém as duas coisas separadas quando houver
+// pré-envase de verdade.
+
+export type EstadoVariante =
+  | 'Disponível'
+  | 'Últimas unidades'
+  | 'Sob demanda'
+  | 'Tudo reservado'
+  | 'Sem volume'
+  | 'Sem carga'
 
 export interface LinhaDerivado {
   baseId: string
   perfume: string
   marca: string
   variante: VarianteMl
+  /** Unidades físicas já envasadas e etiquetadas. Zero é o normal aqui. */
   envasadas: number
+  /** Unidades prontas já comprometidas com pedidos. */
   reservadas: number
+  /** Prontas menos comprometidas. NUNCA negativo — o excedente vira pendência. */
   disponiveis: number
+  /** Unidades que o volume disponível da base ainda permite fracionar. */
+  capacidade: number
+  /** Prontas + capacidade: o total que a loja poderia vender hoje. */
+  vendaveis: number
+  /** Demanda que nem o pronto nem o volume cobrem. */
+  pendentes: number
   /** Volume já fracionado, portanto fora do estoque de base. */
   volumeMl: number
   precoPraticado: number
   valorTotal: number
-  estado: 'Disponível' | 'Últimas unidades' | 'Tudo reservado'
+  estado: EstadoVariante
 }
 
 export function apurarDerivado(
@@ -167,8 +225,33 @@ export function apurarDerivado(
   envasadas: number,
   reservadas: number,
   precoPraticado: number,
+  /** Ml livres da base — é o que sustenta a capacidade desta variante. */
+  disponivelBaseMl = 0,
+  /** A base já entrou no livro de movimentações. */
+  temCarga = true,
 ): LinhaDerivado {
-  const disponiveis = envasadas - reservadas
+  // Estoque físico pronto não pode ser negativo: se há mais reserva que
+  // unidade pronta, o que existe é demanda pendente — e ela tem nome próprio.
+  const disponiveis = Math.max(0, envasadas - reservadas)
+  const pendentes = Math.max(0, reservadas - envasadas)
+  const capacidade = Math.max(0, Math.floor(disponivelBaseMl / variante))
+  const vendaveis = disponiveis + capacidade
+
+  const estado: EstadoVariante = !temCarga
+    ? 'Sem carga'
+    : vendaveis === 0
+      ? // Unidade envasada que existe mas está toda comprometida não é "sem
+        // volume": o frasco pronto está ali, com dono. A ação é separar e
+        // despachar, não recomprar.
+        envasadas > 0
+        ? 'Tudo reservado'
+        : 'Sem volume'
+      : disponiveis === 0
+        ? 'Sob demanda'
+        : vendaveis <= 2
+          ? 'Últimas unidades'
+          : 'Disponível'
+
   return {
     baseId,
     perfume,
@@ -177,14 +260,13 @@ export function apurarDerivado(
     envasadas,
     reservadas,
     disponiveis,
+    capacidade,
+    vendaveis,
+    pendentes,
     volumeMl: envasadas * variante,
     precoPraticado,
-    valorTotal: precoPraticado * envasadas,
-    estado:
-      disponiveis === 0
-        ? 'Tudo reservado'
-        : disponiveis <= 2
-          ? 'Últimas unidades'
-          : 'Disponível',
+    // Valor do que está pronto — capacidade não é estoque e não se valoriza.
+    valorTotal: precoPraticado * disponiveis,
+    estado,
   }
 }

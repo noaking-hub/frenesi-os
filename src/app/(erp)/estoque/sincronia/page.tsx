@@ -9,6 +9,16 @@ import type { AcaoSync, BaseSync } from '@/domain'
 import { AplicarShopify } from './AplicarShopify'
 import { ImportarShopify } from './ImportarShopify'
 
+/**
+ * Estoque nunca pode vir do cache do build.
+ *
+ * Sem isto a página é pré-renderizada no deploy e congela: reserva muda a
+ * cada pedido pago, baixa muda a cada faturamento, e a tela mostraria o
+ * saldo de horas atrás com cara de saldo atual.
+ */
+export const dynamic = 'force-dynamic'
+
+
 const TOM_ACAO: Record<AcaoSync, Tom> = {
   esgotar: 'erro',
   reduzir: 'atencao',

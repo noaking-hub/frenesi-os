@@ -7,11 +7,25 @@ import { repositorio } from '@/data/repository'
 import { origemDoAjuste, pct, plural, resumirMovimentacoes, volume } from '@/domain'
 import type { Movimentacao, TipoMovimentacao } from '@/domain'
 
+/**
+ * Estoque nunca pode vir do cache do build.
+ *
+ * Sem isto a página é pré-renderizada no deploy e congela: reserva muda a
+ * cada pedido pago, baixa muda a cada faturamento, e a tela mostraria o
+ * saldo de horas atrás com cara de saldo atual.
+ */
+export const dynamic = 'force-dynamic'
+
+
 const ROTULO: Record<TipoMovimentacao, string> = {
   entrada: 'Entrada',
   saida: 'Saída',
   ajuste: 'Ajuste',
   devolucao: 'Devolução',
+  reserva: 'Reserva',
+  liberacao: 'Liberação',
+  perda: 'Perda',
+  estorno: 'Estorno',
 }
 
 const TOM: Record<TipoMovimentacao, Tom> = {
@@ -19,6 +33,12 @@ const TOM: Record<TipoMovimentacao, Tom> = {
   saida: 'atencao',
   ajuste: 'erro',
   devolucao: 'info',
+  // Reserva e liberação não mexem no líquido: tom neutro, para não competir
+  // com o que realmente entrou ou saiu do frasco.
+  reserva: 'info',
+  liberacao: 'neutro',
+  perda: 'erro',
+  estorno: 'neutro',
 }
 
 export default async function Movimentacoes() {
@@ -174,19 +194,45 @@ export default async function Movimentacoes() {
           tamanho={12.5}
           tom={m.volumeMl > 0 ? 'ok' : m.tipo === 'ajuste' ? 'erro' : 'var(--color-corrente)'}
         >
-          {`${m.volumeMl > 0 ? '+' : '−'} ${volume(Math.abs(m.volumeMl))}`}
+          {m.tipo === 'reserva' || m.tipo === 'liberacao'
+            ? // Reserva não tira líquido do frasco: mostrar "±0 ml" faria
+              // parecer lançamento vazio. O que se move aqui é o comprometido.
+              `${(m.reservaMl ?? 0) > 0 ? '+' : '−'} ${volume(Math.abs(m.reservaMl ?? 0))} reservados`
+            : `${m.volumeMl > 0 ? '+' : '−'} ${volume(Math.abs(m.volumeMl))}`}
         </Valor>
       ),
     },
     {
       chave: 'saldo',
       titulo: 'Saldo',
-      largura: '108px',
+      largura: '138px',
       alinhamento: 'right',
+      // Antes e depois na mesma linha: é o que permite auditar sem refazer a
+      // conta de cabeça, e o escopo pede os dois.
       render: (m) => (
-        <Valor tamanho={11.5} peso={400} tom="var(--color-secundario)">
-          {m.saldoMl === null ? '—' : volume(m.saldoMl)}
-        </Valor>
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
+          <Valor tamanho={11.5} peso={400} tom="var(--color-secundario)">
+            {m.saldoMl === null ? '—' : volume(m.saldoMl)}
+          </Valor>
+          {m.saldoAnteriorMl !== null && m.saldoAnteriorMl !== undefined && m.saldoMl !== null && (
+            <span
+              className="font-mono"
+              style={{ fontSize: 9, lineHeight: 1.2, color: 'rgba(242,237,227,.3)', whiteSpace: 'nowrap' }}
+            >
+              {`antes ${volume(m.saldoAnteriorMl)}`}
+            </span>
+          )}
+          {(m.tipo === 'reserva' || m.tipo === 'liberacao') &&
+            m.saldoReservadoMl !== null &&
+            m.saldoReservadoMl !== undefined && (
+              <span
+                className="font-mono"
+                style={{ fontSize: 9, lineHeight: 1.2, color: 'rgba(242,237,227,.38)', whiteSpace: 'nowrap' }}
+              >
+                {`reservado ${volume(m.saldoReservadoMl)}`}
+              </span>
+            )}
+        </span>
       ),
     },
     {

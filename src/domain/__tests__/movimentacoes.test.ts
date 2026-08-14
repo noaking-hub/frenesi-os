@@ -77,11 +77,11 @@ describe('movimentações', () => {
 
 describe('inventário', () => {
   const contagens: ContagemInventario[] = [
-    { baseId: 'bac', perfume: 'Baccarat', sistemaMl: 640, contadoMl: 640, responsavel: 'Pedro A.', quando: 'hoje' },
-    { baseId: 'sau', perfume: 'Sauvage', sistemaMl: 1180, contadoMl: 1174, responsavel: 'Pedro A.', quando: 'hoje' },
-    { baseId: 'blu', perfume: 'Bleu', sistemaMl: 760, contadoMl: 768, responsavel: 'Marina F.', quando: 'hoje' },
+    { baseId: 'bac', perfume: 'Baccarat', sistemaMl: 640, movimentosMl: 0, contadoMl: 640, responsavel: 'Pedro A.', quando: 'hoje' },
+    { baseId: 'sau', perfume: 'Sauvage', sistemaMl: 1180, movimentosMl: 0, contadoMl: 1174, responsavel: 'Pedro A.', quando: 'hoje' },
+    { baseId: 'blu', perfume: 'Bleu', sistemaMl: 760, movimentosMl: 0, contadoMl: 768, responsavel: 'Marina F.', quando: 'hoje' },
     // Ninguém contou: diferente de contar zero.
-    { baseId: 'gg', perfume: 'Good Girl', sistemaMl: 340, contadoMl: null, responsavel: null, quando: null },
+    { baseId: 'gg', perfume: 'Good Girl', sistemaMl: 340, movimentosMl: 0, contadoMl: null, responsavel: null, quando: null },
   ]
 
   it('não confunde base não contada com contagem zerada', () => {
@@ -117,12 +117,17 @@ describe('produtos derivados', () => {
     const d = apurarDerivado('bac', 'Baccarat', 'Maison Francis', 5, 8, 3, 79.9)
     expect(d.disponiveis).toBe(5)
     expect(d.volumeMl).toBe(40)
-    expect(d.valorTotal).toBeCloseTo(639.2, 5)
+    // Valor conta o que está PRONTO E LIVRE: capacidade não é estoque, e
+    // unidade reservada já tem dono.
+    expect(d.valorTotal).toBeCloseTo(399.5, 5)
     expect(d.estado).toBe('Disponível')
   })
 
   it('marca tudo reservado quando não sobra unidade', () => {
     expect(apurarDerivado('del', 'Delina', 'Marly', 5, 2, 2, 62.9).estado).toBe('Tudo reservado')
+    // Sem unidade pronta e sem volume na base, o estado é outro: não há o
+    // que separar, há o que comprar.
+    expect(apurarDerivado('del', 'Delina', 'Marly', 5, 0, 0, 62.9).estado).toBe('Sem volume')
   })
 
   it('avisa nas últimas unidades', () => {
