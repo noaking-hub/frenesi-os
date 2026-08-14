@@ -236,6 +236,8 @@ export interface Pedido {
   entregaShopifyEm?: string | null
   /** Prazo de entrega cotado pela transportadora, em dias da postagem. */
   prazoEntregaDias?: number | null
+  /** Data de entrega PROMETIDA no checkout (Yampi). Nunca a realizada. */
+  entregaPrevistaEm?: string | null
   estoqueBaixadoEm?: string | null
   estoqueBaixadoMl?: number | null
 }

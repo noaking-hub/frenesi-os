@@ -604,9 +604,10 @@ export interface SlaEntrega {
 /**
  * Prazo de ENTREGA — a segunda metade da régua, depois do despacho.
  *
- * Conta da POSTAGEM (primeiro escaneamento da transportadora) usando o prazo
- * em dias que a transportadora cotou para aquele envio. As duas pontas
- * precisam existir: sem postagem o relógio não começou, e sem prazo cotado a
+ * A régua tem duas fontes, nesta ordem: a data PROMETIDA no checkout
+ * (`date_delivery` da Yampi) — é ela que o cliente viu ao comprar, e é por
+ * ela que ele cobra — e, na falta dela, a POSTAGEM (primeiro escaneamento)
+ * mais o prazo em dias que a transportadora cotou. Sem nenhuma das duas, a
  * resposta honesta é "sem previsão" — o escopo proíbe inventar data, e uma
  * previsão chutada vira promessa quebrada na boca do atendimento.
  */
@@ -618,20 +619,28 @@ export function slaDeEntrega(
     postadoEm: string | null | undefined
     /** Prazo cotado pela transportadora, em dias. */
     prazoDias: number | null | undefined
+    /** Data de entrega prometida no checkout. Tem precedência sobre a cotação. */
+    prometidoEm?: string | null
   },
   agora = new Date(),
 ): SlaEntrega {
   if (p.situacao === 'entregue') return { estado: 'entregue', rotulo: 'Entregue', ate: null }
 
-  const inicio = p.postadoEm ? Date.parse(p.postadoEm) : NaN
-  if (!Number.isFinite(inicio) || !p.prazoDias || p.prazoDias <= 0) {
-    return { estado: 'sem-previsao', rotulo: 'Sem previsão', ate: null }
-  }
-
   // Mesmo calendário do SLA de expedição: dias em baldes UTC, para as duas
   // metades da régua nunca discordarem sobre que dia é hoje.
   const diaDe = (t: number) => Math.floor(t / 86_400_000)
-  const limite = diaDe(inicio) + p.prazoDias
+
+  const prometido = dataIso(p.prometidoEm)
+  const inicio = p.postadoEm ? Date.parse(p.postadoEm) : NaN
+  let limite: number
+  if (prometido) {
+    limite = diaDe(prometido.getTime())
+  } else if (Number.isFinite(inicio) && p.prazoDias && p.prazoDias > 0) {
+    limite = diaDe(inicio) + p.prazoDias
+  } else {
+    return { estado: 'sem-previsao', rotulo: 'Sem previsão', ate: null }
+  }
+
   const dias = limite - diaDe(agora.getTime())
   const ate = new Date(limite * 86_400_000).toLocaleDateString('pt-BR', {
     day: '2-digit',

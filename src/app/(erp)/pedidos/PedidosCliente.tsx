@@ -1019,6 +1019,7 @@ function CelulaPrazo({ v }: { v: Viva }) {
       entregueEm: v.p.entregueEm,
       postadoEm: v.log.primeiroEvento,
       prazoDias: v.p.prazoEntregaDias,
+      prometidoEm: v.p.entregaPrevistaEm,
     })
     const TOM_ENTREGA: Record<typeof entrega.estado, Tom> = {
       entregue: 'ok',
@@ -1034,10 +1035,12 @@ function CelulaPrazo({ v }: { v: Viva }) {
         }
         secundaria={
           entrega.estado === 'sem-previsao'
-            ? 'transportadora não cotada'
-            : v.p.prazoEntregaDias
-              ? `${v.p.prazoEntregaDias} dias da postagem`
-              : ''
+            ? 'sem promessa nem cotação'
+            : v.p.entregaPrevistaEm
+              ? 'prometida no checkout'
+              : v.p.prazoEntregaDias
+                ? `${v.p.prazoEntregaDias} dias da postagem`
+                : ''
         }
       />
     )

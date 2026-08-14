@@ -38,6 +38,14 @@ function paraWaMe(telefone: string): string {
   return digitos.startsWith('55') ? digitos : `55${digitos}`
 }
 
+/** dd/MM legível — o timestamptz cru do banco não é coisa de mostrar a cliente. */
+function dataPt(iso: string | null | undefined): string | null {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return null
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'America/Sao_Paulo' })
+}
+
 export function PortalDevolucoes({
   contato,
 }: {
@@ -104,6 +112,7 @@ export function PortalDevolucoes({
       }}
     >
       <div
+        className="portal-coluna"
         style={{
           width: '100%',
           maxWidth: 430,
@@ -115,6 +124,7 @@ export function PortalDevolucoes({
         }}
       >
         <header
+          className="portal-header"
           style={{
             position: 'sticky',
             top: 0,
@@ -198,9 +208,11 @@ export function PortalDevolucoes({
                 className="font-display"
                 style={{ margin: 0, fontWeight: 600, fontSize: 26, lineHeight: 1.15, letterSpacing: '.01em' }}
               >
-                Vamos resolver isso
+                Solicite sua devolução
               </h1>
-              <Corpo>Informe o e-mail ou o CPF da compra para encontrarmos seu pedido.</Corpo>
+              <Corpo>
+                Para localizar o pedido, informe o e-mail ou o CPF usado na compra.
+              </Corpo>
             </div>
 
             <div
@@ -327,14 +339,19 @@ export function PortalDevolucoes({
         {passo === 3 && pedido && (
           <Passo>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-              <RotuloCampo>{`Pedido ${pedido.id} · entregue em ${pedido.entregueEm}`}</RotuloCampo>
-              <TituloPasso>O que você quer devolver?</TituloPasso>
+              <RotuloCampo>
+                {(() => {
+                  const entrega = dataPt(pedido.entregueEm)
+                  return entrega ? `Pedido ${pedido.id} · entregue em ${entrega}` : `Pedido ${pedido.id}`
+                })()}
+              </RotuloCampo>
+              <TituloPasso>Quais itens você quer devolver?</TituloPasso>
               <Corpo>
                 {(() => {
                   const s = statusDevolucao(pedido.diasDesdeEntrega)
                   return s.restam === 1
-                    ? `Hoje é o último dia do prazo de ${PRAZO_DEVOLUCAO_DIAS} dias. Marque os itens que quer devolver.`
-                    : `Você está no ${pedido.diasDesdeEntrega}º dia dos ${PRAZO_DEVOLUCAO_DIAS} disponíveis. Marque os itens que quer devolver.`
+                    ? `Hoje é o último dia do prazo de ${PRAZO_DEVOLUCAO_DIAS} dias. Marque os itens que deseja devolver.`
+                    : `Você ainda tem ${s.restam} dos ${PRAZO_DEVOLUCAO_DIAS} dias de prazo. Marque os itens que deseja devolver.`
                 })()}
               </Corpo>
             </div>
@@ -467,8 +484,8 @@ export function PortalDevolucoes({
         {passo === 4 && (
           <Passo>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <TituloPasso>Por que está devolvendo?</TituloPasso>
-              <Corpo>Escolha o motivo mais próximo. Isso define como cuidamos do seu caso.</Corpo>
+              <TituloPasso>Motivo da devolução</TituloPasso>
+              <Corpo>Escolha o motivo que melhor descreve o caso — é ele que orienta a análise.</Corpo>
             </div>
 
             <div role="radiogroup" aria-label="Motivo da devolução" style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
@@ -571,6 +588,7 @@ export function PortalDevolucoes({
                 {danificado
                   ? 'Como o frasco chegou com defeito, só a foto do nível é obrigatória. A do dano acelera a análise.'
                   : 'Precisamos ver que o decant não foi usado. As duas fotos são obrigatórias.'}
+                {' '}Tire as fotos agora e guarde-as no celular — nossa equipe vai pedi-las durante a análise.
               </Corpo>
             </div>
 
@@ -710,7 +728,7 @@ export function PortalDevolucoes({
                 {
                   marca: '✓',
                   feito: true,
-                  titulo: 'Recebemos suas fotos',
+                  titulo: 'Solicitação registrada',
                   desc: 'Análise em até 1 dia útil',
                 },
                 {
@@ -724,9 +742,11 @@ export function PortalDevolucoes({
                 {
                   marca: '3',
                   feito: false,
-                  titulo: 'Enviamos o código reverso por e-mail',
-                  // O reverso sai na mesma plataforma que emitiu a etiqueta de ida.
-                  desc: `Postagem sem custo pela ${pedido.gateway}, com o passo a passo`,
+                  titulo: 'Você recebe o código de postagem',
+                  // O reverso sai na mesma plataforma que emitiu a etiqueta de
+                  // ida, e quem o entrega é o ATENDIMENTO — os e-mails
+                  // automáticos ficam desligados até o sistema rodar 100%.
+                  desc: `Nossa equipe entra em contato com o código e o passo a passo · postagem sem custo pela ${pedido.gateway}`,
                 },
                 {
                   marca: '4',
@@ -840,6 +860,7 @@ export function PortalDevolucoes({
         )}
 
         <footer
+          className="portal-rodape"
           style={{
             padding: '18px 22px 26px',
             borderTop: `1px solid rgba(36,31,24,.08)`,
@@ -892,7 +913,7 @@ function Passo({
 }) {
   return (
     <div
-      className="animate-[pt-in_.26s_ease_both]"
+      className="portal-passo animate-[pt-in_.26s_ease_both]"
       style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 18, padding }}
     >
       {children}
@@ -909,8 +930,20 @@ function CartaoPedido({
   selecionado: boolean
   aoEscolher: () => void
 }) {
-  // Elegibilidade e cópia saem da mesma função que o ERP usa.
-  const s = statusDevolucao(pedido.diasDesdeEntrega)
+  // Elegibilidade e cópia saem da mesma função que o ERP usa. Exceção
+  // honesta: pedido entregue cuja data de entrega o sistema não tem — não dá
+  // para contar prazo do que não se sabe, e "aguardando entrega" seria
+  // mentira. O caminho é o atendimento.
+  const semData = pedido.situacao === 'entregue' && pedido.diasDesdeEntrega === null
+  const s = semData
+    ? {
+        elegivel: false,
+        estado: 'aguardando-entrega' as const,
+        restam: 0,
+        selo: 'Fale com a gente',
+        mensagem: 'Não temos a data exata desta entrega — fale com o atendimento para abrir a devolução.',
+      }
+    : statusDevolucao(pedido.diasDesdeEntrega)
   const corPrazo = s.elegivel ? (s.restam <= 2 ? PORTAL.link : PORTAL.ok) : PORTAL.erro
 
   return (
@@ -968,7 +1001,15 @@ function CartaoPedido({
 
       <span style={{ display: 'flex', alignItems: 'baseline', gap: 9, flexWrap: 'wrap' }}>
         <span className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.4, color: PORTAL.terciario }}>
-          {`comprado em ${pedido.data} · ${pedido.entregueEm ? `entregue em ${pedido.entregueEm}` : 'em trânsito'}`}
+          {(() => {
+            const entrega = dataPt(pedido.entregueEm)
+            const situacao = entrega
+              ? `entregue em ${entrega}`
+              : pedido.situacao === 'entregue'
+                ? 'entregue'
+                : 'em trânsito'
+            return `comprado em ${pedido.data} · ${situacao}`
+          })()}
         </span>
         <span className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.4, color: PORTAL.terciario }}>
           {plural(pedido.itens.length, 'item', 'itens')}
@@ -1108,7 +1149,9 @@ function SlotFoto({
           cursor: 'pointer',
         }}
       >
-        {feita ? 'Foto anexada · trocar' : 'Tirar ou anexar foto'}
+        {/* O portal ainda não recebe upload: o que se confirma é que a foto
+            EXISTE e será apresentada na análise. Fingir anexo seria pior. */}
+        {feita ? 'Foto confirmada · desfazer' : 'Confirmar que tirei esta foto'}
       </button>
     </div>
   )

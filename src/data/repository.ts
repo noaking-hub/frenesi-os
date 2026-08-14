@@ -357,7 +357,7 @@ const repositorioSupabase: Repositorio = {
           'destino, cep, logradouro, peso, dimensoes, gateway, rastreio, situacao, ' +
           'servico_frete, rastreio_url, rastreio_lido_em, entrega_local, ' +
           'producao_em, enviado_shopify_em, estoque_baixado_em, estoque_baixado_ml, ' +
-          'shopify_numero, entrega_shopify_em, prazo_entrega_dias, ' +
+          'shopify_numero, entrega_shopify_em, prazo_entrega_dias, entrega_prevista_em, ' +
           'clientes(nome, email, cpf, telefone), pedido_itens(descricao, variante, preco, base_id)',
       )
       .order('comprado_em', { ascending: false })
@@ -408,10 +408,15 @@ const repositorioSupabase: Repositorio = {
         cashback: Number(p.cashback),
         pagamento: p.pagamento,
         envio: rotuloEnvio(p.envio),
-        // O prazo de devolução só começa a correr na marcação de entrega.
-        diasDesdeEntrega: p.entregue_em
-          ? Math.floor((Date.now() - new Date(p.entregue_em).getTime()) / dia)
-          : null,
+        // O prazo de devolução corre da entrega REAL. Enquanto a varredura
+        // não repõe o escaneamento da transportadora, a data prometida serve
+        // de relógio reserva — ela é ≥ a entrega de fato, então o cliente
+        // nunca perde prazo porque o nosso dado estava faltando.
+        diasDesdeEntrega: (() => {
+          const base =
+            p.entregue_em ?? (p.situacao === 'entregue' ? p.entrega_prevista_em : null)
+          return base ? Math.floor((Date.now() - new Date(base).getTime()) / dia) : null
+        })(),
         entregueEm: p.entregue_em,
         destino: p.destino ?? '',
         cep: p.cep ?? '',
@@ -438,6 +443,7 @@ const repositorioSupabase: Repositorio = {
         shopifyNumero: p.shopify_numero,
         entregaShopifyEm: p.entrega_shopify_em,
         prazoEntregaDias: p.prazo_entrega_dias === null ? null : Number(p.prazo_entrega_dias),
+        entregaPrevistaEm: p.entrega_prevista_em,
         estoqueBaixadoEm: p.estoque_baixado_em,
         estoqueBaixadoMl: p.estoque_baixado_ml === null ? null : Number(p.estoque_baixado_ml),
         itens: itens.map((i) => ({
@@ -659,7 +665,7 @@ const repositorioSupabase: Repositorio = {
       .select(
         'protocolo, pedido_id, tipo, motivo, comentario, itens, fotos, status, aberta_em, ' +
           'reverso, lacre, conferencia, ' +
-          'pedidos(valor, destino, gateway, rastreio, entregue_em, clientes(nome, email, telefone, cpf))',
+          'pedidos(valor, destino, gateway, rastreio, entregue_em, entrega_prevista_em, situacao, clientes(nome, email, telefone, cpf))',
       )
       .order('aberta_em', { ascending: false })
       .limit(200)
@@ -670,7 +676,11 @@ const repositorioSupabase: Repositorio = {
 
     return linhas.map((s): SolicitacaoErp => {
       const cliente = s.pedidos?.clientes
-      const entregue = s.pedidos?.entregue_em
+      // Mesmo relógio reserva de `pedidos()`: sem a entrega real, vale a
+      // prometida — nunca menos prazo para o cliente por dado nosso faltando.
+      const entregue =
+        s.pedidos?.entregue_em ??
+        (s.pedidos?.situacao === 'entregue' ? s.pedidos?.entrega_prevista_em : null)
       const diasDesdeEntrega = entregue
         ? Math.floor((Date.now() - Date.parse(entregue)) / dia)
         : null
@@ -1113,6 +1123,7 @@ interface LinhaPedido {
   shopify_numero: string | null
   entrega_shopify_em: string | null
   prazo_entrega_dias: number | null
+  entrega_prevista_em: string | null
   estoque_baixado_em: string | null
   estoque_baixado_ml: number | string | null
   clientes: { nome: string; email: string; cpf: string | null; telefone: string } | null
@@ -1188,6 +1199,8 @@ interface LinhaSolicitacao {
     gateway: string | null
     rastreio: string | null
     entregue_em: string | null
+    entrega_prevista_em: string | null
+    situacao: string | null
     clientes: { nome: string; email: string; telefone: string; cpf: string } | null
   } | null
 }

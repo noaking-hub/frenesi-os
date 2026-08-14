@@ -362,20 +362,42 @@ export async function varrerRastreiosFrenet(limite = 60): Promise<RodadaRastreio
   if (!supabaseConfigurado()) throw new Error('O Supabase precisa estar configurado.')
 
   const sb = supabaseServer()
-  const { data, error } = await sb
+  // Duas filas, nesta ordem: primeiro os envios VIVOS (ainda não entregues),
+  // que precisam de leitura fresca; depois o mutirão de reposição — pedidos
+  // já entregues cuja data real de entrega ainda não veio da transportadora
+  // (a importação gravava a PREVISÃO da Yampi no lugar, e o reparo zerou).
+  // Sem a divisão, centenas de códigos antigos passariam na frente do que
+  // está na rua agora.
+  const { data: vivos, error } = await sb
     .from('pedidos')
     .select('id, rastreio, servico_frete, rastreio_servico, rastreio_lido_em')
     .not('rastreio', 'is', null)
     .is('entregue_em', null)
+    .neq('situacao', 'entregue')
     .order('rastreio_lido_em', { ascending: true, nullsFirst: true })
     .limit(limite)
   if (error) throw error
+
+  const alvos = (vivos ?? []) as AlvoRastreio[]
+  const vagas = limite - alvos.length
+  if (vagas > 0) {
+    const { data: reposicao, error: erroReposicao } = await sb
+      .from('pedidos')
+      .select('id, rastreio, servico_frete, rastreio_servico, rastreio_lido_em')
+      .not('rastreio', 'is', null)
+      .is('entregue_em', null)
+      .eq('situacao', 'entregue')
+      .order('rastreio_lido_em', { ascending: true, nullsFirst: true })
+      .limit(vagas)
+    if (erroReposicao) throw erroReposicao
+    alvos.push(...((reposicao ?? []) as AlvoRastreio[]))
+  }
 
   // Nada é descartado por rótulo aqui: etiqueta emitida no Melhor Envio pode
   // ter saído por uma transportadora que a Frenet consulta igual (a J&T
   // responde por código público). Quem decide é `rastrearNaFrenet`, que sabe
   // quais serviços esta conta tem — e avisa quando não tem nenhum.
-  return consultarAlvos((data ?? []) as AlvoRastreio[])
+  return consultarAlvos(alvos)
 }
 
 interface AlvoRastreio {
@@ -497,7 +519,13 @@ export async function cotarPrazosDeEntrega(limite = 15): Promise<RodadaCotacao> 
     .select('id, cep, valor, rastreio, servico_frete, rastreio_servico')
     .not('rastreio', 'is', null)
     .is('entregue_em', null)
+    // Entregue sem data real ainda é entregue: cotar prazo para ele seria
+    // gastar a cota da Frenet com uma pergunta que já foi respondida.
+    .neq('situacao', 'entregue')
     .is('prazo_entrega_dias', null)
+    // Quem tem a promessa do checkout não precisa de cotação: a régua usa a
+    // promessa primeiro, e a cota da Frenet vai para quem está sem nada.
+    .is('entrega_prevista_em', null)
     .eq('entrega_local', false)
     .not('cep', 'is', null)
     .order('comprado_em', { ascending: false })

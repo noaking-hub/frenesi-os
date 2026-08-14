@@ -220,6 +220,53 @@ describe('SLA de entrega — o prazo da transportadora, depois do despacho', () 
     ).toBe('sem-previsao')
   })
 
+  it('a promessa do checkout tem precedência sobre a cotação', () => {
+    // Promessa 19/08 vence prazo cotado que daria 15/08: o cliente cobra pela
+    // data que viu ao comprar, e é por ela que a régua responde.
+    const s = slaDeEntrega(
+      {
+        situacao: 'enviado',
+        entregueEm: null,
+        postadoEm: '2026-08-10T08:00:00Z',
+        prazoDias: 5,
+        prometidoEm: '2026-08-19T03:00:00Z',
+      },
+      agora,
+    )
+    expect(s.estado).toBe('no-prazo')
+    expect(s.rotulo).toBe('Entrega até 19/08')
+  })
+
+  it('a promessa vale mesmo sem postagem, e atrasa quando o dia passa', () => {
+    expect(
+      slaDeEntrega(
+        { situacao: 'enviado', entregueEm: null, postadoEm: null, prazoDias: null, prometidoEm: '2026-08-19T03:00:00Z' },
+        agora,
+      ).estado,
+    ).toBe('no-prazo')
+    const atrasada = slaDeEntrega(
+      { situacao: 'enviado', entregueEm: null, postadoEm: null, prazoDias: null, prometidoEm: '2026-08-11T03:00:00Z' },
+      agora,
+    )
+    expect(atrasada.estado).toBe('atrasado')
+    expect(atrasada.rotulo).toBe('Entrega atrasada · 2 dias')
+  })
+
+  it('promessa fora do formato ISO é ignorada — cai na cotação, nunca em data errada', () => {
+    // `new Date('19/08/2026')` inventaria um mês: só ISO entra na conta.
+    const s = slaDeEntrega(
+      {
+        situacao: 'enviado',
+        entregueEm: null,
+        postadoEm: '2026-08-10T08:00:00Z',
+        prazoDias: 5,
+        prometidoEm: '19/08/2026',
+      },
+      agora,
+    )
+    expect(s.rotulo).toBe('Entrega até 15/08')
+  })
+
   it('entregue encerra a régua', () => {
     expect(
       slaDeEntrega(

@@ -121,6 +121,7 @@ export function FichaDoPedido({
     entregueEm: pedido.entregueEm,
     postadoEm: logistica.primeiroEvento,
     prazoDias: pedido.prazoEntregaDias,
+    prometidoEm: pedido.entregaPrevistaEm,
   })
   const textoPrevisao =
     previsao.estado === 'no-prazo'

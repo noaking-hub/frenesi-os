@@ -519,8 +519,7 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
     const nome = p.status?.data?.name ?? ''
     const entregue = Boolean(p.delivered)
     const endereco = enderecoDe(p)
-    const entregueEm = entregue ? dataYampi(p.date_delivery) : null
-    if (entregueEm) entregues++
+    if (entregue) entregues++
     const email = p.customer?.data?.email?.trim().toLowerCase()
 
     return {
@@ -552,9 +551,12 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
         producaoEm: anterior.get(`YP-${p.number}`)?.producao_em ?? null,
       }),
       comprado_em: dataYampi(p.created_at) ?? new Date().toISOString(),
-      // Sem esta data o Portal de Devoluções não funciona: o prazo de 7 dias
-      // conta a partir dela, e é a única plataforma que a marca.
-      entregue_em: entregueEm,
+      // `date_delivery` é a data PROMETIDA no checkout — nunca a entrega
+      // realizada. Já foi gravada em `entregue_em` e o ERP passou semanas
+      // afirmando entregas que não tinham acontecido. A `entregue_em` não é
+      // escrita aqui de propósito: ela pertence a quem viu o fato — o
+      // escaneamento da transportadora, a Shopify ou a confirmação em mãos.
+      entrega_prevista_em: dataYampi(p.date_delivery),
       rastreio: p.track_code,
       // O serviço diz por qual plataforma o envio foi emitido (Frenet ou
       // Melhor Envio) — a Yampi não informa a plataforma diretamente.

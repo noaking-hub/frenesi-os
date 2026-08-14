@@ -284,3 +284,31 @@
     padding: 20px 18px 40px !important;
   }
 }
+
+/* ── Portal de devoluções ───────────────────────────────────────────────────
+   Mobile-first de verdade: no celular a coluna ocupa a tela inteira; no
+   desktop ela vira um cartão centrado mais largo, com respiro — sem isso o
+   portal abria como uma tira de 430px perdida no monitor. !important pelo
+   mesmo motivo das classes do ERP: o arranjo é style inline. */
+@media (min-width: 900px) {
+  .portal .portal-coluna {
+    max-width: 640px !important;
+    min-height: 0 !important;
+    margin: 40px 0 48px;
+    border-radius: 18px;
+    overflow: hidden;
+    border: 1px solid rgba(36, 31, 24, 0.08);
+  }
+  .portal .portal-passo {
+    padding-left: 40px !important;
+    padding-right: 40px !important;
+  }
+  .portal .portal-rodape {
+    padding-left: 40px !important;
+    padding-right: 40px !important;
+  }
+  .portal .portal-header {
+    padding-left: 40px !important;
+    padding-right: 40px !important;
+  }
+}
