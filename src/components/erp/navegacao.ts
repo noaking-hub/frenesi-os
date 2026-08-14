@@ -54,7 +54,9 @@ export const NAV: GrupoNav[] = [
       { id: 'inventario', label: 'Inventário', href: '/estoque/inventario', pronta: true },
     ],
   },
-  { id: 'producao', label: 'Produção', href: '/producao', pronta: true },
+  // "Produção" virou "Envase": a tela não abre mais ordem nem baixa estoque
+  // — ela diz o que fracionar agora, a partir dos pedidos já pagos.
+  { id: 'envase', label: 'Envase', href: '/envase', pronta: true },
   {
     id: 'financeiro',
     label: 'Financeiro',

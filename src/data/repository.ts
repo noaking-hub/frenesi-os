@@ -19,7 +19,6 @@ import type {
   Envio,
   Lancamento,
   Ocorrencia,
-  OrdemProducao,
   Repasse,
   Lote,
   Movimentacao,
@@ -28,7 +27,6 @@ import type {
   PerfumeBase,
   ProdutoDerivado,
   ReceitaMensal,
-  StatusOrdem,
   TipoMovimentacao,
   VarianteMl,
 } from '@/domain'
@@ -59,7 +57,6 @@ export interface Repositorio {
   envios(): Promise<Envio[]>
   ocorrencias(): Promise<Ocorrencia[]>
   solicitacoes(): Promise<SolicitacaoErp[]>
-  ordens(): Promise<OrdemProducao[]>
   lancamentos(): Promise<Lancamento[]>
   contas(): Promise<ContaBancaria[]>
   repasses(): Promise<Repasse[]>
@@ -118,9 +115,6 @@ const repositorioFixtures: Repositorio = {
   },
   async solicitacoes() {
     return fixtures.SOLICITACOES
-  },
-  async ordens() {
-    return fixtures.ORDENS
   },
   async lancamentos() {
     return fixtures.LANCAMENTOS
@@ -778,36 +772,6 @@ const repositorioSupabase: Repositorio = {
     })
   },
 
-  async ordens() {
-    const { data, error } = await supabaseServer()
-      .from('ordens_producao')
-      .select(
-        'id, base_id, variante, quantidade, liquido_ml, status, responsavel, motivo, ' +
-          'aberta_em, concluida_em, envasadas, perfumes_base(nome, marca)',
-      )
-      .order('aberta_em', { ascending: false })
-      .limit(200)
-    if (error) throw error
-    const linhas = (data ?? []) as unknown as LinhaOrdem[]
-    return linhas.map((o): OrdemProducao => {
-      const concluida = o.status === 'concluida'
-      return {
-        id: o.id,
-        baseId: o.base_id,
-        perfume: o.perfumes_base?.nome ?? o.base_id,
-        marca: o.perfumes_base?.marca ?? '',
-        variante: o.variante as VarianteMl,
-        quantidade: o.quantidade,
-        // O que a ordem envasa. A perda técnica não entra: ela é estimativa de
-        // preço, não movimentação — quem mede é o encerramento do lote.
-        volumeMl: Number(o.liquido_ml),
-        status: STATUS_ORDEM[o.status],
-        responsavel: o.responsavel,
-        prazo: dataCurta(concluida ? (o.concluida_em ?? o.aberta_em) : o.aberta_em),
-        motivo: o.motivo,
-      }
-    })
-  },
   async lancamentos() {
     const { data, error } = await supabaseServer()
       .from('lancamentos')
@@ -1060,20 +1024,6 @@ interface LinhaRepasse {
   pedidos: { valor: number | string; pagamento: string; comprado_em: string | null }
 }
 
-interface LinhaOrdem {
-  id: string
-  base_id: string
-  variante: number
-  quantidade: number
-  liquido_ml: number | string
-  status: 'em_envase' | 'aguardando_conferencia' | 'bloqueada' | 'concluida'
-  responsavel: string
-  motivo: string
-  aberta_em: string
-  concluida_em: string | null
-  envasadas: number | null
-  perfumes_base: { nome: string; marca: string } | null
-}
 
 /** `2026-08-09` → `09/08/2026`, como as telas de financeiro mostram. */
 function dataBr(iso: string): string {
@@ -1098,12 +1048,6 @@ function dataCurta(iso: string): string {
     .replace(',', '')
 }
 
-const STATUS_ORDEM: Record<LinhaOrdem['status'], StatusOrdem> = {
-  em_envase: 'Em envase',
-  aguardando_conferencia: 'Aguardando conferência',
-  bloqueada: 'Bloqueada',
-  concluida: 'Concluída',
-}
 
 interface LinhaLote {
   id: string

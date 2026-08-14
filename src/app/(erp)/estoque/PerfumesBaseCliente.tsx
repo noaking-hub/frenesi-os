@@ -282,7 +282,7 @@ export function PerfumesBaseCliente({ coberturas }: { coberturas: CoberturaBase[
             {c.acao}
           </span>
           <Link
-            href={c.disponivelMl === 0 ? '/estoque/lotes' : '/producao'}
+            href={c.disponivelMl === 0 ? '/estoque/lotes' : '/envase'}
             className="font-sans hover:bg-[rgba(239,209,140,.13)]"
             style={{
               display: 'inline-flex',

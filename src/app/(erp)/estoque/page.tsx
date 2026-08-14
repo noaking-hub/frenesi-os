@@ -99,8 +99,8 @@ export default async function PerfumesBase() {
         <LinkSecundario href="/estoque/lotes" altura={34}>
           Registrar compra de frasco
         </LinkSecundario>
-        <LinkOuro href="/producao" altura={34}>
-          Nova ordem de produção
+        <LinkOuro href="/envase" altura={34}>
+          Fila de envase
         </LinkOuro>
       </div>
 

@@ -19,7 +19,6 @@ import type {
   Lote,
   Movimentacao,
   Ocorrencia,
-  OrdemProducao,
   Pedido,
   PerfumeBase,
   ProdutoDerivado,
@@ -385,39 +384,6 @@ export const INVENTARIO: ContagemInventario[] = [
   { baseId: 'oud', perfume: 'Oud Wood', sistemaMl: 0, movimentosMl: 0, contadoMl: 0, responsavel: 'Pedro A.', quando: 'hoje 08:52' },
 ]
 
-/**
- * Ordens de produção. São elas que geram as saídas de lote que Movimentações
- * e Lotes leem — os volumes já embutem a perda técnica de 3% do parâmetro
- * (24 un × 5 ml × 1,03 = 123,6 ml).
- */
-export const ORDENS: OrdemProducao[] = [
-  {
-    id: 'OP-2214', baseId: 'bac', perfume: 'Baccarat Rouge 540', marca: 'Maison Francis',
-    variante: 5, quantidade: 24, volumeMl: 123.6, status: 'Em envase',
-    responsavel: 'Pedro A.', prazo: 'hoje 16:00', motivo: 'AUTO_COBERTURA',
-  },
-  {
-    id: 'OP-2213', baseId: 'oud', perfume: 'Oud Wood', marca: 'Tom Ford',
-    variante: 10, quantidade: 12, volumeMl: 123.6, status: 'Bloqueada',
-    responsavel: 'Pedro A.', prazo: 'atrasada 1 dia',
-    motivo: 'Sem volume · aguardando recompra do base',
-  },
-  {
-    id: 'OP-2212', baseId: 'sau', perfume: 'Sauvage Elixir', marca: 'Dior',
-    variante: 15, quantidade: 18, volumeMl: 278.1, status: 'Aguardando conferência',
-    responsavel: 'Marina F.', prazo: 'hoje 18:00', motivo: 'Alto giro · estoque de segurança',
-  },
-  {
-    id: 'OP-2211', baseId: 'del', perfume: 'Delina', marca: 'Parfums de Marly',
-    variante: 8, quantidade: 15, volumeMl: 123.6, status: 'Concluída',
-    responsavel: 'Pedro A.', prazo: 'ontem 15:20', motivo: 'Pedidos da semana',
-  },
-  {
-    id: 'OP-2210', baseId: 'erb', perfume: 'Erba Pura', marca: 'Xerjoff',
-    variante: 3, quantidade: 40, volumeMl: 123.6, status: 'Concluída',
-    responsavel: 'Marina F.', prazo: '01/08 11:40', motivo: 'Kit descoberta',
-  },
-]
 
 /**
  * Rastreamento por pedido.

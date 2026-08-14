@@ -531,3 +531,214 @@ export async function produto360(baseId: string): Promise<Produto360Dados> {
     }[]).map((p) => ({ variante: p.variante, unidades: p.publicado, lidoEm: p.lido_em })),
   }
 }
+
+// ── Fila de envase ─────────────────────────────────────────────────────────
+
+/** Data no fuso da operação: o servidor roda em UTC e adiantaria tudo em 3h. */
+function diaCurto(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    timeZone: 'America/Sao_Paulo',
+  })
+}
+
+export interface ItemDoEnvase {
+  variante: number
+  unidades: number
+  ml: number
+}
+
+export interface PedidoNaFila {
+  pedidoId: string
+  cliente: string
+  compradoEm: string
+  /** Já formatado no servidor: o cliente não tem acesso ao fuso da operação. */
+  quando: string
+  entregaLocal: boolean
+  itens: ItemDoEnvase[]
+  mlTotal: number
+  /** Bases deste pedido sem volume disponível que as cubra. */
+  bloqueios: string[]
+}
+
+export interface PerfumeNaFila {
+  baseId: string
+  perfume: string
+  marca: string
+  /** Ml a envasar somando todos os pedidos da fila. */
+  mlAEnvasar: number
+  /** Ml livres hoje, já descontado o que outros pedidos comprometeram. */
+  disponivelMl: number
+  fisicoMl: number
+  pedidos: number
+  itens: ItemDoEnvase[]
+  /** Falta volume para atender a fila inteira desta base. */
+  faltaMl: number
+}
+
+export interface FilaDeEnvase {
+  porPerfume: PerfumeNaFila[]
+  porPedido: PedidoNaFila[]
+  pedidos: number
+  mlTotal: number
+  perfumes: number
+  /** Pedidos que não dá para envasar hoje por falta de volume. */
+  bloqueados: number
+  semBanco: boolean
+}
+
+/**
+ * O que precisa ser envasado agora.
+ *
+ * A fila é DERIVADA das reservas — pedidos pagos que ainda não saíram. Ela
+ * não cria ordem nem baixa estoque: quem baixa é o faturamento, e ter dois
+ * caminhos de baixa para o mesmo envase é o que fazia o ml sair duas vezes
+ * no modelo antigo de ordem de produção.
+ *
+ * Duas visões da mesma verdade: por PERFUME (quantos frascos pegar da
+ * prateleira e quanto tirar de cada um) e por PEDIDO (o que separar para
+ * cada cliente).
+ */
+export async function carregarFilaDeEnvase(): Promise<FilaDeEnvase> {
+  const vazia: FilaDeEnvase = {
+    porPerfume: [],
+    porPedido: [],
+    pedidos: 0,
+    mlTotal: 0,
+    perfumes: 0,
+    bloqueados: 0,
+    semBanco: false,
+  }
+  if (!supabaseConfigurado()) return { ...vazia, semBanco: true }
+
+  const sb = supabaseServer()
+  const [{ data: reservas }, bases] = await Promise.all([
+    sb
+      .from('reservas_estoque')
+      .select('pedido_id, base_id, ml, criada_em, pedidos(comprado_em, entrega_local, clientes(nome))')
+      .is('liberada_em', null),
+    repositorio().perfumesBase(),
+  ])
+
+  const linhas = (reservas ?? []) as unknown as {
+    pedido_id: string
+    base_id: string
+    ml: number | string
+    criada_em: string
+    pedidos: {
+      comprado_em: string
+      entrega_local: boolean
+      clientes: { nome: string } | null
+    } | null
+  }[]
+  if (linhas.length === 0) return vazia
+
+  // Os itens vêm dos pedidos da fila — é o que diz QUAIS variantes envasar,
+  // e não só quantos ml no total.
+  const pedidoIds = [...new Set(linhas.map((l) => l.pedido_id))]
+  const { data: itens } = await sb
+    .from('pedido_itens')
+    .select('pedido_id, base_id, variante, quantidade')
+    .in('pedido_id', pedidoIds)
+    .not('base_id', 'is', null)
+    .not('variante', 'is', null)
+
+  const doPedido = new Map<string, { baseId: string; variante: number; quantidade: number }[]>()
+  for (const i of (itens ?? []) as unknown as {
+    pedido_id: string
+    base_id: string
+    variante: number
+    quantidade: number
+  }[]) {
+    const lista = doPedido.get(i.pedido_id) ?? []
+    lista.push({ baseId: i.base_id, variante: i.variante, quantidade: i.quantidade })
+    doPedido.set(i.pedido_id, lista)
+  }
+
+  const porBase = new Map(bases.map((b) => [b.id, b]))
+  const somarItens = (lista: { variante: number; quantidade: number }[]): ItemDoEnvase[] => {
+    const mapa = new Map<number, ItemDoEnvase>()
+    for (const i of lista) {
+      const atual = mapa.get(i.variante) ?? { variante: i.variante, unidades: 0, ml: 0 }
+      atual.unidades += i.quantidade
+      atual.ml += i.quantidade * i.variante
+      mapa.set(i.variante, atual)
+    }
+    return [...mapa.values()].sort((a, b) => a.variante - b.variante)
+  }
+
+  // ── Por perfume: o que pegar da prateleira ───────────────────────────────
+  const perfumes = new Map<string, PerfumeNaFila>()
+  for (const l of linhas) {
+    const base = porBase.get(l.base_id)
+    const atual = perfumes.get(l.base_id) ?? {
+      baseId: l.base_id,
+      perfume: base?.nome ?? l.base_id,
+      marca: base?.marca ?? '',
+      mlAEnvasar: 0,
+      // O disponível JÁ desconta esta fila inteira — é o saldo depois de
+      // todas as reservas, não antes. Por isso a falta se mede contra o
+      // físico, e não contra ele.
+      disponivelMl: base?.volumeMl ?? 0,
+      fisicoMl: base?.volumeMl ?? 0,
+      pedidos: 0,
+      itens: [],
+      faltaMl: 0,
+    }
+    atual.mlAEnvasar += Number(l.ml)
+    atual.pedidos += 1
+    const itensDaBase = (doPedido.get(l.pedido_id) ?? []).filter((i) => i.baseId === l.base_id)
+    atual.itens = somarItens([
+      ...atual.itens.flatMap((i) => [{ variante: i.variante, quantidade: i.unidades }]),
+      ...itensDaBase,
+    ])
+    perfumes.set(l.base_id, atual)
+  }
+  for (const p of perfumes.values()) {
+    p.faltaMl = Math.max(0, Math.round((p.mlAEnvasar - p.fisicoMl) * 10) / 10)
+  }
+
+  // ── Por pedido: o que separar para cada cliente ──────────────────────────
+  const pedidos = new Map<string, PedidoNaFila>()
+  for (const l of linhas) {
+    const atual = pedidos.get(l.pedido_id) ?? {
+      pedidoId: l.pedido_id,
+      cliente: l.pedidos?.clientes?.nome ?? 'Cliente sem cadastro',
+      compradoEm: l.pedidos?.comprado_em ?? l.criada_em,
+      quando: diaCurto(l.pedidos?.comprado_em ?? l.criada_em),
+      entregaLocal: l.pedidos?.entrega_local ?? false,
+      itens: [],
+      mlTotal: 0,
+      bloqueios: [],
+    }
+    atual.mlTotal += Number(l.ml)
+    const base = porBase.get(l.base_id)
+    // Bloqueio é falta de líquido no frasco, não falta de disponível: o
+    // disponível já está comprometido com este mesmo pedido.
+    if ((base?.volumeMl ?? 0) < Number(l.ml)) {
+      atual.bloqueios.push(base?.nome ?? l.base_id)
+    }
+    pedidos.set(l.pedido_id, atual)
+  }
+  for (const p of pedidos.values()) {
+    p.itens = somarItens(doPedido.get(p.pedidoId) ?? [])
+  }
+
+  const listaPerfumes = [...perfumes.values()].sort((a, b) => b.mlAEnvasar - a.mlAEnvasar)
+  const listaPedidos = [...pedidos.values()].sort(
+    (a, b) => new Date(a.compradoEm).getTime() - new Date(b.compradoEm).getTime(),
+  )
+
+  return {
+    porPerfume: listaPerfumes,
+    porPedido: listaPedidos,
+    pedidos: listaPedidos.length,
+    mlTotal: listaPerfumes.reduce((a, p) => a + p.mlAEnvasar, 0),
+    perfumes: listaPerfumes.length,
+    bloqueados: listaPedidos.filter((p) => p.bloqueios.length > 0).length,
+    semBanco: false,
+  }
+}
