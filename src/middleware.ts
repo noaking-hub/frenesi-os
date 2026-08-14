@@ -23,13 +23,17 @@ const ABERTO = [
   // Portal do cliente: quem abre devolução não tem — nem deve ter — conta.
   '/devolucoes',
   // Webhooks e rotinas: autenticam por token próprio no cabeçalho, não por
-  // sessão de navegador. Exigir cookie aqui quebraria as integrações.
+  // sessão de navegador. Exigir cookie aqui quebraria as integrações — e a
+  // quebra é MUDA: o agendador recebe o redirect para /entrar, a página de
+  // login responde 200, e a rotina "sucede" sem ter rodado. Foi exatamente
+  // assim que o pulso de pedidos ficou surdo até a rota entrar nesta lista.
   '/api/frenet',
   '/api/melhorenvio',
   '/api/crm',
   '/api/financeiro',
   '/api/concorrentes',
   '/api/tela',
+  '/api/pedidos/pulso',
 ]
 
 export async function middleware(req: NextRequest) {
