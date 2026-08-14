@@ -171,9 +171,20 @@ export function LotesCliente({ lotes, bases, parametros, perda, conciliacao }: P
       largura: '96px',
       render: (l) => (
         <span style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
-          <Badge tom={l.encerradoEm ? 'neutro' : 'ok'}>
+          <Badge tom={l.encerradoEm ? 'neutro' : apuracoes.find((a) => a.id === l.id)?.antigo ? 'atencao' : 'ok'}>
             {l.encerradoEm ? 'Encerrado' : 'Em uso'}
           </Badge>
+          {/* Frasco aberto meses evapora: a perda real dele sai alta e vale
+              investigar antes de encerrar. É o alerta "lote antigo". */}
+          {!l.encerradoEm && apuracoes.find((a) => a.id === l.id)?.antigo && (
+            <span
+              className="font-sans"
+              style={{ fontSize: 9, lineHeight: 1.3, color: COR.atencao, whiteSpace: 'nowrap' }}
+              title="Lote aberto há mais de 180 dias"
+            >
+              {`aberto há ${apuracoes.find((a) => a.id === l.id)!.diasAberto} dias`}
+            </span>
+          )}
           {!l.encerradoEm && (
             // Linha clicável já é um <button>, e button dentro de button é
             // HTML inválido: o navegador desaninha, a hidratação quebra e a

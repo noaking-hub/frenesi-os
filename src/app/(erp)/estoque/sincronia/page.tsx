@@ -55,6 +55,15 @@ export default async function SincroniaShopify() {
       tom: 'ok',
     },
     {
+      // O que a loja publica sai do DISPONÍVEL, não do físico: sem este
+      // número na tela, ninguém entende por que a capacidade caiu sem
+      // ninguém ter mexido no frasco.
+      label: 'Comprometido em pedidos',
+      valor: volume(sync.bases.reduce((a, b) => a + b.reservadoMl, 0)),
+      hint: 'Já vendido e ainda não despachado · sai da conta antes de publicar',
+      tom: sync.bases.some((b) => b.reservadoMl > 0) ? 'atencao' : 'neutro',
+    },
+    {
       label: 'Fora do controle de estoque',
       valor: pad2(sync.semCarga),
       hint: 'A sincronia não mexe nelas na loja · entram quando a compra do frasco for registrada',
@@ -189,7 +198,7 @@ export default async function SincroniaShopify() {
               style={{ fontSize: 11, lineHeight: 1.55, color: 'rgba(242,237,227,.68)', textWrap: 'pretty' }}
             >
               {exemplo && varExemplo.length
-                ? `${exemplo.base.nome} tem ${volume(exemplo.base.volumeMl)} em estoque. A variante de ${varExemplo[0].variante} ml permite ${plural(varExemplo[0].possivel, 'unidade', 'unidades')}${
+                ? `${exemplo.base.nome} tem ${volume(exemplo.disponivelMl)} disponíveis. A variante de ${varExemplo[0].variante} ml permite ${plural(varExemplo[0].possivel, 'unidade', 'unidades')}${
                     varExemplo[1]
                       ? `, a de ${varExemplo[1].variante} ml permite ${varExemplo[1].possivel}`
                       : ''
@@ -255,9 +264,21 @@ function CardBase({ base }: { base: BaseSync }) {
             {base.base.marca}
           </span>
         </span>
-        <Valor tamanho={13} tom="ouro">
-          {volume(base.base.volumeMl)}
-        </Valor>
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
+          <Valor tamanho={13} tom="ouro">
+            {volume(base.disponivelMl)}
+          </Valor>
+          {/* Físico e comprometido só aparecem quando divergem do disponível:
+              é o que explica a capacidade ter caído sem o frasco mudar. */}
+          {base.reservadoMl > 0 && (
+            <span
+              className="font-sans"
+              style={{ fontSize: 9, lineHeight: 1.3, color: COR.atencao, whiteSpace: 'nowrap' }}
+            >
+              {`${volume(base.base.volumeMl)} no frasco · ${volume(base.reservadoMl)} vendidos`}
+            </span>
+          )}
+        </span>
       </div>
 
       <div
