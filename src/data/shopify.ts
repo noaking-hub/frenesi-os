@@ -1331,11 +1331,7 @@ export async function sincronizarEnviosShopify(
   let entregues = 0
   let fechados = 0
 
-  for (const e of envios) {
-    if (opcoes.prazoMs && Date.now() - inicio > opcoes.prazoMs) {
-      restantes.push(e.pedidoId)
-      continue
-    }
+  const processar = async (e: EnvioParaShopify) => {
     const busca = `name:${e.shopifyNumero}`
     const dados = await chamarShopify<{
       orders: {
@@ -1362,7 +1358,7 @@ export async function sincronizarEnviosShopify(
         pedido: e.pedidoId,
         motivo: `nenhum pedido ${e.shopifyNumero} na Shopify — o número da Yampi pode não ser o da loja`,
       })
-      continue
+      return
     }
 
     // Fulfillment order já fechado significa envio criado por outro caminho.
@@ -1390,11 +1386,11 @@ export async function sincronizarEnviosShopify(
           if ((rd.fulfillmentEventCreate?.userErrors ?? []).length === 0) entregues++
         } catch (erro) {
           ignorados.push({ pedido: e.pedidoId, motivo: `não marquei a entrega: ${mensagemDe(erro)}` })
-          continue
+          return
         }
       }
       jaEnviados.push(e.pedidoId)
-      continue
+      return
     }
 
     const r = await chamarShopify<{
@@ -1430,7 +1426,7 @@ export async function sincronizarEnviosShopify(
         pedido: e.pedidoId,
         motivo: erros.map((x) => x.message).join('; ') || 'a Shopify não criou o envio',
       })
-      continue
+      return
     }
     enviados++
 
@@ -1483,6 +1479,26 @@ export async function sincronizarEnviosShopify(
         })
       }
     }
+  }
+
+  // Lotes de 3 em paralelo: cada pedido custa 2 a 4 chamadas em sequência, e
+  // um por vez drenava a fila acumulada a ~25 pedidos por minuto — 3 ao mesmo
+  // tempo triplica sem chegar perto do limite de custo do GraphQL da Shopify.
+  // Uma falha de rede em um item não derruba os outros dois nem a rodada.
+  const fila = [...envios]
+  while (fila.length > 0) {
+    if (opcoes.prazoMs && Date.now() - inicio > opcoes.prazoMs) {
+      restantes.push(...fila.map((e) => e.pedidoId))
+      break
+    }
+    const lote = fila.splice(0, 3)
+    await Promise.all(
+      lote.map((e) =>
+        processar(e).catch((erro) =>
+          ignorados.push({ pedido: e.pedidoId, motivo: mensagemDe(erro) }),
+        ),
+      ),
+    )
   }
 
   return { enviados, entregues, fechados, ignorados, jaEnviados, restantes }
