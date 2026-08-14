@@ -11,8 +11,14 @@ import type { ChaveModelo } from '@/data/modelo-email'
 import {
   HTML_BASE_RECUPERACAO,
   aplicarSite,
+  HTML_VALIDADO_DEVOLUCAO_ABERTA,
+  HTML_VALIDADO_DEVOLUCAO_APROVADA,
+  HTML_VALIDADO_DEVOLUCAO_CONCLUIDA,
   HTML_VALIDADO_ENVIO,
   emailCashback,
+  emailDevolucaoAberta,
+  emailDevolucaoAprovada,
+  emailDevolucaoConcluida,
   emailEnvio,
   emailGiftback,
   emailRecuperacao,
@@ -74,7 +80,13 @@ export function ModeloEmail({
     // Cada tipo abre com a SUA base validada, não com a do carrinho: editar em
     // cima da moldura errada é começar refazendo.
     if (!htmlProprio.trim()) {
-      setHtmlProprio(tipo === 'envio' ? HTML_VALIDADO_ENVIO : HTML_BASE_RECUPERACAO)
+      const BASES: Partial<Record<ChaveModelo, string>> = {
+        envio: HTML_VALIDADO_ENVIO,
+        'devolucao-aberta': HTML_VALIDADO_DEVOLUCAO_ABERTA,
+        'devolucao-aprovada': HTML_VALIDADO_DEVOLUCAO_APROVADA,
+        'devolucao-concluida': HTML_VALIDADO_DEVOLUCAO_CONCLUIDA,
+      }
+      setHtmlProprio(BASES[tipo] ?? HTML_BASE_RECUPERACAO)
     }
     setModoHtml(true)
   }
@@ -89,6 +101,33 @@ export function ModeloEmail({
           codigo: 'AD778124948BR',
           transportadora: 'Correios',
           link: 'https://rastreio.frenet.com.br/COR/AD778124948BR',
+        },
+        modelo,
+      )
+    }
+    if (tipo === 'devolucao-aberta') {
+      return emailDevolucaoAberta(
+        { nome: 'Marina Fontes', pedido: 'YP-1510190959842609', protocolo: 'DEV-1043' },
+        modelo,
+      )
+    }
+    if (tipo === 'devolucao-aprovada') {
+      return emailDevolucaoAprovada(
+        { nome: 'Marina Fontes', protocolo: 'DEV-1043', reverso: 'RV4471120BR' },
+        modelo,
+      )
+    }
+    if (tipo === 'devolucao-concluida') {
+      return emailDevolucaoConcluida(
+        {
+          nome: 'Marina Fontes',
+          protocolo: 'DEV-1043',
+          resolucao: 'Reembolso integral',
+          reembolsoValor: 189.8,
+          reembolsoForma: 'pix',
+          reembolsoData: '14/08/2026',
+          temComprovante: true,
+          trocaPedidoId: null,
         },
         modelo,
       )
@@ -174,13 +213,15 @@ export function ModeloEmail({
   return (
     <Modal
       titulo={
-        tipo === 'giftback'
-          ? 'Modelo do e-mail de aniversário'
-          : tipo === 'cashback'
-            ? 'Modelo do aviso de cashback'
-            : tipo === 'envio'
-              ? 'Modelo do aviso de envio'
-              : 'Modelo do e-mail de recuperação'
+        {
+          carrinho: 'Modelo do e-mail de recuperação',
+          giftback: 'Modelo do e-mail de aniversário',
+          cashback: 'Modelo do aviso de cashback',
+          envio: 'Modelo do aviso de envio',
+          'devolucao-aberta': 'Modelo da confirmação de devolução',
+          'devolucao-aprovada': 'Modelo da aprovação com código de postagem',
+          'devolucao-concluida': 'Modelo da conclusão da devolução',
+        }[tipo]
       }
       largura={980}
       aoFechar={aoFechar}
@@ -217,7 +258,18 @@ export function ModeloEmail({
                   : 'O documento inteiro é seu. Campos vivos: '}
                 <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{nome}'}</span>
                 {', '}
-                {tipo === 'envio' ? (
+                {tipo.startsWith('devolucao') ? (
+                  <>
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>
+                      {tipo === 'devolucao-aberta'
+                        ? '{pedido} e {protocolo}'
+                        : tipo === 'devolucao-aprovada'
+                          ? '{protocolo} e {reverso}'
+                          : '{protocolo}, {resolucao}, {destaque}, {corpo} e {nota}'}
+                    </span>
+                    {'. Use tabela e estilo inline — Gmail ignora CSS de cabeçalho.'}
+                  </>
+                ) : tipo === 'envio' ? (
                   <>
                     <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{pedido}'}</span>
                     {', '}
@@ -277,7 +329,18 @@ export function ModeloEmail({
                 {'Escreva como a marca fala. '}
                 <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{nome}'}</span>
                 {' vira o primeiro nome do cliente (e some quando não há nome); '}
-                {tipo === 'envio' ? (
+                {tipo.startsWith('devolucao') ? (
+                  <>
+                    <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>
+                      {tipo === 'devolucao-aberta'
+                        ? '{pedido} e {protocolo}'
+                        : tipo === 'devolucao-aprovada'
+                          ? '{protocolo} e {reverso}'
+                          : '{protocolo} e {resolucao}'}
+                    </span>
+                    {' entram sozinhos. O quadro em destaque e o rodapé são da moldura.'}
+                  </>
+                ) : tipo === 'envio' ? (
                   <>
                     <span className="font-mono" style={{ color: 'var(--color-ouro)' }}>{'{pedido}'}</span>
                     {', '}
@@ -362,7 +425,9 @@ export function ModeloEmail({
               {/* O que a prévia está simulando. Dizer "sem cupom" num aviso de
                   envio confundiria: ali o dado de exemplo é outro. */}
               dados de exemplo
-              {tipo === 'envio'
+              {tipo.startsWith('devolucao')
+                ? ' · DEV-1043'
+                : tipo === 'envio'
                 ? ' · AD778124948BR · Correios'
                 : tipo === 'cashback'
                   ? ' · saldo R$ 47,90'

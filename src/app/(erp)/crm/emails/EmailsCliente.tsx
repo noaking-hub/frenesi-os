@@ -18,11 +18,17 @@ export function EmailsCliente({
   giftback,
   cashback,
   envio,
+  devolucaoAberta,
+  devolucaoAprovada,
+  devolucaoConcluida,
 }: {
   carrinho: ModeloEmailRecuperacao
   giftback: ModeloEmailRecuperacao
   cashback: ModeloEmailRecuperacao
   envio: ModeloEmailRecuperacao
+  devolucaoAberta: ModeloEmailRecuperacao
+  devolucaoAprovada: ModeloEmailRecuperacao
+  devolucaoConcluida: ModeloEmailRecuperacao
 }) {
   const [editando, setEditando] = useState<ChaveModelo | null>(null)
 
@@ -62,6 +68,30 @@ export function EmailsCliente({
       onde: 'Enviado sozinho quando o pedido ganha código de rastreio',
       modelo: envio,
       extras: 'código e transportadora entram sozinhos · o botão já abre a página do objeto',
+      cupom: null,
+    },
+    {
+      chave: 'devolucao-aberta' as const,
+      nome: 'Devolução · solicitação recebida',
+      onde: 'Enviado sozinho quando o cliente abre a devolução no portal',
+      modelo: devolucaoAberta,
+      extras: 'protocolo e pedido entram sozinhos · próximos passos numerados',
+      cupom: null,
+    },
+    {
+      chave: 'devolucao-aprovada' as const,
+      nome: 'Devolução · código de postagem',
+      onde: 'Enviado sozinho quando a triagem aprova e gera o código reverso',
+      modelo: devolucaoAprovada,
+      extras: 'código reverso entra sozinho · instrução da agência dos Correios',
+      cupom: null,
+    },
+    {
+      chave: 'devolucao-concluida' as const,
+      nome: 'Devolução · concluída',
+      onde: 'Enviado sozinho na conclusão — com o comprovante do reembolso em anexo',
+      modelo: devolucaoConcluida,
+      extras: 'resolução e valor entram sozinhos · comprovante anexado ao e-mail',
       cupom: null,
     },
   ]

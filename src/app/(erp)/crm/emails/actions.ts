@@ -4,7 +4,16 @@ import { revalidatePath } from 'next/cache'
 
 import { emailConfigurado, entregar } from '@/data/email'
 import { gravarModeloEmail, type ChaveModelo } from '@/data/modelo-email'
-import { aplicarSite, emailCashback, emailEnvio, emailGiftback, emailRecuperacao } from '@/domain'
+import {
+  aplicarSite,
+  emailCashback,
+  emailDevolucaoAberta,
+  emailDevolucaoAprovada,
+  emailDevolucaoConcluida,
+  emailEnvio,
+  emailGiftback,
+  emailRecuperacao,
+} from '@/domain'
 import type { ModeloEmailRecuperacao } from '@/domain'
 
 /**
@@ -45,6 +54,19 @@ export async function salvarModelo(
       erro: 'O HTML precisa conter {codigo} — sem ele o aviso de envio vai sem o rastreio.',
     }
   }
+  // Mesma lógica nos avisos de devolução: cada um existe por causa de um dado.
+  if (chave === 'devolucao-aberta' && html && !/\{protocolo\}/.test(html)) {
+    return {
+      ok: false,
+      erro: 'O HTML precisa conter {protocolo} — é o número que o cliente guarda.',
+    }
+  }
+  if (chave === 'devolucao-aprovada' && html && !/\{reverso\}/.test(html)) {
+    return {
+      ok: false,
+      erro: 'O HTML precisa conter {reverso} — sem ele a aprovação vai sem o código de postagem.',
+    }
+  }
   try {
     await gravarModeloEmail(chave, {
       assunto: m.assunto.trim(),
@@ -78,7 +100,31 @@ export async function enviarTeste(
   }
   try {
     const r =
-      chave === 'envio'
+      chave === 'devolucao-aberta'
+        ? emailDevolucaoAberta(
+            { nome: 'Marina Fontes', pedido: 'YP-1510190959842609', protocolo: 'DEV-1043' },
+            m,
+          )
+        : chave === 'devolucao-aprovada'
+        ? emailDevolucaoAprovada(
+            { nome: 'Marina Fontes', protocolo: 'DEV-1043', reverso: 'RV4471120BR' },
+            m,
+          )
+        : chave === 'devolucao-concluida'
+        ? emailDevolucaoConcluida(
+            {
+              nome: 'Marina Fontes',
+              protocolo: 'DEV-1043',
+              resolucao: 'Reembolso integral',
+              reembolsoValor: 189.8,
+              reembolsoForma: 'pix',
+              reembolsoData: '14/08/2026',
+              temComprovante: true,
+              trocaPedidoId: null,
+            },
+            m,
+          )
+        : chave === 'envio'
         ? emailEnvio(
             {
               nome: 'Marina Fontes',
