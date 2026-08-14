@@ -111,6 +111,10 @@ export interface ResultadoBaixa {
   fechados: number
   ignorados: { pedido: string; motivo: string }[]
   semEspelho: string[]
+  /** Já enviados na Shopify por outro caminho — saíram da fila como feitos. */
+  jaEnviados: string[]
+  /** O orçamento de tempo acabou antes deles — continuam na fila. */
+  restantes: string[]
   /** Pedidos que ganharam o número da Shopify nesta rodada, antes da baixa. */
   vinculados: number
   /** O vínculo automático falhou (a baixa dos já vinculados seguiu normal). */
@@ -138,8 +142,13 @@ export interface ResultadoBaixa {
  * não como erro que derruba a rodada inteira.
  *
  * Sem `pedidoIds`, processa a fila toda: entregue na Yampi e ainda sem baixa.
+ * `prazoMs` corta a rodada antes do limite de tempo da Netlify — o que não
+ * couber volta em `restantes` e fica na fila para a próxima chamada.
  */
-export async function baixarNaShopify(pedidoIds?: string[]): Promise<Resposta<{ resultado: ResultadoBaixa }>> {
+export async function baixarNaShopify(
+  pedidoIds?: string[],
+  opcoes: { prazoMs?: number } = {},
+): Promise<Resposta<{ resultado: ResultadoBaixa }>> {
   if (!supabaseConfigurado()) {
     return { ok: false, erro: 'O Supabase precisa estar configurado para ler a fila de baixa.' }
   }
@@ -218,6 +227,8 @@ export async function baixarNaShopify(pedidoIds?: string[]): Promise<Resposta<{ 
           entregues: 0,
           fechados: 0,
           ignorados: [],
+          jaEnviados: [],
+          restantes: [],
           semEspelho,
           vinculados,
           erroVinculo,
@@ -227,12 +238,12 @@ export async function baixarNaShopify(pedidoIds?: string[]): Promise<Resposta<{ 
       }
     }
 
-    const r = await sincronizarEnviosShopify(alvos)
+    const r = await sincronizarEnviosShopify(alvos, opcoes)
 
-    // Só marca no ERP o que a Shopify de fato aceitou. Gravar a baixa antes da
-    // confirmação faria o pedido sumir da fila sem ter sido baixado — e o
-    // problema voltaria como chamado do cliente, não como linha na tela.
-    const falhou = new Set(r.ignorados.map((i) => i.pedido))
+    // Só marca no ERP o que a Shopify de fato aceitou — ou já tinha aceitado
+    // por outro caminho. Gravar os que falharam esconderia o pedido da próxima
+    // rodada; gravar os que o tempo não alcançou, idem.
+    const falhou = new Set([...r.ignorados.map((i) => i.pedido), ...r.restantes])
     const baixados = alvos.map((a) => a.pedidoId).filter((id) => !falhou.has(id))
     if (baixados.length) {
       const agora = new Date().toISOString()

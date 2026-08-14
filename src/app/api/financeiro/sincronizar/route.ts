@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 
+import { sincronizarEnvios } from '@/app/(erp)/pedidos/actions'
 import { cotarPrazosDeEntrega, frenetConfigurada, varrerRastreiosFrenet } from '@/data/frenet'
 import { codigosDoMelhorEnvio, melhorEnvioConectado, rastrearNoMelhorEnvio } from '@/data/melhorenvio'
 import { atualizarExtratoEsperando, mercadoPagoConfigurado } from '@/data/mercadopago'
@@ -120,6 +121,7 @@ export async function POST(req: Request) {
         vinculados: el.vinculados,
         consultados: el.consultados,
         entregues: el.entregues,
+        datasRepostas: el.datasRepostas,
         mlConsumido: el.mlConsumido,
         falhas: el.falhas.length,
       }
@@ -161,6 +163,22 @@ export async function POST(req: Request) {
     }
   } else {
     relatorio.rastreio = { pulado: 'FRENET_TOKEN não está definido' }
+  }
+
+  // O espelho de envios na Shopify, em dose pequena: o rastreio que a Yampi
+  // acabou de dar precisa chegar à conta do cliente na loja sem depender de
+  // alguém clicar em "Sincronizar agora". O orçamento é curto de propósito —
+  // a fila grande é trabalho do botão; aqui é só o gotejo do dia a dia, e as
+  // etapas seguintes da corrente ainda precisam do tempo que sobra.
+  if (shopifyConfigurada()) {
+    try {
+      const esp = await sincronizarEnvios({ prazoMs: 6_000 })
+      relatorio.espelhoEnvios = esp.ok
+        ? { enviados: esp.enviados, entregues: esp.entregues, naFila: esp.naFila }
+        : { erro: esp.erro }
+    } catch (e) {
+      relatorio.espelhoEnvios = { erro: mensagemDe(e) }
+    }
   }
 
   // Melhor Envio cobre os 22% que a Frenet não vê. Só roda depois de alguém

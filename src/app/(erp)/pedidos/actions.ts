@@ -9,6 +9,8 @@ import { revalidatePath } from 'next/cache'
 
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 
+import { baixarNaShopify } from './envios/actions'
+
 import {
   derivarConsumoDiario,
   escoposDoToken,
@@ -170,6 +172,8 @@ export type RespostaEnvios =
       entregues: number
       fechados: number
       ignorados: { pedido: string; motivo: string }[]
+      /** Quantos ainda esperam na fila — o chamador decide se roda de novo. */
+      naFila: number
     }
   | { ok: false; erro: string }
 
@@ -183,8 +187,12 @@ export type RespostaEnvios =
  *
  * Criar o fulfillment marca o pedido como enviado, dispara o e-mail de
  * confirmação com o código e faz o rastreio aparecer no histórico da conta.
+ *
+ * `prazoMs` corta a rodada antes de a Netlify cortar a função: o que não
+ * couber fica na fila e o retorno diz quantos sobraram, para o chamador
+ * continuar na requisição seguinte em vez de morrer sem resposta.
  */
-export async function sincronizarEnvios(): Promise<RespostaEnvios> {
+export async function sincronizarEnvios(opcoes: { prazoMs?: number } = {}): Promise<RespostaEnvios> {
   if (!supabaseConfigurado()) {
     return { ok: false, erro: 'O Supabase precisa estar configurado.' }
   }
@@ -195,7 +203,7 @@ export async function sincronizarEnvios(): Promise<RespostaEnvios> {
     // e-mail de envio para o mesmo pedido.
     const { data, error } = await sb
       .from('pedidos')
-      .select('id, shopify_numero, rastreio, entregue_em')
+      .select('id, shopify_numero, rastreio, situacao, envio')
       .not('shopify_numero', 'is', null)
       .not('rastreio', 'is', null)
       .is('enviado_shopify_em', null)
@@ -207,15 +215,23 @@ export async function sincronizarEnvios(): Promise<RespostaEnvios> {
       shopifyNumero: p.shopify_numero as string,
       rastreio: p.rastreio as string | null,
       transportadora: null,
-      entregue: Boolean(p.entregue_em),
+      // Pela SITUAÇÃO, não pela data: a separação entre data prometida e
+      // entrega real deixou entregues antigos com entregue_em vazio à espera
+      // da varredura, e eles sairiam daqui como "só enviados" — a Shopify
+      // nunca saberia da entrega, porque marcado o espelho ninguém volta.
+      entregue: p.situacao === 'entregue' || p.envio === 'entregue',
     }))
 
-    const r = await sincronizarEnviosShopify(envios)
+    const r = await sincronizarEnviosShopify(envios, opcoes)
 
-    // Marca só os que a Shopify aceitou: gravar os recusados esconderia o
-    // pedido da próxima rodada e ele nunca mais seria tentado.
+    // Sai da fila quem teve o envio criado E quem já estava enviado por outro
+    // caminho — os dois são trabalho concluído. Só fica quem falhou de
+    // verdade (para tentar de novo) e quem o orçamento de tempo não alcançou.
     const recusados = new Set(r.ignorados.map((i) => i.pedido))
-    const gravados = envios.filter((e) => !recusados.has(e.pedidoId)).map((e) => e.pedidoId)
+    const semVez = new Set(r.restantes)
+    const gravados = envios
+      .map((e) => e.pedidoId)
+      .filter((id) => !recusados.has(id) && !semVez.has(id))
     if (gravados.length) {
       const agora = new Date().toISOString()
       const { error: erroMarca } = await sb
@@ -223,10 +239,41 @@ export async function sincronizarEnvios(): Promise<RespostaEnvios> {
         .update({ enviado_shopify_em: agora })
         .in('id', gravados)
       if (erroMarca) throw erroMarca
+
+      // Para os entregues, o espelho incluiu o evento de entrega — fechar
+      // também a fila de baixa evita que "Baixar na Shopify" refaça o mesmo
+      // pedido pelo outro caminho.
+      const entreguesGravados = envios
+        .filter((e) => e.entregue && gravados.includes(e.pedidoId))
+        .map((e) => e.pedidoId)
+      if (entreguesGravados.length) {
+        const { error: erroBaixa } = await sb
+          .from('pedidos')
+          .update({ entrega_shopify_em: agora, baixado_shopify: true })
+          .in('id', entreguesGravados)
+          .is('entrega_shopify_em', null)
+        if (erroBaixa) throw erroBaixa
+      }
     }
 
+    // O tamanho real da fila depois da rodada — é ele que diz ao botão da
+    // tela se vale disparar outra requisição.
+    const { count } = await sb
+      .from('pedidos')
+      .select('id', { count: 'exact', head: true })
+      .not('shopify_numero', 'is', null)
+      .not('rastreio', 'is', null)
+      .is('enviado_shopify_em', null)
+
     revalidatePath('/', 'layout')
-    return { ok: true, ...r }
+    return {
+      ok: true,
+      enviados: r.enviados,
+      entregues: r.entregues,
+      fechados: r.fechados,
+      ignorados: r.ignorados,
+      naFila: count ?? 0,
+    }
   } catch (e) {
     console.error('[shopify] sincronia de envios falhou:', e)
     return { ok: false, erro: mensagemDe(e) }
@@ -239,13 +286,36 @@ export async function sincronizarEnvios(): Promise<RespostaEnvios> {
  * É a única forma de um pedido de motoboy fechar o ciclo: ele não é faturado
  * e nenhuma transportadora vai confirmar o que a própria operação entregou.
  * A mesma ação baixa o estoque, na mesma transação do banco.
+ *
+ * A Shopify é avisada na sequência, não na mesma transação: a loja fora do ar
+ * não pode impedir a operação de registrar o que já aconteceu no balcão. Se o
+ * espelho falhar, o pedido continua na fila "Aguardando baixa" de Rastreamento
+ * e entregas — e o retorno diz isso a quem clicou.
  */
 export async function confirmarEntregaEmMaos(
   pedidoId: string,
-): Promise<{ ok: true; mlConsumido: number } | { ok: false; erro: string }> {
+): Promise<{ ok: true; mlConsumido: number; shopify: string | null } | { ok: false; erro: string }> {
   const r = await confirmarEntregaLocal(pedidoId, OPERADOR)
-  if (r.ok) revalidatePath('/pedidos')
-  return r
+  if (!r.ok) return r
+
+  let shopify: string | null = null
+  if (shopifyConfigurada()) {
+    try {
+      const b = await baixarNaShopify([pedidoId])
+      if (!b.ok) shopify = `a baixa na Shopify falhou (${b.erro}) — o pedido segue na fila de Rastreamento e entregas.`
+      else if (b.resultado.enviados || b.resultado.entregues) shopify = 'entrega marcada na Shopify.'
+      else if (b.resultado.semEspelho.length) {
+        shopify = 'sem pedido correspondente na Shopify — a entrega ficou só no ERP.'
+      } else if (b.resultado.ignorados.length) {
+        shopify = `a Shopify recusou a baixa: ${b.resultado.ignorados[0].motivo}. O pedido segue na fila de Rastreamento e entregas.`
+      }
+    } catch (e) {
+      shopify = `a baixa na Shopify falhou (${mensagemDe(e)}) — o pedido segue na fila de Rastreamento e entregas.`
+    }
+  }
+
+  revalidatePath('/pedidos')
+  return { ok: true, mlConsumido: r.mlConsumido, shopify }
 }
 
 /**

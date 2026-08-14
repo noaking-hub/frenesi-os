@@ -47,27 +47,31 @@ export function ImportarPedidos({
   const router = useRouter()
 
   /**
-   * Importa pela ROTA, não por Server Action: o Next enfileira actions por
-   * aba e segura toda navegação enquanto uma está no ar — uma importação
-   * lenta travava o clique em qualquer outro menu.
+   * Um passo da sincronia, pela ROTA e não por Server Action: o Next enfileira
+   * actions por aba e segura toda navegação enquanto uma está no ar — uma
+   * importação lenta travava o clique em qualquer outro menu.
+   *
+   * Cada chamada leva UM passo, porque a Netlify mata a função em ~26 s sem
+   * devolver nada: a requisição única que fazia tudo morria no meio e o
+   * navegador mostrava página de erro. E nenhuma falha estoura daqui — uma
+   * exceção solta dentro da transition derrubava a tela inteira, que é pior
+   * que a sincronia falhar.
    */
-  const importarPelaRota = async (
-    diasJanela: number,
-    espelhar = false,
-  ): Promise<{
-    importacao: Awaited<ReturnType<typeof importarDaYampi>> | null
-    envios: Awaited<ReturnType<typeof sincronizarEnvios>> | null
-    entregasLocais: { entregues?: number; mlConsumido?: number; erro?: string } | null
-  }> => {
-    const resposta = await fetch('/api/tela/pedidos', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dias: diasJanela, espelhar }),
-    })
-    const r = await resposta.json()
-    router.refresh()
-    return r
+  const chamarPasso = async <T,>(corpo: object): Promise<T | { falha: string }> => {
+    try {
+      const resposta = await fetch('/api/tela/pedidos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(corpo),
+      })
+      if (!resposta.ok) return { falha: `o servidor respondeu ${resposta.status}` }
+      return (await resposta.json()) as T
+    } catch {
+      return { falha: 'a conexão caiu antes da resposta' }
+    }
   }
+  const falhou = (r: unknown): r is { falha: string } =>
+    typeof r === 'object' && r !== null && 'falha' in r
 
   const conferirYampiAgora = () =>
     iniciarTransicao(async () => {
@@ -115,8 +119,15 @@ export function ImportarPedidos({
       setResumo(null)
       setAviso(null)
       setDiagnostico(null)
-      const { importacao } = await importarPelaRota(dias)
-      const r = importacao
+      const resposta = await chamarPasso<{
+        importacao: Awaited<ReturnType<typeof importarDaYampi>> | null
+      }>({ passo: 'importar', dias })
+      router.refresh()
+      if (falhou(resposta)) {
+        setErro(`A importação não terminou: ${resposta.falha}. Tente de novo — o que já entrou não se perde.`)
+        return
+      }
+      const r = resposta.importacao
       if (!r || !r.ok) {
         setErro(r ? r.erro : 'A importação não respondeu.')
         return
@@ -174,34 +185,92 @@ export function ImportarPedidos({
   const sincronizarTudo = () =>
     iniciarTransicao(async () => {
       setErro(null)
-      setResumo(null)
       setAviso(null)
       setDiagnostico(null)
-      const { importacao, envios, entregasLocais } = await importarPelaRota(10, true)
-      const r = importacao
-      if (!r || !r.ok) {
-        setErro(r ? r.erro : 'A importação não respondeu.')
-        return
+      const tropecos: string[] = []
+
+      // Passo 1 — entregas locais: a loja conta o que o motoboy entregou.
+      setResumo('Passo 1 de 3 · conferindo entregas locais na Shopify…')
+      const locais = await chamarPasso<{
+        entregasLocais: {
+          entregues?: number
+          datasRepostas?: number
+          mlConsumido?: number
+          erro?: string
+        } | null
+      }>({ passo: 'locais' })
+      const entregasLocais = falhou(locais) ? null : locais.entregasLocais
+      if (falhou(locais)) tropecos.push(`entregas locais: ${locais.falha}`)
+      else if (entregasLocais?.erro) tropecos.push(`entregas locais: ${entregasLocais.erro}`)
+
+      // Passo 2 — os pedidos novos da Yampi, que trazem CPF e pagamento.
+      setResumo('Passo 2 de 3 · importando pedidos da Yampi…')
+      const imp = await chamarPasso<{
+        importacao: Awaited<ReturnType<typeof importarDaYampi>> | null
+      }>({ passo: 'importar', dias: 10 })
+      const r = falhou(imp) ? null : imp.importacao
+      if (falhou(imp)) tropecos.push(`importação: ${imp.falha}`)
+      else if (r && !r.ok) tropecos.push(`importação: ${r.erro}`)
+
+      // Passo 3 — espelho de envios. A fila pode ter acumulado centenas de
+      // pedidos; cada rodada leva o que cabe no tempo de uma função e diz
+      // quantos sobraram — daí o laço, com teto para não prender a tela.
+      let enviados = 0
+      let entregues = 0
+      let naFila = 0
+      for (let rodada = 1; rodada <= 8; rodada++) {
+        setResumo(
+          rodada === 1
+            ? 'Passo 3 de 3 · espelhando envios na Shopify…'
+            : `Passo 3 de 3 · espelhando envios na Shopify — ${naFila} na fila…`,
+        )
+        const passo = await chamarPasso<{
+          envios: Awaited<ReturnType<typeof sincronizarEnvios>> | null
+        }>({ passo: 'envios' })
+        if (falhou(passo)) {
+          tropecos.push(`espelho de envios: ${passo.falha}`)
+          break
+        }
+        const e = passo.envios
+        if (!e || !e.ok) {
+          tropecos.push(`espelho de envios: ${e ? e.erro : 'sem resposta'}`)
+          break
+        }
+        enviados += e.enviados
+        entregues += e.entregues
+        naFila = e.naFila
+        if (naFila === 0) break
       }
-      const e = envios ?? { ok: false as const, erro: 'sem resposta' }
+
+      router.refresh()
+
+      const partes = [
+        r?.ok ? `${plural(r.resultado.pedidos, 'pedido conferido', 'pedidos conferidos')} na Yampi` : null,
+        r?.ok && r.resultado.extratoLigado
+          ? `${r.resultado.extratoLigado} movimento(s) do extrato ligados à venda`
+          : null,
+        enviados ? `${plural(enviados, 'envio espelhado', 'envios espelhados')} na Shopify` : null,
+        entregues ? `${plural(entregues, 'entrega marcada', 'entregas marcadas')} na loja` : null,
+        // A ponta inversa: entrega de motoboy marcada na LOJA fecha aqui.
+        entregasLocais?.entregues
+          ? `${plural(entregasLocais.entregues, 'entrega local confirmada', 'entregas locais confirmadas')} pela Shopify` +
+            (entregasLocais.mlConsumido
+              ? ` (${entregasLocais.mlConsumido.toFixed(1).replace('.', ',')} ml baixados)`
+              : '')
+          : null,
+        entregasLocais?.datasRepostas
+          ? `${plural(entregasLocais.datasRepostas, 'data de entrega reposta', 'datas de entrega repostas')} pela loja`
+          : null,
+      ].filter(Boolean)
       setResumo(
-        `${plural(r.resultado.pedidos, 'pedido conferido', 'pedidos conferidos')} na Yampi` +
-          (r.resultado.extratoLigado
-            ? ` · ${r.resultado.extratoLigado} movimento(s) do extrato ligados à venda`
-            : '') +
-          (e.ok && e.enviados
-            ? ` · ${plural(e.enviados, 'envio espelhado', 'envios espelhados')} na Shopify`
-            : '') +
-          // A ponta inversa: entrega de motoboy marcada na LOJA fecha aqui.
-          (entregasLocais?.entregues
-            ? ` · ${plural(entregasLocais.entregues, 'entrega local confirmada', 'entregas locais confirmadas')} pela Shopify` +
-              (entregasLocais.mlConsumido
-                ? ` (${entregasLocais.mlConsumido.toFixed(1).replace('.', ',')} ml baixados)`
-                : '')
-            : '') +
+        (partes.length ? partes.join(' · ') : 'Sincronizado — nada de novo desta vez') +
+          (naFila > 0 ? ` · ${naFila} envio(s) ainda na fila — clique de novo para continuar` : '') +
           '.',
       )
-      if (r.resultado.pedidosSemTransacao) {
+      if (tropecos.length) {
+        setErro(`A sincronia tropeçou em: ${tropecos.join('; ')}. O que aparece acima foi concluído.`)
+      }
+      if (r?.ok && r.resultado.pedidosSemTransacao) {
         setAviso(
           `${plural(r.resultado.pedidosSemTransacao, 'pedido pago sem transação', 'pedidos pagos sem transação')} de pagamento — esses créditos não acham a venda sozinhos.`,
         )
@@ -214,17 +283,20 @@ export function ImportarPedidos({
       setResumo(null)
       setAviso(null)
       setDiagnostico(null)
-      const r = await sincronizarEnvios()
+      // Com orçamento de tempo: a fila pode ter centenas de pedidos, e uma
+      // Server Action cortada pela Netlify derruba a tela sem explicação.
+      const r = await sincronizarEnvios({ prazoMs: 14_000 })
       if (!r.ok) {
         setErro(r.erro)
         return
       }
       setResumo(
-        r.enviados === 0 && r.ignorados.length === 0
+        r.enviados === 0 && r.ignorados.length === 0 && r.naFila === 0
           ? 'Nenhum pedido novo para espelhar: todos os que têm rastreio já estão fechados na Shopify.'
           : `${plural(r.enviados, 'pedido marcado como enviado', 'pedidos marcados como enviados')} na Shopify, com o rastreio na conta do cliente` +
             (r.entregues ? ` · ${plural(r.entregues, 'entrega confirmada', 'entregas confirmadas')}` : '') +
             (r.fechados ? ` · ${plural(r.fechados, 'pedido fechado', 'pedidos fechados')} e fora da fila de abertos` : '') +
+            (r.naFila ? ` · ${r.naFila} ainda na fila — clique de novo para continuar` : '') +
             '. Quem avisa o cliente continua sendo a Yampi — a Shopify não manda nada.',
       )
       if (r.ignorados.length) {
@@ -379,12 +451,22 @@ export function ImportarPedidos({
         </button>
       </div>
 
-      {(erro || resumo) && (
+      {/* Resumo e erro convivem: a sincronia agora é por passos, e "o passo 2
+          falhou" não apaga o que os passos 1 e 3 concluíram. */}
+      {resumo && (
         <span
           className="font-sans"
-          style={{ fontSize: 11, lineHeight: 1.5, color: erro ? COR.erro : COR.ok, textWrap: 'pretty' }}
+          style={{ fontSize: 11, lineHeight: 1.5, color: COR.ok, textWrap: 'pretty' }}
         >
-          {erro ?? resumo}
+          {resumo}
+        </span>
+      )}
+      {erro && (
+        <span
+          className="font-sans"
+          style={{ fontSize: 11, lineHeight: 1.5, color: COR.erro, textWrap: 'pretty' }}
+        >
+          {erro}
         </span>
       )}
       {diagnostico && (

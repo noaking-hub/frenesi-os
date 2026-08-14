@@ -319,17 +319,20 @@ export function PedidosCliente({ itens, filaInicial }: { itens: Linha[]; filaIni
     iniciar(async () => {
       let ok = 0
       let ml = 0
+      let naLoja = 0
       const falhas: string[] = []
       for (const v of alvos) {
         const r = await confirmarEntregaEmMaos(v.p.id)
         if (r.ok) {
           ok++
           ml += r.mlConsumido
+          if (r.shopify?.startsWith('entrega marcada')) naLoja++
         } else falhas.push(v.p.id)
       }
       setSelecionados(new Set())
       avisar(
         `${ok} entrega(s) confirmada(s) · ${ml.toFixed(1).replace('.', ',')} ml baixados.` +
+          (naLoja ? ` ${naLoja} marcada(s) também na Shopify.` : '') +
           (falhas.length ? ` Recusados: ${falhas.join(', ')}.` : ''),
       )
     })

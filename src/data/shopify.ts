@@ -1207,6 +1207,10 @@ const CONSULTA_PEDIDO_ENVIO = /* GraphQL */ `
         id
         name
         displayFulfillmentStatus
+        fulfillments(first: 5) {
+          id
+          displayStatus
+        }
         fulfillmentOrders(first: 10) {
           nodes {
             id
@@ -1275,6 +1279,15 @@ export interface ResultadoEnvios {
   /** Pedidos tirados da fila de "abertos" da loja. */
   fechados: number
   ignorados: { pedido: string; motivo: string }[]
+  /**
+   * Já estavam enviados na Shopify por outro caminho — estado TERMINAL, não
+   * falha. Quem chama deve marcá-los como espelhados: devolvê-los à fila (como
+   * era antes) fazia os mesmos 200 pedidos serem reconsultados a cada rodada,
+   * e foi isso que levou o "Sincronizar agora" a estourar o tempo da Netlify.
+   */
+  jaEnviados: string[]
+  /** Não processados nesta rodada — o orçamento de tempo acabou antes. */
+  restantes: string[]
 }
 
 /**
@@ -1287,21 +1300,42 @@ export interface ResultadoEnvios {
  * e faz o rastreio aparecer no histórico da conta.
  *
  * `notifyCustomer` é o ponto todo: sem ele o status muda mas ninguém avisa.
+ *
+ * `prazoMs` limita o tempo de rodada: cada pedido custa 2 a 4 chamadas à
+ * Shopify, e a Netlify mata a função em ~26 s sem devolver resposta nenhuma —
+ * parar por conta própria e devolver `restantes` deixa o chamador continuar
+ * na requisição seguinte em vez de morrer no meio.
  */
 export async function sincronizarEnviosShopify(
   envios: EnvioParaShopify[],
+  opcoes: { prazoMs?: number } = {},
 ): Promise<ResultadoEnvios> {
   const { loja } = credenciais()
   if (!loja) throw new Error('SHOPIFY_LOJA precisa estar no .env.local')
-  if (envios.length === 0) return { enviados: 0, entregues: 0, fechados: 0, ignorados: [] }
+  const vazio: ResultadoEnvios = {
+    enviados: 0,
+    entregues: 0,
+    fechados: 0,
+    ignorados: [],
+    jaEnviados: [],
+    restantes: [],
+  }
+  if (envios.length === 0) return vazio
   const token = await tokenDeAcesso(loja)
+  const inicio = Date.now()
 
   const ignorados: ResultadoEnvios['ignorados'] = []
+  const jaEnviados: string[] = []
+  const restantes: string[] = []
   let enviados = 0
   let entregues = 0
   let fechados = 0
 
   for (const e of envios) {
+    if (opcoes.prazoMs && Date.now() - inicio > opcoes.prazoMs) {
+      restantes.push(e.pedidoId)
+      continue
+    }
     const busca = `name:${e.shopifyNumero}`
     const dados = await chamarShopify<{
       orders: {
@@ -1309,6 +1343,7 @@ export async function sincronizarEnviosShopify(
           id: string
           name: string
           displayFulfillmentStatus: string
+          fulfillments: { id: string; displayStatus: string | null }[]
           fulfillmentOrders: { nodes: { id: string; status: string }[] }
         }[]
       }
@@ -1330,11 +1365,35 @@ export async function sincronizarEnviosShopify(
       continue
     }
 
-    // Fulfillment order já fechado significa envio criado por outro caminho:
-    // repetir geraria um segundo e-mail de envio para o mesmo pedido.
+    // Fulfillment order já fechado significa envio criado por outro caminho.
+    // Não é falha para tentar de novo: é trabalho já feito, e o pedido sai da
+    // fila. Mas se o ERP sabe da ENTREGA e a loja ainda mostra o fulfillment
+    // em trânsito, o evento de entrega ainda é nosso para dar — era o que
+    // faltava no pedido de motoboy confirmado no ERP e "Em andamento" na loja.
     const abertos = pedido.fulfillmentOrders.nodes.filter((f) => f.status === 'OPEN' || f.status === 'IN_PROGRESS')
     if (abertos.length === 0) {
-      ignorados.push({ pedido: e.pedidoId, motivo: 'já estava enviado na Shopify' })
+      const pendente = e.entregue
+        ? pedido.fulfillments.find((f) => f.displayStatus !== 'DELIVERED' && f.displayStatus !== 'CANCELED')
+        : undefined
+      if (pendente) {
+        try {
+          const rd = await chamarShopify<{
+            fulfillmentEventCreate: { userErrors: { message: string }[] }
+          }>(
+            loja,
+            token,
+            MUTACAO_ENTREGA,
+            { fulfillmentEvent: { fulfillmentId: pendente.id, status: 'DELIVERED' } },
+            'marcar a entrega',
+            'write_merchant_managed_fulfillment_orders',
+          )
+          if ((rd.fulfillmentEventCreate?.userErrors ?? []).length === 0) entregues++
+        } catch (erro) {
+          ignorados.push({ pedido: e.pedidoId, motivo: `não marquei a entrega: ${mensagemDe(erro)}` })
+          continue
+        }
+      }
+      jaEnviados.push(e.pedidoId)
       continue
     }
 
@@ -1426,7 +1485,7 @@ export async function sincronizarEnviosShopify(
     }
   }
 
-  return { enviados, entregues, fechados, ignorados }
+  return { enviados, entregues, fechados, ignorados, jaEnviados, restantes }
 }
 
 // ── Vínculo Yampi → Shopify ────────────────────────────────────────────────
@@ -1863,6 +1922,8 @@ export interface ResultadoEntregasLocais {
   consultados: number
   /** Confirmados como entregues nesta rodada. */
   entregues: number
+  /** Já entregues que estavam sem data real — a loja devolveu o deliveredAt. */
+  datasRepostas: number
   mlConsumido: number
   falhas: { pedido: string; erro: string }[]
 }
@@ -1901,29 +1962,42 @@ export async function importarEntregasLocaisDaShopify(): Promise<ResultadoEntreg
   }
 
   const sb = supabaseServer()
+  // Duas filas na mesma consulta: os pendentes de sempre, e os JÁ entregues
+  // que ficaram sem data real — a separação entre data prometida e entrega
+  // real zerou o entregue_em deles, e a varredura da transportadora nunca vai
+  // repor o que nenhuma transportadora escaneou. Só a loja sabe quando o
+  // motoboy entregou.
   const { data, error } = await sb
     .from('pedidos')
-    .select('id, shopify_gid')
+    .select('id, shopify_gid, situacao, entregue_em')
     .eq('entrega_local', true)
-    .neq('situacao', 'entregue')
     .not('shopify_gid', 'is', null)
+    .or('situacao.neq.entregue,entregue_em.is.null')
     .limit(200)
   if (error) throw error
 
-  const pendentes = (data ?? []) as { id: string; shopify_gid: string }[]
+  const linhas = (data ?? []) as {
+    id: string
+    shopify_gid: string
+    situacao: string
+    entregue_em: string | null
+  }[]
+  const jaEntregues = new Set(linhas.filter((p) => p.situacao === 'entregue').map((p) => p.id))
+  const pendentes = linhas.filter((p) => !jaEntregues.has(p.id))
   const resultado: ResultadoEntregasLocais = {
     vinculados,
     consultados: pendentes.length,
     entregues: 0,
+    datasRepostas: 0,
     mlConsumido: 0,
     falhas: [],
   }
-  if (pendentes.length === 0) return resultado
+  if (linhas.length === 0) return resultado
 
   const token = await tokenDeAcesso(loja)
-  const porGid = new Map(pendentes.map((p) => [p.shopify_gid, p.id]))
+  const porGid = new Map(linhas.map((p) => [p.shopify_gid, p.id]))
 
-  for (const lote of emLotes(pendentes, 50)) {
+  for (const lote of emLotes(linhas, 50)) {
     const dados: { nodes: (EntregaShopify | null)[] } = await chamarShopify(
       loja,
       token,
@@ -1937,6 +2011,21 @@ export async function importarEntregasLocaisDaShopify(): Promise<ResultadoEntreg
       if (!node) continue
       const pedidoId = porGid.get(node.id)
       if (!pedidoId) continue
+
+      // Reposição de data: o pedido já está entregue e baixado — só falta o
+      // QUANDO. Aceita apenas o deliveredAt real da loja; inventar "agora"
+      // para uma entrega antiga distorceria a janela de devolução.
+      if (jaEntregues.has(pedidoId)) {
+        const dataReal = node.fulfillments.find((f) => f.deliveredAt)?.deliveredAt
+        if (!dataReal) continue
+        const { error: erroData } = await sb
+          .from('pedidos')
+          .update({ entregue_em: dataReal, entrega_shopify_em: dataReal })
+          .eq('id', pedidoId)
+        if (erroData) resultado.falhas.push({ pedido: pedidoId, erro: mensagemDe(erroData) })
+        else resultado.datasRepostas++
+        continue
+      }
 
       const entregueEm =
         node.fulfillments.find((f) => f.deliveredAt)?.deliveredAt ??

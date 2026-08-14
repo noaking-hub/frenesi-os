@@ -169,9 +169,12 @@ export function FichaDoPedido({
       if (!r.ok) return aoErro(r.erro)
       aoFechar()
       aoRecado(
-        r.mlConsumido > 0
+        (r.mlConsumido > 0
           ? `${pedido.id} entregue · ${r.mlConsumido.toFixed(1).replace('.', ',')} ml baixados do estoque.`
-          : `${pedido.id} entregue. Nenhum ml baixado — os perfumes deste pedido estão fora do controle de estoque.`,
+          : `${pedido.id} entregue. Nenhum ml baixado — os perfumes deste pedido estão fora do controle de estoque.`) +
+          // O espelho na loja acontece na sequência — quem clicou merece saber
+          // se a Shopify ficou sabendo ou se o pedido segue na fila de baixa.
+          (r.shopify ? ` Shopify: ${r.shopify}` : ''),
       )
     })
 

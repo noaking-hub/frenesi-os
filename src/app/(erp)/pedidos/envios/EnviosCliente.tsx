@@ -264,7 +264,7 @@ export function EnviosCliente({
       const r = await baixarNaShopify(ids)
       if (!r.ok) return setErro(r.erro)
       const x = r.resultado
-      const falhou = new Set([...x.ignorados.map((i) => i.pedido), ...x.semEspelho])
+      const falhou = new Set([...x.ignorados.map((i) => i.pedido), ...x.semEspelho, ...x.restantes])
       setBaixados((s) => {
         const novo = new Set(s)
         for (const id of ids) if (!falhou.has(id)) novo.add(id)
@@ -274,9 +274,13 @@ export function EnviosCliente({
       avisar(
         [
           `${x.entregues} entrega(s) marcada(s) na Shopify · ${x.fechados} pedido(s) fechado(s).`,
+          x.jaEnviados.length ? `${x.jaEnviados.length} já estavam baixados na loja.` : '',
           x.vinculados ? `${x.vinculados} pedido(s) ganharam o número da Shopify nesta rodada.` : '',
           x.semEspelho.length
             ? `${x.semEspelho.length} sem par na Shopify (ex.: ${x.semEspelho.slice(0, 3).join(', ')}).`
+            : '',
+          x.restantes.length
+            ? `${x.restantes.length} ficaram para a próxima rodada — o tempo da função acabou antes.`
             : '',
           ...x.ignorados.slice(0, 4).map((i) => `${i.pedido}: ${i.motivo}`),
         ]
