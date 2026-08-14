@@ -35,6 +35,25 @@ const ABERTO = [
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
+  // devolucoes.frenesiperfumes.com.br É o portal, não uma rota dele: a raiz
+  // do host serve o portal (rewrite, o cliente nunca vê /devolucoes) e
+  // nenhuma tela do ERP responde por esse endereço — o cliente que trocar a
+  // URL cai de volta no portal, não numa tela de login que não é para ele.
+  const host = req.headers.get('host') ?? ''
+  if (host.split(':')[0].startsWith('devolucoes.')) {
+    if (pathname === '/' || pathname.startsWith('/devolucoes')) {
+      const destino = req.nextUrl.clone()
+      // O POST das server actions vai para a URL da página — na raiz do
+      // host — e precisa do MESMO rewrite do GET para achar o handler.
+      if (!pathname.startsWith('/devolucoes')) destino.pathname = '/devolucoes'
+      return NextResponse.rewrite(destino)
+    }
+    const raiz = req.nextUrl.clone()
+    raiz.pathname = '/'
+    raiz.search = ''
+    return NextResponse.redirect(raiz)
+  }
+
   if (ABERTO.some((rota) => pathname === rota || pathname.startsWith(`${rota}/`))) {
     return NextResponse.next()
   }

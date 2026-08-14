@@ -32,7 +32,18 @@ const PASSOS = ['Acesso', 'Pedidos', 'Itens', 'Motivo', 'Fotos', 'Pronto'] as co
 
 type Metodo = 'email' | 'cpf'
 
-export function PortalDevolucoes() {
+/** Telefone do cadastro no formato do wa.me: só dígitos, com o DDI 55. */
+function paraWaMe(telefone: string): string {
+  const digitos = telefone.replace(/\D/g, '')
+  return digitos.startsWith('55') ? digitos : `55${digitos}`
+}
+
+export function PortalDevolucoes({
+  contato,
+}: {
+  /** Contato do cadastro da empresa. Vazio = a linha não aparece. */
+  contato: { telefone: string; email: string }
+}) {
   const [passo, setPasso] = useState(1)
   const [metodo, setMetodo] = useState<Metodo>('email')
   const [ident, setIdent] = useState('')
@@ -837,15 +848,29 @@ export function PortalDevolucoes() {
             gap: 6,
           }}
         >
-          <span
-            className="font-sans"
-            style={{ fontSize: 11, lineHeight: 1.5, color: 'rgba(36,31,24,.45)', textWrap: 'pretty' }}
-          >
-            Dúvidas? Fale com a gente pelo WhatsApp{' '}
-            <a href="https://wa.me/5511900004821" style={{ color: PORTAL.link }}>
-              (11) 9•••• 4821
-            </a>
-          </span>
+          {/* Contato real do cadastro da empresa, ou linha nenhuma — número
+              inventado aqui mandaria cliente para o WhatsApp de um estranho. */}
+          {contato.telefone ? (
+            <span
+              className="font-sans"
+              style={{ fontSize: 11, lineHeight: 1.5, color: 'rgba(36,31,24,.45)', textWrap: 'pretty' }}
+            >
+              Dúvidas? Fale com a gente pelo WhatsApp{' '}
+              <a href={`https://wa.me/${paraWaMe(contato.telefone)}`} style={{ color: PORTAL.link }}>
+                {contato.telefone}
+              </a>
+            </span>
+          ) : contato.email ? (
+            <span
+              className="font-sans"
+              style={{ fontSize: 11, lineHeight: 1.5, color: 'rgba(36,31,24,.45)', textWrap: 'pretty' }}
+            >
+              Dúvidas? Fale com a gente:{' '}
+              <a href={`mailto:${contato.email}`} style={{ color: PORTAL.link }}>
+                {contato.email}
+              </a>
+            </span>
+          ) : null}
           <span
             className="font-sans"
             style={{ fontSize: 10, lineHeight: 1.5, color: 'rgba(36,31,24,.32)' }}

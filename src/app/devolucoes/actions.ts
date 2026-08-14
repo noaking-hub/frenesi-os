@@ -55,11 +55,18 @@ export async function abrirDevolucao(dados: {
   if (!dados.motivo) return { ok: false, erro: 'Informe o motivo da devolução.' }
 
   const rotulo = MOTIVOS.find((m) => m.id === dados.motivo)
+  // O tipo decide a régua da triagem: em arrependimento, volume abaixo do
+  // mínimo bloqueia; em defeito e erro de envio a perda é esperada. m2 é
+  // "recebi produto diferente" (erro de envio) e m4 é "volume abaixo do que
+  // comprei" (defeito de envase) — mapear qualquer um deles como
+  // arrependimento faria a triagem recusar cliente com razão.
   const tipo: TipoSolicitacao = ehDanificado(dados.motivo)
     ? 'Defeito'
-    : dados.motivo === 'm3'
+    : dados.motivo === 'm2'
       ? 'Erro de envio'
-      : 'Arrependimento'
+      : dados.motivo === 'm4'
+        ? 'Defeito'
+        : 'Arrependimento'
 
   const { data, error } = await supabaseServer().rpc('abrir_solicitacao_devolucao', {
     p_pedido_id: dados.pedidoId,
