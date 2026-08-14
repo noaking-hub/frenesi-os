@@ -168,7 +168,7 @@ async function tudoDe<T>(
 
 const CAMPOS_BASE =
   'id, nome, marca, genero, genero_manual, custo_por_ml, volume_ml, ' +
-  'consumo_diario_ml, imagem_url, ativo'
+  'consumo_diario_ml, imagem_url, ativo, shopify_product_id, shopify_handle'
 
 /** Forma da linha de `perfumes_base`, conferida contra `supabase/migrations`. */
 interface LinhaPerfumeBase {
@@ -182,6 +182,8 @@ interface LinhaPerfumeBase {
   consumo_diario_ml: number | string
   imagem_url: string | null
   ativo: boolean | null
+  shopify_product_id: string | null
+  shopify_handle: string | null
 }
 
 /**
@@ -227,6 +229,8 @@ async function lerPerfumesBase({ apenasAtivos }: { apenasAtivos: boolean }) {
     imagemUrl: b.imagem_url ?? undefined,
     ativo: b.ativo ?? true,
     sobControle: controladas.has(b.id),
+    shopifyProductId: b.shopify_product_id,
+    shopifyHandle: b.shopify_handle,
   }))
 }
 
@@ -286,7 +290,7 @@ const repositorioSupabase: Repositorio = {
     const data = await tudoDe('produtos_derivados', (de, ate) =>
       supabaseServer()
         .from('produtos_derivados')
-        .select('base_id, variante, envasadas, reservadas, preco_praticado')
+        .select('base_id, variante, envasadas, reservadas, preco_praticado, sku, shopify_variant_id')
         .order('base_id')
         .order('variante')
         .range(de, ate),
@@ -297,6 +301,8 @@ const repositorioSupabase: Repositorio = {
       envasadas: d.envasadas,
       reservadas: d.reservadas,
       precoPraticado: Number(d.preco_praticado ?? 0),
+      sku: (d.sku as string | null) ?? null,
+      shopifyVariantId: (d.shopify_variant_id as string | null) ?? null,
     }))
   },
 

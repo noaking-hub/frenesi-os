@@ -52,6 +52,10 @@ export interface PerfumeBase {
    * sincronia zerar o produto na loja.
    */
   sobControle?: boolean
+  /** Vínculo com a Shopify — sem ele, nada se publica nem se sincroniza. */
+  shopifyProductId?: string | null
+  /** Handle público da loja; é ele que monta o link "ver na Shopify". */
+  shopifyHandle?: string | null
 }
 
 /** Decants já envasados de uma base numa variante. */
@@ -63,6 +67,10 @@ export interface ProdutoDerivado {
   /** Unidades já reservadas em pedidos não separados. */
   reservadas: number
   precoPraticado: number
+  /** SKU publicado na loja — variante sem SKU não casa venda com estoque. */
+  sku?: string | null
+  /** ID da variante na Shopify; sem ele não há sincronia nem publicação. */
+  shopifyVariantId?: string | null
 }
 
 /** Uma saída de produção que consumiu volume de um lote. */

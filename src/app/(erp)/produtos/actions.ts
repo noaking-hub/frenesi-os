@@ -56,6 +56,37 @@ export async function salvarPerfumeBase(dados: EdicaoPerfume): Promise<RespostaE
   return { ok: true }
 }
 
+/**
+ * Ativa ou desativa perfumes em lote — a ação em massa do Catálogo.
+ *
+ * Desativar não apaga nada: o perfume sai das telas de operação e da
+ * sincronia, e o histórico (lotes, movimentações, vendas) continua inteiro.
+ */
+export async function definirAtivos(
+  ids: string[],
+  ativo: boolean,
+): Promise<{ ok: true; alterados: number } | { ok: false; erro: string }> {
+  if (ids.length === 0) return { ok: false, erro: 'Selecione ao menos um perfume.' }
+  if (!supabaseConfigurado()) {
+    return { ok: false, erro: 'O Supabase precisa estar configurado.' }
+  }
+  try {
+    // Em lotes de 100: um `.in()` grande estoura o tamanho da URL do PostgREST.
+    for (let i = 0; i < ids.length; i += 100) {
+      const { error } = await supabaseServer()
+        .from('perfumes_base')
+        .update({ ativo })
+        .in('id', ids.slice(i, i + 100))
+      if (error) throw error
+    }
+    revalidatePath('/', 'layout')
+    return { ok: true, alterados: ids.length }
+  } catch (e) {
+    console.error('[catalogo] ativar/desativar em massa falhou:', e)
+    return { ok: false, erro: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 /** `Libre Intense (Decant)` → `libre-intense-decant`, como o handle da Shopify. */
 function idDe(nome: string): string {
   return nome

@@ -353,3 +353,168 @@ function brlSimples(n: number): string {
   return `R$ ${n.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/, '.')}`
 }
 
+
+// ── Produto 360º ────────────────────────────────────────────────────────────
+
+export interface VendasJanela {
+  ml: number
+  unidades: number
+  faturamento: number
+  pedidos: number
+}
+
+export interface Produto360Dados {
+  /** Vendas pagas por janela de dias — 7, 30 e 90. */
+  vendas: { d7: VendasJanela; d30: VendasJanela; d90: VendasJanela }
+  /** Unidades vendidas em 90 dias por volumetria — elege a mais vendida. */
+  porVariante: Partial<Record<number, number>>
+  /** Entradas de estoque com custo — é o histórico de custo real. */
+  lotes: {
+    id: string
+    fornecedor: string
+    volumeMl: number
+    custoTotal: number | null
+    custoPorMl: number | null
+    entrada: string
+    encerradoEm: string | null
+  }[]
+  /** Trilha do livro de movimentações, mais recente primeiro. */
+  movimentacoes: {
+    tipo: string
+    ocorridaEm: string
+    volumeMl: number
+    saldoMl: number | null
+    ref: string | null
+    descricao: string | null
+    responsavel: string | null
+  }[]
+  /** O que a Shopify diz estar publicado por variante, e quando foi lido. */
+  publicado: { variante: number; unidades: number; lidoEm: string | null }[]
+}
+
+const VAZIO_JANELA: VendasJanela = { ml: 0, unidades: 0, faturamento: 0, pedidos: 0 }
+
+/**
+ * O dossiê de um perfume-base para a tela Produto 360º.
+ *
+ * Três leituras dirigidas em vez de reusar as listas globais: a tela de um
+ * produto não pode pagar o transporte do catálogo inteiro. Vendas contam só
+ * pedido pago e não cancelado — o resto é ruído que inflaria giro e
+ * cobertura, e cobertura errada compra estoque errado.
+ */
+export async function produto360(baseId: string): Promise<Produto360Dados> {
+  const vazio: Produto360Dados = {
+    vendas: { d7: VAZIO_JANELA, d30: VAZIO_JANELA, d90: VAZIO_JANELA },
+    porVariante: {},
+    lotes: [],
+    movimentacoes: [],
+    publicado: [],
+  }
+  if (!supabaseConfigurado()) return vazio
+
+  const sb = supabaseServer()
+  const d90 = new Date(Date.now() - 90 * 86_400_000).toISOString()
+
+  const [itens, lotes, movs, pub] = await Promise.all([
+    sb
+      .from('pedido_itens')
+      .select('variante, quantidade, preco, pedido_id, pedidos!inner(comprado_em, pagamento, situacao)')
+      .eq('base_id', baseId)
+      .eq('pedidos.pagamento', 'pago')
+      .neq('pedidos.situacao', 'cancelado')
+      .gte('pedidos.comprado_em', d90)
+      .limit(5000),
+    sb
+      .from('lotes')
+      .select('id, fornecedor, volume_ml, custo_total, entrada_em, encerrado_em')
+      .eq('base_id', baseId)
+      .order('entrada_em', { ascending: false }),
+    sb
+      .from('movimentacoes')
+      .select('tipo, ocorrida_em, volume_ml, saldo_ml, ref, descricao, responsavel')
+      .eq('base_id', baseId)
+      .order('ocorrida_em', { ascending: false })
+      .limit(40),
+    sb.from('shopify_publicado').select('variante, publicado, lido_em').eq('base_id', baseId),
+  ])
+  for (const r of [itens, lotes, movs, pub]) {
+    if (r.error) throw r.error
+  }
+
+  const agora = Date.now()
+  const janelas = { d7: { ...VAZIO_JANELA }, d30: { ...VAZIO_JANELA }, d90: { ...VAZIO_JANELA } }
+  const pedidosPorJanela = { d7: new Set<string>(), d30: new Set<string>(), d90: new Set<string>() }
+  const porVariante: Partial<Record<number, number>> = {}
+
+  for (const linha of (itens.data ?? []) as unknown as {
+    variante: number | null
+    quantidade: number
+    preco: number | string
+    pedido_id: string
+    pedidos: { comprado_em: string }
+  }[]) {
+    const dias = (agora - Date.parse(linha.pedidos.comprado_em)) / 86_400_000
+    const v = Number(linha.variante ?? 0)
+    const qtd = Number(linha.quantidade) || 0
+    const receita = Number(linha.preco) * qtd
+    for (const chave of ['d7', 'd30', 'd90'] as const) {
+      const limite = chave === 'd7' ? 7 : chave === 'd30' ? 30 : 90
+      if (dias > limite) continue
+      janelas[chave].ml += v * qtd
+      janelas[chave].unidades += qtd
+      janelas[chave].faturamento += receita
+      pedidosPorJanela[chave].add(linha.pedido_id)
+    }
+    if (dias <= 90 && v > 0) porVariante[v] = (porVariante[v] ?? 0) + qtd
+  }
+  for (const chave of ['d7', 'd30', 'd90'] as const) {
+    janelas[chave].pedidos = pedidosPorJanela[chave].size
+  }
+
+  return {
+    vendas: janelas,
+    porVariante,
+    lotes: ((lotes.data ?? []) as unknown as {
+      id: string
+      fornecedor: string
+      volume_ml: number | string
+      custo_total: number | string | null
+      entrada_em: string
+      encerrado_em: string | null
+    }[]).map((l) => {
+      const volume = Number(l.volume_ml)
+      const custo = l.custo_total === null ? null : Number(l.custo_total)
+      return {
+        id: l.id,
+        fornecedor: l.fornecedor,
+        volumeMl: volume,
+        custoTotal: custo,
+        custoPorMl: custo && volume > 0 ? custo / volume : null,
+        entrada: l.entrada_em,
+        encerradoEm: l.encerrado_em,
+      }
+    }),
+    movimentacoes: ((movs.data ?? []) as unknown as {
+      tipo: string
+      ocorrida_em: string
+      volume_ml: number | string
+      saldo_ml: number | string | null
+      ref: string | null
+      descricao: string | null
+      responsavel: string | null
+    }[]).map((m) => ({
+      tipo: m.tipo,
+      ocorridaEm: m.ocorrida_em,
+      volumeMl: Number(m.volume_ml),
+      saldoMl: m.saldo_ml === null ? null : Number(m.saldo_ml),
+      ref: m.ref,
+      descricao: m.descricao,
+      responsavel: m.responsavel,
+    })),
+    publicado: ((pub.data ?? []) as unknown as {
+      variante: number
+      publicado: number
+      lido_em: string | null
+    }[]).map((p) => ({ variante: p.variante, unidades: p.publicado, lidoEm: p.lido_em })),
+  }
+}

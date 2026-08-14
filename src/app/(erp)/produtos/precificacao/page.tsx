@@ -3,12 +3,17 @@ import { repositorio } from '@/data/repository'
 
 import { PrecificacaoCliente } from './PrecificacaoCliente'
 
-export default async function Precificacao() {
+export default async function Precificacao({
+  searchParams,
+}: {
+  searchParams: Promise<{ base?: string }>
+}) {
   const repo = repositorio()
-  const [bases, parametros, precos] = await Promise.all([
+  const [bases, parametros, precos, { base }] = await Promise.all([
     repo.perfumesBase(),
     repo.parametros(),
     repo.precoPraticado(),
+    searchParams,
   ])
 
   // Sem perfume base não há o que precificar — a tela diz isso em vez de quebrar.
@@ -21,5 +26,12 @@ export default async function Precificacao() {
     )
   }
 
-  return <PrecificacaoCliente bases={bases} parametros={parametros} precos={precos} />
+  return (
+    <PrecificacaoCliente
+      bases={bases}
+      parametros={parametros}
+      precos={precos}
+      baseInicial={base}
+    />
+  )
 }

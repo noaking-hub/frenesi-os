@@ -28,6 +28,8 @@ interface Props {
   bases: PerfumeBase[]
   parametros: ParametrosPrecificacao
   precos: Record<string, Partial<Record<VarianteMl, number>>>
+  /** Perfume a abrir de cara — é o `?base=` dos atalhos do Catálogo e do 360º. */
+  baseInicial?: string
 }
 
 interface Linha {
@@ -67,11 +69,15 @@ const BASE_LIVRE: PerfumeBase = {
   consumoDiarioMl: 0,
 } as PerfumeBase
 
-export function PrecificacaoCliente({ bases, parametros, precos }: Props) {
+export function PrecificacaoCliente({ bases, parametros, precos, baseInicial }: Props) {
   // Abrir num perfume sem custo mostra uma tabela de preços que não cobre o
-  // perfume — começamos por um que já tem custo, quando existe algum.
+  // perfume — começamos por um que já tem custo, quando existe algum. O
+  // atalho vindo do Catálogo/360º manda mais: quem clicou escolheu o perfume.
   const [baseId, setBaseId] = useState(
-    () => (bases.find((b) => b.custoPorMl > 0) ?? bases[0])?.id ?? '',
+    () =>
+      (bases.find((b) => b.id === baseInicial) ??
+        bases.find((b) => b.custoPorMl > 0) ??
+        bases[0])?.id ?? '',
   )
   // Sem catálogo, a tela já nasce como calculadora em vez de quebrar.
   const [modoLivre, setModoLivre] = useState(bases.length === 0)

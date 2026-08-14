@@ -101,6 +101,12 @@ export function localizar(pathname: string): { modulo: string; tela: string } {
     const tela = grupo.telas?.find((t) => rotaAtiva(pathname, t.href))
     if (tela) return { modulo: grupo.label, tela: tela.label }
   }
+  // Rota dinâmica que a navegação não lista: o detalhe de um perfume. A
+  // igualdade exata acima nunca a encontraria — e "Módulo" no topo parece
+  // tela quebrada.
+  if (/^\/produtos\/[^/]+$/.test(pathname)) {
+    return { modulo: 'Produtos', tela: 'Produto 360º' }
+  }
   return { modulo: 'FRENESI ERP', tela: 'Módulo' }
 }
 
