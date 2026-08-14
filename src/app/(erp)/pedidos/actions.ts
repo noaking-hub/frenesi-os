@@ -73,6 +73,8 @@ const EXIGIDOS = [
   // criar o envio não basta: sem ele a loja fica em "em andamento" para
   // sempre, mesmo com o pedido entregue no ERP.
   'write_fulfillments',
+  // Publicar preço pela Precificação escreve na variante do produto.
+  'write_products',
 ]
 
 /**

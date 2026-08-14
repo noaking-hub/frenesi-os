@@ -21,8 +21,8 @@ import {
 } from '@/domain'
 import type { ParametrosPrecificacao, PerfumeBase, VarianteMl } from '@/domain'
 
-import { mercadoDaBase, publicarPrecos } from './actions'
-import type { PrecoDeMercado } from './actions'
+import { historicoDePublicacoes, mercadoDaBase, publicarPrecos } from './actions'
+import type { PrecoDeMercado, PublicacaoRegistrada } from './actions'
 
 interface Props {
   bases: PerfumeBase[]
@@ -41,6 +41,8 @@ interface Linha {
   custoProduto: number
   praticado: number | null
   unidades: number
+  /** Menor preço permitido — abaixo dele a margem mínima não fecha. */
+  piso: number
   /** Menor preço entre os concorrentes, quando a busca acha esta variante. */
   mercado: PrecoDeMercado | null
   /** O que será publicado: o digitado à mão, ou o sugerido. */
@@ -137,6 +139,7 @@ export function PrecificacaoCliente({ bases, parametros, precos, baseInicial }: 
       custoProduto: c.custoProduto,
       praticado: precos[base.id]?.[v] ?? null,
       unidades: Math.floor(base.volumeMl / v),
+      piso: c.piso,
       mercado: mercado.find((m) => m.variante === v) ?? null,
       aPublicar: manual ? parseNum(digitado) : c.sugerido,
       manual,
@@ -273,7 +276,15 @@ export function PrecificacaoCliente({ bases, parametros, precos, baseInicial }: 
               gap: 6,
               height: 30,
               padding: '0 9px',
-              border: `1px solid ${l.manual ? 'rgba(239,209,140,.45)' : 'rgba(255,255,255,.11)'}`,
+              // Abaixo do piso a caixa fica vermelha: o servidor vai recusar,
+              // e a tela avisa ANTES do clique, não depois.
+              border: `1px solid ${
+                l.aPublicar > 0 && l.aPublicar < l.piso - 0.005
+                  ? 'rgba(224,102,102,.55)'
+                  : l.manual
+                    ? 'rgba(239,209,140,.45)'
+                    : 'rgba(255,255,255,.11)'
+              }`,
               background: 'rgba(255,255,255,.03)',
               borderRadius: 8,
             }}
@@ -303,6 +314,14 @@ export function PrecificacaoCliente({ bases, parametros, precos, baseInicial }: 
               }}
             />
           </span>
+          {l.aPublicar > 0 && l.aPublicar < l.piso - 0.005 && (
+            <span
+              className="font-sans"
+              style={{ fontSize: 9, lineHeight: 1.3, color: COR.erro, textAlign: 'right' }}
+            >
+              {`abaixo do piso ${brl(l.piso)} — será recusado`}
+            </span>
+          )}
           {l.manual && (
             <button
               type="button"
@@ -1129,6 +1148,11 @@ function PublicarPrecos({
   const [erro, setErro] = useState<string | null>(null)
   const [resumo, setResumo] = useState<string | null>(null)
   const [recusadas, setRecusadas] = useState<{ variante: string; motivo: string }[]>([])
+  const [divergentes, setDivergentes] = useState<
+    { variante: string; esperado: number; gravado: number }[]
+  >([])
+  const [confirmando, setConfirmando] = useState(false)
+  const [versaoHistorico, setVersaoHistorico] = useState(0)
   const [pendente, iniciarTransicao] = useTransition()
 
   // O que vai para a loja é `aPublicar`: o digitado à mão quando existe, o
@@ -1136,23 +1160,32 @@ function PublicarPrecos({
   // edição decorativo — pior que não ter campo nenhum.
   const mudam = linhas.filter((l) => l.aPublicar > 0 && l.praticado !== l.aPublicar)
   const manuais = mudam.filter((l) => l.manual).length
+  // Abaixo do piso nem entra no envio: o servidor recusaria de qualquer
+  // forma, e mandar para ser recusado é auditoria suja de propósito.
+  const barrados = mudam.filter((l) => l.aPublicar < l.piso - 0.005)
+  const publicaveis = mudam.filter((l) => l.aPublicar >= l.piso - 0.005)
 
   const publicar = () =>
     iniciarTransicao(async () => {
+      setConfirmando(false)
       setErro(null)
       setResumo(null)
       setRecusadas([])
+      setDivergentes([])
       const r = await publicarPrecos(
-        mudam.map((l) => ({ baseId: base.id, variante: l.variante, preco: l.aPublicar })),
+        publicaveis.map((l) => ({ baseId: base.id, variante: l.variante, preco: l.aPublicar })),
       )
       if (!r.ok) {
         setErro(r.erro)
         return
       }
       setRecusadas(r.ignoradas)
+      setDivergentes(r.divergentes)
+      setVersaoHistorico((v) => v + 1)
       setResumo(
-        `${plural(r.aplicadas, 'preço publicado', 'preços publicados')} na Shopify` +
+        `${plural(r.aplicadas, 'preço publicado e conferido', 'preços publicados e conferidos')} na Shopify` +
           (r.ignoradas.length ? ` · ${plural(r.ignoradas.length, 'recusado', 'recusados')}` : '') +
+          (r.divergentes.length ? ` · ${r.divergentes.length} com DIVERGÊNCIA no retorno` : '') +
           '. A Yampi pega o novo preço na próxima sincronia do catálogo — confira lá antes de anunciar.',
       )
     })
@@ -1162,9 +1195,10 @@ function PublicarPrecos({
   // — ele é a decisão explícita de quem digitou —, então continua podendo
   // sair. Travar os dois transformaria o campo de edição em enfeite.
   const soManuais = mudam.length > 0 && mudam.every((l) => l.manual)
-  const travado = pendente || (simulando && !soManuais) || mudam.length === 0
+  const travado = pendente || (simulando && !soManuais) || publicaveis.length === 0
 
   return (
+    <>
     <section
       style={{
         display: 'flex',
@@ -1190,13 +1224,21 @@ function PublicarPrecos({
                   .map((l) => `${l.variante} ml ${l.praticado === null ? '' : `${brl(l.praticado)} → `}${brl(l.aPublicar)}${l.manual ? ' (à mão)' : ''}`)
                   .join(' · ')}.`}
         </span>
+        {barrados.length > 0 && (
+          <span
+            className="font-sans"
+            style={{ fontSize: 10.5, lineHeight: 1.5, color: COR.erro, textWrap: 'pretty' }}
+          >
+            {`${barrados.map((l) => `${l.variante} ml`).join(', ')} abaixo do piso — ${plural(barrados.length, 'fica de fora', 'ficam de fora')} da publicação até o preço cobrir a margem mínima.`}
+          </span>
+        )}
         <span
           className="font-sans"
           style={{ fontSize: 10, lineHeight: 1.45, color: 'rgba(242,237,227,.34)', textWrap: 'pretty' }}
         >
           O preço vai para a Shopify, que é a dona do catálogo. A Yampi espelha o catálogo dela —
           por isso o ERP não escreve nas duas: duas verdades de preço se desfazem na sincronia
-          seguinte.
+          seguinte. Cada publicação fica registrada com antes, depois, autor e o retorno da loja.
         </span>
         {(erro || resumo) && (
           <span
@@ -1206,6 +1248,15 @@ function PublicarPrecos({
             {erro ?? resumo}
           </span>
         )}
+        {divergentes.map((d) => (
+          <span
+            key={d.variante}
+            className="font-sans"
+            style={{ fontSize: 10.5, lineHeight: 1.45, color: COR.erro, textWrap: 'pretty' }}
+          >
+            {`${d.variante}: pedimos ${brl(d.esperado)} e a loja gravou ${brl(d.gravado)} — confira na Shopify.`}
+          </span>
+        ))}
         {recusadas.map((r) => (
           <span
             key={r.variante}
@@ -1219,7 +1270,7 @@ function PublicarPrecos({
 
       <button
         type="button"
-        onClick={publicar}
+        onClick={() => setConfirmando(true)}
         disabled={travado}
         className="botao-ouro font-sans hover:brightness-[1.07]"
         style={{
@@ -1235,8 +1286,141 @@ function PublicarPrecos({
           opacity: travado ? 0.45 : 1,
         }}
       >
-        {pendente ? 'Publicando…' : `Publicar na Shopify${mudam.length ? ` · ${mudam.length}` : ''}`}
+        {pendente ? 'Publicando…' : `Publicar na Shopify${publicaveis.length ? ` · ${publicaveis.length}` : ''}`}
       </button>
+    </section>
+
+    <HistoricoPublicacoes baseId={base.id} versao={versaoHistorico} />
+
+    {confirmando && (
+      <Modal titulo="Confirmar publicação na Shopify" largura={540} aoFechar={() => setConfirmando(false)}>
+        <span
+          className="font-sans"
+          style={{ fontSize: 11.5, lineHeight: 1.55, color: 'var(--color-secundario)', textWrap: 'pretty' }}
+        >
+          {`${base.nome} — ${plural(publicaveis.length, 'variante vai mudar', 'variantes vão mudar')} de preço na loja:`}
+        </span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+          {publicaveis.map((l) => (
+            <span
+              key={l.variante}
+              style={{
+                display: 'flex',
+                gap: 10,
+                alignItems: 'baseline',
+                padding: '9px 12px',
+                borderRadius: 9,
+                background: 'rgba(255,255,255,.03)',
+                border: '1px solid rgba(255,255,255,.07)',
+              }}
+            >
+              <span className="font-mono" style={{ fontSize: 11.5, color: COR.ouro, width: 46, flex: 'none' }}>
+                {`${l.variante} ml`}
+              </span>
+              <span className="font-mono" style={{ fontSize: 12, color: 'var(--color-corrente)' }}>
+                {`${l.praticado === null ? 'sem preço' : brl(l.praticado)} → ${brl(l.aPublicar)}`}
+              </span>
+              {l.manual && (
+                <span className="font-sans" style={{ fontSize: 9.5, color: COR.ouro }}>
+                  à mão
+                </span>
+              )}
+              <span style={{ flex: 1 }} />
+              <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>
+                {`margem ${pct(l.margem, 1)}`}
+              </span>
+            </span>
+          ))}
+        </div>
+        {barrados.length > 0 && (
+          <span className="font-sans" style={{ fontSize: 10.5, lineHeight: 1.5, color: COR.erro, textWrap: 'pretty' }}>
+            {`Fora da publicação por piso: ${barrados.map((l) => `${l.variante} ml (mín. ${brl(l.piso)})`).join(', ')}.`}
+          </span>
+        )}
+        <span
+          className="font-sans"
+          style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+        >
+          Fica registrado na trilha: preço anterior, novo preço, autor, data e o retorno da loja.
+          A publicação só é dada como certa quando a Shopify devolve o MESMO valor.
+        </span>
+        <div style={{ display: 'flex', gap: 9, justifyContent: 'flex-end' }}>
+          <BotaoSecundario altura={36} onClick={() => setConfirmando(false)}>
+            Cancelar
+          </BotaoSecundario>
+          <button
+            type="button"
+            onClick={publicar}
+            className="botao-ouro font-sans hover:brightness-[1.07]"
+            style={{ height: 36, padding: '0 18px', fontWeight: 700, fontSize: 11.5, lineHeight: 1, borderRadius: 9, cursor: 'pointer' }}
+          >
+            {`Confirmar e publicar · ${publicaveis.length}`}
+          </button>
+        </div>
+      </Modal>
+    )}
+    </>
+  )
+}
+
+/**
+ * A trilha de publicações do perfume, na tela — quem mandou qual preço,
+ * quando, e o que a loja respondeu. Auditoria que mora longe ninguém abre;
+ * aqui ela fica embaixo do botão que a alimenta.
+ */
+function HistoricoPublicacoes({ baseId, versao }: { baseId: string; versao: number }) {
+  const [itens, setItens] = useState<PublicacaoRegistrada[]>([])
+
+  useEffect(() => {
+    let vivo = true
+    setItens([])
+    if (!baseId) return
+    historicoDePublicacoes(baseId).then((r) => {
+      if (vivo) setItens(r)
+    })
+    return () => {
+      vivo = false
+    }
+  }, [baseId, versao])
+
+  if (itens.length === 0) return null
+
+  const TOM: Record<PublicacaoRegistrada['resultado'], Tom> = {
+    confirmado: 'ok',
+    divergente: 'erro',
+    recusado: 'atencao',
+  }
+
+  return (
+    <section
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 9,
+        padding: '13px 17px',
+        borderRadius: 13,
+        border: '1px solid var(--color-borda)',
+        background: 'var(--color-mesa)',
+      }}
+    >
+      <Rotulo>Últimas publicações deste perfume</Rotulo>
+      {itens.map((p, i) => (
+        <span key={i} style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+          <span className="font-mono" style={{ fontSize: 10, color: 'var(--color-terciario)', flex: 'none' }}>
+            {new Date(p.quando).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })}
+          </span>
+          <span className="font-mono" style={{ fontSize: 11, color: COR.ouro, width: 40, flex: 'none' }}>
+            {`${p.variante} ml`}
+          </span>
+          <span className="font-mono" style={{ fontSize: 11, color: 'var(--color-corrente)' }}>
+            {`${p.precoAnterior === null ? 'sem preço' : brl(p.precoAnterior)} → ${brl(p.precoNovo)}`}
+          </span>
+          <Badge tom={TOM[p.resultado]}>{p.resultado}</Badge>
+          <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)', flex: 1, minWidth: 120 }}>
+            {[p.usuario, p.detalhe].filter(Boolean).join(' · ')}
+          </span>
+        </span>
+      ))}
     </section>
   )
 }

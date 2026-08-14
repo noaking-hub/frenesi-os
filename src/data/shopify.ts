@@ -678,6 +678,10 @@ export async function aplicarEstoqueShopify(
 const MUTACAO_PRECO = /* GraphQL */ `
   mutation ($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
     productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+      productVariants {
+        id
+        price
+      }
       userErrors {
         field
         message
@@ -697,6 +701,12 @@ export interface ResultadoPrecos {
   aplicadas: number
   /** Variantes que o ERP quis mexer mas a loja não deixou, com o motivo. */
   ignoradas: { variante: string; motivo: string }[]
+  /**
+   * O preço que a loja DISSE ter gravado, por id de variante. É a prova do
+   * retorno que o escopo exige: se não bater com o pedido, é divergência —
+   * nunca um "publicado" no escuro.
+   */
+  retornoPorVariante: Record<string, number>
 }
 
 /**
@@ -714,10 +724,11 @@ export async function aplicarPrecosShopify(alvos: AlvoPreco[]): Promise<Resultad
   if (!loja) {
     throw new Error('SHOPIFY_LOJA precisa estar no .env.local (ex.: sua-loja.myshopify.com)')
   }
-  if (alvos.length === 0) return { aplicadas: 0, ignoradas: [] }
+  if (alvos.length === 0) return { aplicadas: 0, ignoradas: [], retornoPorVariante: {} }
   const token = await tokenDeAcesso(loja)
 
   const ignoradas: ResultadoPrecos['ignoradas'] = []
+  const retornoPorVariante: Record<string, number> = {}
   const porProduto = new Map<string, AlvoPreco[]>()
   for (const a of alvos) {
     if (!a.shopifyProductId || !a.shopifyVariantId) {
@@ -735,7 +746,10 @@ export async function aplicarPrecosShopify(alvos: AlvoPreco[]): Promise<Resultad
   let aplicadas = 0
   for (const [productId, variantes] of porProduto) {
     const r = await chamarShopify<{
-      productVariantsBulkUpdate: { userErrors: { field: string[]; message: string }[] }
+      productVariantsBulkUpdate: {
+        productVariants: { id: string; price: string }[] | null
+        userErrors: { field: string[]; message: string }[]
+      }
     }>(
       loja,
       token,
@@ -757,10 +771,15 @@ export async function aplicarPrecosShopify(alvos: AlvoPreco[]): Promise<Resultad
       }
       continue
     }
+    // O retorno da mutação é a loja dizendo o que gravou — é ele que fecha o
+    // ciclo "publicar → conferir" do escopo, não a ausência de erro.
+    for (const pv of r.productVariantsBulkUpdate?.productVariants ?? []) {
+      retornoPorVariante[pv.id] = Number(pv.price)
+    }
     aplicadas += variantes.length
   }
 
-  return { aplicadas, ignoradas }
+  return { aplicadas, ignoradas, retornoPorVariante }
 }
 
 // ── Pedidos ────────────────────────────────────────────────────────────────
