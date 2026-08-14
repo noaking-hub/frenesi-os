@@ -31,7 +31,9 @@ export function emailConfigurado(): boolean {
 export interface Anexo {
   nome: string
   /** Conteúdo em texto; vai codificado em base64 para o provedor. */
-  conteudo: string
+  conteudo?: string
+  /** Binário (PDF, imagem) já em base64 — texto re-codificado corromperia. */
+  conteudoBase64?: string
 }
 
 export interface Entrega {
@@ -71,7 +73,7 @@ export async function entregar(m: Entrega): Promise<{ id: string }> {
         ? {
             attachments: m.anexos.map((a) => ({
               filename: a.nome,
-              content: Buffer.from(a.conteudo, 'utf8').toString('base64'),
+              content: a.conteudoBase64 ?? Buffer.from(a.conteudo ?? '', 'utf8').toString('base64'),
             })),
           }
         : {}),

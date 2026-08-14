@@ -14,6 +14,7 @@ import {
 } from '@/components/portal/primitivos'
 import {
   MOTIVOS,
+  PASSOS_DEVOLUCAO,
   PRAZO_DEVOLUCAO_DIAS,
   brl,
   descreveVariante,
@@ -24,7 +25,8 @@ import {
 } from '@/domain'
 import type { MotivoDevolucao, PedidoPortal } from '@/domain'
 
-import { abrirDevolucao, buscarPedidos } from './actions'
+import { abrirDevolucao, buscarPedidos, consultarDevolucao } from './actions'
+import type { AcompanhamentoDevolucao } from './actions'
 
 /**
  * Portal de devoluções — a vitrine da marca no pior momento da compra.
@@ -62,6 +64,10 @@ export function PortalDevolucoes({
   contato: { telefone: string; email: string }
 }) {
   const [passo, setPasso] = useState(1)
+  // 'fluxo' é o assistente de abertura; 'acompanhar' é a consulta por
+  // protocolo — o comprovante do reembolso mora lá.
+  const [tela, setTela] = useState<'fluxo' | 'acompanhar'>('fluxo')
+  const [protocoloConsulta, setProtocoloConsulta] = useState('')
   const [metodo, setMetodo] = useState<Metodo>('email')
   const [ident, setIdent] = useState('')
   const [pedidos, setPedidos] = useState<PedidoPortal[]>([])
@@ -98,7 +104,7 @@ export function PortalDevolucoes({
   // deixava o passo novo aberto no meio da rolagem.
   useEffect(() => {
     window.scrollTo({ top: 0 })
-  }, [passo])
+  }, [passo, tela])
 
   const buscar = () => {
     iniciarBusca(async () => {
@@ -209,10 +215,18 @@ export function PortalDevolucoes({
             </span>
           </div>
 
-          <Etapas passo={passo} />
+          {tela === 'fluxo' && <Etapas passo={passo} />}
+          {tela === 'acompanhar' && <div style={{ paddingBottom: 18 }} />}
         </header>
 
-        {passo === 1 && (
+        {tela === 'acompanhar' && (
+          <Acompanhar
+            protocoloInicial={protocoloConsulta}
+            aoVoltar={() => setTela('fluxo')}
+          />
+        )}
+
+        {tela === 'fluxo' && passo === 1 && (
           <Passo>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 6 }}>
               <h1
@@ -321,6 +335,26 @@ export function PortalDevolucoes({
               </BotaoPrimario>
             </div>
 
+            <button
+              type="button"
+              onClick={() => setTela('acompanhar')}
+              className="font-sans"
+              style={{
+                border: 0,
+                background: 'transparent',
+                color: PORTAL.link,
+                fontWeight: 600,
+                fontSize: 12.5,
+                textDecoration: 'underline',
+                textUnderlineOffset: 3,
+                cursor: 'pointer',
+                alignSelf: 'flex-start',
+                padding: 0,
+              }}
+            >
+              Já abriu uma devolução? Acompanhar pelo protocolo
+            </button>
+
             <BlocoAviso
               titulo="Antes de começar"
               itens={[
@@ -332,7 +366,7 @@ export function PortalDevolucoes({
           </Passo>
         )}
 
-        {passo === 2 && (
+        {tela === 'fluxo' && passo === 2 && (
           <Passo>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <TituloPasso>
@@ -373,7 +407,7 @@ export function PortalDevolucoes({
           </Passo>
         )}
 
-        {passo === 3 && pedido && (
+        {tela === 'fluxo' && passo === 3 && pedido && (
           <Passo>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
               <RotuloCampo>
@@ -517,7 +551,7 @@ export function PortalDevolucoes({
           </Passo>
         )}
 
-        {passo === 4 && (
+        {tela === 'fluxo' && passo === 4 && (
           <Passo>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <TituloPasso>Motivo da devolução</TituloPasso>
@@ -620,7 +654,7 @@ export function PortalDevolucoes({
           </Passo>
         )}
 
-        {passo === 5 && (
+        {tela === 'fluxo' && passo === 5 && (
           <Passo>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <TituloPasso>Fotos do produto</TituloPasso>
@@ -681,7 +715,7 @@ export function PortalDevolucoes({
           </Passo>
         )}
 
-        {passo === 6 && pedido && (
+        {tela === 'fluxo' && passo === 6 && pedido && (
           <Passo padding="32px 22px 30px">
             <div
               style={{
@@ -867,6 +901,15 @@ export function PortalDevolucoes({
               </span>
             </BlocoAviso>
 
+            <BotaoPrimario
+              onClick={() => {
+                setProtocoloConsulta(protocolo ?? '')
+                setTela('acompanhar')
+              }}
+              style={{ height: 48 }}
+            >
+              Acompanhar esta devolução
+            </BotaoPrimario>
             <BotaoSecundario onClick={recomecar} style={{ height: 48 }}>
               Abrir outra devolução
             </BotaoSecundario>
@@ -921,6 +964,306 @@ export function PortalDevolucoes({
         </footer>
       </div>
     </div>
+  )
+}
+
+/**
+ * Acompanhamento por protocolo — a devolução vista pelo cliente.
+ *
+ * Dupla chave (protocolo + e-mail ou CPF): protocolo sozinho circula em
+ * print; a identidade não. Aprovada, o código de postagem aparece aqui;
+ * concluída com reembolso, o COMPROVANTE fica disponível para baixar.
+ */
+function Acompanhar({
+  protocoloInicial,
+  aoVoltar,
+}: {
+  protocoloInicial: string
+  aoVoltar: () => void
+}) {
+  const [protocolo, setProtocolo] = useState(protocoloInicial)
+  const [ident, setIdent] = useState('')
+  const [resultado, setResultado] = useState<AcompanhamentoDevolucao | null>(null)
+  const [erro, setErro] = useState<string | null>(null)
+  const [consultando, iniciar] = useTransition()
+
+  const consultar = () => {
+    setErro(null)
+    iniciar(async () => {
+      const r = await consultarDevolucao(protocolo, ident)
+      if (!r.ok) {
+        setResultado(null)
+        setErro(r.erro)
+        return
+      }
+      setResultado(r.devolucao)
+    })
+  }
+
+  const d = resultado
+
+  return (
+    <Passo>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 6 }}>
+        <h1
+          className="font-display"
+          style={{ margin: 0, fontWeight: 600, fontSize: 28, lineHeight: 1.15, textWrap: 'balance' }}
+        >
+          Acompanhar devolução
+        </h1>
+        <Corpo>
+          Informe o protocolo (ex.: DEV-1043) e o e-mail ou CPF usado na compra.
+        </Corpo>
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          padding: '18px 18px 20px',
+          background: PORTAL.card,
+          border: '1px solid rgba(36,31,24,.08)',
+          borderRadius: 16,
+          boxShadow: SOMBRA_CARTAO,
+        }}
+      >
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+          <RotuloCampo>Protocolo</RotuloCampo>
+          <input
+            value={protocolo}
+            onChange={(e) => setProtocolo(e.target.value)}
+            placeholder="DEV-0000"
+            className="font-mono focus:border-[#B08D4B]"
+            style={{
+              height: 48,
+              padding: '0 15px',
+              border: '1px solid rgba(36,31,24,.14)',
+              background: PORTAL.coluna,
+              color: PORTAL.tinta,
+              fontWeight: 600,
+              fontSize: 15,
+              letterSpacing: '.04em',
+              borderRadius: 11,
+              outline: 0,
+            }}
+          />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+          <RotuloCampo>E-mail ou CPF da compra</RotuloCampo>
+          <input
+            value={ident}
+            onChange={(e) => setIdent(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && protocolo.trim() && ident.trim() && !consultando) consultar()
+            }}
+            placeholder="seu@email.com"
+            className="font-sans focus:border-[#B08D4B]"
+            style={{
+              height: 48,
+              padding: '0 15px',
+              border: '1px solid rgba(36,31,24,.14)',
+              background: PORTAL.coluna,
+              color: PORTAL.tinta,
+              fontWeight: 500,
+              fontSize: 14,
+              borderRadius: 11,
+              outline: 0,
+            }}
+          />
+        </label>
+        <BotaoPrimario
+          ativo={protocolo.trim().length > 0 && ident.trim().length > 0 && !consultando}
+          onClick={consultar}
+          style={{ height: 50 }}
+        >
+          {consultando ? 'Consultando…' : 'Consultar'}
+        </BotaoPrimario>
+        {erro && (
+          <Corpo>
+            <span style={{ color: '#9b3d3d' }}>{erro}</span>
+          </Corpo>
+        )}
+      </div>
+
+      {d && (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 16,
+            padding: '18px 18px 20px',
+            background: PORTAL.card,
+            border: '1px solid rgba(36,31,24,.08)',
+            borderRadius: 16,
+            boxShadow: SOMBRA_CARTAO,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span className="font-mono" style={{ fontWeight: 700, fontSize: 16, color: PORTAL.link }}>
+              {d.protocolo}
+            </span>
+            <span className="font-sans" style={{ fontSize: 11.5, color: PORTAL.terciario }}>
+              {`pedido ${d.pedidoId} · aberta em ${d.abertaEm}`}
+            </span>
+            <span style={{ flex: 1 }} />
+            <span
+              className="font-sans"
+              style={{
+                fontWeight: 600,
+                fontSize: 9,
+                letterSpacing: '.07em',
+                textTransform: 'uppercase',
+                color: d.recusada ? PORTAL.erro : PORTAL.ok,
+                background: d.recusada ? 'rgba(168,58,48,.1)' : 'rgba(63,122,82,.12)',
+                borderRadius: 20,
+                padding: '5px 9px',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {d.status}
+            </span>
+          </div>
+
+          {/* A régua do caso, na mesma gramática do ERP. */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(${PASSOS_DEVOLUCAO.length},1fr)`,
+              gap: 8,
+            }}
+          >
+            {PASSOS_DEVOLUCAO.map((p, i) => {
+              const feito = i < d.etapa
+              const atual = i === d.etapa
+              const cor = atual && d.recusada ? PORTAL.erro : PORTAL.ouro
+              return (
+                <span key={p} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span
+                    style={{
+                      height: 3,
+                      borderRadius: 2,
+                      display: 'block',
+                      background: feito
+                        ? 'rgba(63,122,82,.45)'
+                        : atual
+                          ? d.recusada
+                            ? 'rgba(168,58,48,.4)'
+                            : 'rgba(176,141,75,.5)'
+                          : 'rgba(36,31,24,.1)',
+                    }}
+                  />
+                  <span
+                    className="font-sans"
+                    style={{
+                      fontWeight: 600,
+                      fontSize: 8.5,
+                      lineHeight: 1.25,
+                      letterSpacing: '.06em',
+                      textTransform: 'uppercase',
+                      color: feito ? PORTAL.ok : atual ? cor : 'rgba(36,31,24,.35)',
+                    }}
+                  >
+                    {p}
+                  </span>
+                </span>
+              )
+            })}
+          </div>
+
+          {d.reverso && !d.resolucao && (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 8,
+                padding: '16px 14px',
+                borderRadius: 12,
+                border: '1px solid rgba(176,141,75,.35)',
+                background: 'rgba(176,141,75,.06)',
+                textAlign: 'center',
+              }}
+            >
+              <RotuloCampo>Código de postagem reversa</RotuloCampo>
+              <span
+                className="font-mono"
+                style={{
+                  fontWeight: 700,
+                  fontSize: 20,
+                  letterSpacing: '.08em',
+                  color: PORTAL.tinta,
+                  border: '1px dashed rgba(176,141,75,.5)',
+                  borderRadius: 9,
+                  padding: '10px 18px',
+                }}
+              >
+                {d.reverso}
+              </span>
+              <span className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.5, color: PORTAL.secundario }}>
+                Apresente este código no balcão de uma agência dos Correios — a postagem não tem custo.
+              </span>
+            </div>
+          )}
+
+          {d.resolucao && (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+                padding: '16px 14px',
+                borderRadius: 12,
+                border: '1px solid rgba(63,122,82,.3)',
+                background: 'rgba(63,122,82,.05)',
+              }}
+            >
+              <RotuloCampo>Resolução</RotuloCampo>
+              <span className="font-sans" style={{ fontWeight: 600, fontSize: 14, color: PORTAL.tinta }}>
+                {d.resolucao}
+              </span>
+              {d.reembolsoValor != null && (
+                <span className="font-sans" style={{ fontSize: 12.5, lineHeight: 1.55, color: PORTAL.secundario }}>
+                  {`Reembolso de ${brl(d.reembolsoValor)}${d.reembolsoForma ? ` por ${d.reembolsoForma === 'pix' ? 'Pix' : 'estorno no cartão'}` : ''}${d.reembolsoEm ? `, efetuado em ${d.reembolsoEm}` : ''}.`}
+                </span>
+              )}
+              {d.trocaPedidoId && (
+                <span className="font-sans" style={{ fontSize: 12.5, lineHeight: 1.55, color: PORTAL.secundario }}>
+                  {`Novo pedido do reenvio: ${d.trocaPedidoId}.`}
+                </span>
+              )}
+              {d.comprovanteUrl && (
+                <a
+                  href={d.comprovanteUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-sans"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    height: 46,
+                    borderRadius: 11,
+                    border: '1px solid rgba(176,141,75,.45)',
+                    background: 'rgba(176,141,75,.1)',
+                    color: PORTAL.link,
+                    fontWeight: 700,
+                    fontSize: 13,
+                    textDecoration: 'none',
+                  }}
+                >
+                  Baixar comprovante do reembolso
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      <BotaoSecundario onClick={aoVoltar} style={{ height: 48 }}>
+        Abrir uma nova devolução
+      </BotaoSecundario>
+    </Passo>
   )
 }
 

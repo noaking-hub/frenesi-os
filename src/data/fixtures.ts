@@ -581,6 +581,15 @@ export interface SolicitacaoErp {
   fotos: string[]
   /** Fotos enviadas pelo portal, já com URL assinada para a ficha exibir. */
   fotosArquivos?: { rotulo: string; url: string }[]
+  /** Resolução registrada na conclusão. Null = ainda não concluída. */
+  resolucao?: string | null
+  reembolsoValor?: number | null
+  reembolsoForma?: 'pix' | 'estorno-cartao' | null
+  reembolsoEm?: string | null
+  /** Comprovante do reembolso, já com URL assinada. */
+  comprovanteUrl?: string | null
+  /** Novo pedido do reenvio, quando a resolução é troca. */
+  trocaPedidoId?: string | null
   /** A conferência: volume medido de cada item recebido. Vazia antes de chegar. */
   itens: ItemAferido[]
   /** O que o cliente marcou no portal. É contra esta lista que se confere. */

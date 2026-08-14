@@ -1,6 +1,7 @@
 import {
   HTML_VALIDADO_DEVOLUCAO_ABERTA,
   HTML_VALIDADO_DEVOLUCAO_APROVADA,
+  HTML_VALIDADO_DEVOLUCAO_CONCLUIDA,
   HTML_VALIDADO_ENTREGUE,
   HTML_VALIDADO_ENVIO,
 } from './emails-validados'
@@ -22,6 +23,7 @@ export type EventoNotificacao =
   | 'pedido_entregue'
   | 'devolucao_aberta'
   | 'devolucao_aprovada'
+  | 'devolucao_concluida'
   | 'devolucao_recebida'
   | 'cashback_creditado'
   | 'cashback_expirando'
@@ -107,6 +109,7 @@ export const ASSUNTO: Record<EventoNotificacao, string> = {
   pedido_entregue: 'Seu pedido chegou · {pedido}',
   devolucao_aberta: 'Recebemos sua solicitação de devolução · {protocolo}',
   devolucao_aprovada: 'Devolução aprovada · código de postagem · {protocolo}',
+  devolucao_concluida: 'Devolução concluída · {protocolo}',
   devolucao_recebida: 'Recebemos sua devolução · {pedido}',
   cashback_creditado: 'Você ganhou cashback na Frenesi',
   cashback_expirando: 'Seu cashback está perto de expirar',
@@ -120,6 +123,7 @@ export const ROTULO_EVENTO: Record<EventoNotificacao, string> = {
   pedido_entregue: 'Pedido entregue',
   devolucao_aberta: 'Devolução aberta no portal',
   devolucao_aprovada: 'Devolução aprovada · reverso enviado',
+  devolucao_concluida: 'Devolução concluída · resolução informada',
   devolucao_recebida: 'Devolução recebida',
   cashback_creditado: 'Cashback creditado',
   cashback_expirando: 'Cashback expirando',
@@ -223,6 +227,71 @@ export const MODELO_DEVOLUCAO_APROVADA_PADRAO: ModeloEmailRecuperacao = {
     'Leve o produto na embalagem original, com o lacre como está, a uma agência dos Correios e apresente o código abaixo no balcão. Não é preciso imprimir etiqueta.',
   textoBotao: 'Tirar dúvidas no WhatsApp',
   html: HTML_VALIDADO_DEVOLUCAO_APROVADA,
+}
+
+/**
+ * Conclusão da devolução, com a resolução em destaque. O reembolso é
+ * executado MANUALMENTE pela operação (decisão do dono) — este e-mail
+ * comprova: valor no quadro, forma e data na nota, comprovante em anexo.
+ * Placeholders: {nome}, {protocolo}, {resolucao}, {destaque}, {corpo}, {nota}.
+ */
+export const MODELO_DEVOLUCAO_CONCLUIDA_PADRAO: ModeloEmailRecuperacao = {
+  assunto: 'Devolução concluída · {protocolo}',
+  titulo: '{nome}, sua devolução foi concluída',
+  mensagem: '{corpo}',
+  textoBotao: 'Falar com o atendimento',
+  html: HTML_VALIDADO_DEVOLUCAO_CONCLUIDA,
+}
+
+export interface ConclusaoDevolucao {
+  nome: string | null
+  protocolo: string
+  resolucao: string
+  reembolsoValor: number | null
+  reembolsoForma: 'pix' | 'estorno-cartao' | null
+  /** dd/MM/aaaa já formatada, quando houve reembolso. */
+  reembolsoData: string | null
+  temComprovante: boolean
+  trocaPedidoId: string | null
+}
+
+/** Monta a conclusão. O quadro tracejado muda com a resolução. */
+export function emailDevolucaoConcluida(
+  d: ConclusaoDevolucao,
+  modelo: ModeloEmailRecuperacao = MODELO_DEVOLUCAO_CONCLUIDA_PADRAO,
+): { assunto: string; html: string } {
+  const nome = d.nome?.trim().split(/\s+/)[0] || 'Olá'
+  const forma = d.reembolsoForma === 'pix' ? 'Pix' : 'estorno no cartão'
+  const reembolso = d.reembolsoValor !== null
+
+  const destaque = reembolso
+    ? `R$ ${d.reembolsoValor!.toFixed(2).replace('.', ',')}`
+    : d.trocaPedidoId
+      ? `Pedido ${d.trocaPedidoId}`
+      : d.protocolo
+  const corpo = reembolso
+    ? `O reembolso foi efetuado por ${forma}.${d.temComprovante ? ' O comprovante segue anexo a este e-mail.' : ''}`
+    : d.trocaPedidoId
+      ? 'Um novo pedido foi gerado para a sua troca — ele segue o fluxo normal de produção e envio da loja.'
+      : 'Nossa equipe entra em contato com os detalhes da resolução.'
+  const nota = reembolso
+    ? `Efetuado${d.reembolsoData ? ` em ${d.reembolsoData}` : ''} · ${forma}`
+    : d.trocaPedidoId
+      ? 'Número do novo pedido do reenvio'
+      : 'Guarde o protocolo para o atendimento'
+
+  const preenche = (t: string) =>
+    t
+      .split('{nome}').join(escapa(nome))
+      .split('{protocolo}').join(escapa(d.protocolo))
+      .split('{resolucao}').join(escapa(d.resolucao))
+      .split('{destaque}').join(escapa(destaque))
+      .split('{corpo}').join(escapa(corpo))
+      .split('{nota}').join(escapa(nota))
+  return {
+    assunto: preenche(modelo.assunto),
+    html: preenche(modelo.html || HTML_VALIDADO_DEVOLUCAO_CONCLUIDA),
+  }
 }
 
 /** Monta a confirmação de devolução aberta. */

@@ -4,6 +4,7 @@ import {
   MODELO_CASHBACK_PADRAO,
   MODELO_DEVOLUCAO_ABERTA_PADRAO,
   MODELO_DEVOLUCAO_APROVADA_PADRAO,
+  MODELO_DEVOLUCAO_CONCLUIDA_PADRAO,
   MODELO_ENVIO_PADRAO,
   MODELO_GIFT_PADRAO,
   MODELO_PADRAO,
@@ -25,6 +26,7 @@ export type ChaveModelo =
   | 'envio'
   | 'devolucao-aberta'
   | 'devolucao-aprovada'
+  | 'devolucao-concluida'
 
 const PADROES: Record<ChaveModelo, ModeloEmailRecuperacao> = {
   carrinho: MODELO_PADRAO,
@@ -33,6 +35,7 @@ const PADROES: Record<ChaveModelo, ModeloEmailRecuperacao> = {
   envio: MODELO_ENVIO_PADRAO,
   'devolucao-aberta': MODELO_DEVOLUCAO_ABERTA_PADRAO,
   'devolucao-aprovada': MODELO_DEVOLUCAO_APROVADA_PADRAO,
+  'devolucao-concluida': MODELO_DEVOLUCAO_CONCLUIDA_PADRAO,
 }
 
 export async function lerModeloEmail(chave: ChaveModelo): Promise<ModeloEmailRecuperacao> {

@@ -6,6 +6,7 @@ import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import {
   MOTIVOS,
   ehDanificado,
+  etapaDe,
   fotosCompletas,
   identificarFrete,
   statusDevolucao,
@@ -313,4 +314,146 @@ export async function abrirDevolucao(
   await avisarDevolucaoAberta(protocolo)
 
   return { ok: true, protocolo }
+}
+
+/**
+ * Acompanhamento por protocolo — a devolução vista pelo CLIENTE.
+ *
+ * A dupla chave (protocolo + e-mail ou CPF da compra) é o que impede curioso
+ * com um protocolo alheio de ler o caso: protocolo sozinho circula em print,
+ * a identidade não. A resposta é outro recorte mínimo — status, reverso e
+ * comprovante — e o comprovante sai por URL assinada de vida curta.
+ */
+export interface AcompanhamentoDevolucao {
+  protocolo: string
+  pedidoId: string
+  status: string
+  /** 0..4 na régua Solicitação → Resolução. */
+  etapa: number
+  recusada: boolean
+  abertaEm: string
+  /** Código de postagem reversa, quando já gerado. */
+  reverso: string | null
+  resolucao: string | null
+  reembolsoValor: number | null
+  reembolsoForma: 'pix' | 'estorno-cartao' | null
+  reembolsoEm: string | null
+  comprovanteUrl: string | null
+  trocaPedidoId: string | null
+}
+
+export async function consultarDevolucao(
+  protocoloBruto: string,
+  identificacao: string,
+): Promise<{ ok: true; devolucao: AcompanhamentoDevolucao } | { ok: false; erro: string }> {
+  const protocolo = protocoloBruto.trim().toUpperCase()
+  const ident = identificacao.trim()
+  const naoEncontrada = {
+    ok: false as const,
+    erro: 'Não encontramos essa devolução. Confira o protocolo e o e-mail ou CPF da compra.',
+  }
+
+  if (!/^DEV-\d{1,10}$/.test(protocolo) || ident.length < 6) return naoEncontrada
+
+  // Só dígitos é CPF; o resto é e-mail — o cliente não precisa escolher.
+  const digitos = ident.replace(/\D/g, '')
+  const ehCpf = digitos.length === 11 && /^[\d.\-\s]+$/.test(ident)
+  const alvo = ehCpf ? digitos : ident.toLowerCase()
+
+  if (!supabaseConfigurado()) {
+    // Fixtures (desenvolvimento local): só o caminho por e-mail existe.
+    const s = (await repositorio().solicitacoes()).find(
+      (x) => x.id === protocolo && !ehCpf && x.email.toLowerCase() === alvo,
+    )
+    if (!s) return naoEncontrada
+    return {
+      ok: true,
+      devolucao: {
+        protocolo: s.id,
+        pedidoId: s.pedidoId,
+        status: s.status,
+        etapa: etapaDe(s.status),
+        recusada: s.status === 'Recusada',
+        abertaEm: s.abertura,
+        reverso: s.reverso || null,
+        resolucao: s.resolucao ?? null,
+        reembolsoValor: s.reembolsoValor ?? null,
+        reembolsoForma: s.reembolsoForma ?? null,
+        reembolsoEm: null,
+        comprovanteUrl: null,
+        trocaPedidoId: s.trocaPedidoId ?? null,
+      },
+    }
+  }
+
+  const sb = supabaseServer()
+  const { data } = await sb
+    .from('solicitacoes_devolucao')
+    .select(
+      'protocolo, pedido_id, status, aberta_em, reverso, resolucao, reembolso_valor, ' +
+        'reembolso_forma, reembolso_em, comprovante_reembolso, troca_pedido_id, ' +
+        'pedidos(clientes(email, cpf))',
+    )
+    .eq('protocolo', protocolo)
+    .maybeSingle()
+  const s = data as unknown as {
+    protocolo: string
+    pedido_id: string
+    status: string
+    aberta_em: string
+    reverso: string
+    resolucao: string | null
+    reembolso_valor: number | string | null
+    reembolso_forma: 'pix' | 'estorno-cartao' | null
+    reembolso_em: string | null
+    comprovante_reembolso: string | null
+    troca_pedido_id: string | null
+    pedidos: { clientes: { email: string | null; cpf: string | null } | null } | null
+  } | null
+  if (!s) return naoEncontrada
+
+  const cliente = s.pedidos?.clientes
+  const confere = ehCpf
+    ? (cliente?.cpf ?? '').replace(/\D/g, '') === alvo
+    : (cliente?.email ?? '').toLowerCase() === alvo
+  if (!confere) return naoEncontrada
+
+  // O comprovante só é assinado quando o caso está concluído — antes disso
+  // ele nem existe, e a URL assinada tem 1 hora de vida.
+  let comprovanteUrl: string | null = null
+  if (s.status === 'Concluída' && s.comprovante_reembolso) {
+    const { data: assinada } = await sb.storage
+      .from('devolucoes')
+      .createSignedUrl(s.comprovante_reembolso, 60 * 60)
+    comprovanteUrl = assinada?.signedUrl ?? null
+  }
+
+  const dataPt = (iso: string | null) =>
+    iso
+      ? new Date(iso).toLocaleDateString('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          timeZone: 'America/Sao_Paulo',
+        })
+      : null
+
+  return {
+    ok: true,
+    devolucao: {
+      protocolo: s.protocolo,
+      pedidoId: s.pedido_id,
+      status: s.status,
+      etapa: etapaDe(s.status as Parameters<typeof etapaDe>[0]),
+      recusada: s.status === 'Recusada',
+      abertaEm: dataPt(s.aberta_em) ?? '',
+      reverso: s.reverso || null,
+      resolucao: s.resolucao,
+      reembolsoValor: s.reembolso_valor === null ? null : Number(s.reembolso_valor),
+      reembolsoForma: s.reembolso_forma,
+      reembolsoEm: dataPt(s.reembolso_em),
+      comprovanteUrl,
+      trocaPedidoId: s.troca_pedido_id,
+    },
+  }
 }

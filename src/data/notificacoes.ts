@@ -5,6 +5,7 @@ import {
   avisosDe,
   emailDevolucaoAberta,
   emailDevolucaoAprovada,
+  emailDevolucaoConcluida,
   emailEntregue,
   emailEnvio,
   identificarFrete,
@@ -389,4 +390,128 @@ export async function avisarDevolucaoAprovada(protocolo: string): Promise<void> 
       ? emailDevolucaoAprovada({ nome: d.nome, protocolo, reverso: d.reverso }, modelo)
       : null,
   )
+}
+
+/**
+ * Conclusão com prova: o e-mail leva a resolução e, quando houver, o
+ * comprovante do reembolso EM ANEXO — baixado do bucket privado na hora do
+ * envio, nunca por link público. Mesmas travas dos demais avisos.
+ */
+export async function avisarDevolucaoConcluida(protocolo: string): Promise<void> {
+  try {
+    if (!supabaseConfigurado()) return
+    const sb = supabaseServer()
+
+    const { data } = await sb
+      .from('solicitacoes_devolucao')
+      .select(
+        'protocolo, pedido_id, resolucao, reembolso_valor, reembolso_forma, reembolso_em, ' +
+          'comprovante_reembolso, troca_pedido_id, pedidos(clientes(nome, email))',
+      )
+      .eq('protocolo', protocolo)
+      .maybeSingle()
+    const s = data as unknown as {
+      protocolo: string
+      pedido_id: string
+      resolucao: string | null
+      reembolso_valor: number | string | null
+      reembolso_forma: 'pix' | 'estorno-cartao' | null
+      reembolso_em: string | null
+      comprovante_reembolso: string | null
+      troca_pedido_id: string | null
+      pedidos: { clientes: { nome: string | null; email: string | null } | null } | null
+    } | null
+    const email = s?.pedidos?.clientes?.email?.trim()
+    if (!s || !email) return
+
+    const modelo = await lerModeloEmail('devolucao-concluida').catch(() => undefined)
+    const mensagem = emailDevolucaoConcluida(
+      {
+        nome: s.pedidos?.clientes?.nome ?? null,
+        protocolo,
+        resolucao: s.resolucao ?? 'Devolução concluída',
+        reembolsoValor: s.reembolso_valor === null ? null : Number(s.reembolso_valor),
+        reembolsoForma: s.reembolso_forma,
+        reembolsoData: s.reembolso_em
+          ? new Date(s.reembolso_em).toLocaleDateString('pt-BR', {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric',
+              timeZone: 'America/Sao_Paulo',
+            })
+          : null,
+        temComprovante: Boolean(s.comprovante_reembolso),
+        trocaPedidoId: s.troca_pedido_id,
+      },
+      modelo,
+    )
+
+    const chave = `${protocolo}|devolucao_concluida`
+    const desligado = !avisosDePedidoLigados() || !emailConfigurado()
+
+    if (desligado) {
+      await sb.from('notificacoes_enviadas').upsert(
+        {
+          chave,
+          pedido_id: s.pedido_id,
+          evento: 'devolucao_concluida',
+          destinatario: email,
+          assunto: '(não enviado)',
+          estado: 'dispensado',
+          motivo: 'módulo de avisos desligado quando o fato aconteceu',
+          concluido_em: new Date().toISOString(),
+        },
+        { onConflict: 'chave', ignoreDuplicates: true },
+      )
+      return
+    }
+
+    const { data: ganha } = await sb
+      .from('notificacoes_enviadas')
+      .upsert(
+        {
+          chave,
+          pedido_id: s.pedido_id,
+          evento: 'devolucao_concluida',
+          destinatario: email,
+          assunto: mensagem.assunto,
+          estado: 'enviando',
+        },
+        { onConflict: 'chave', ignoreDuplicates: true },
+      )
+      .select('chave')
+    if (!(ganha ?? []).length) return
+
+    try {
+      const anexos = []
+      if (s.comprovante_reembolso) {
+        const { data: arquivo } = await sb.storage
+          .from('devolucoes')
+          .download(s.comprovante_reembolso)
+        if (arquivo) {
+          const extensao = s.comprovante_reembolso.split('.').pop() ?? 'pdf'
+          anexos.push({
+            nome: `comprovante-${protocolo}.${extensao}`,
+            conteudoBase64: Buffer.from(await arquivo.arrayBuffer()).toString('base64'),
+          })
+        }
+      }
+      const r = await entregar({ para: email, assunto: mensagem.assunto, html: mensagem.html, anexos })
+      await sb
+        .from('notificacoes_enviadas')
+        .update({ estado: 'enviado', provedor_id: r.id, concluido_em: new Date().toISOString() })
+        .eq('chave', chave)
+    } catch (e) {
+      await sb
+        .from('notificacoes_enviadas')
+        .update({
+          estado: 'falhou',
+          motivo: (e instanceof Error ? e.message : String(e)).slice(0, 300),
+          concluido_em: new Date().toISOString(),
+        })
+        .eq('chave', chave)
+    }
+  } catch (e) {
+    console.error(`[devolucoes] aviso de conclusão de ${protocolo} não registrado:`, e)
+  }
 }

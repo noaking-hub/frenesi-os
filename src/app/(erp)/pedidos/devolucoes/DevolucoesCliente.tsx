@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition, type ReactNode } from 'react'
+import { useMemo, useRef, useState, useTransition, type ReactNode } from 'react'
 
 import { Modal, PainelInferior } from '@/components/erp/Modal'
 import { BORDA, COR, FAIXA, FUNDO, type Tom } from '@/components/erp/tokens'
@@ -25,6 +25,7 @@ import {
   Campo,
   Nota,
   Selo,
+  dataHora,
 } from '../FichaDoPedido'
 import {
   Aba,
@@ -52,7 +53,7 @@ import {
   delta,
 } from '../PedidosCliente'
 
-import { conferirDevolucao, moverSolicitacao } from './actions'
+import { concluirDevolucao, conferirDevolucao, moverSolicitacao } from './actions'
 import type { SolicitacaoErp } from '@/data/fixtures'
 
 /**
@@ -93,7 +94,6 @@ const TIPOS: ('Todos' | TipoSolicitacao)[] = ['Todos', 'Arrependimento', 'Defeit
 
 interface Decisao {
   status?: StatusSolicitacao
-  resolucao?: string
   reverso?: string
 }
 
@@ -116,6 +116,7 @@ export function DevolucoesCliente({
   const [menuLinha, setMenuLinha] = useState<string | null>(null)
   const [ancoraMenu, setAncoraMenu] = useState<{ x: number; y: number } | null>(null)
   const [conferindo, setConferindo] = useState<string | null>(null)
+  const [concluindo, setConcluindo] = useState<string | null>(null)
 
   // Espelho local do que já foi gravado, para a ficha não voltar ao estado
   // antigo no intervalo entre a gravação e a revalidação da rota.
@@ -135,11 +136,6 @@ export function DevolucoesCliente({
   const gravar = (d: SolicitacaoErp, patch: Decisao, recadoOk?: string) => {
     setErro(null)
     setRecado(null)
-    // A resolução é escolha de tela — não muda nada no banco até a conclusão.
-    if (!patch.status && !patch.reverso) {
-      setDecisoes((s) => ({ ...s, [d.id]: { ...s[d.id], ...patch } }))
-      return
-    }
     if (!ligado) {
       setErro('Sem o Supabase configurado a decisão não seria gravada em lugar nenhum.')
       return
@@ -169,6 +165,22 @@ export function DevolucoesCliente({
       setDecisoes((s) => ({ ...s, [d.id]: { ...s[d.id], status: 'Recebida' } }))
       setConferindo(null)
       avisar(`Conferência de ${d.id} registrada — a triagem na ficha decide o desfecho.`)
+    })
+  }
+
+  const concluir = (d: SolicitacaoErp, form: FormData) => {
+    setErro(null)
+    setRecado(null)
+    if (!ligado) {
+      setErro('Sem o Supabase configurado a conclusão não seria gravada em lugar nenhum.')
+      return
+    }
+    iniciar(async () => {
+      const r = await concluirDevolucao(form)
+      if (!r.ok) return setErro(r.erro)
+      setDecisoes((s) => ({ ...s, [d.id]: { ...s[d.id], status: 'Concluída' } }))
+      setConcluindo(null)
+      avisar(`${d.id} concluída — resolução e comprovante registrados na ficha.`)
     })
   }
 
@@ -219,6 +231,7 @@ export function DevolucoesCliente({
   const contarFila = (f: Fila) => doPeriodo.filter(PREDICADO[f]).length
   const abertaAgora = aberto ? (solicitacoes.find((d) => d.id === aberto) ?? null) : null
   const emConferencia = conferindo ? (solicitacoes.find((d) => d.id === conferindo) ?? null) : null
+  const emConclusao = concluindo ? (solicitacoes.find((d) => d.id === concluindo) ?? null) : null
 
   const filtroSujo = fila !== 'Todas' || tipo !== 'Todos' || busca.trim() !== '' || dias !== 0
   const limpar = () => {
@@ -447,10 +460,10 @@ export function DevolucoesCliente({
           solicitacao={abertaAgora}
           status={statusDe(abertaAgora)}
           reverso={reversoDe(abertaAgora)}
-          resolucao={decisoes[abertaAgora.id]?.resolucao ?? RESOLUCOES[0]}
           pendente={pendente}
           aoGravar={(patch, recadoOk) => gravar(abertaAgora, patch, recadoOk)}
           aoConferir={() => setConferindo(abertaAgora.id)}
+          aoConcluir={() => setConcluindo(abertaAgora.id)}
           aoFechar={() => setAberto(null)}
           aoAvisar={avisar}
           aoErro={setErro}
@@ -463,6 +476,15 @@ export function DevolucoesCliente({
           pendente={pendente}
           aoConfirmar={(itens, lacre) => conferir(emConferencia, itens, lacre)}
           aoFechar={() => setConferindo(null)}
+        />
+      )}
+
+      {emConclusao && (
+        <ModalConclusao
+          solicitacao={emConclusao}
+          pendente={pendente}
+          aoConfirmar={(form) => concluir(emConclusao, form)}
+          aoFechar={() => setConcluindo(null)}
         />
       )}
     </div>
@@ -734,10 +756,10 @@ function FichaDevolucao({
   solicitacao: d,
   status,
   reverso,
-  resolucao,
   pendente,
   aoGravar,
   aoConferir,
+  aoConcluir,
   aoFechar,
   aoAvisar,
   aoErro,
@@ -745,10 +767,10 @@ function FichaDevolucao({
   solicitacao: SolicitacaoErp
   status: StatusSolicitacao
   reverso: string
-  resolucao: string
   pendente: boolean
   aoGravar: (patch: Decisao, recadoOk?: string) => void
   aoConferir: () => void
+  aoConcluir: () => void
   aoFechar: () => void
   aoAvisar: (texto: string) => void
   aoErro: (texto: string) => void
@@ -1076,6 +1098,45 @@ function FichaDevolucao({
             <Campo rotulo="Contato" valor={d.telefone} mono />
           </Bloco>
 
+          {d.resolucao && (
+            <Bloco titulo="Resolução" largo>
+              <Campo rotulo="Resolução" valor={d.resolucao} ouro />
+              {d.reembolsoValor != null && (
+                <Campo rotulo="Valor reembolsado" valor={brl(d.reembolsoValor)} mono />
+              )}
+              {d.reembolsoForma && (
+                <Campo
+                  rotulo="Forma"
+                  valor={d.reembolsoForma === 'pix' ? 'Pix' : 'Estorno no cartão'}
+                />
+              )}
+              {d.reembolsoEm && (
+                <Campo rotulo="Efetuado em" valor={dataHora(d.reembolsoEm) ?? '—'} />
+              )}
+              {d.trocaPedidoId && <Campo rotulo="Novo pedido da troca" valor={d.trocaPedidoId} mono />}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+                <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>
+                  Comprovante
+                </span>
+                {d.comprovanteUrl ? (
+                  <a
+                    href={d.comprovanteUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-sans hover:brightness-110"
+                    style={{ fontSize: 12, fontWeight: 600, color: COR.ouro, textDecoration: 'underline' }}
+                  >
+                    Abrir comprovante
+                  </a>
+                ) : (
+                  <span className="font-sans" style={{ fontSize: 12, color: 'rgba(242,237,227,.45)' }}>
+                    Não anexado
+                  </span>
+                )}
+              </div>
+            </Bloco>
+          )}
+
           <div style={{ gridColumn: '1 / -1', minWidth: 0 }}>
             <div
               style={{
@@ -1223,30 +1284,17 @@ function FichaDevolucao({
         )}
 
         {acoes.podeConcluir && (
-          <>
-            <BotaoFicha
-              primario
-              desabilitado={pendente}
-              aoClicar={() =>
-                aoGravar({ status: 'Concluída' }, `${d.id} concluída com ${resolucao.toLowerCase()}.`)
-              }
-            >
-              {pendente ? 'Gravando…' : `Concluir com ${resolucao.toLowerCase()}`}
-            </BotaoFicha>
-            <CaixaSeletor rotulo="Resolução" valor={resolucao} aoMudar={(v) => aoGravar({ resolucao: v })}>
-              {RESOLUCOES.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </CaixaSeletor>
-          </>
+          <BotaoFicha primario desabilitado={pendente} aoClicar={aoConcluir}>
+            Concluir devolução
+          </BotaoFicha>
         )}
 
         {acoes.encerrada && (
           <Nota>
             {status === 'Concluída'
-              ? 'Devolução encerrada. A resolução acordada com o cliente está registrada acima.'
+              ? d.resolucao
+                ? `Devolução encerrada com ${d.resolucao.toLowerCase()} — detalhes no quadro Resolução acima.`
+                : 'Devolução encerrada.'
               : 'Devolução recusada. Nada mais a fazer aqui — o pedido segue o fluxo normal.'}
           </Nota>
         )}
@@ -1493,6 +1541,217 @@ function ModalConferencia({
         <BotaoFicha aoClicar={aoFechar}>Cancelar</BotaoFicha>
         <BotaoFicha primario desabilitado={pendente || itens.length === 0} aoClicar={confirmar}>
           {pendente ? 'Gravando…' : 'Registrar conferência'}
+        </BotaoFicha>
+      </div>
+    </Modal>
+  )
+}
+
+// ── conclusão ──────────────────────────────────────────────────────────────
+
+/**
+ * O fecho do caso: resolução, valor e COMPROVANTE. O reembolso em si é feito
+ * fora do sistema (banco ou gateway, manualmente — decisão da operação);
+ * aqui fica a prova, que a ficha, o portal e o e-mail do cliente mostram.
+ */
+function ModalConclusao({
+  solicitacao: d,
+  pendente,
+  aoConfirmar,
+  aoFechar,
+}: {
+  solicitacao: SolicitacaoErp
+  pendente: boolean
+  aoConfirmar: (form: FormData) => void
+  aoFechar: () => void
+}) {
+  const [resolucao, setResolucao] = useState(RESOLUCOES[0])
+  const [valor, setValor] = useState(d.valor.toFixed(2).replace('.', ','))
+  const [forma, setForma] = useState<'pix' | 'estorno-cartao'>('pix')
+  const [trocaPedido, setTrocaPedido] = useState('')
+  const [comprovante, setComprovante] = useState<File | null>(null)
+  const [aviso, setAviso] = useState<string | null>(null)
+  const entrada = useRef<HTMLInputElement>(null)
+
+  const ehReembolso = resolucao.toLowerCase().includes('reembolso')
+  const ehTroca = resolucao.toLowerCase().includes('troca')
+
+  const confirmar = () => {
+    if (ehReembolso) {
+      const n = Number(valor.replace(/\./g, '').replace(',', '.'))
+      if (!Number.isFinite(n) || n <= 0) {
+        setAviso('Informe o valor reembolsado.')
+        return
+      }
+      if (!comprovante) {
+        setAviso('Anexe o comprovante do reembolso — é ele que vai para a ficha e para o cliente.')
+        return
+      }
+    }
+    if (ehTroca && !trocaPedido.trim()) {
+      setAviso('Informe o número do novo pedido da troca.')
+      return
+    }
+    setAviso(null)
+    const form = new FormData()
+    form.set('protocolo', d.id)
+    form.set('resolucao', resolucao)
+    if (ehReembolso) {
+      form.set('valor', valor)
+      form.set('forma', forma)
+    }
+    if (ehTroca) form.set('trocaPedido', trocaPedido.trim())
+    if (comprovante) form.set('comprovante', comprovante)
+    aoConfirmar(form)
+  }
+
+  const campoTexto = {
+    height: 34,
+    padding: '0 10px',
+    border: '1px solid rgba(255,255,255,.14)',
+    borderRadius: 8,
+    background: 'rgba(255,255,255,.04)',
+    color: 'var(--color-corrente)',
+    fontSize: 12.5,
+    outline: 0,
+  } as const
+
+  return (
+    <Modal titulo={`Concluir ${d.id}`} largura={520} padding={0} aoFechar={aoFechar}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '15px 20px',
+          borderBottom: '1px solid var(--color-borda-sutil)',
+        }}
+      >
+        <span className="font-sans" style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--color-corrente)' }}>
+          Concluir devolução
+        </span>
+        <span className="font-mono" style={{ fontSize: 11.5, fontWeight: 700, color: COR.ouro }}>
+          {d.id}
+        </span>
+        <span style={{ flex: 1 }} />
+        <button
+          type="button"
+          onClick={aoFechar}
+          aria-label="Fechar"
+          className="hover:border-ouro/40"
+          style={{
+            width: 26,
+            height: 26,
+            border: '1px solid rgba(255,255,255,.12)',
+            borderRadius: 999,
+            background: 'transparent',
+            color: 'var(--color-terciario)',
+            cursor: 'pointer',
+            fontSize: 10.5,
+            lineHeight: 1,
+          }}
+        >
+          ✕
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '16px 20px' }}>
+        <Nota>
+          O reembolso é feito manualmente no banco ou no gateway — aqui fica o registro e o
+          comprovante, que aparecem na ficha e ficam disponíveis ao cliente.
+        </Nota>
+
+        <CaixaSeletor rotulo="Resolução" valor={resolucao} aoMudar={setResolucao}>
+          {RESOLUCOES.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </CaixaSeletor>
+
+        {ehReembolso && (
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>
+                Valor reembolsado (R$)
+              </span>
+              <input
+                value={valor}
+                onChange={(e) => setValor(e.target.value)}
+                inputMode="decimal"
+                className="font-mono focus:border-ouro/50"
+                style={{ ...campoTexto, width: 120, textAlign: 'right' }}
+              />
+            </label>
+            <CaixaSeletor rotulo="Forma" valor={forma} aoMudar={(v) => setForma(v as typeof forma)}>
+              <option value="pix">Pix</option>
+              <option value="estorno-cartao">Estorno no cartão</option>
+            </CaixaSeletor>
+          </div>
+        )}
+
+        {ehTroca && (
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>
+              Número do novo pedido
+            </span>
+            <input
+              value={trocaPedido}
+              onChange={(e) => setTrocaPedido(e.target.value)}
+              placeholder="YP-…"
+              className="font-mono focus:border-ouro/50"
+              style={{ ...campoTexto, width: 220 }}
+            />
+          </label>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>
+            {ehReembolso ? 'Comprovante do reembolso (obrigatório)' : 'Comprovante (opcional)'}
+          </span>
+          <input
+            ref={entrada}
+            type="file"
+            accept="application/pdf,image/*"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              setComprovante(e.target.files?.[0] ?? null)
+              e.target.value = ''
+            }}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+            <BotaoFicha aoClicar={() => entrada.current?.click()}>
+              {comprovante ? 'Trocar arquivo' : 'Anexar PDF ou imagem'}
+            </BotaoFicha>
+            {comprovante && (
+              <span className="font-sans" style={{ fontSize: 11, color: 'rgba(242,237,227,.7)', overflowWrap: 'anywhere' }}>
+                {comprovante.name}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {aviso && (
+          <span className="font-sans" style={{ fontSize: 11.5, color: COR.erro }}>
+            {aviso}
+          </span>
+        )}
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          gap: 9,
+          padding: '12px 20px',
+          borderTop: '1px solid var(--color-borda-sutil)',
+          background: 'rgba(0,0,0,.22)',
+        }}
+      >
+        <BotaoFicha aoClicar={aoFechar}>Cancelar</BotaoFicha>
+        <BotaoFicha primario desabilitado={pendente} aoClicar={confirmar}>
+          {pendente ? 'Gravando…' : 'Concluir devolução'}
         </BotaoFicha>
       </div>
     </Modal>

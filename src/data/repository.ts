@@ -665,6 +665,7 @@ const repositorioSupabase: Repositorio = {
       .select(
         'protocolo, pedido_id, tipo, motivo, comentario, itens, fotos, status, aberta_em, ' +
           'reverso, lacre, conferencia, foto_nivel, foto_lacre, ' +
+          'resolucao, reembolso_valor, reembolso_forma, reembolso_em, comprovante_reembolso, troca_pedido_id, ' +
           'pedidos(valor, destino, gateway, rastreio, entregue_em, entrega_prevista_em, situacao, clientes(nome, email, telefone, cpf))',
       )
       .order('aberta_em', { ascending: false })
@@ -674,9 +675,11 @@ const repositorioSupabase: Repositorio = {
     const linhas = (data ?? []) as unknown as LinhaSolicitacao[]
     const dia = 24 * 60 * 60 * 1000
 
-    // As fotos vivem num bucket privado: a ficha as exibe por URL assinada de
-    // vida curta, geradas num lote só — uma chamada, não duas por solicitação.
-    const caminhos = linhas.flatMap((s) => [s.foto_nivel, s.foto_lacre].filter(Boolean) as string[])
+    // Fotos e comprovantes vivem num bucket privado: a ficha os exibe por URL
+    // assinada de vida curta, geradas num lote só — uma chamada por leitura.
+    const caminhos = linhas.flatMap(
+      (s) => [s.foto_nivel, s.foto_lacre, s.comprovante_reembolso].filter(Boolean) as string[],
+    )
     const urlAssinada = new Map<string, string>()
     if (caminhos.length) {
       const { data: assinadas } = await supabaseServer()
@@ -740,6 +743,14 @@ const repositorioSupabase: Repositorio = {
             ? { rotulo: 'Lacre / dano', url: urlAssinada.get(s.foto_lacre)! }
             : null,
         ].filter(Boolean) as { rotulo: string; url: string }[],
+        resolucao: s.resolucao,
+        reembolsoValor: s.reembolso_valor === null ? null : Number(s.reembolso_valor),
+        reembolsoForma: s.reembolso_forma,
+        reembolsoEm: s.reembolso_em,
+        comprovanteUrl: s.comprovante_reembolso
+          ? (urlAssinada.get(s.comprovante_reembolso) ?? null)
+          : null,
+        trocaPedidoId: s.troca_pedido_id,
         itens: (s.conferencia ?? []).map((i) =>
           aferirItem(i.perfume, i.variante, Number(i.medido_ml), i.observacao ?? ''),
         ),
@@ -1214,6 +1225,12 @@ interface LinhaSolicitacao {
   conferencia: { perfume: string; variante: VarianteMl; medido_ml: number | string; observacao?: string }[]
   foto_nivel: string | null
   foto_lacre: string | null
+  resolucao: string | null
+  reembolso_valor: number | string | null
+  reembolso_forma: 'pix' | 'estorno-cartao' | null
+  reembolso_em: string | null
+  comprovante_reembolso: string | null
+  troca_pedido_id: string | null
   pedidos: {
     valor: number | string
     destino: string | null
