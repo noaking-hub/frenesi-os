@@ -589,11 +589,15 @@ export async function coletarConcorrente(concorrenteId: string): Promise<Resulta
 
   const linhas = comVariante.map((o) => {
     const chaveEnsinada = normalizarTitulo(o.titulo)
-    const baseId = ensinados.get(chaveEnsinada) ?? casarTitulo(o.titulo, catalogo)?.baseId ?? null
+    const ensinado = ensinados.get(chaveEnsinada) ?? null
+    const baseId = ensinado ?? casarTitulo(o.titulo, catalogo)?.baseId ?? null
     return {
       concorrente_id: concorrenteId,
       chave: o.chave,
       base_id: baseId,
+      // A confiança do vínculo viaja com o preço: apelido é gente que
+      // ensinou; título é palpite de máquina. A tela mostra a diferença.
+      casado_por: baseId === null ? null : ensinado !== null ? 'apelido' : 'titulo',
       variante: o.variante,
       titulo: o.titulo,
       preco: o.preco,

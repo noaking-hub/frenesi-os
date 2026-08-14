@@ -264,6 +264,13 @@ export interface PrecoDeMercado {
   fonte: string
   /** Quantas lojas têm esta variante deste perfume. */
   lojas: number
+  /**
+   * Confiança do vínculo que sustenta o menor preço: 'alta' quando alguém
+   * ensinou o nome à mão; 'auto' quando foi casamento por título; 'baixa'
+   * quando veio de busca textual — o escopo manda destacar essa diferença
+   * antes de alguém decidir preço em cima.
+   */
+  confianca: 'alta' | 'auto' | 'baixa'
 }
 
 /**
@@ -283,35 +290,45 @@ export async function mercadoDaBase(baseId: string): Promise<PrecoDeMercado[]> {
 
   const { data: casados } = await sb
     .from('concorrente_precos')
-    .select('variante, preco, concorrentes(nome)')
+    .select('variante, preco, casado_por, concorrentes(nome)')
     .eq('base_id', baseId)
     .not('variante', 'is', null)
 
   const observados = ((casados ?? []) as unknown as {
     variante: number
     preco: number | string
+    casado_por: string | null
     concorrentes: { nome: string } | null
   }[]).map((p) => ({
     variante: p.variante as VarianteMl,
     preco: Number(p.preco),
     fonte: p.concorrentes?.nome ?? '—',
+    ensinado: p.casado_por === 'apelido',
   }))
 
   if (observados.length > 0) {
-    const porVariante = new Map<VarianteMl, Map<string, number>>()
+    const porVariante = new Map<VarianteMl, Map<string, { preco: number; ensinado: boolean }>>()
     for (const o of observados) {
       if (!(o.preco > 0)) continue
-      const fontes = porVariante.get(o.variante) ?? new Map<string, number>()
+      const fontes = porVariante.get(o.variante) ?? new Map<string, { preco: number; ensinado: boolean }>()
       const atual = fontes.get(o.fonte)
       // Mesma loja com dois preços para o tamanho: vale o menor, que é o que
       // o cliente pagaria lá.
-      if (atual === undefined || o.preco < atual) fontes.set(o.fonte, o.preco)
+      if (atual === undefined || o.preco < atual.preco) {
+        fontes.set(o.fonte, { preco: o.preco, ensinado: o.ensinado })
+      }
       porVariante.set(o.variante, fontes)
     }
     return [...porVariante.entries()]
       .map(([variante, fontes]) => {
-        const [fonte, menor] = [...fontes.entries()].sort((a, b) => a[1] - b[1])[0]
-        return { variante, menor, fonte, lojas: fontes.size }
+        const [fonte, dono] = [...fontes.entries()].sort((a, b) => a[1].preco - b[1].preco)[0]
+        return {
+          variante,
+          menor: dono.preco,
+          fonte,
+          lojas: fontes.size,
+          confianca: (dono.ensinado ? 'alta' : 'auto') as PrecoDeMercado['confianca'],
+        }
       })
       .sort((a, b) => a.variante - b.variante)
   }
@@ -337,6 +354,9 @@ export async function mercadoDaBase(baseId: string): Promise<PrecoDeMercado[]> {
         menor: l.menor as number,
         fonte: barata?.fonte ?? '—',
         lojas: Object.keys(l.porFonte).length,
+        // Busca textual é o caminho reserva — comparação de baixa confiança,
+        // e a tela diz isso em vez de fingir vínculo.
+        confianca: 'baixa' as const,
       }
     })
 }

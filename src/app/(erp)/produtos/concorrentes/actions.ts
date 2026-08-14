@@ -226,7 +226,8 @@ export async function ensinarApelido(titulo: string, baseId: string): Promise<Re
 
   const { error: erroAplicar } = await sb
     .from('concorrente_precos')
-    .update({ base_id: baseId })
+    // Vínculo ensinado é confiança de gente — a tela marca a diferença.
+    .update({ base_id: baseId, casado_por: 'apelido' })
     .is('base_id', null)
     .eq('titulo', titulo)
   if (erroAplicar) return { ok: false, erro: erroAplicar.message }
@@ -261,7 +262,7 @@ export async function recasarPendentes(): Promise<Resposta<{ casados: number }>>
     if (!c) continue
     const { error } = await sb
       .from('concorrente_precos')
-      .update({ base_id: c.baseId })
+      .update({ base_id: c.baseId, casado_por: 'titulo' })
       .eq('concorrente_id', p.concorrente_id)
       .eq('chave', p.chave)
     if (!error) casados++

@@ -63,7 +63,7 @@ interface Mudanca {
 }
 
 /** Nossa posição × mercado, pelos vínculos que a coleta grava (base_id). */
-async function visaoDeMercado(): Promise<{
+async function visaoDeMercado(dias: number): Promise<{
   acima: PosicaoLinha[]
   abaixo: number
   soNossos: number
@@ -74,7 +74,7 @@ async function visaoDeMercado(): Promise<{
   if (!supabaseConfigurado()) return vazio
   const sb = supabaseServer()
 
-  const quatorzeDias = new Date(Date.now() - 14 * 86_400_000).toISOString()
+  const quatorzeDias = new Date(Date.now() - dias * 86_400_000).toISOString()
   const [{ data: precos }, { data: nossos }, { data: bases }, { data: mudancasCruas }] =
     await Promise.all([
       sb.from('concorrente_precos').select('base_id, variante, preco, concorrentes(nome)').not('base_id', 'is', null).not('variante', 'is', null).limit(8000),
@@ -159,13 +159,21 @@ async function visaoDeMercado(): Promise<{
 const dataHora = (iso: string) =>
   new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
 
-export default async function Concorrentes() {
+export default async function Concorrentes({
+  searchParams,
+}: {
+  searchParams: Promise<{ dias?: string }>
+}) {
+  // Janela do histórico de mercado — 14/30/90 dias, como o escopo pede.
+  const { dias: diasParam } = await searchParams
+  const dias = [14, 30, 90].includes(Number(diasParam)) ? Number(diasParam) : 14
+
   const repo = repositorio()
   const [bases, fontes, semDono, mercado] = await Promise.all([
     repo.perfumesBase(),
     repo.concorrentesFontes(),
     lerSemDono(),
-    visaoDeMercado(),
+    visaoDeMercado(dias),
   ])
 
   const atualizadoEm =
@@ -198,7 +206,7 @@ export default async function Concorrentes() {
       tom: 'ok',
     },
     {
-      label: 'Movimentos em 14 dias',
+      label: `Movimentos em ${dias} dias`,
       valor: String(mercado.mudancas.length),
       hint: furos.length
         ? `${plural(furos.length, 'corte furou', 'cortes furaram')} nosso preço`
@@ -266,9 +274,23 @@ export default async function Concorrentes() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '16px 18px', borderBottom: '1px solid rgba(255,255,255,.06)' }}>
             <TituloSecao tamanho={14.5}>Movimentos do mercado</TituloSecao>
             <div style={{ flex: 1 }} />
-            <span className="font-sans" style={{ fontSize: 10, color: 'rgba(242,237,227,.35)' }}>
-              últimos 14 dias
-            </span>
+            {/* As três janelas do escopo, como links: a tela é de servidor e
+                o período muda a consulta, não só o rótulo. */}
+            {[14, 30, 90].map((d) => (
+              <a
+                key={d}
+                href={d === 14 ? '/produtos/concorrentes' : `/produtos/concorrentes?dias=${d}`}
+                className="font-sans hover:text-ouro"
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                  color: dias === d ? COR.ouro : 'rgba(242,237,227,.35)',
+                }}
+              >
+                {`${d}d`}
+              </a>
+            ))}
           </div>
           {mercado.mudancas.length === 0 ? (
             <div style={{ padding: '26px 18px', textAlign: 'center' }}>

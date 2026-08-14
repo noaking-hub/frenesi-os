@@ -255,9 +255,25 @@ export function PrecificacaoCliente({ bases, parametros, precos, baseInicial }: 
             </span>
             <span
               className="font-mono"
-              style={{ fontSize: 9, color: 'rgba(242,237,227,.3)', whiteSpace: 'nowrap' }}
+              style={{
+                fontSize: 9,
+                // Baixa confiança pede destaque: o vínculo veio de busca por
+                // texto, não de mapeamento — decidir preço em cima exige olhar.
+                color:
+                  l.mercado.confianca === 'baixa' ? COR.atencao : 'rgba(242,237,227,.3)',
+                whiteSpace: 'nowrap',
+              }}
+              title={
+                l.mercado.confianca === 'alta'
+                  ? 'Vínculo ensinado à mão — confiança alta'
+                  : l.mercado.confianca === 'auto'
+                    ? 'Casado automaticamente pelo título'
+                    : 'Comparação por busca textual — baixa confiança'
+              }
             >
-              {`${l.mercado.fonte} · ${plural(l.mercado.lojas, 'loja', 'lojas')}`}
+              {`${l.mercado.fonte} · ${plural(l.mercado.lojas, 'loja', 'lojas')}${
+                l.mercado.confianca === 'alta' ? ' · ✓ ensinado' : l.mercado.confianca === 'baixa' ? ' · baixa confiança' : ''
+              }`}
             </span>
           </span>
         )
