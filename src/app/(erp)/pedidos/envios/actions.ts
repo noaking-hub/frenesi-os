@@ -113,6 +113,9 @@ export interface ResultadoBaixa {
   semEspelho: string[]
   /** Já enviados na Shopify por outro caminho — saíram da fila como feitos. */
   jaEnviados: string[]
+  /** O envio existe mas a loja negou o evento de entrega (falta o escopo
+   * write_fulfillments) — continuam na fila de baixa até o escopo chegar. */
+  semEvento: string[]
   /** O orçamento de tempo acabou antes deles — continuam na fila. */
   restantes: string[]
   /** Pedidos que ganharam o número da Shopify nesta rodada, antes da baixa. */
@@ -228,6 +231,7 @@ export async function baixarNaShopify(
           fechados: 0,
           ignorados: [],
           jaEnviados: [],
+          semEvento: [],
           restantes: [],
           semEspelho,
           vinculados,
@@ -242,8 +246,10 @@ export async function baixarNaShopify(
 
     // Só marca no ERP o que a Shopify de fato aceitou — ou já tinha aceitado
     // por outro caminho. Gravar os que falharam esconderia o pedido da próxima
-    // rodada; gravar os que o tempo não alcançou, idem.
-    const falhou = new Set([...r.ignorados.map((i) => i.pedido), ...r.restantes])
+    // rodada; gravar os que o tempo não alcançou, idem. E quem ficou sem o
+    // evento de entrega (escopo negado) fica na fila: a baixa dele é
+    // exatamente o que esta fila existe para consertar.
+    const falhou = new Set([...r.ignorados.map((i) => i.pedido), ...r.restantes, ...r.semEvento])
     const baixados = alvos.map((a) => a.pedidoId).filter((id) => !falhou.has(id))
     if (baixados.length) {
       const agora = new Date().toISOString()

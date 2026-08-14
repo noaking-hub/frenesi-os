@@ -1286,6 +1286,13 @@ export interface ResultadoEnvios {
    * e foi isso que levou o "Sincronizar agora" a estourar o tempo da Netlify.
    */
   jaEnviados: string[]
+  /**
+   * Subconjunto dos jaEnviados cujo evento de ENTREGA a Shopify negou —
+   * na prática, falta do escopo write_fulfillments. Saem da fila de espelho
+   * (repetir a negativa a cada rodada entupia a cabeça da fila), mas NÃO
+   * podem ser dados como baixados: a loja ainda mostra o envio em trânsito.
+   */
+  semEvento: string[]
   /** Não processados nesta rodada — o orçamento de tempo acabou antes. */
   restantes: string[]
 }
@@ -1318,6 +1325,7 @@ export async function sincronizarEnviosShopify(
     fechados: 0,
     ignorados: [],
     jaEnviados: [],
+    semEvento: [],
     restantes: [],
   }
   if (envios.length === 0) return vazio
@@ -1326,6 +1334,7 @@ export async function sincronizarEnviosShopify(
 
   const ignorados: ResultadoEnvios['ignorados'] = []
   const jaEnviados: string[] = []
+  const semEvento: string[] = []
   const restantes: string[] = []
   let enviados = 0
   let entregues = 0
@@ -1381,12 +1390,17 @@ export async function sincronizarEnviosShopify(
             MUTACAO_ENTREGA,
             { fulfillmentEvent: { fulfillmentId: pendente.id, status: 'DELIVERED' } },
             'marcar a entrega',
-            'write_merchant_managed_fulfillment_orders',
+            'write_fulfillments',
           )
           if ((rd.fulfillmentEventCreate?.userErrors ?? []).length === 0) entregues++
-        } catch (erro) {
-          ignorados.push({ pedido: e.pedidoId, motivo: `não marquei a entrega: ${mensagemDe(erro)}` })
-          return
+          else semEvento.push(e.pedidoId)
+        } catch {
+          // Negativa aqui é quase sempre falta do escopo write_fulfillments —
+          // e repetir a mesma negativa a cada rodada deixava esses pedidos
+          // entupindo a cabeça da fila, com o orçamento de tempo inteiro
+          // gasto em recusas. O envio existe: sai da fila como feito, e o
+          // evento pendente fica anotado para quando o escopo chegar.
+          semEvento.push(e.pedidoId)
         }
       }
       jaEnviados.push(e.pedidoId)
@@ -1444,14 +1458,17 @@ export async function sincronizarEnviosShopify(
           },
         },
         'marcar a entrega',
-        'write_merchant_managed_fulfillment_orders',
+        'write_fulfillments',
       )
       if ((rd.fulfillmentEventCreate?.userErrors ?? []).length === 0) entregues++
+      else semEvento.push(e.pedidoId)
 
       // Entregue e faturado é pedido terminado: fechar tira da fila de
       // "abertos" da loja, que é o trabalho manual que sobrava para o fim.
       // Sem o escopo write_orders a Shopify recusa — e isso não invalida o
-      // envio, então o erro vira aviso em vez de derrubar a rodada.
+      // envio. NÃO entra em `ignorados`: o chamador devolve ignorado à fila,
+      // e um pedido cujo envio DEU CERTO ficaria sendo reprocessado para
+      // sempre por causa de um fechamento cosmético que continua negado.
       try {
         const rf = await chamarShopify<{
           orderClose: { userErrors: { message: string }[] }
@@ -1463,20 +1480,9 @@ export async function sincronizarEnviosShopify(
           'fechar o pedido',
           'write_orders',
         )
-        const errosFechar = rf.orderClose?.userErrors ?? []
-        if (errosFechar.length) {
-          ignorados.push({
-            pedido: e.pedidoId,
-            motivo: `enviado, mas não fechei na loja: ${errosFechar[0].message}`,
-          })
-        } else {
-          fechados++
-        }
+        if ((rf.orderClose?.userErrors ?? []).length === 0) fechados++
       } catch (erro) {
-        ignorados.push({
-          pedido: e.pedidoId,
-          motivo: `enviado, mas não fechei na loja: ${erro instanceof Error ? erro.message : String(erro)}`,
-        })
+        console.error(`[shopify] envio de ${e.pedidoId} criado, mas não fechei o pedido na loja:`, erro)
       }
     }
   }
@@ -1501,7 +1507,7 @@ export async function sincronizarEnviosShopify(
     )
   }
 
-  return { enviados, entregues, fechados, ignorados, jaEnviados, restantes }
+  return { enviados, entregues, fechados, ignorados, jaEnviados, semEvento, restantes }
 }
 
 // ── Vínculo Yampi → Shopify ────────────────────────────────────────────────

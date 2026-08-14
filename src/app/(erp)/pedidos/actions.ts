@@ -69,6 +69,10 @@ const EXIGIDOS = [
   'read_merchant_managed_fulfillment_orders',
   'write_merchant_managed_fulfillment_orders',
   'write_orders',
+  // Marcar a ENTREGA (fulfillmentEventCreate) exige este escopo próprio —
+  // criar o envio não basta: sem ele a loja fica em "em andamento" para
+  // sempre, mesmo com o pedido entregue no ERP.
+  'write_fulfillments',
 ]
 
 /**
@@ -172,6 +176,8 @@ export type RespostaEnvios =
       entregues: number
       fechados: number
       ignorados: { pedido: string; motivo: string }[]
+      /** Envios que existem na loja mas ficaram sem o evento de entrega. */
+      semEvento: number
       /** Quantos ainda esperam na fila — o chamador decide se roda de novo. */
       naFila: number
     }
@@ -242,9 +248,12 @@ export async function sincronizarEnvios(opcoes: { prazoMs?: number } = {}): Prom
 
       // Para os entregues, o espelho incluiu o evento de entrega — fechar
       // também a fila de baixa evita que "Baixar na Shopify" refaça o mesmo
-      // pedido pelo outro caminho.
+      // pedido pelo outro caminho. EXCETO quem ficou sem o evento (escopo
+      // write_fulfillments negado): a loja ainda mostra o envio em trânsito,
+      // e dar baixa aqui esconderia o pedido da fila que vai consertar isso.
+      const eventoNegado = new Set(r.semEvento)
       const entreguesGravados = envios
-        .filter((e) => e.entregue && gravados.includes(e.pedidoId))
+        .filter((e) => e.entregue && gravados.includes(e.pedidoId) && !eventoNegado.has(e.pedidoId))
         .map((e) => e.pedidoId)
       if (entreguesGravados.length) {
         const { error: erroBaixa } = await sb
@@ -272,6 +281,7 @@ export async function sincronizarEnvios(opcoes: { prazoMs?: number } = {}): Prom
       entregues: r.entregues,
       fechados: r.fechados,
       ignorados: r.ignorados,
+      semEvento: r.semEvento.length,
       naFila: count ?? 0,
     }
   } catch (e) {

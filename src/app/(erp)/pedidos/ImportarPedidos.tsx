@@ -218,6 +218,7 @@ export function ImportarPedidos({
       let enviados = 0
       let entregues = 0
       let naFila = 0
+      let semEvento = 0
       for (let rodada = 1; rodada <= 8; rodada++) {
         setResumo(
           rodada === 1
@@ -239,7 +240,13 @@ export function ImportarPedidos({
         enviados += e.enviados
         entregues += e.entregues
         naFila = e.naFila
+        semEvento += e.semEvento
         if (naFila === 0) break
+      }
+      if (semEvento) {
+        tropecos.push(
+          `${semEvento} envio(s) já existem na loja mas ficaram SEM a entrega marcada — o app da Shopify precisa do escopo write_fulfillments (confira em Ferramentas → Conferir permissões)`,
+        )
       }
 
       router.refresh()
