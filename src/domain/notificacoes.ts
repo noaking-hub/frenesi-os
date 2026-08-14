@@ -1,4 +1,9 @@
-import { HTML_VALIDADO_ENTREGUE, HTML_VALIDADO_ENVIO } from './emails-validados'
+import {
+  HTML_VALIDADO_DEVOLUCAO_ABERTA,
+  HTML_VALIDADO_DEVOLUCAO_APROVADA,
+  HTML_VALIDADO_ENTREGUE,
+  HTML_VALIDADO_ENVIO,
+} from './emails-validados'
 import type { ModeloEmailRecuperacao } from './recuperacao'
 
 /**
@@ -15,6 +20,8 @@ export type EventoNotificacao =
   | 'pedido_faturado'
   | 'pedido_enviado'
   | 'pedido_entregue'
+  | 'devolucao_aberta'
+  | 'devolucao_aprovada'
   | 'devolucao_recebida'
   | 'cashback_creditado'
   | 'cashback_expirando'
@@ -98,6 +105,8 @@ export const ASSUNTO: Record<EventoNotificacao, string> = {
   // frustração exatamente no aviso que deveria acalmar.
   pedido_enviado: 'Seu pedido foi enviado · {pedido}',
   pedido_entregue: 'Seu pedido chegou · {pedido}',
+  devolucao_aberta: 'Recebemos sua solicitação de devolução · {protocolo}',
+  devolucao_aprovada: 'Devolução aprovada · código de postagem · {protocolo}',
   devolucao_recebida: 'Recebemos sua devolução · {pedido}',
   cashback_creditado: 'Você ganhou cashback na Frenesi',
   cashback_expirando: 'Seu cashback está perto de expirar',
@@ -109,6 +118,8 @@ export const ROTULO_EVENTO: Record<EventoNotificacao, string> = {
   pedido_faturado: 'Nota fiscal emitida',
   pedido_enviado: 'Pedido enviado',
   pedido_entregue: 'Pedido entregue',
+  devolucao_aberta: 'Devolução aberta no portal',
+  devolucao_aprovada: 'Devolução aprovada · reverso enviado',
   devolucao_recebida: 'Devolução recebida',
   cashback_creditado: 'Cashback creditado',
   cashback_expirando: 'Cashback expirando',
@@ -180,6 +191,76 @@ export function emailEnvio(
 }
 
 const LOJA = 'https://frenesiperfumes.com.br'
+
+// ── Modelos da devolução ────────────────────────────────────────────────────
+
+/**
+ * Confirmação de que a solicitação existe do outro lado.
+ *
+ * O bloco em destaque é o PROTOCOLO — o número que o cliente vai ditar para o
+ * atendimento. Placeholders: {nome}, {pedido}, {protocolo}, {motivo}.
+ */
+export const MODELO_DEVOLUCAO_ABERTA_PADRAO: ModeloEmailRecuperacao = {
+  assunto: 'Recebemos sua solicitação de devolução · {protocolo}',
+  titulo: '{nome}, recebemos sua solicitação',
+  mensagem:
+    'Nossa equipe analisa a devolução em até 1 dia útil. Você não precisa fazer nada agora — guarde o produto na embalagem original, com o lacre como está.',
+  textoBotao: 'Falar com o atendimento',
+  html: HTML_VALIDADO_DEVOLUCAO_ABERTA,
+}
+
+/**
+ * Aprovação com o código de postagem reversa em destaque — é o e-mail que o
+ * cliente leva à agência. Placeholders: {nome}, {protocolo}, {plataforma},
+ * {reverso}.
+ */
+export const MODELO_DEVOLUCAO_APROVADA_PADRAO: ModeloEmailRecuperacao = {
+  assunto: 'Devolução aprovada · código de postagem · {protocolo}',
+  titulo: '{nome}, sua devolução foi aprovada',
+  mensagem:
+    'Leve o decant na embalagem original, com o lacre como está, e apresente o código abaixo no balcão da agência. A postagem não tem custo para você.',
+  textoBotao: 'Tirar dúvida no WhatsApp',
+  html: HTML_VALIDADO_DEVOLUCAO_APROVADA,
+}
+
+/** Monta a confirmação de devolução aberta. */
+export function emailDevolucaoAberta(
+  d: { nome: string | null; pedido: string; protocolo: string; motivo: string },
+  modelo: ModeloEmailRecuperacao = MODELO_DEVOLUCAO_ABERTA_PADRAO,
+): { assunto: string; html: string } {
+  const nome = d.nome?.trim().split(/\s+/)[0] || 'Olá'
+  const preenche = (t: string) =>
+    t
+      .split('{nome}').join(escapa(nome))
+      .split('{pedido}').join(escapa(d.pedido))
+      .split('{protocolo}').join(escapa(d.protocolo))
+      .split('{motivo}').join(escapa(d.motivo || 'Devolução'))
+  return {
+    assunto: preenche(modelo.assunto),
+    html: preenche(modelo.html || HTML_VALIDADO_DEVOLUCAO_ABERTA),
+  }
+}
+
+/**
+ * Monta a aprovação com o reverso. Sem código não há e-mail — quem chama
+ * garante; um "código: em breve" na caixa de destaque seria pior que esperar.
+ */
+export function emailDevolucaoAprovada(
+  d: { nome: string | null; protocolo: string; plataforma: string; reverso: string },
+  modelo: ModeloEmailRecuperacao = MODELO_DEVOLUCAO_APROVADA_PADRAO,
+): { assunto: string; html: string } {
+  const nome = d.nome?.trim().split(/\s+/)[0] || 'Olá'
+  const preenche = (t: string) =>
+    t
+      .split('{nome}').join(escapa(nome))
+      .split('{protocolo}').join(escapa(d.protocolo))
+      .split('{plataforma}').join(escapa(d.plataforma))
+      .split('{reverso}').join(escapa(d.reverso))
+  return {
+    assunto: preenche(modelo.assunto),
+    html: preenche(modelo.html || HTML_VALIDADO_DEVOLUCAO_APROVADA),
+  }
+}
 
 /**
  * Aviso de entrega concluída, na mesma moldura validada.

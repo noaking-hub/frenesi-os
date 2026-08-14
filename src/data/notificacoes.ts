@@ -3,6 +3,8 @@ import 'server-only'
 import {
   ASSUNTO,
   avisosDe,
+  emailDevolucaoAberta,
+  emailDevolucaoAprovada,
   emailEntregue,
   emailEnvio,
   identificarFrete,
@@ -261,4 +263,143 @@ function mensagemDoAviso(
     assunto: destinoDeTeste ? `[TESTE] ${conteudo.assunto}` : conteudo.assunto,
     html: conteudo.html,
   }
+}
+
+// ── Avisos de devolução ─────────────────────────────────────────────────────
+
+/**
+ * Um aviso de devolução, com as três travas do módulo: chave derivada do fato
+ * (`DEV-1042|devolucao_aberta`), vaga reservada antes do envio, e — com o
+ * módulo desligado — o fato entra no log como dispensado, sem sair e-mail.
+ * Ligar `AVISOS_DE_PEDIDO=1` depois só avisa o que acontecer daí em diante.
+ *
+ * Nunca lança: o aviso é coadjuvante. Falhar o registro da devolução porque o
+ * provedor de e-mail espirrou inverteria a importância das coisas.
+ */
+async function avisarDevolucao(
+  protocolo: string,
+  evento: 'devolucao_aberta' | 'devolucao_aprovada',
+  montar: (d: {
+    nome: string | null
+    email: string
+    pedido: string
+    motivo: string
+    gateway: string
+    reverso: string
+  }) => { assunto: string; html: string } | null,
+): Promise<void> {
+  try {
+    if (!supabaseConfigurado()) return
+    const sb = supabaseServer()
+
+    const { data } = await sb
+      .from('solicitacoes_devolucao')
+      .select('protocolo, pedido_id, motivo, reverso, pedidos(servico_frete, rastreio, clientes(nome, email))')
+      .eq('protocolo', protocolo)
+      .maybeSingle()
+    const s = data as unknown as {
+      protocolo: string
+      pedido_id: string
+      motivo: string
+      reverso: string
+      pedidos: {
+        servico_frete: string | null
+        rastreio: string | null
+        clientes: { nome: string | null; email: string | null } | null
+      } | null
+    } | null
+    const email = s?.pedidos?.clientes?.email?.trim()
+    if (!s || !email) return
+
+    const mensagem = montar({
+      nome: s.pedidos?.clientes?.nome ?? null,
+      email,
+      pedido: s.pedido_id,
+      motivo: s.motivo,
+      gateway: identificarFrete(s.pedidos?.servico_frete ?? null, s.pedidos?.rastreio ?? null)
+        .gateway,
+      reverso: s.reverso,
+    })
+    if (!mensagem) return
+
+    const chave = `${protocolo}|${evento}`
+    const desligado = !avisosDePedidoLigados() || !emailConfigurado()
+
+    if (desligado) {
+      await sb.from('notificacoes_enviadas').upsert(
+        {
+          chave,
+          pedido_id: s.pedido_id,
+          evento,
+          destinatario: email,
+          assunto: '(não enviado)',
+          estado: 'dispensado',
+          motivo: 'módulo de avisos desligado quando o fato aconteceu',
+          concluido_em: new Date().toISOString(),
+        },
+        { onConflict: 'chave', ignoreDuplicates: true },
+      )
+      return
+    }
+
+    const { data: ganha } = await sb
+      .from('notificacoes_enviadas')
+      .upsert(
+        {
+          chave,
+          pedido_id: s.pedido_id,
+          evento,
+          destinatario: email,
+          assunto: mensagem.assunto,
+          estado: 'enviando',
+        },
+        { onConflict: 'chave', ignoreDuplicates: true },
+      )
+      .select('chave')
+    if (!(ganha ?? []).length) return
+
+    try {
+      const r = await entregar({ para: email, assunto: mensagem.assunto, html: mensagem.html })
+      await sb
+        .from('notificacoes_enviadas')
+        .update({ estado: 'enviado', provedor_id: r.id, concluido_em: new Date().toISOString() })
+        .eq('chave', chave)
+    } catch (e) {
+      await sb
+        .from('notificacoes_enviadas')
+        .update({
+          estado: 'falhou',
+          motivo: (e instanceof Error ? e.message : String(e)).slice(0, 300),
+          concluido_em: new Date().toISOString(),
+        })
+        .eq('chave', chave)
+    }
+  } catch (e) {
+    console.error(`[devolucoes] aviso ${evento} de ${protocolo} não registrado:`, e)
+  }
+}
+
+/** Confirmação de solicitação aberta — chamado pelo portal. */
+export async function avisarDevolucaoAberta(protocolo: string): Promise<void> {
+  const modelo = await lerModeloEmail('devolucao-aberta').catch(() => undefined)
+  await avisarDevolucao(protocolo, 'devolucao_aberta', (d) =>
+    emailDevolucaoAberta(
+      { nome: d.nome, pedido: d.pedido, protocolo, motivo: d.motivo },
+      modelo,
+    ),
+  )
+}
+
+/** Aprovação com o código reverso — chamado quando o ERP gera o reverso. */
+export async function avisarDevolucaoAprovada(protocolo: string): Promise<void> {
+  const modelo = await lerModeloEmail('devolucao-aprovada').catch(() => undefined)
+  await avisarDevolucao(protocolo, 'devolucao_aprovada', (d) =>
+    // Sem reverso não há o que apresentar na agência — o e-mail não sai.
+    d.reverso
+      ? emailDevolucaoAprovada(
+          { nome: d.nome, protocolo, plataforma: d.gateway, reverso: d.reverso },
+          modelo,
+        )
+      : null,
+  )
 }

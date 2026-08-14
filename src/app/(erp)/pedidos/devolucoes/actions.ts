@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 
+import { avisarDevolucaoAprovada } from '@/data/notificacoes'
 import { mensagemDe } from '@/data/shopify'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import type { StatusSolicitacao, VarianteMl } from '@/domain'
@@ -33,6 +34,12 @@ export async function moverSolicitacao(
   if (error) {
     console.error('[devolucoes] mover_solicitacao_devolucao falhou:', error)
     return { ok: false, erro: mensagemDe(error) }
+  }
+
+  // Reverso recém-gerado dispara o e-mail de aprovação — pronto, mas atrás da
+  // trava AVISOS_DE_PEDIDO; desligado, o fato só entra no log.
+  if (status === 'Aguardando postagem' && reverso.trim()) {
+    await avisarDevolucaoAprovada(protocolo)
   }
 
   revalidatePath('/', 'layout')

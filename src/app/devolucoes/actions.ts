@@ -1,5 +1,6 @@
 'use server'
 
+import { avisarDevolucaoAberta } from '@/data/notificacoes'
 import { repositorio } from '@/data/repository'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import {
@@ -305,6 +306,11 @@ export async function abrirDevolucao(
       .update({ foto_nivel: caminhoNivel, foto_lacre: caminhoLacre })
       .eq('protocolo', protocolo)
   }
+
+  // Confirmação por e-mail — pronta, mas atrás da trava AVISOS_DE_PEDIDO:
+  // desligada, o fato entra no log como dispensado e nada sai. A função nunca
+  // lança; a solicitação registrada é o que importa.
+  await avisarDevolucaoAberta(protocolo)
 
   return { ok: true, protocolo }
 }
