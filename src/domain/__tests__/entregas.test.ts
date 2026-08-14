@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { acoesDisponiveis, aferirItem, aguardaBaixaShopify, diasAlemDoPrazo, ehEntregaLocal, ehExcecao, emAberto, etapaDe, identificarFrete, resumirEnvios, resumirOcorrencias, situacaoDoPedido, slaDeExpedicao, triarDevolucao } from '..'
+import { PRAZO_EXPEDICAO_DIAS, acoesDisponiveis, aferirItem, aguardaBaixaShopify, diasAlemDoPrazo, ehEntregaLocal, ehExcecao, emAberto, etapaDe, identificarFrete, resumirEnvios, resumirOcorrencias, servicoLegivel, situacaoDoPedido, slaDeEntrega, slaDeExpedicao, triarDevolucao } from '..'
 import type { Envio, Ocorrencia } from '..'
 
 const envio = (p: Partial<Envio>): Envio => ({
@@ -179,6 +179,67 @@ describe('triagem de devolução', () => {
   })
 })
 
+describe('SLA de entrega — o prazo da transportadora, depois do despacho', () => {
+  const agora = new Date('2026-08-13T12:00:00Z')
+
+  it('conta da postagem usando os dias cotados', () => {
+    // Postado dia 10 com prazo de 5 dias: entrega até 15/08.
+    const s = slaDeEntrega(
+      { situacao: 'enviado', entregueEm: null, postadoEm: '2026-08-10T08:00:00Z', prazoDias: 5 },
+      agora,
+    )
+    expect(s.estado).toBe('no-prazo')
+    expect(s.rotulo).toBe('Entrega até 15/08')
+  })
+
+  it('vence hoje e atrasa em dias inteiros', () => {
+    expect(
+      slaDeEntrega(
+        { situacao: 'enviado', entregueEm: null, postadoEm: '2026-08-10T08:00:00Z', prazoDias: 3 },
+        agora,
+      ).estado,
+    ).toBe('vence-hoje')
+    const atrasado = slaDeEntrega(
+      { situacao: 'enviado', entregueEm: null, postadoEm: '2026-08-05T08:00:00Z', prazoDias: 5 },
+      agora,
+    )
+    expect(atrasado.estado).toBe('atrasado')
+    expect(atrasado.rotulo).toBe('Entrega atrasada · 3 dias')
+  })
+
+  it('sem postagem ou sem prazo cotado, a resposta é "sem previsão" — nunca uma data inventada', () => {
+    expect(
+      slaDeEntrega({ situacao: 'enviado', entregueEm: null, postadoEm: null, prazoDias: 5 }, agora)
+        .estado,
+    ).toBe('sem-previsao')
+    expect(
+      slaDeEntrega(
+        { situacao: 'enviado', entregueEm: null, postadoEm: '2026-08-10T08:00:00Z', prazoDias: null },
+        agora,
+      ).estado,
+    ).toBe('sem-previsao')
+  })
+
+  it('entregue encerra a régua', () => {
+    expect(
+      slaDeEntrega(
+        { situacao: 'entregue', entregueEm: '2026-08-12T10:00:00Z', postadoEm: '2026-08-10T08:00:00Z', prazoDias: 5 },
+        agora,
+      ).estado,
+    ).toBe('entregue')
+  })
+})
+
+describe('serviço legível', () => {
+  it('traduz os códigos de máquina para gente', () => {
+    expect(servicoLegivel('FRENET_PAC_03298')).toBe('Frenet · PAC')
+    expect(servicoLegivel('ME_STANDARD_35')).toBe('Melhor Envio · Standard')
+    expect(servicoLegivel('ME_EXPRESS_31')).toBe('Melhor Envio · Express')
+    expect(servicoLegivel('MOTOBOY')).toBe('Motoboy')
+    expect(servicoLegivel(null)).toBeNull()
+  })
+})
+
 describe('ciclo de vida da devolução', () => {
   it('libera aprovar e recusar só enquanto está em análise', () => {
     expect(acoesDisponiveis('Nova', false).emAnalise).toBe(true)
@@ -286,6 +347,16 @@ describe('entrega local', () => {
 describe('SLA de expedição', () => {
   const agora = new Date('2026-08-13T12:00:00Z')
   const base = { situacao: 'pago' as const, entregueEm: null }
+
+  it('o prazo padrão é a régua da operação: 72 horas do pagamento', () => {
+    expect(PRAZO_EXPEDICAO_DIAS).toBe(3)
+    // Comprado dia 11, sem prazo explícito: vence dia 14 — amanhã.
+    expect(slaDeExpedicao({ ...base, compradoEm: '2026-08-11T09:00:00Z' }, undefined, agora).rotulo)
+      .toBe('Amanhã')
+    // Comprado dia 10: vence hoje, dia 13.
+    expect(slaDeExpedicao({ ...base, compradoEm: '2026-08-10T09:00:00Z' }, undefined, agora).estado)
+      .toBe('hoje')
+  })
 
   it('fala a língua da operação, não em horas', () => {
     expect(slaDeExpedicao({ ...base, compradoEm: '2026-08-11T09:00:00Z' }, 2, agora).rotulo).toBe('Vence hoje')

@@ -122,6 +122,8 @@ export interface SituacaoLogistica {
   local: string | null
   /** Quantas tentativas de entrega a transportadora registrou. */
   tentativas: number
+  /** Primeiro escaneamento — é a postagem, e é dele que o prazo de entrega conta. */
+  primeiroEvento: string | null
   /**
    * Horas desde o último evento. Acima de 72 h com o objeto em trânsito é
    * pendência: não é erro da transportadora, é sinal de que algo travou.
@@ -155,12 +157,16 @@ export function situacaoLogistica(
       original: null,
       local: null,
       tentativas: 0,
+      primeiroEvento: null,
       horasSemAtualizacao: null,
     }
   }
 
   const ordenados = [...eventos].sort((a, b) => (b.quando ?? '').localeCompare(a.quando ?? ''))
   const tentativas = ordenados.filter((e) => statusDoEvento(e.descricao) === 'tentativa').length
+  const primeiroEvento = ordenados.length
+    ? (ordenados[ordenados.length - 1].quando ?? null)
+    : null
 
   const decisivo = ordenados.find((e) => statusDoEvento(e.descricao) !== null)
   const ultimo = ordenados[0] ?? null
@@ -179,6 +185,7 @@ export function situacaoLogistica(
       original: ultimo?.descricao ?? null,
       local: ultimo?.local ?? null,
       tentativas,
+      primeiroEvento,
       horasSemAtualizacao: Number.isFinite(horas) ? horas : null,
     }
   }
@@ -189,6 +196,7 @@ export function situacaoLogistica(
     original: decisivo.descricao,
     local: decisivo.local ?? null,
     tentativas,
+    primeiroEvento,
     horasSemAtualizacao: horas,
   }
 }

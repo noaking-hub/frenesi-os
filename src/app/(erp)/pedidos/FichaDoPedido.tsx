@@ -10,6 +10,7 @@ import {
   paginaDeRastreio,
   resumirEvento,
   servicoLegivel,
+  slaDeEntrega,
   statusDoEvento,
   statusOperacional,
   type EventoTransportadora,
@@ -111,6 +112,32 @@ export function FichaDoPedido({
     entregaLocal: pedido.entregaLocal,
   })
   const link = pedido.rastreioUrl ?? paginaDeRastreio(pedido.transportadora, pedido.rastreio)
+
+  // Segunda metade da régua de prazo: o relógio da transportadora, contado da
+  // postagem com o prazo que ELA cotou. Sem as duas pontas, "Sem previsão" —
+  // data inventada aqui viraria promessa quebrada na boca do atendimento.
+  const previsao = slaDeEntrega({
+    situacao: pedido.situacao,
+    entregueEm: pedido.entregueEm,
+    postadoEm: logistica.primeiroEvento,
+    prazoDias: pedido.prazoEntregaDias,
+  })
+  const textoPrevisao =
+    previsao.estado === 'no-prazo'
+      ? `Até ${previsao.ate}`
+      : previsao.estado === 'vence-hoje'
+        ? 'Vence hoje'
+        : previsao.estado === 'atrasado'
+          ? previsao.rotulo.replace('Entrega atrasada', 'Atrasada')
+          : previsao.rotulo
+  const corPrevisao =
+    previsao.estado === 'atrasado'
+      ? COR.erro
+      : previsao.estado === 'vence-hoje'
+        ? COR.atencao
+        : previsao.estado === 'entregue'
+          ? COR.ok
+          : undefined
 
   const copiar = async (texto: string, chave: string) => {
     try {
@@ -324,7 +351,7 @@ export function FichaDoPedido({
               </div>
               <Campo rotulo="Data de coleta" valor={coleta?.quando ? (dataHora(coleta.quando) ?? '—') : '—'} />
               {/* "Sem previsão" é resposta legítima; data inventada, nunca. */}
-              <Campo rotulo="Previsão de entrega" valor="Sem previsão" />
+              <Campo rotulo="Previsão de entrega" valor={textoPrevisao} cor={corPrevisao} />
               <Campo
                 rotulo="Última atualização"
                 valor={logistica.desde ? (dataHora(logistica.desde) ?? '—') : 'Sem evento'}
@@ -808,11 +835,14 @@ function Campo({
   valor,
   mono,
   ouro,
+  cor,
 }: {
   rotulo: string
   valor: string
   mono?: boolean
   ouro?: boolean
+  /** Cor de estado (atraso, vencimento) — sobrepõe o cinza padrão. */
+  cor?: string
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
@@ -821,8 +851,8 @@ function Campo({
         className={mono ? 'font-mono' : 'font-sans'}
         style={{
           fontSize: mono ? 11.5 : 12,
-          color: ouro ? COR.ouro : 'rgba(242,237,227,.88)',
-          fontWeight: ouro ? 700 : 400,
+          color: ouro ? COR.ouro : (cor ?? 'rgba(242,237,227,.88)'),
+          fontWeight: ouro || cor ? 700 : 400,
           overflowWrap: 'anywhere',
         }}
       >

@@ -234,6 +234,8 @@ export interface Pedido {
   shopifyNumero?: string | null
   /** Quando o ERP marcou a entrega na Shopify. Preenchido = baixado. */
   entregaShopifyEm?: string | null
+  /** Prazo de entrega cotado pela transportadora, em dias da postagem. */
+  prazoEntregaDias?: number | null
   estoqueBaixadoEm?: string | null
   estoqueBaixadoMl?: number | null
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-import { frenetConfigurada, varrerRastreiosFrenet } from '@/data/frenet'
+import { cotarPrazosDeEntrega, frenetConfigurada, varrerRastreiosFrenet } from '@/data/frenet'
 import { codigosDoMelhorEnvio, melhorEnvioConectado, rastrearNoMelhorEnvio } from '@/data/melhorenvio'
 import { atualizarExtratoEsperando, mercadoPagoConfigurado } from '@/data/mercadopago'
 import { baixarEstoqueDosFaturados } from '@/data/baixa-estoque'
@@ -147,6 +147,17 @@ export async function POST(req: Request) {
       }
     } catch (e) {
       relatorio.rastreio = { erro: mensagemDe(e) }
+    }
+    // O prazo de entrega cotado é a segunda metade da régua de SLA — 72 h de
+    // expedição são regra da operação; daqui em diante quem promete é a
+    // transportadora, e a promessa dela sai desta cotação.
+    try {
+      const c = await cotarPrazosDeEntrega(10)
+      relatorio.prazosDeEntrega = c.pulado
+        ? { pulado: c.pulado }
+        : { consultados: c.consultados, cotados: c.cotados, falhas: c.falhas.length }
+    } catch (e) {
+      relatorio.prazosDeEntrega = { erro: mensagemDe(e) }
     }
   } else {
     relatorio.rastreio = { pulado: 'FRENET_TOKEN não está definido' }

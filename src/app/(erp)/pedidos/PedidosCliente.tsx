@@ -5,12 +5,14 @@ import { createPortal } from 'react-dom'
 
 import { COR, FUNDO, BORDA, type Tom } from '@/components/erp/tokens'
 import {
+  PRAZO_EXPEDICAO_DIAS,
   ROTULO_LOGISTICO,
   brl,
   ehOcorrencia,
   paginaDeRastreio,
   paradoDemais,
   servicoLegivel,
+  slaDeEntrega,
   slaDeExpedicao,
   statusOperacional,
   type Pedido,
@@ -1008,18 +1010,46 @@ function CelulaPrazo({ v }: { v: Viva }) {
     return <Dupla principal={<span style={{ color: COR.atencao }}>Entrega local</span>} secundaria="confirmar em mãos" />
   }
 
+  // Depois do despacho a régua troca de dono: o prazo passa a ser o que a
+  // TRANSPORTADORA cotou, contado da postagem. Antes disso, vale as 72 h de
+  // expedição da operação.
+  if (v.p.situacao === 'enviado') {
+    const entrega = slaDeEntrega({
+      situacao: v.p.situacao,
+      entregueEm: v.p.entregueEm,
+      postadoEm: v.log.primeiroEvento,
+      prazoDias: v.p.prazoEntregaDias,
+    })
+    const TOM_ENTREGA: Record<typeof entrega.estado, Tom> = {
+      entregue: 'ok',
+      'no-prazo': 'neutro',
+      'vence-hoje': 'atencao',
+      atrasado: 'erro',
+      'sem-previsao': 'neutro',
+    }
+    return (
+      <Dupla
+        principal={
+          <span style={{ color: COR[TOM_ENTREGA[entrega.estado]] }}>{entrega.rotulo}</span>
+        }
+        secundaria={
+          entrega.estado === 'sem-previsao'
+            ? 'transportadora não cotada'
+            : v.p.prazoEntregaDias
+              ? `${v.p.prazoEntregaDias} dias da postagem`
+              : ''
+        }
+      />
+    )
+  }
+
   const vencimento = dataVencimento(v.p.compradoEm)
-  // Pedido despachado não mostra vencimento de expedição: esse prazo ficou
-  // para trás no momento do despacho.
-  const secundaria =
-    v.sla.estado === 'entregue' || v.p.situacao === 'enviado' ? '' : (vencimento ?? '')
+  const secundaria = v.sla.estado === 'entregue' ? '' : (vencimento ?? '')
 
   return (
     <Dupla
       principal={
-        <span style={{ color: COR[TOM_SLA[v.sla.estado]] }}>
-          {v.sla.rotulo.replace('Em atraso · ', 'Em atraso · ')}
-        </span>
+        <span style={{ color: COR[TOM_SLA[v.sla.estado]] }}>{v.sla.rotulo}</span>
       }
       secundaria={secundaria}
     />
@@ -1033,7 +1063,7 @@ function CelulaPrazo({ v }: { v: Viva }) {
  * formatar em São Paulo aqui faria a data da segunda linha discordar do
  * estado da primeira para toda compra feita depois das 21h.
  */
-function dataVencimento(compradoEm: string, prazoDias = 2): string | null {
+function dataVencimento(compradoEm: string, prazoDias = PRAZO_EXPEDICAO_DIAS): string | null {
   if (!/^\d{4}-\d{2}-\d{2}/.test(compradoEm)) return null
   const t = Date.parse(compradoEm)
   if (!Number.isFinite(t)) return null

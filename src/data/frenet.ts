@@ -454,6 +454,123 @@ async function consultarAlvos(alvos: AlvoRastreio[]): Promise<RodadaRastreio> {
   return resultado
 }
 
+export interface RodadaCotacao {
+  consultados: number
+  cotados: number
+  falhas: { pedido: string; erro: string }[]
+  /** Sem o CEP de origem não há cotação — a rodada inteira é pulada. */
+  pulado?: string
+}
+
+/**
+ * Cota na Frenet o prazo de entrega dos pedidos que ainda não têm um.
+ *
+ * A régua do pedido tem duas metades: 72 h de expedição (regra da operação) e
+ * o prazo da transportadora depois do despacho. A Yampi não devolve esse
+ * número — quem o conhece é a cotação da Frenet, que responde `DeliveryTime`
+ * por serviço. O prazo é gravado UMA vez por pedido: cotar de novo a cada
+ * tela daria um prazo diferente por dia, contado do dia errado.
+ *
+ * Só entra o prazo do serviço que o pedido realmente usou. Sem match de
+ * serviço, o pedido fica sem prazo e a tela diz "sem previsão" — o escopo
+ * proíbe inventar data, e o prazo do SEDEX no pedido que foi de PAC seria
+ * exatamente isso.
+ */
+export async function cotarPrazosDeEntrega(limite = 15): Promise<RodadaCotacao> {
+  if (!frenetConfigurada()) throw new Error('A Frenet não está configurada.')
+  if (!supabaseConfigurado()) throw new Error('O Supabase precisa estar configurado.')
+
+  const origem = (process.env.FRETE_CEP_ORIGEM ?? '').replace(/\D/g, '')
+  if (origem.length !== 8) {
+    return {
+      consultados: 0,
+      cotados: 0,
+      falhas: [],
+      pulado:
+        'FRETE_CEP_ORIGEM não está definido no ambiente — é o CEP de onde os pacotes saem, e sem ele não há cotação.',
+    }
+  }
+
+  const sb = supabaseServer()
+  const { data, error } = await sb
+    .from('pedidos')
+    .select('id, cep, valor, rastreio, servico_frete, rastreio_servico')
+    .not('rastreio', 'is', null)
+    .is('entregue_em', null)
+    .is('prazo_entrega_dias', null)
+    .eq('entrega_local', false)
+    .not('cep', 'is', null)
+    .order('comprado_em', { ascending: false })
+    .limit(limite)
+  if (error) throw error
+
+  const alvos = (data ?? []) as {
+    id: string
+    cep: string
+    valor: number
+    rastreio: string
+    servico_frete: string | null
+    rastreio_servico: string | null
+  }[]
+  const resultado: RodadaCotacao = { consultados: 0, cotados: 0, falhas: [] }
+
+  const catalogoServicos = await servicosDaFrenet()
+  const codigosConhecidos = catalogoServicos.map((s) => s.codigo)
+
+  for (const p of alvos) {
+    const destino = p.cep.replace(/\D/g, '')
+    if (destino.length !== 8) continue
+
+    // Qual serviço este pedido usou — mesmo desempate da varredura de rastreio.
+    const doServico =
+      p.rastreio_servico ??
+      servicoFrenetDe(p.servico_frete, codigosConhecidos) ??
+      servicosPeloFormato(p.rastreio).find((c) => codigosConhecidos.includes(c)) ??
+      null
+    if (!doServico) continue
+
+    try {
+      const cotacao = await chamarFrenet<Record<string, unknown>>('/shipping/quote', {
+        SellerCEP: origem,
+        RecipientCEP: destino,
+        ShipmentInvoiceValue: Number(p.valor) || 100,
+        RecipientCountry: 'BR',
+        ShippingItemArray: [
+          // A caixa padrão dos decants. O prazo quase não varia com o peso —
+          // varia com a rota — e é o prazo que interessa aqui, não o preço.
+          { Weight: 0.3, Length: 16, Height: 6, Width: 11, Quantity: 1 },
+        ],
+      })
+      resultado.consultados++
+
+      const servicos = Array.isArray(cotacao?.ShippingSevicesArray)
+        ? (cotacao.ShippingSevicesArray as Record<string, unknown>[])
+        : []
+      const doPedido = servicos.find(
+        (s) => String(s.ServiceCode ?? s.serviceCode ?? '') === doServico,
+      )
+      const dias = Number(doPedido?.DeliveryTime ?? doPedido?.deliveryTime)
+
+      if (Number.isFinite(dias) && dias > 0) {
+        const { error: erroGrava } = await sb
+          .from('pedidos')
+          .update({ prazo_entrega_dias: Math.round(dias) })
+          .eq('id', p.id)
+        if (erroGrava) throw erroGrava
+        resultado.cotados++
+      }
+    } catch (e) {
+      resultado.falhas.push({
+        pedido: p.id,
+        erro: e instanceof Error ? e.message : String(e),
+      })
+    }
+    await new Promise((r) => setTimeout(r, 150))
+  }
+
+  return resultado
+}
+
 /** A linha do tempo de um pedido, já gravada — para a tela e para o site. */
 export async function eventosDoPedido(pedidoId: string): Promise<EventoTransportadora[]> {
   if (!supabaseConfigurado()) return []

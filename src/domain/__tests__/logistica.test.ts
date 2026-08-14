@@ -198,6 +198,7 @@ describe('statusOperacional — a coluna de status da tela', () => {
     original: null,
     local: null,
     tentativas: 0,
+    primeiroEvento: null,
     horasSemAtualizacao: null,
   })
 

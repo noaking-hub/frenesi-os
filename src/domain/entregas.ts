@@ -557,6 +557,15 @@ export function situacaoDoPedido(dados: {
 
 // ── SLA de expedição ───────────────────────────────────────────────────────
 
+/**
+ * Prazo de produção + expedição: 72 horas da confirmação do pagamento.
+ *
+ * Regra da operação, definida pelo dono — não é chute de sistema. Vale para
+ * todo pedido de transportadora; depois do despacho, quem dita o prazo é a
+ * transportadora contratada (ver `slaDeEntrega`).
+ */
+export const PRAZO_EXPEDICAO_DIAS = 3
+
 export type EstadoSla = 'hoje' | 'amanha' | 'em-atraso' | 'entregue' | 'sem-previsao' | 'em-dia'
 
 export interface Sla {
@@ -585,9 +594,65 @@ function dataIso(valor: string | null | undefined): Date | null {
   return Number.isFinite(d.getTime()) ? d : null
 }
 
+export interface SlaEntrega {
+  estado: 'entregue' | 'no-prazo' | 'vence-hoje' | 'atrasado' | 'sem-previsao'
+  rotulo: string
+  /** dd/MM do limite, quando há prazo para calcular. */
+  ate: string | null
+}
+
+/**
+ * Prazo de ENTREGA — a segunda metade da régua, depois do despacho.
+ *
+ * Conta da POSTAGEM (primeiro escaneamento da transportadora) usando o prazo
+ * em dias que a transportadora cotou para aquele envio. As duas pontas
+ * precisam existir: sem postagem o relógio não começou, e sem prazo cotado a
+ * resposta honesta é "sem previsão" — o escopo proíbe inventar data, e uma
+ * previsão chutada vira promessa quebrada na boca do atendimento.
+ */
+export function slaDeEntrega(
+  p: {
+    situacao: SituacaoPedido
+    entregueEm: string | null
+    /** Primeiro evento da transportadora — a postagem de fato. */
+    postadoEm: string | null | undefined
+    /** Prazo cotado pela transportadora, em dias. */
+    prazoDias: number | null | undefined
+  },
+  agora = new Date(),
+): SlaEntrega {
+  if (p.situacao === 'entregue') return { estado: 'entregue', rotulo: 'Entregue', ate: null }
+
+  const inicio = p.postadoEm ? Date.parse(p.postadoEm) : NaN
+  if (!Number.isFinite(inicio) || !p.prazoDias || p.prazoDias <= 0) {
+    return { estado: 'sem-previsao', rotulo: 'Sem previsão', ate: null }
+  }
+
+  // Mesmo calendário do SLA de expedição: dias em baldes UTC, para as duas
+  // metades da régua nunca discordarem sobre que dia é hoje.
+  const diaDe = (t: number) => Math.floor(t / 86_400_000)
+  const limite = diaDe(inicio) + p.prazoDias
+  const dias = limite - diaDe(agora.getTime())
+  const ate = new Date(limite * 86_400_000).toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    timeZone: 'UTC',
+  })
+
+  if (dias < 0) {
+    return {
+      estado: 'atrasado',
+      rotulo: dias === -1 ? 'Entrega atrasada · 1 dia' : `Entrega atrasada · ${Math.abs(dias)} dias`,
+      ate,
+    }
+  }
+  if (dias === 0) return { estado: 'vence-hoje', rotulo: 'Entrega vence hoje', ate }
+  return { estado: 'no-prazo', rotulo: `Entrega até ${ate}`, ate }
+}
+
 export function slaDeExpedicao(
   p: { situacao: SituacaoPedido; compradoEm: string; entregueEm: string | null },
-  prazoDias = 2,
+  prazoDias = PRAZO_EXPEDICAO_DIAS,
   agora = new Date(),
 ): Sla {
   if (p.situacao === 'entregue') {
