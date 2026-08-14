@@ -19,7 +19,6 @@ import {
   descreveVariante,
   ehDanificado,
   fotosCompletas,
-  frascoDe,
   plural,
   statusDevolucao,
 } from '@/domain'
@@ -638,11 +637,7 @@ export function PortalDevolucoes({
               <UploadFoto
                 marca="1"
                 titulo="Nível do líquido no frasco"
-                descricao={`Contra a luz, mostrando quanto perfume tem dentro${
-                  selecionados.length
-                    ? ` — um decant de ${selecionados[0].variante} ml num frasco de ${frascoDe(selecionados[0].variante)} ml fica parcialmente cheio.`
-                    : '.'
-                }`}
+                descricao="Contra a luz, mostrando quanto perfume tem dentro do frasco."
                 obrigatoria
                 arquivo={arquivos.nivel}
                 aoEscolher={(f) => setArquivos((s) => ({ ...s, nivel: f }))}
