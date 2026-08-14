@@ -55,6 +55,59 @@ describe('casar título de concorrente com o catálogo', () => {
   })
 })
 
+describe('casamento estrito: a palavra que sobra é outro produto', () => {
+  it('flanker que NÃO temos não casa com o comum', () => {
+    // O caso real que furou o módulo: o catálogo tem só o Coco Mademoiselle
+    // EDP, a loja vende também o Intense — e o Intense (mais barato no ml)
+    // entrava na comparação como se fosse o comum.
+    expect(
+      casarTitulo('Chanel - Coco Mademoiselle Eau de Parfum Intense (decant) 5ml', BASES),
+    ).toBeNull()
+  })
+
+  it('o produto pai não casa quando só temos o filho', () => {
+    // "Dior Homme" sem o Intense é OUTRO perfume — não o nosso Dior Homme
+    // Intense. Faltar palavra do nome reprova.
+    expect(casarTitulo('Dior - Dior Homme Eau de Parfum decant 10ml', BASES)).toBeNull()
+  })
+
+  it('variação com sobra qualquer não casa (L’Eau, Privée…)', () => {
+    expect(
+      casarTitulo('Chanel - Coco Mademoiselle L’Eau Privée Eau de Parfum 5ml', BASES),
+    ).toBeNull()
+  })
+
+  it('"Man" da loja é o nosso "Masculino"', () => {
+    const bases = [
+      {
+        id: 'cdni',
+        nome: 'Club de Nuit Intense Masculino Eau de Parfum (Decant)',
+        marca: 'Armaf',
+      },
+    ]
+    const c = casarTitulo('Armaf - Club de Nuit Intense Man Eau de Parfum 5ml', bases)
+    expect(c?.baseId).toBe('cdni')
+    // O Woman da mesma família é outro perfume: gênero declarado conflita.
+    expect(casarTitulo('Armaf - Club de Nuit Intense Woman Eau de Parfum 5ml', bases)).toBeNull()
+  })
+
+  it('título sem concentração casa quando o produto só existe numa', () => {
+    // A Tabs escreve "(Decant) Chanel - Coco Mademoiselle" sem o EDP. Como o
+    // catálogo só tem uma concentração deste perfume, não há o que confundir.
+    const c = casarTitulo('(Decant) Chanel - Coco Mademoiselle 5ml', BASES)
+    expect(c?.baseId).toBe('coco-mad')
+  })
+
+  it('título sem concentração NÃO casa quando temos EDP e EDT', () => {
+    expect(casarTitulo('(Decant) Dior - Sauvage 10ml', BASES)).toBeNull()
+  })
+
+  it('palavra de anúncio não reprova: tester, original', () => {
+    const c = casarTitulo('Coco Mademoiselle Chanel Eau de Parfum Original Tester 5ml', BASES)
+    expect(c?.baseId).toBe('coco-mad')
+  })
+})
+
 describe('achar o perfume do catálogo pelo que foi digitado', () => {
   it('acha mesmo com palavra nossa no meio', () => {
     // O caso real: a loja escreve "Bleu de Chanel Eau de Parfum", o nosso

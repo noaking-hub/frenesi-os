@@ -105,9 +105,11 @@ export function BuscaPrecos({ atualizadoEm }: { atualizadoEm: string | null }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
           <Aviso
             texto={
-              resultado.parecidos.length
-                ? `Nada casa com todas as palavras de “${resultado.termo}”. Parecidos na base — clique para buscar:`
-                : `Nada encontrado para “${resultado.termo}” na base coletada. Se o concorrente tem o perfume no site, a próxima vasculhada alcança — a coleta roda todo dia e agora cobre até 900 produtos por loja (era 400); vale também clicar em Vasculhar na fonte.`
+              resultado.nosso
+                ? `Nenhum preço de concorrente está casado com “${resultado.nosso.nome}” ainda. Se a loja vende este perfume, o título dela deve estar na lista de preços sem dono — ensine o nome lá embaixo e ele entra na comparação.`
+                : resultado.parecidos.length
+                  ? `Nada casa com todas as palavras de “${resultado.termo}”. Parecidos na base — clique para buscar:`
+                  : `Nada encontrado para “${resultado.termo}” na base coletada. Se o concorrente tem o perfume no site, a próxima vasculhada alcança — a coleta roda todo dia e agora cobre até 900 produtos por loja (era 400); vale também clicar em Vasculhar na fonte.`
             }
           />
           {resultado.parecidos.length > 0 && (
@@ -142,6 +144,27 @@ export function BuscaPrecos({ atualizadoEm }: { atualizadoEm: string | null }) {
 
       {resultado && resultado.linhas.length > 0 && (
         <Comparativo resultado={resultado} aoTrocarBase={trocarBase} />
+      )}
+
+      {/* O que o texto achou e o casamento recusou fica À VISTA: outro produto
+          da família (Intense, Elixir) não entra no "menor do mercado", mas
+          sumir com ele esconderia loja que talvez venda o perfume certo com
+          título ainda sem vínculo — e a comparação pareceria completa. */}
+      {buscou && resultado && resultado.foraDaComparacao.length > 0 && (
+        <span
+          className="font-sans"
+          style={{ fontSize: 10.5, lineHeight: 1.6, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+        >
+          {'Fora da comparação por serem outro produto — ou ainda sem vínculo: '}
+          {resultado.foraDaComparacao.map((f, i) => (
+            <span key={`${f.fonte}|${f.titulo}`}>
+              {i > 0 && ' · '}
+              <span style={{ color: 'rgba(242,237,227,.55)' }}>“{f.titulo}”</span>
+              {` (${f.fonte})`}
+            </span>
+          ))}
+          {'. Se algum É o perfume buscado, ensine o nome na lista de preços sem dono.'}
+        </span>
       )}
 
       {!buscou && (

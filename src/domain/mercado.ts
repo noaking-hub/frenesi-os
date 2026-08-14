@@ -320,6 +320,12 @@ export function tokensDe(texto: string): Set<string> {
       .toLowerCase()
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
+      // "Man" e "Masculino" s\u00e3o a mesma informa\u00e7\u00e3o em l\u00ednguas diferentes \u2014 o
+      // Club de Nuit Intense MAN \u00e9 o nosso "Masculino". "Male" fica de fora:
+      // Le Male \u00e9 nome de produto, n\u00e3o p\u00fablico-alvo.
+      .replace(/\b(?:man|men|homem|homens)\b/g, ' masculino ')
+      .replace(/\b(?:woman|women|mulher|mulheres)\b/g, ' feminino ')
+      .replace(/\bunisex\b/g, ' unissex ')
       .replace(/\d+\s*ml\b/g, ' ')
       .split(/[^a-z0-9]+/)
       .filter((t) => t.length > 1 && !GENERICAS.has(t) && !/^\d+$/.test(t)),
@@ -328,52 +334,98 @@ export function tokensDe(texto: string): Set<string> {
 
 export interface Casamento {
   baseId: string
-  /** Fração dos tokens da nossa base presentes no título do concorrente. */
+  /** Mantido por compatibilidade: o casamento estrito é tudo ou nada. */
   score: number
 }
 
-/** Cobertura mínima para aceitar um casamento automático. */
-export const SCORE_MINIMO = 0.7
-/** Vantagem mínima sobre o segundo colocado. Empate técnico não casa. */
-export const VANTAGEM_MINIMA = 0.15
+/** As concentrações, já normalizadas para a sigla por `tokensDe`. */
+const CONCENTRACOES = new Set(Object.keys(FORMAS_CONCENTRACAO))
+
+/** Público-alvo, não produto. `tokensDe` converge man/woman para cá. */
+const GENEROS = new Set(['masculino', 'feminino', 'unissex'])
+
+/**
+ * Palavras de anúncio que não distinguem produto nenhum.
+ *
+ * A lista é curta e inequívoca DE PROPÓSITO: "Intense", "Elixir" e "Extreme"
+ * jamais entram aqui — são exatamente as palavras que separam um flanker do
+ * perfume comum, com preços diferentes.
+ */
+const RUIDO_DE_ANUNCIO = new Set([
+  'tester',
+  'original',
+  'importado',
+  'oficial',
+  'lacrado',
+  'selado',
+  'amostra',
+])
+
+/**
+ * O título do concorrente fala DESTA base — nos dois sentidos.
+ *
+ * O casamento antigo media só a ida: quantas palavras nossas o título traz.
+ * A volta era de graça, e nela morava o estrago — "Coco Mademoiselle Intense"
+ * contém "Coco Mademoiselle" inteiro, então o flanker casava com o comum e o
+ * preço de OUTRO perfume entrava na comparação de mercado.
+ */
+function casaEstrito(
+  doTitulo: Set<string>,
+  b: { nome: string; marca: string },
+): boolean {
+  const doNome = tokensDe(b.nome)
+  const daMarca = tokensDe(b.marca)
+  if (doNome.size === 0) return false
+
+  // 1. Ida: tudo que NOMEIA o produto precisa estar no título — a palavra que
+  //    falta é outro produto ("Dior Homme" não é o Dior Homme Intense).
+  //    Gênero e concentração ficam fora da exigência: loja raramente escreve
+  //    "Masculino", e quem anuncia "Luna Rossa Ocean Le Parfum" não repete o
+  //    "Eau de Parfum" do nosso cadastro.
+  for (const t of doNome) {
+    if (GENEROS.has(t) || CONCENTRACOES.has(t) || RUIDO_DE_ANUNCIO.has(t)) continue
+    if (!doTitulo.has(t)) return false
+  }
+
+  // 2. O que os dois lados DECLARAM não pode conflitar: EDT não é EDP, e o
+  //    Woman não é o Man. Título calado não reprova — a ambiguidade que o
+  //    silêncio cria morre na exigência de casamento único, logo abaixo.
+  for (const grupo of [CONCENTRACOES, GENEROS]) {
+    const daBase = [...doNome].filter((t) => grupo.has(t))
+    const declarados = [...doTitulo].filter((t) => grupo.has(t))
+    if (daBase.length && declarados.length && !declarados.some((t) => daBase.includes(t))) {
+      return false
+    }
+  }
+
+  // 3. Volta: NADA pode sobrar no título. A sobra é outro produto — Intense,
+  //    Elixir, Extreme, L'Eau — nunca enfeite.
+  for (const t of doTitulo) {
+    if (doNome.has(t) || daMarca.has(t)) continue
+    if (GENEROS.has(t) || CONCENTRACOES.has(t) || RUIDO_DE_ANUNCIO.has(t)) continue
+    return false
+  }
+  return true
+}
 
 /**
  * Descobre de qual base nossa um título de concorrente fala.
  *
  * Devolve `null` quando não há certeza — e isso é o ponto. Um preço casado com
  * o perfume errado não fica só errado: ele entra na comparação de mercado e
- * empurra o preço de venda de OUTRO produto. Duas travas evitam isso: a
- * cobertura precisa ser alta, e o segundo colocado precisa ficar claramente
- * atrás. Empate técnico vira trabalho manual, não palpite.
+ * empurra o preço de venda de OUTRO produto. Por isso o casamento é estrito
+ * nos dois sentidos e precisa ser ÚNICO: título que serve a duas bases (sem
+ * concentração, e temos EDP e EDT) vira trabalho manual, não palpite.
  */
 export function casarTitulo(
   titulo: string,
   bases: { id: string; nome: string; marca: string }[],
 ): Casamento | null {
-  const alvo = tokensDe(titulo)
-  if (alvo.size === 0) return null
+  const doTitulo = tokensDe(titulo)
+  if (doTitulo.size === 0) return null
 
-  let melhor: Casamento | null = null
-  let segundo = 0
-
-  for (const b of bases) {
-    const meus = tokensDe(`${b.nome} ${b.marca}`)
-    if (meus.size === 0) continue
-    let acertos = 0
-    for (const t of meus) if (alvo.has(t)) acertos++
-    const score = acertos / meus.size
-
-    if (!melhor || score > melhor.score) {
-      segundo = melhor?.score ?? 0
-      melhor = { baseId: b.id, score }
-    } else if (score > segundo) {
-      segundo = score
-    }
-  }
-
-  if (!melhor || melhor.score < SCORE_MINIMO) return null
-  if (melhor.score - segundo < VANTAGEM_MINIMA) return null
-  return melhor
+  const casadas = bases.filter((b) => casaEstrito(doTitulo, b))
+  return casadas.length === 1 ? { baseId: casadas[0].id, score: 1 } : null
 }
 
 // ── Leitura da vitrine do concorrente ──────────────────────────────────────

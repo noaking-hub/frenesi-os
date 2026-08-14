@@ -7,11 +7,15 @@ import type { VarianteMl } from '@/domain'
 /**
  * Consulta de preço de um perfume, meu contra o dos concorrentes.
  *
- * A busca é por TEXTO, não pelo casamento com o catálogo. Isso é deliberado:
- * exigir que cada título do concorrente estivesse ligado a uma base nossa
- * fazia a consulta depender de um trabalho de cadastro que não interessa a
- * quem só quer saber por quanto o vizinho vende o Idôle. Quem digita o nome
- * do perfume sabe o que procura melhor que qualquer casamento automático.
+ * Quando a busca encontra um perfume do NOSSO catálogo, a comparação usa só
+ * os preços CASADOS com ele — pelo casamento estrito ou por nome ensinado.
+ * Era por texto ("toda palavra digitada aparece no título"), e texto mistura
+ * família: buscar "Coco Mademoiselle" trazia o Intense junto, e o "menor do
+ * mercado" saía de OUTRO produto. O que o texto acha e o casamento recusa
+ * não some: aparece como "fora da comparação", para conferir e ensinar.
+ *
+ * Sem perfume nosso na busca, vale o texto puro — quem explora o mercado de
+ * algo que não vendemos não tem casamento para usar.
  */
 
 export interface PrecoDeFonte {
@@ -31,6 +35,11 @@ export interface LinhaComparativo {
   diferenca: number | null
 }
 
+export interface TituloForaDaComparacao {
+  titulo: string
+  fonte: string
+}
+
 export interface ResultadoBusca {
   termo: string
   /** Perfume do nosso catálogo que casou com o termo. */
@@ -42,13 +51,28 @@ export interface ResultadoBusca {
   linhas: LinhaComparativo[]
   /** Títulos achados no mercado, para conferir se a busca pegou o certo. */
   encontrados: number
+  /**
+   * O texto achou, o casamento recusou: outro produto da mesma família
+   * (Intense, Elixir) ou título ainda sem vínculo. Visível de propósito —
+   * esconder faria a comparação parecer completa quando falta loja.
+   */
+  foraDaComparacao: TituloForaDaComparacao[]
   /** Sem Supabase não há preço guardado — e isso não é "nada encontrado". */
   semBanco: boolean
   /** Quando nada casa com TODAS as palavras: títulos que casam com alguma. */
   parecidos: string[]
 }
 
-export async function buscarPrecos(termo: string): Promise<ResultadoBusca | null> {
+interface PrecoLido {
+  fonte: string
+  titulo: string
+  preco: number
+  variante: VarianteMl
+  url: string | null
+  baseId: string | null
+}
+
+async function buscar(termo: string, baseIdForcado?: string): Promise<ResultadoBusca | null> {
   const limpo = termo.trim()
   if (limpo.length < 3) return null
   if (!supabaseConfigurado()) {
@@ -59,6 +83,7 @@ export async function buscarPrecos(termo: string): Promise<ResultadoBusca | null
       fontes: [],
       linhas: [],
       encontrados: 0,
+      foraDaComparacao: [],
       semBanco: true,
       parecidos: [],
     }
@@ -66,52 +91,70 @@ export async function buscarPrecos(termo: string): Promise<ResultadoBusca | null
 
   const sb = supabaseServer()
 
-  // A busca NÃO depende do catálogo nem da grafia exata: os preços coletados
-  // vêm inteiros e o casamento acontece aqui, com acento removido dos dois
-  // lados. Antes o filtro era ilike no banco — e "Idôle" digitado não achava
-  // "Idole" gravado (nem o contrário), o que parecia exigir cadastro prévio.
-  // Cada palavra digitada precisa aparecer no título; a concentração aceita
-  // as duas formas (EDT e Eau de Toilette).
+  // A busca não depende da grafia exata: acento sai dos dois lados e a
+  // concentração aceita as duas formas (EDT e Eau de Toilette).
   const grupos = formasDeBusca(limpo).slice(0, 6)
 
   const [{ data: bases }, { data: precos }] = await Promise.all([
     sb.from('perfumes_base').select('id, nome, marca').eq('ativo', true).limit(500),
     sb
       .from('concorrente_precos')
-      .select('titulo, preco, variante, url, concorrentes(nome)')
+      .select('titulo, preco, variante, url, base_id, concorrentes(nome)')
       .not('variante', 'is', null)
       .limit(8000),
   ])
 
   const candidatos = buscarNoCatalogo(limpo, bases ?? [])
-  const nosso = candidatos[0] ?? null
+  const nosso =
+    (baseIdForcado ? (bases ?? []).find((b) => b.id === baseIdForcado) : null) ??
+    candidatos[0] ??
+    null
 
   const normaliza = (t: string) =>
     t
       .toLowerCase()
       .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[̀-ͯ]/g, '')
 
-  const observados = ((precos ?? []) as unknown as {
+  const todos: PrecoLido[] = ((precos ?? []) as unknown as {
     titulo: string
     preco: number | string
     variante: number
     url: string | null
+    base_id: string | null
     concorrentes: { nome: string } | null
-  }[])
-    .filter((p) => {
-      const alvo = normaliza(p.titulo)
-      return (grupos.length ? grupos : [[limpo]]).every((formas) =>
-        formas.some((f) => alvo.includes(normaliza(f))),
-      )
-    })
-    .map((p) => ({
-      fonte: p.concorrentes?.nome ?? '—',
-      titulo: p.titulo,
-      preco: Number(p.preco),
-      variante: p.variante as VarianteMl,
-      url: p.url,
-    }))
+  }[]).map((p) => ({
+    fonte: p.concorrentes?.nome ?? '—',
+    titulo: p.titulo,
+    preco: Number(p.preco),
+    variante: p.variante as VarianteMl,
+    url: p.url,
+    baseId: p.base_id,
+  }))
+
+  const casaComTexto = (p: PrecoLido) => {
+    const alvo = normaliza(p.titulo)
+    return (grupos.length ? grupos : [[limpo]]).every((formas) =>
+      formas.some((f) => alvo.includes(normaliza(f))),
+    )
+  }
+
+  // Com perfume nosso: só o que está CASADO com ele entra na comparação —
+  // inclusive títulos ensinados com grafia que a busca por texto não acharia.
+  const observados = nosso ? todos.filter((p) => p.baseId === nosso.id) : todos.filter(casaComTexto)
+
+  const foraDaComparacao: TituloForaDaComparacao[] = []
+  if (nosso) {
+    const vistos = new Set<string>()
+    for (const p of todos) {
+      if (p.baseId === nosso.id || !casaComTexto(p)) continue
+      const curto = p.titulo.replace(/\s*\d+\s*ml\b.*$/i, '').trim()
+      const chave = `${p.fonte}|${curto}`
+      if (vistos.has(chave)) continue
+      vistos.add(chave)
+      if (foraDaComparacao.length < 8) foraDaComparacao.push({ titulo: curto, fonte: p.fonte })
+    }
+  }
 
   let nossosPrecos: Partial<Record<VarianteMl, number>> = {}
   if (nosso) {
@@ -128,12 +171,12 @@ export async function buscarPrecos(termo: string): Promise<ResultadoBusca | null
 
   // Nada casou com todas as palavras? Oferece o que casa com ALGUMA — é o
   // que transforma "nada encontrado" em "você quis dizer".
-  let parecidos: string[] = []
-  if (observados.length === 0) {
+  const parecidos: string[] = []
+  if (!nosso && observados.length === 0) {
     const vistos = new Set<string>()
-    for (const p of (precos ?? []) as unknown as { titulo: string }[]) {
+    for (const p of todos) {
       const alvo = normaliza(p.titulo)
-      if ((grupos.length ? grupos : [[limpo]]).some((formas) => formas.some((f) => alvo.includes(normaliza(f))))) {
+      if (grupos.some((formas) => formas.some((f) => alvo.includes(normaliza(f))))) {
         const curto = p.titulo.replace(/\s*\d+\s*ml\b.*$/i, '').trim()
         if (!vistos.has(curto)) {
           vistos.add(curto)
@@ -171,44 +214,29 @@ export async function buscarPrecos(termo: string): Promise<ResultadoBusca | null
   return {
     termo: limpo,
     nosso,
-    alternativas: candidatos.slice(1, 6),
+    alternativas: candidatos.filter((c) => c.id !== nosso?.id).slice(0, 5),
     fontes,
     linhas,
     encontrados: observados.length,
+    foraDaComparacao,
     semBanco: false,
     parecidos,
   }
 }
 
-/** Troca o perfume do nosso lado sem refazer a busca de mercado. */
-export async function buscarPrecosDaBase(termo: string, baseId: string): Promise<ResultadoBusca | null> {
-  const r = await buscarPrecos(termo)
-  if (!r) return null
-  const escolhido = [r.nosso, ...r.alternativas].find((b) => b?.id === baseId) ?? r.nosso
-  if (!escolhido || escolhido.id === r.nosso?.id) return r
+export async function buscarPrecos(termo: string): Promise<ResultadoBusca | null> {
+  return buscar(termo)
+}
 
-  const sb = supabaseServer()
-  const { data } = await sb
-    .from('produtos_derivados')
-    .select('variante, preco_praticado')
-    .eq('base_id', escolhido.id)
-  const meus = Object.fromEntries(
-    (data ?? [])
-      .filter((d) => Number(d.preco_praticado) > 0)
-      .map((d) => [d.variante as VarianteMl, Number(d.preco_praticado)]),
-  ) as Partial<Record<VarianteMl, number>>
-
-  const linhas = r.linhas.map((l) => {
-    const meu = meus[l.variante] ?? null
-    return { ...l, nosso: meu, diferenca: meu !== null && l.menor !== null ? meu - l.menor : null }
-  })
-
-  return {
-    ...r,
-    nosso: escolhido,
-    alternativas: [r.nosso, ...r.alternativas].filter(
-      (b): b is { id: string; nome: string; marca: string } => Boolean(b) && b!.id !== escolhido.id,
-    ),
-    linhas,
-  }
+/**
+ * Troca o perfume da comparação — e refaz o LADO DO MERCADO junto.
+ *
+ * Antes só o nosso preço trocava e a tabela de mercado ficava a da busca
+ * anterior: escolher o Eau de Toilette mostrava os preços do Eau de Parfum.
+ */
+export async function buscarPrecosDaBase(
+  termo: string,
+  baseId: string,
+): Promise<ResultadoBusca | null> {
+  return buscar(termo, baseId)
 }
