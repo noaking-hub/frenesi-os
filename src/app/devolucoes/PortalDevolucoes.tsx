@@ -383,14 +383,7 @@ export function PortalDevolucoes({
                 })()}
               </RotuloCampo>
               <TituloPasso>Quais itens você quer devolver?</TituloPasso>
-              <Corpo>
-                {(() => {
-                  const s = statusDevolucao(pedido.diasDesdeEntrega)
-                  return s.restam === 1
-                    ? `Hoje é o último dia do prazo de ${PRAZO_DEVOLUCAO_DIAS} dias. Marque os itens que deseja devolver.`
-                    : `Você ainda tem ${s.restam} dos ${PRAZO_DEVOLUCAO_DIAS} dias de prazo. Marque os itens que deseja devolver.`
-                })()}
-              </Corpo>
+              <Corpo>Marque os itens que deseja devolver.</Corpo>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
