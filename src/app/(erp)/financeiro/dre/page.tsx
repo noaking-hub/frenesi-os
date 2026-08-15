@@ -1,10 +1,20 @@
-import Link from 'next/link'
-
-import { Cartao, CabecalhoCartao, LinhaResumo, VazioInterno } from '@/components/erp/Cartao'
-import { BarraProporcao, LinhaEvolucao, PALETA_CATEGORIA } from '@/components/erp/Graficos'
-import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
-import { EstadoVazio, Rotulo, Valor } from '@/components/erp/primitivos'
-import { COR } from '@/components/erp/tokens'
+import {
+  AcaoPainel,
+  Colunas,
+  Etiqueta,
+  Ferramentas,
+  GradeIndicadores,
+  Indicador,
+  ListaBarras,
+  Num,
+  Painel,
+  Pilha,
+  Pilula,
+  Segmentado,
+  Vazio,
+  type TomUi,
+} from '@/components/erp/ui'
+import { AreaPontos, curto } from '@/components/erp/Visualizacoes'
 import { carregarDre } from '@/data/financeiro'
 import {
   brl,
@@ -12,21 +22,34 @@ import {
   competenciaPorExtenso,
   ROTULO_NATUREZA,
 } from '@/domain'
-import type { LinhaDreGerencial } from '@/domain'
+import type { LinhaDreGerencial, NaturezaGerencial } from '@/domain'
 
 /**
- * DRE gerencial — o resultado por COMPETÊNCIA.
+ * DRE Gerencial — resultado por competência.
  *
  * A venda de 30 de agosto que o gateway paga em 15 de setembro é resultado de
  * agosto e caixa de setembro. Esta tela responde pela primeira leitura; o
- * fluxo de caixa responde pela segunda. Foi misturar as duas que fazia o
+ * fluxo de caixa responde pela segunda. Misturar as duas foi o que fazia o
  * Financeiro antigo somar a mesma venda duas vezes.
  *
- * Nenhum subtotal é digitado: todos saem das linhas, e a base dos percentuais
- * é a receita LÍQUIDA — comparar despesa com um faturamento que ainda inclui
- * imposto e devolução infla a margem aparente.
+ * Nenhum subtotal é digitado — todos saem das linhas — e a base dos
+ * percentuais é a receita LÍQUIDA: comparar despesa com um faturamento que
+ * ainda inclui imposto e devolução infla a margem aparente.
  */
 export const dynamic = 'force-dynamic'
+
+const TOM_NATUREZA: Record<NaturezaGerencial, TomUi> = {
+  receita_operacional: 'ok',
+  deducao_receita: 'atencao',
+  cmv: 'erro',
+  despesa_fixa: 'info',
+  despesa_comercial: 'roxo',
+  despesa_administrativa: 'neutro',
+  despesa_financeira: 'erro',
+  investimento: 'ouro',
+  transferencia: 'neutro',
+  aporte_retirada: 'ouro',
+}
 
 export default async function Dre({
   searchParams,
@@ -34,341 +57,311 @@ export default async function Dre({
   searchParams: Promise<{ competencia?: string }>
 }) {
   const { competencia } = await searchParams
-  const alvo = /^\d{4}-\d{2}$/.test(competencia ?? '') ? competencia! : new Date().toISOString().slice(0, 7)
+  const alvo = /^\d{4}-\d{2}$/.test(competencia ?? '')
+    ? competencia!
+    : new Date().toISOString().slice(0, 7)
   const p = await carregarDre(alvo)
 
   if (p.semBanco) {
     return (
-      <EstadoVazio
-        titulo="DRE indisponível"
-        instrucao="O Supabase precisa estar configurado para apurar o resultado por competência."
-      />
+      <Pilha>
+        <Painel>
+          <Vazio icone="cadeado" texto="O Supabase precisa estar configurado para apurar o resultado." />
+        </Painel>
+      </Pilha>
     )
   }
 
   const d = p.dre
   const anterior = competenciaAnterior(alvo)
-  const maiorCategoria = Math.max(1, ...p.porCategoria.map((c) => c.valor))
+  const linhaResultado = d.linhas.find((l) => l.linha === '= Resultado gerencial')
 
-  const kpis: Kpi[] = [
-    {
-      label: 'Receita bruta',
-      valor: brl(d.receitaBruta),
-      hint: `Vendas reconhecidas em ${competenciaPorExtenso(alvo)}`,
-      tom: 'neutro',
-    },
-    {
-      label: 'Receita líquida',
-      valor: brl(d.receitaLiquida),
-      hint: 'Depois de impostos, devoluções e taxas de gateway',
-      tom: 'info',
-    },
-    {
-      label: 'Margem de contribuição',
-      valor: brl(d.margemContribuicao),
-      hint: `${d.margemContribuicaoPct.toFixed(1).replace('.', ',')}% da receita líquida`,
-      tom: d.margemContribuicao > 0 ? 'ok' : 'erro',
-    },
-    {
-      label: 'Resultado gerencial',
-      valor: brl(d.resultado),
-      hint: `${d.margemLiquidaPct.toFixed(1).replace('.', ',')}% da receita líquida`,
-      tom: d.resultado > 0 ? 'ok' : 'erro',
-    },
-    {
-      label: 'Ponto de equilíbrio',
-      valor: d.pontoEquilibrio > 0 ? brl(d.pontoEquilibrio) : '—',
-      hint:
-        d.pontoEquilibrio > 0
-          ? 'Faturamento líquido que cobre a estrutura fixa'
-          : 'Sem margem de contribuição positiva, vender mais aumenta o prejuízo',
-      tom: d.pontoEquilibrio > 0 && d.receitaLiquida >= d.pontoEquilibrio ? 'ok' : 'atencao',
-    },
-    {
-      label: 'Contra o mês anterior',
-      valor: variacaoDe(d.linhas, '= Resultado gerencial'),
-      hint: `Resultado de ${competenciaPorExtenso(anterior)}`,
-      tom: sinalDe(d.linhas, '= Resultado gerencial'),
-    },
-  ]
+  const meses = [...new Set([alvo, ...p.disponiveis])].sort().reverse().slice(0, 8).reverse()
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <FaixaKpis kpis={kpis} />
+    <Pilha gap={16}>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.6fr) minmax(0,1fr)', gap: 14 }}>
-        <Cartao padding="15px 0 0">
-          <div style={{ padding: '0 17px' }}>
-            <CabecalhoCartao
-              titulo="Demonstração do resultado"
-              nota={competenciaPorExtenso(alvo)}
-              acao={<SeletorCompetencia atual={alvo} disponiveis={p.disponiveis} />}
+      <Ferramentas
+        esquerda={
+          <>
+            <Pilula icone="calendario" tom="ouro">
+              {competenciaPorExtenso(alvo)}
+            </Pilula>
+            <span className="font-sans" style={{ fontSize: 12, color: 'rgba(242,237,227,.42)' }}>
+              {`comparado a ${competenciaPorExtenso(anterior)}`}
+            </span>
+          </>
+        }
+        direita={
+          meses.length > 1 ? (
+            <Segmentado
+              opcoes={meses.map((m) => ({ id: m, rotulo: m.slice(5) + '/' + m.slice(2, 4) }))}
+              ativo={alvo}
+              base="/financeiro/dre"
+              chave="competencia"
             />
-          </div>
+          ) : undefined
+        }
+      />
 
+      <GradeIndicadores>
+        <Indicador
+          icone="tendencia"
+          tom="ok"
+          rotulo="Receita líquida"
+          valor={brl(d.receitaLiquida)}
+          nota={`Bruta de ${brl(d.receitaBruta)} menos deduções`}
+        />
+        <Indicador
+          icone="pizza"
+          tom="roxo"
+          rotulo="Margem de contribuição"
+          valor={brl(d.margemContribuicao)}
+          tomValor={d.margemContribuicao >= 0 ? 'ok' : 'erro'}
+          nota={`${d.margemContribuicaoPct.toFixed(1).replace('.', ',')}% da receita líquida`}
+        />
+        <Indicador
+          icone="caixa"
+          tom="ouro"
+          rotulo="Resultado gerencial"
+          valor={brl(d.resultado)}
+          tomValor={d.resultado >= 0 ? 'ok' : 'erro'}
+          delta={
+            linhaResultado && linhaResultado.anterior !== 0
+              ? { pct: linhaResultado.variacaoPct, base: `vs. ${anterior}` }
+              : undefined
+          }
+          nota={
+            linhaResultado && linhaResultado.anterior === 0
+              ? 'Sem base de comparação no mês anterior'
+              : undefined
+          }
+        />
+        <Indicador
+          icone="porcento"
+          tom="ciano"
+          rotulo="Margem líquida"
+          valor={`${d.margemLiquidaPct.toFixed(1).replace('.', ',')}%`}
+          tomValor={d.margemLiquidaPct >= 0 ? 'ok' : 'erro'}
+          nota="Resultado sobre a receita líquida"
+        />
+        <Indicador
+          icone="alvo"
+          tom="atencao"
+          rotulo="Ponto de equilíbrio"
+          valor={d.pontoEquilibrio > 0 ? brl(d.pontoEquilibrio) : '—'}
+          nota={
+            d.pontoEquilibrio > 0
+              ? `${((d.receitaLiquida / d.pontoEquilibrio) * 100).toFixed(0)}% atingido no mês`
+              : 'Sem margem positiva, vender mais aumenta o prejuízo'
+          }
+          tomNota={
+            d.pontoEquilibrio > 0 && d.receitaLiquida >= d.pontoEquilibrio ? 'ok' : 'atencao'
+          }
+        />
+        <Indicador
+          icone="escudo"
+          tom={d.receitaLiquida >= d.pontoEquilibrio && d.pontoEquilibrio > 0 ? 'ok' : 'neutro'}
+          rotulo="Folga sobre o equilíbrio"
+          valor={d.pontoEquilibrio > 0 ? brl(d.receitaLiquida - d.pontoEquilibrio) : '—'}
+          tomValor={
+            d.pontoEquilibrio > 0 && d.receitaLiquida - d.pontoEquilibrio < 0 ? 'erro' : 'ok'
+          }
+          nota={
+            d.pontoEquilibrio > 0
+              ? 'Quanto a receita passou do mínimo que cobre a estrutura'
+              : 'Ponto de equilíbrio não calculável'
+          }
+        />
+      </GradeIndicadores>
+
+      <Colunas proporcao="minmax(0,1.7fr) minmax(0,1fr)">
+        <Painel
+          titulo="DRE por competência"
+          icone="lista"
+          nota={competenciaPorExtenso(alvo)}
+          padding="16px 0 14px"
+          rodape={undefined}
+        >
           {d.linhas.length === 0 ? (
-            <div style={{ padding: '0 17px 17px' }}>
-              <VazioInterno texto="Nenhum lançamento nesta competência." />
-            </div>
+            <Vazio icone="lista" texto="Nenhum lançamento nesta competência." />
           ) : (
             <div style={{ overflowX: 'auto' }}>
-              <div style={{ minWidth: 560 }}>
+              <div style={{ minWidth: 700 }}>
                 <div
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'minmax(0,1fr) 128px 74px 118px',
+                    gridTemplateColumns: 'minmax(0,1fr) 132px 78px 132px 96px',
                     gap: 12,
-                    padding: '10px 17px',
-                    background: 'var(--color-cabecalho)',
-                    borderTop: '1px solid var(--color-borda)',
-                    borderBottom: '1px solid var(--color-borda)',
+                    padding: '0 17px 10px',
+                    borderBottom: '1px solid rgba(255,255,255,.07)',
                   }}
                 >
-                  <Rotulo>Linha</Rotulo>
-                  <Rotulo style={{ textAlign: 'right' }}>{competenciaPorExtenso(alvo)}</Rotulo>
-                  <Rotulo style={{ textAlign: 'right' }}>% RL</Rotulo>
-                  <Rotulo style={{ textAlign: 'right' }}>vs. mês anterior</Rotulo>
+                  <Etiqueta>Descrição</Etiqueta>
+                  <Etiqueta style={{ textAlign: 'right' }}>Valor do mês</Etiqueta>
+                  <Etiqueta style={{ textAlign: 'right' }}>% receita</Etiqueta>
+                  <Etiqueta style={{ textAlign: 'right' }}>Mês anterior</Etiqueta>
+                  <Etiqueta style={{ textAlign: 'right' }}>Variação</Etiqueta>
                 </div>
 
                 {d.linhas.map((l) => (
-                  <LinhaDre key={l.linha} linha={l} />
+                  <LinhaDre key={l.linha} l={l} />
                 ))}
+
+                <div style={{ padding: '13px 17px 0' }}>
+                  <span
+                    className="font-sans"
+                    style={{ fontSize: 10.5, color: 'rgba(242,237,227,.38)', textWrap: 'pretty' }}
+                  >
+                    O percentual é calculado sobre a Receita Líquida. Transferências entre contas
+                    próprias, aportes e investimentos não entram em nenhuma linha desta apuração.
+                  </span>
+                </div>
               </div>
             </div>
           )}
-        </Cartao>
+        </Painel>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Cartao>
-            <CabecalhoCartao titulo="Resultado nos últimos 6 meses" nota="Por competência" />
-            {p.evolucao.length >= 2 ? (
-              <>
-                <LinhaEvolucao
-                  valores={p.evolucao.map((e) => e.resultado)}
-                  rotulos={p.evolucao.map((e) => e.competencia.slice(5))}
-                  altura={150}
-                  cor={p.evolucao[p.evolucao.length - 1].resultado >= 0 ? '#5FA97A' : '#E06D6D'}
-                />
-                <span
-                  className="font-sans"
-                  style={{ fontSize: 10, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
-                >
-                  Meses sem lançamento aparecem como zero — a série é do que foi registrado, não
-                  uma estimativa do que faltou registrar.
-                </span>
-              </>
+        <Pilha gap={14}>
+          <Painel
+            titulo="Categorias que mais pesam"
+            icone="pizza"
+            nota={competenciaPorExtenso(alvo)}
+            acao={<AcaoPainel href="/financeiro/categorias">Ver todas</AcaoPainel>}
+          >
+            {p.porCategoria.length > 0 ? (
+              <ListaBarras
+                itens={p.porCategoria.slice(0, 7).map((c) => ({
+                  rotulo: c.categoria,
+                  valor: c.valor,
+                  texto: brl(c.valor),
+                  direita:
+                    d.receitaLiquida > 0
+                      ? `${((c.valor / d.receitaLiquida) * 100).toFixed(1).replace('.', ',')}%`
+                      : undefined,
+                  tom: TOM_NATUREZA[c.natureza],
+                  icone: 'etiqueta',
+                }))}
+              />
             ) : (
-              <VazioInterno texto="Ainda não há meses suficientes para desenhar a tendência." />
+              <Vazio icone="pizza" texto="Nenhum custo ou despesa classificado nesta competência." />
             )}
-          </Cartao>
+          </Painel>
 
-          <Cartao>
-            <CabecalhoCartao titulo="Saúde do resultado" nota="Indicadores derivados das linhas" />
-            <LinhaResumo
-              rotulo="Margem de contribuição"
-              nota="Quanto sobra de cada real depois do custo variável"
-              valor={`${d.margemContribuicaoPct.toFixed(1).replace('.', ',')}%`}
-            />
-            <LinhaResumo
-              rotulo="Margem líquida"
-              nota="Depois de toda a estrutura"
-              valor={`${d.margemLiquidaPct.toFixed(1).replace('.', ',')}%`}
-            />
-            <LinhaResumo
-              rotulo="Ponto de equilíbrio"
-              nota="Receita líquida mínima do mês"
-              valor={d.pontoEquilibrio > 0 ? brl(d.pontoEquilibrio) : '—'}
-            />
-            <LinhaResumo
-              rotulo="Folga sobre o equilíbrio"
-              nota={
-                d.pontoEquilibrio > 0
-                  ? 'Quanto a receita passou (ou faltou para) o ponto de equilíbrio'
-                  : 'Sem ponto de equilíbrio calculável'
-              }
-              valor={d.pontoEquilibrio > 0 ? brl(d.receitaLiquida - d.pontoEquilibrio) : '—'}
-              destaque
-            />
-          </Cartao>
-        </div>
-      </div>
-
-      <Cartao>
-        <CabecalhoCartao
-          titulo="Onde o dinheiro foi"
-          nota={`Custos e despesas de ${competenciaPorExtenso(alvo)}, por categoria`}
-        />
-        {p.porCategoria.length > 0 ? (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(280px,1fr))',
-              gap: 14,
+          <Painel
+            titulo="Evolução do resultado"
+            icone="linha"
+            nota="últimos 6 meses"
+            rodape={{
+              nota: 'Meses sem lançamento aparecem como zero: a série é do que foi registrado, não uma estimativa do que faltou registrar.',
             }}
           >
-            {p.porCategoria.slice(0, 12).map((c, i) => (
-              <span key={c.categoria} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <span style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
-                  <span
-                    className="font-sans"
-                    style={{
-                      fontSize: 11.5,
-                      color: 'var(--color-corrente)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {c.categoria}
-                  </span>
-                  <Valor tamanho={12} peso={400}>
-                    {brl(c.valor)}
-                  </Valor>
-                </span>
-                <BarraProporcao
-                  valor={c.valor}
-                  maximo={maiorCategoria}
-                  cor={PALETA_CATEGORIA[i % PALETA_CATEGORIA.length]}
-                  altura={5}
-                />
-                <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                  <span className="font-sans" style={{ fontSize: 9.5, color: 'var(--color-terciario)' }}>
-                    {ROTULO_NATUREZA[c.natureza]}
-                  </span>
-                  <span className="font-sans" style={{ fontSize: 9.5, color: 'var(--color-terciario)' }}>
-                    {d.receitaLiquida > 0
-                      ? `${((c.valor / d.receitaLiquida) * 100).toFixed(1).replace('.', ',')}% da receita`
-                      : '—'}
-                  </span>
-                </span>
-              </span>
-            ))}
-          </div>
-        ) : (
-          <VazioInterno texto="Nenhum custo ou despesa classificado nesta competência." />
-        )}
-      </Cartao>
-    </div>
+            {p.evolucao.length >= 2 ? (
+              <AreaPontos
+                valores={p.evolucao.map((e) => e.resultado)}
+                rotulos={p.evolucao.map((e) => `${e.competencia.slice(5)}/${e.competencia.slice(2, 4)}`)}
+                altura={196}
+                formatar={curto}
+                rotularTodos
+              />
+            ) : (
+              <Vazio icone="linha" texto="Ainda não há meses suficientes para desenhar a tendência." />
+            )}
+          </Painel>
+        </Pilha>
+      </Colunas>
+    </Pilha>
   )
 }
 
-function LinhaDre({ linha }: { linha: LinhaDreGerencial }) {
-  const positivo = linha.valor >= 0
+/**
+ * Uma linha da demonstração.
+ *
+ * Subtotal ganha peso, fundo e fonte maior; linha de detalhe recua sob o
+ * subtotal a que pertence. Sem essa hierarquia, quinze linhas de mesmo peso
+ * viram uma parede de números onde o resultado se perde.
+ */
+function LinhaDre({ l }: { l: LinhaDreGerencial }) {
+  const resultado = l.linha.toLowerCase().includes('resultado')
+  const positivo = l.valor >= 0
+
   return (
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: 'minmax(0,1fr) 128px 74px 118px',
+        gridTemplateColumns: 'minmax(0,1fr) 132px 78px 132px 96px',
         gap: 12,
         alignItems: 'center',
-        padding: linha.destaque ? '12px 17px' : '9px 17px',
-        borderTop: '1px solid var(--color-borda-sutil)',
-        background: linha.destaque ? 'rgba(239,209,140,.035)' : 'transparent',
+        padding: l.destaque ? '12px 17px' : '9px 17px',
+        borderBottom: '1px solid rgba(255,255,255,.04)',
+        background: resultado
+          ? 'rgba(233,197,131,.06)'
+          : l.destaque
+            ? 'rgba(255,255,255,.018)'
+            : 'transparent',
+        borderLeft: resultado ? '2px solid #E9C583' : '2px solid transparent',
       }}
     >
       <span
         className="font-sans"
         style={{
-          fontWeight: linha.destaque ? 600 : 400,
-          fontSize: linha.destaque ? 12.5 : 11.5,
-          // A indentação separa o que soma do que é somado: as linhas de
-          // detalhe recuam sob o subtotal a que pertencem.
-          paddingLeft: linha.destaque ? 0 : 12,
-          color: linha.destaque ? 'var(--color-tinta)' : 'var(--color-secundario)',
+          fontWeight: l.destaque ? 600 : 400,
+          fontSize: l.destaque ? 12.5 : 11.5,
+          letterSpacing: l.destaque ? '.02em' : 0,
+          paddingLeft: l.destaque ? 0 : 14,
+          color: l.destaque
+            ? positivo
+              ? '#5FC084'
+              : '#E8756F'
+            : 'rgba(242,237,227,.66)',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
         }}
       >
-        {linha.linha}
+        {l.linha}
       </span>
 
       <span style={{ textAlign: 'right' }}>
-        <Valor
-          tamanho={linha.destaque ? 14 : 12}
-          peso={linha.destaque ? 600 : 400}
-          tom={linha.destaque ? (positivo ? 'ok' : 'erro') : positivo ? undefined : 'erro'}
+        <Num
+          tamanho={l.destaque ? 14 : 12}
+          peso={l.destaque ? 600 : 500}
+          tom={l.destaque ? (positivo ? 'ok' : 'erro') : positivo ? undefined : 'erro'}
         >
-          {brl(linha.valor)}
-        </Valor>
-      </span>
-
-      <span
-        className="font-mono"
-        style={{ fontSize: 10.5, textAlign: 'right', color: 'var(--color-terciario)' }}
-      >
-        {linha.pctReceita === 0 ? '—' : `${linha.pctReceita.toFixed(1).replace('.', ',')}%`}
+          {brl(l.valor)}
+        </Num>
       </span>
 
       <span style={{ textAlign: 'right' }}>
-        {linha.anterior === 0 && linha.valor === 0 ? (
-          <span className="font-mono" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
+        <Num tamanho={11} peso={400} tom={l.destaque ? 'ouro' : 'neutro'}>
+          {l.pctReceita === 0 ? '—' : `${l.pctReceita.toFixed(1).replace('.', ',')}%`}
+        </Num>
+      </span>
+
+      <span style={{ textAlign: 'right' }}>
+        <Num tamanho={11.5} peso={400} tom="neutro">
+          {l.anterior === 0 ? '—' : brl(l.anterior)}
+        </Num>
+      </span>
+
+      <span style={{ textAlign: 'right' }}>
+        {l.anterior === 0 && l.valor === 0 ? (
+          <Num tamanho={11} peso={400} tom="neutro">
             —
-          </span>
+          </Num>
         ) : (
           <span style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
-            <span
-              className="font-mono"
-              style={{ fontSize: 11, color: linha.variacao >= 0 ? COR.ok : COR.erro }}
-            >
-              {`${linha.variacao >= 0 ? '+' : '−'} ${brl(Math.abs(linha.variacao))}`}
-            </span>
-            {linha.anterior !== 0 && (
-              <span className="font-mono" style={{ fontSize: 9.5, color: 'var(--color-terciario)' }}>
-                {`${linha.variacaoPct >= 0 ? '+' : '−'}${Math.abs(linha.variacaoPct).toFixed(0)}%`}
-              </span>
+            <Num tamanho={11} peso={500} tom={l.variacao >= 0 ? 'ok' : 'erro'}>
+              {`${l.variacao >= 0 ? '+' : '−'} ${brl(Math.abs(l.variacao))}`}
+            </Num>
+            {l.anterior !== 0 && (
+              <Num tamanho={9.5} peso={400} tom="neutro">
+                {`${l.variacaoPct >= 0 ? '+' : '−'}${Math.abs(l.variacaoPct).toFixed(1).replace('.', ',')}%`}
+              </Num>
             )}
           </span>
         )}
       </span>
     </div>
   )
-}
-
-/**
- * Meses navegáveis.
- *
- * A lista sai das competências que TÊM receita — oferecer 24 meses vazios
- * transformaria o seletor num calendário de nada.
- */
-function SeletorCompetencia({ atual, disponiveis }: { atual: string; disponiveis: string[] }) {
-  const meses = [...new Set([atual, ...disponiveis])].sort().reverse().slice(0, 12)
-  return (
-    <span style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-      {meses.map((m) => (
-        <Link
-          key={m}
-          href={`/financeiro/dre?competencia=${m}`}
-          className="font-sans hover:border-ouro/40 hover:text-ouro"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            height: 26,
-            padding: '0 9px',
-            border: `1px solid ${m === atual ? 'rgba(239,209,140,.42)' : 'rgba(255,255,255,.1)'}`,
-            background: m === atual ? 'rgba(239,209,140,.08)' : 'transparent',
-            color: m === atual ? COR.ouro : 'var(--color-secundario)',
-            fontWeight: 600,
-            fontSize: 10,
-            borderRadius: 6,
-            textDecoration: 'none',
-          }}
-        >
-          {m}
-        </Link>
-      ))}
-    </span>
-  )
-}
-
-function variacaoDe(linhas: LinhaDreGerencial[], nome: string): string {
-  const l = linhas.find((x) => x.linha === nome)
-  if (!l || (l.anterior === 0 && l.valor === 0)) return '—'
-  return `${l.variacao >= 0 ? '+' : '−'} ${brl(Math.abs(l.variacao))}`
-}
-
-function sinalDe(linhas: LinhaDreGerencial[], nome: string) {
-  const l = linhas.find((x) => x.linha === nome)
-  if (!l) return 'neutro' as const
-  return l.variacao >= 0 ? ('ok' as const) : ('erro' as const)
 }

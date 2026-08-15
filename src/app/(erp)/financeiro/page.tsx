@@ -1,95 +1,81 @@
 import Link from 'next/link'
 
-import { Cartao, CabecalhoCartao, VazioInterno } from '@/components/erp/Cartao'
-import { BarrasFluxo, LegendaGrafico, PALETA_CATEGORIA, Rosca } from '@/components/erp/Graficos'
-import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
-import { EstadoVazio, LinkSecundario, Losango } from '@/components/erp/primitivos'
-import { COR, type Tom } from '@/components/erp/tokens'
+import {
+  AcaoPainel,
+  Bolinha,
+  Celula,
+  Chip,
+  Colunas,
+  Comparacao,
+  Destaque,
+  Etiqueta,
+  Ferramentas,
+  GradeIndicadores,
+  Ico,
+  Indicador,
+  LinhaValor,
+  LinkSeta,
+  Num,
+  Painel,
+  Pilha,
+  Pilula,
+  TINTA,
+  TabelaUi,
+  Vazio,
+  type ColunaUi,
+  type TomUi,
+} from '@/components/erp/ui'
+import { BarrasEixo, CORES_SERIE, Legenda, RoscaLegenda } from '@/components/erp/Visualizacoes'
 import { carregarVisaoFinanceira } from '@/data/financeiro'
-import { brl, competenciaPorExtenso, diaCurtoPt, pad2, plural } from '@/domain'
+import { brl, competenciaPorExtenso, diaCurtoPt, plural } from '@/domain'
 import type { AlertaFinanceiro, LancamentoGerencial } from '@/domain'
 
 /**
- * Visão Financeira — a landing do módulo.
+ * Dashboard Financeiro — a tela inicial do módulo.
  *
- * Trocou Lançamentos como primeira tela por uma razão do escopo: quem abre o
- * Financeiro quer saber quanto tem, quanto vai ter e o que exige decisão hoje.
- * Uma lista cronológica responde nenhuma das três.
+ * Responde três perguntas nesta ordem: quanto tem, quanto vai ter, e o que
+ * exige decisão hoje. Uma lista de lançamentos não responde nenhuma das três
+ * — por isso deixou de ser a porta de entrada do Financeiro.
  *
- * A hierarquia segue a regra §17: número com ação associada ocupa mais
- * espaço; número que só informa fica menor.
+ * Todo indicador daqui carrega comparação ou nota. Número sem contexto é o
+ * que o escopo proíbe, e é o que transforma painel em planilha escura.
  */
 export const dynamic = 'force-dynamic'
 
-const TOM_ALERTA: Record<AlertaFinanceiro['severidade'], Tom> = {
+const TOM_ALERTA: Record<AlertaFinanceiro['severidade'], TomUi> = {
   critico: 'erro',
   atencao: 'atencao',
-  informativo: 'neutro',
+  informativo: 'info',
 }
 
-export default async function VisaoFinanceira() {
+export default async function DashboardFinanceiro() {
   const v = await carregarVisaoFinanceira()
 
   if (v.semBanco) {
     return (
-      <EstadoVazio
-        titulo="Financeiro indisponível"
-        instrucao="O Supabase precisa estar configurado para o módulo financeiro ler contas, lançamentos e conciliação."
-      />
+      <Pilha>
+        <Painel>
+          <Vazio
+            icone="cadeado"
+            texto="O Supabase precisa estar configurado para o Financeiro ler contas, lançamentos e conciliação."
+          />
+        </Painel>
+      </Pilha>
     )
   }
 
-  const kpis: Kpi[] = [
-    {
-      label: 'Caixa disponível hoje',
-      valor: brl(v.caixaHoje),
-      hint:
-        v.caixaALiquidar > 0
-          ? `+ ${brl(v.caixaALiquidar)} a liquidar nos gateways`
-          : 'Soma das contas ativas',
-      tom: v.caixaHoje > 0 ? 'ok' : 'erro',
-    },
-    {
-      label: 'Saldo projetado 7 dias',
-      valor: brl(v.saldo7),
-      hint: 'Caixa + recebimentos − pagamentos do período',
-      tom: v.saldo7 < 0 ? 'erro' : 'neutro',
-    },
-    {
-      label: 'Saldo projetado 30 dias',
-      valor: brl(v.saldo30),
-      hint: v.projecao.menorSaldoEm
-        ? `Menor ponto: ${brl(v.projecao.menorSaldo)} em ${diaCurtoPt(v.projecao.menorSaldoEm)}`
-        : 'Sem vale no horizonte',
-      tom: v.projecao.menorSaldo < 0 ? 'erro' : 'ouro',
-    },
-    {
-      label: 'A pagar',
-      valor: brl(v.aPagar.valor),
-      hint: `${plural(v.aPagar.qtd, 'compromisso aberto', 'compromissos abertos')}`,
-      tom: v.vencidos.qtd > 0 ? 'atencao' : 'neutro',
-    },
-    {
-      label: 'A receber',
-      valor: brl(v.aReceber.valor),
-      hint: `${plural(v.aReceber.qtd, 'recebimento previsto', 'recebimentos previstos')}`,
-      tom: 'ok',
-    },
-    {
-      label: 'Pendências de conciliação',
-      valor: pad2(v.pendenciasConciliacao.qtd),
-      hint: v.pendenciasConciliacao.qtd
-        ? `${brl(v.pendenciasConciliacao.valor)} em diferença`
-        : 'Nenhuma venda exige decisão',
-      tom: v.pendenciasConciliacao.qtd ? 'erro' : 'ok',
-    },
-  ]
+  // Variação contra o caixa de HOJE: é a única comparação que a projeção
+  // permite sem inventar histórico. "Cresce 8% até domingo" informa; o saldo
+  // bruto de domingo, sozinho, não.
+  const variacao = (futuro: number) =>
+    v.caixaHoje !== 0 ? ((futuro - v.caixaHoje) / Math.abs(v.caixaHoje)) * 100 : 0
 
   const totalSaidas = v.saidasPorCategoria.reduce((a, c) => a + c.valor, 0)
+  const risco = v.projecao.menorSaldo < 0
 
-  // O gráfico mostra 30 dias: o suficiente para enxergar o vale sem espremer
-  // as barras a ponto de virarem uma faixa contínua.
-  const barras = v.projecao.dias.slice(0, 30).map((d) => ({
+  // 21 dias: o suficiente para o vale aparecer sem espremer as barras a ponto
+  // de virarem uma faixa contínua.
+  const barras = v.projecao.dias.slice(0, 21).map((d) => ({
     rotulo: diaCurtoPt(d.dia),
     entrada: d.entradas,
     saida: d.saidas,
@@ -97,363 +83,441 @@ export default async function VisaoFinanceira() {
     previsto: !d.realizado,
   }))
 
+  // As linhas do resumo saem das mesmas grandezas da DRE, por subtração:
+  // nenhum subtotal é digitado, e o cartão nunca discorda da tela cheia.
+  const custosVariaveis = v.receitaLiquidaMes - v.margemMes
+  const despesasFixas = v.margemMes - v.resultadoMes
+
+  const hoje = new Date().toLocaleDateString('pt-BR', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <FaixaKpis kpis={kpis} />
+    <Pilha gap={16}>
 
-      {v.alertas.length > 0 && <PainelAlertas alertas={v.alertas} />}
+      <Ferramentas
+        esquerda={
+          <>
+            <Pilula icone="calendario">{`Hoje, ${hoje}`}</Pilula>
+            <Comparacao texto="competência de" alvo={competenciaPorExtenso(v.competencia)} />
+          </>
+        }
+        direita={<AcaoPainel href="/financeiro/configuracoes">Configurações financeiras</AcaoPainel>}
+      />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.55fr) minmax(0,1fr)', gap: 14 }}>
-        <Cartao>
-          <CabecalhoCartao
-            titulo="Fluxo de caixa projetado"
-            nota="Barras cheias já aconteceram; listradas são previsão"
-            acao={<LinkSecundario href="/financeiro/fluxo-de-caixa" altura={30}>Ver fluxo completo</LinkSecundario>}
-          />
-          <LegendaGrafico
+      <GradeIndicadores>
+        <Indicador
+          icone="carteira"
+          tom="ouro"
+          rotulo="Saldo disponível hoje"
+          valor={brl(v.caixaHoje)}
+          tomValor={v.caixaHoje > 0 ? 'ok' : 'erro'}
+          nota={
+            v.caixaALiquidar > 0
+              ? `+ ${brl(v.caixaALiquidar)} a liquidar nos gateways`
+              : `Soma de ${plural(v.contas.length, 'conta ativa', 'contas ativas')}`
+          }
+          href="/financeiro/contas"
+        />
+        <Indicador
+          icone="calendario"
+          tom="info"
+          rotulo="Saldo projetado 7 dias"
+          valor={brl(v.saldo7)}
+          delta={{ pct: variacao(v.saldo7), base: 'vs. hoje' }}
+          href="/financeiro/fluxo-de-caixa?dias=15"
+        />
+        <Indicador
+          icone="tendencia"
+          tom="ciano"
+          rotulo="Saldo projetado 30 dias"
+          valor={brl(v.saldo30)}
+          delta={{ pct: variacao(v.saldo30), base: 'vs. hoje' }}
+          href="/financeiro/fluxo-de-caixa?dias=30"
+        />
+        <Indicador
+          icone="saida"
+          tom="erro"
+          rotulo="Contas a pagar"
+          valor={brl(v.aPagar.valor)}
+          nota={
+            v.vencidos.qtd
+              ? `${plural(v.vencidos.qtd, 'compromisso vencido', 'compromissos vencidos')} · ${brl(v.vencidos.valor)}`
+              : plural(v.aPagar.qtd, 'compromisso em aberto', 'compromissos em aberto')
+          }
+          tomNota={v.vencidos.qtd ? 'erro' : 'neutro'}
+          href="/financeiro/lancamentos?tipo=saida"
+        />
+        <Indicador
+          icone="entrada"
+          tom="ok"
+          rotulo="Contas a receber"
+          valor={brl(v.aReceber.valor)}
+          nota={plural(v.aReceber.qtd, 'recebimento previsto', 'recebimentos previstos')}
+          tomNota="ok"
+          href="/financeiro/lancamentos?tipo=entrada"
+        />
+        <Indicador
+          icone="recibo"
+          tom={v.pendenciasConciliacao.qtd ? 'atencao' : 'ok'}
+          rotulo="Pendências de conciliação"
+          valor={
+            v.pendenciasConciliacao.qtd
+              ? `${v.pendenciasConciliacao.qtd} ${v.pendenciasConciliacao.qtd === 1 ? 'venda' : 'vendas'}`
+              : 'Tudo conciliado'
+          }
+          nota={
+            v.pendenciasConciliacao.qtd
+              ? `${brl(v.pendenciasConciliacao.valor)} em diferença`
+              : 'Nenhuma venda exige decisão'
+          }
+          tomNota={v.pendenciasConciliacao.qtd ? 'atencao' : 'ok'}
+          href="/financeiro/conciliacao"
+        />
+      </GradeIndicadores>
+
+      <Colunas proporcao="minmax(0,1.6fr) minmax(0,1.05fr) minmax(0,.85fr)">
+        <Painel
+          titulo="Fluxo de caixa projetado"
+          icone="barras"
+          nota="Próximos 21 dias"
+          acao={<AcaoPainel href="/financeiro/fluxo-de-caixa">Ver fluxo de caixa</AcaoPainel>}
+          rodape={{
+            nota: 'Projeção baseada em lançamentos confirmados e contas a pagar/receber futuras.',
+            link: { href: '/financeiro/fluxo-de-caixa', texto: 'Ver fluxo completo' },
+          }}
+        >
+          <Legenda
             itens={[
-              { cor: '#5FA97A', rotulo: 'Entradas' },
-              { cor: '#E06D6D', rotulo: 'Saídas' },
-              { cor: '#EFD18C', rotulo: 'Saldo acumulado' },
+              { cor: CORES_SERIE.entrada, rotulo: 'Entradas' },
+              { cor: CORES_SERIE.saida, rotulo: 'Saídas' },
+              { cor: CORES_SERIE.saldo, rotulo: 'Saldo projetado' },
             ]}
           />
           {barras.length > 0 ? (
-            <BarrasFluxo dados={barras} altura={210} />
+            <BarrasEixo dados={barras} altura={244} />
           ) : (
-            <VazioInterno texto="Sem movimentos no horizonte de 30 dias." />
+            <Vazio icone="barras" texto="Sem movimentos previstos no horizonte." />
           )}
-        </Cartao>
+        </Painel>
 
-        <Cartao>
-          <CabecalhoCartao
-            titulo="Composição das saídas"
-            nota={`Competência de ${competenciaPorExtenso(v.competencia)}`}
-          />
+        <Painel
+          titulo="Composição de saídas"
+          icone="pizza"
+          nota={competenciaPorExtenso(v.competencia)}
+          rodape={{ link: { href: '/financeiro/categorias', texto: 'Ver todas as categorias' } }}
+        >
           {v.saidasPorCategoria.length > 0 ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
-              <Rosca
-                fatias={v.saidasPorCategoria.map((c, i) => ({
-                  rotulo: c.categoria,
-                  valor: c.valor,
-                  cor: PALETA_CATEGORIA[i % PALETA_CATEGORIA.length],
-                }))}
-                tamanho={172}
-                legendaTotal="Total de saídas"
-                valorTotal={brl(totalSaidas)}
-              />
-              <span style={{ flex: 1, minWidth: 190, display: 'flex', flexDirection: 'column', gap: 7 }}>
-                {v.saidasPorCategoria.map((c, i) => (
-                  <span key={c.categoria} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span
-                      aria-hidden
-                      style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: 2,
-                        flex: 'none',
-                        background: PALETA_CATEGORIA[i % PALETA_CATEGORIA.length],
-                      }}
-                    />
-                    <span
-                      className="font-sans"
-                      style={{
-                        flex: 1,
-                        fontSize: 11,
-                        color: 'var(--color-secundario)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {c.categoria}
-                    </span>
-                    <span className="font-mono" style={{ fontSize: 11, color: 'var(--color-corrente)' }}>
-                      {brl(c.valor)}
-                    </span>
-                    <span
-                      className="font-sans"
-                      style={{ fontSize: 10, color: 'var(--color-terciario)', width: 40, textAlign: 'right' }}
-                    >
-                      {totalSaidas ? `${((c.valor / totalSaidas) * 100).toFixed(1).replace('.', ',')}%` : '—'}
-                    </span>
-                  </span>
-                ))}
-              </span>
-            </div>
+            <RoscaLegenda
+              fatias={v.saidasPorCategoria.map((c) => ({ rotulo: c.categoria, valor: c.valor }))}
+              total={totalSaidas}
+              legendaTotal="Total de saídas"
+              formatar={brl}
+              tamanho={176}
+            />
           ) : (
-            <VazioInterno texto="Nenhuma saída classificada nesta competência." />
+            <Vazio icone="pizza" texto="Nenhuma saída classificada nesta competência." />
           )}
-        </Cartao>
-      </div>
+        </Painel>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-          gap: 14,
-        }}
-      >
-        <ListaDeLancamentos
+        <Pilha gap={14}>
+          <Painel
+            titulo="Menor saldo futuro"
+            icone={risco ? 'alerta' : 'escudo'}
+            tom={risco ? 'erro' : 'ok'}
+          >
+            {v.projecao.menorSaldoEm ? (
+              <Destaque
+                tom={risco ? 'erro' : 'ok'}
+                titulo={risco ? 'Risco de caixa' : 'Caixa sustentado'}
+                icone={risco ? 'alerta-circulo' : 'check-circulo'}
+              >
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                  <span className="font-sans" style={{ fontSize: 11.5, color: 'rgba(242,237,227,.6)' }}>
+                    {new Date(`${v.projecao.menorSaldoEm}T12:00:00`).toLocaleDateString('pt-BR', {
+                      day: '2-digit',
+                      month: 'long',
+                      year: 'numeric',
+                    })}
+                  </span>
+                  <Num tamanho={23} tom={risco ? 'erro' : 'ok'} peso={600}>
+                    {brl(v.projecao.menorSaldo)}
+                  </Num>
+                  <span
+                    className="font-sans"
+                    style={{
+                      fontSize: 11,
+                      lineHeight: 1.5,
+                      color: 'rgba(242,237,227,.5)',
+                      textWrap: 'pretty',
+                    }}
+                  >
+                    {risco
+                      ? 'A partir desta data o saldo fica negativo. Antecipar um recebimento ou renegociar um vencimento resolve enquanto há prazo.'
+                      : 'É o ponto mais baixo do horizonte, e ele continua positivo.'}
+                  </span>
+                </span>
+              </Destaque>
+            ) : (
+              <Vazio icone="escudo" texto="Sem vale no horizonte projetado." />
+            )}
+            <LinkSeta href="/financeiro/fluxo-de-caixa">Ver fluxo de caixa completo</LinkSeta>
+          </Painel>
+
+          {v.alertas.length > 0 && (
+            <Painel titulo="Exige decisão" icone="sino" tom="atencao">
+              <Pilha gap={0}>
+                {v.alertas.slice(0, 4).map((a) => (
+                  <Link
+                    key={a.id}
+                    href={a.href}
+                    className="hover:brightness-125"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 10,
+                      padding: '9px 0',
+                      borderTop: '1px solid rgba(255,255,255,.05)',
+                      textDecoration: 'none',
+                    }}
+                  >
+                    <span style={{ color: TINTA[TOM_ALERTA[a.severidade]], paddingTop: 1 }}>
+                      <Ico n={a.severidade === 'critico' ? 'alerta' : 'info'} tamanho={14} />
+                    </span>
+                    <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                      <span
+                        className="font-sans"
+                        style={{
+                          fontSize: 11.5,
+                          fontWeight: 600,
+                          lineHeight: 1.35,
+                          color: TINTA[TOM_ALERTA[a.severidade]],
+                          textWrap: 'pretty',
+                        }}
+                      >
+                        {a.titulo}
+                      </span>
+                      <span
+                        className="font-sans"
+                        style={{ fontSize: 10.5, lineHeight: 1.4, color: 'rgba(242,237,227,.42)' }}
+                      >
+                        {a.detalhe}
+                      </span>
+                    </span>
+                  </Link>
+                ))}
+              </Pilha>
+            </Painel>
+          )}
+        </Pilha>
+      </Colunas>
+
+      <Colunas proporcao="minmax(0,1fr) minmax(0,1fr) minmax(0,.9fr)">
+        <Painel
           titulo="Próximos compromissos"
-          vazio="Nada a pagar no horizonte."
-          itens={v.proximosCompromissos}
-          href="/financeiro/lancamentos?tipo=saida"
-          rotuloAcao="Ver contas a pagar"
+          icone="saida"
           tom="erro"
-        />
-        <ListaDeLancamentos
-          titulo="Recebimentos previstos"
-          vazio="Nenhum recebimento agendado."
-          itens={v.proximosRecebimentos}
-          href="/financeiro/lancamentos?tipo=entrada"
-          rotuloAcao="Ver recebimentos"
-          tom="ok"
-        />
-        <Cartao>
-          <CabecalhoCartao
-            titulo="Resumo da DRE"
-            nota={competenciaPorExtenso(v.competencia)}
-            acao={<LinkSecundario href="/financeiro/dre" altura={30}>Ver DRE</LinkSecundario>}
+          acao={<AcaoPainel href="/financeiro/lancamentos?tipo=saida">Ver contas a pagar</AcaoPainel>}
+        >
+          <ListaDeTitulos
+            itens={v.proximosCompromissos}
+            tom="erro"
+            vazio="Nada a pagar no horizonte."
           />
-          <LinhaResumo rotulo="Receita líquida" valor={v.receitaLiquidaMes} />
-          <LinhaResumo rotulo="Margem de contribuição" valor={v.margemMes} />
-          <LinhaResumo rotulo="Resultado gerencial" valor={v.resultadoMes} destaque />
+        </Painel>
+
+        <Painel
+          titulo="Recebimentos previstos"
+          icone="entrada"
+          tom="ok"
+          acao={<AcaoPainel href="/financeiro/lancamentos?tipo=entrada">Ver recebimentos</AcaoPainel>}
+        >
+          <ListaDeTitulos
+            itens={v.proximosRecebimentos}
+            tom="ok"
+            vazio="Nenhum recebimento agendado."
+          />
+        </Painel>
+
+        <Painel
+          titulo="Resumo da DRE"
+          icone="balanca"
+          tom="roxo"
+          nota={competenciaPorExtenso(v.competencia)}
+          rodape={{ link: { href: '/financeiro/dre', texto: 'Ver DRE gerencial completa' } }}
+        >
+          <Pilha gap={0}>
+            <LinhaValor rotulo="Receita líquida" valor={brl(v.receitaLiquidaMes)} tom="ok" />
+            <LinhaValor rotulo="(−) Custos variáveis" valor={brl(custosVariaveis)} tom="erro" />
+            <LinhaValor rotulo="(−) Despesas fixas" valor={brl(despesasFixas)} tom="erro" />
+            <LinhaValor
+              rotulo="Resultado gerencial"
+              valor={brl(v.resultadoMes)}
+              tom={v.resultadoMes >= 0 ? 'ok' : 'erro'}
+              destaque
+            />
+          </Pilha>
           <span
             className="font-sans"
-            style={{ fontSize: 10, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+            style={{
+              fontSize: 10.5,
+              lineHeight: 1.5,
+              color: 'rgba(242,237,227,.38)',
+              textWrap: 'pretty',
+            }}
           >
-            Resultado por competência — o dinheiro da venda pode entrar em outro mês, e entra no
-            fluxo de caixa, não aqui.
+            Resultado por competência: o dinheiro da venda pode entrar em outro mês — e quando
+            entra, aparece no fluxo de caixa, não aqui.
           </span>
-        </Cartao>
-      </div>
+        </Painel>
+      </Colunas>
 
-      <Cartao>
-        <CabecalhoCartao
-          titulo="Contas e carteiras"
-          nota="O saldo mostra de onde veio: integração, informado ou calculado"
-          acao={<LinkSecundario href="/financeiro/contas" altura={30}>Ver todas as contas</LinkSecundario>}
-        />
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))',
-            gap: 11,
-          }}
-        >
-          {v.contas.map((c) => (
-            <Link
-              key={c.id}
-              href="/financeiro/contas"
-              className="hover:border-ouro/40"
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 6,
-                padding: '13px 14px',
-                border: '1px solid var(--color-borda-sutil)',
-                borderRadius: 12,
-                background: 'rgba(255,255,255,.015)',
-                textDecoration: 'none',
-              }}
-            >
-              <span
-                className="font-sans"
-                style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-corrente)' }}
+      <Painel
+        titulo="Contas e carteiras"
+        icone="banco"
+        nota="O saldo mostra de onde veio: integração, informado ou calculado"
+        acao={<AcaoPainel href="/financeiro/contas">Ver todas as contas e caixas</AcaoPainel>}
+        rodape={{
+          nota: 'Contas conectadas têm o saldo lido pela integração; as demais dependem do extrato.',
+        }}
+      >
+        {v.contas.length > 0 ? (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(208px, 1fr))',
+              gap: 11,
+            }}
+          >
+            {v.contas.map((c, i) => (
+              <Link
+                key={c.id}
+                href="/financeiro/contas"
+                className="hover:border-ouro/30"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 7,
+                  padding: '13px 14px',
+                  border: '1px solid rgba(255,255,255,.06)',
+                  borderRadius: 12,
+                  background: 'rgba(255,255,255,.012)',
+                  textDecoration: 'none',
+                }}
               >
-                {c.nome}
-              </span>
-              <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>
-                {c.tipo}
-              </span>
-              <span
-                className="font-mono"
-                style={{ fontSize: 16, fontWeight: 500, color: 'var(--color-tinta)', paddingTop: 2 }}
-              >
-                {brl(c.saldoDisponivel)}
-              </span>
-              <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>
-                {v.caixaHoje > 0
-                  ? `${((c.saldoDisponivel / v.caixaHoje) * 100).toFixed(1).replace('.', ',')}% do total`
-                  : 'sem saldo'}
-              </span>
-            </Link>
-          ))}
-        </div>
-      </Cartao>
-    </div>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Bolinha
+                    cor={c.cor ?? ['#E9C583', '#5FC084', '#7FA9D8', '#B996E0'][i % 4]}
+                    tamanho={9}
+                  />
+                  <span
+                    className="font-sans"
+                    style={{
+                      flex: 1,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: 'rgba(242,237,227,.9)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {c.nome}
+                  </span>
+                  {c.principal && <Chip tom="ouro">Padrão</Chip>}
+                </span>
+                <span className="font-sans" style={{ fontSize: 10, color: 'rgba(242,237,227,.38)' }}>
+                  {c.tipo}
+                </span>
+                <Num tamanho={17} peso={500} tom={c.saldoDisponivel < 0 ? 'erro' : undefined}>
+                  {brl(c.saldoDisponivel)}
+                </Num>
+                <span className="font-sans" style={{ fontSize: 10, color: 'rgba(242,237,227,.36)' }}>
+                  {v.caixaHoje > 0
+                    ? `${((c.saldoDisponivel / v.caixaHoje) * 100).toFixed(1).replace('.', ',')}% do total`
+                    : 'sem saldo'}
+                </span>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <Vazio icone="banco" texto="Nenhuma conta cadastrada." />
+        )}
+      </Painel>
+    </Pilha>
   )
 }
 
-// ── Blocos ─────────────────────────────────────────────────────────────────
-
-function PainelAlertas({ alertas }: { alertas: AlertaFinanceiro[] }) {
-  return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-        gap: 11,
-      }}
-    >
-      {alertas.slice(0, 4).map((a) => (
-        <Link
-          key={a.id}
-          href={a.href}
-          className="hover:brightness-110"
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 11,
-            padding: '13px 15px',
-            border: `1px solid ${a.severidade === 'critico' ? 'rgba(224,109,109,.32)' : a.severidade === 'atencao' ? 'rgba(224,168,109,.28)' : 'var(--color-borda-sutil)'}`,
-            borderRadius: 12,
-            background:
-              a.severidade === 'critico'
-                ? 'rgba(224,109,109,.06)'
-                : a.severidade === 'atencao'
-                  ? 'rgba(224,168,109,.05)'
-                  : 'rgba(255,255,255,.015)',
-            textDecoration: 'none',
-          }}
-        >
-          <span style={{ paddingTop: 3 }}>
-            <Losango tom={TOM_ALERTA[a.severidade]} preenchido />
-          </span>
-          <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
-            <span
-              className="font-sans"
-              style={{
-                fontSize: 12,
-                fontWeight: 600,
-                lineHeight: 1.35,
-                color: COR[TOM_ALERTA[a.severidade]],
-                textWrap: 'pretty',
-              }}
-            >
-              {a.titulo}
-            </span>
-            <span
-              className="font-sans"
-              style={{ fontSize: 10.5, lineHeight: 1.45, color: 'var(--color-terciario)' }}
-            >
-              {a.detalhe}
-            </span>
-          </span>
-        </Link>
-      ))}
-    </div>
-  )
-}
-
-function ListaDeLancamentos({
-  titulo,
+/** Tabela curta de títulos — a mesma nos compromissos e nos recebimentos. */
+function ListaDeTitulos({
   itens,
-  href,
-  rotuloAcao,
-  vazio,
   tom,
+  vazio,
 }: {
-  titulo: string
   itens: LancamentoGerencial[]
-  href: string
-  rotuloAcao: string
+  tom: TomUi
   vazio: string
-  tom: Tom
 }) {
-  return (
-    <Cartao>
-      <CabecalhoCartao
-        titulo={titulo}
-        acao={<LinkSecundario href={href} altura={30}>{rotuloAcao}</LinkSecundario>}
-      />
-      {itens.length === 0 ? (
-        <VazioInterno texto={vazio} />
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {itens.map((l) => (
-            <span
-              key={l.id}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '58px minmax(0,1fr) auto',
-                gap: 10,
-                alignItems: 'center',
-                padding: '8px 0',
-                borderTop: '1px solid var(--color-borda-sutil)',
-              }}
-            >
-              <span className="font-mono" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
-                {l.venceEm ? diaCurtoPt(l.venceEm) : '—'}
-              </span>
-              <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-                <span
-                  className="font-sans"
-                  style={{
-                    fontSize: 11.5,
-                    color: 'var(--color-corrente)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {l.descricao}
-                </span>
-                <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>
-                  {l.categoria}
-                </span>
-              </span>
-              <span className="font-mono" style={{ fontSize: 11.5, color: COR[tom] }}>
-                {brl(l.valor - l.recebido)}
-              </span>
-            </span>
-          ))}
-        </div>
-      )}
-    </Cartao>
-  )
-}
+  const colunas: ColunaUi<LancamentoGerencial>[] = [
+    {
+      chave: 'venc',
+      titulo: 'Vencimento',
+      largura: '74px',
+      render: (l) => (
+        <Num tamanho={11} peso={500} tom={tom}>
+          {l.venceEm ? diaCurtoPt(l.venceEm) : '—'}
+        </Num>
+      ),
+    },
+    {
+      chave: 'desc',
+      titulo: 'Descrição',
+      largura: 'minmax(0,1fr)',
+      render: (l) => <Celula principal={l.descricao} secundaria={l.categoria} />,
+    },
+    {
+      chave: 'valor',
+      titulo: 'Valor',
+      largura: '104px',
+      alinhamento: 'right',
+      render: (l) => (
+        <Num tamanho={12} tom={tom}>
+          {brl(l.valor - l.recebido)}
+        </Num>
+      ),
+    },
+  ]
 
-function LinhaResumo({
-  rotulo,
-  valor,
-  destaque,
-}: {
-  rotulo: string
-  valor: number
-  destaque?: boolean
-}) {
+  const total = itens.reduce((a, l) => a + (l.valor - l.recebido), 0)
+
   return (
-    <span
-      style={{
-        display: 'flex',
-        alignItems: 'baseline',
-        justifyContent: 'space-between',
-        gap: 12,
-        padding: '7px 0',
-        borderTop: '1px solid var(--color-borda-sutil)',
-      }}
-    >
-      <span
-        className="font-sans"
-        style={{
-          fontSize: destaque ? 12 : 11.5,
-          fontWeight: destaque ? 600 : 400,
-          color: destaque ? 'var(--color-corrente)' : 'var(--color-secundario)',
-        }}
-      >
-        {rotulo}
-      </span>
-      <span
-        className="font-mono"
-        style={{
-          fontSize: destaque ? 15 : 12.5,
-          fontWeight: destaque ? 600 : 400,
-          color: valor < 0 ? COR.erro : destaque ? COR.ok : 'var(--color-tinta)',
-        }}
-      >
-        {brl(valor)}
-      </span>
-    </span>
+    <TabelaUi
+      colunas={colunas}
+      itens={itens}
+      chaveDe={(l) => l.id}
+      larguraMinima={300}
+      vazio={<Vazio icone="check-circulo" texto={vazio} />}
+      rodape={
+        itens.length > 0 ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              paddingTop: 11,
+              borderTop: '1px solid rgba(255,255,255,.05)',
+            }}
+          >
+            <Etiqueta>Total listado</Etiqueta>
+            <div style={{ flex: 1 }} />
+            <Num tamanho={13} tom={tom}>
+              {brl(total)}
+            </Num>
+          </div>
+        ) : null
+      }
+    />
   )
 }

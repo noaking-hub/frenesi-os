@@ -1,357 +1,416 @@
-import Link from 'next/link'
-
-import { Cartao, CabecalhoCartao, LinhaResumo, VazioInterno } from '@/components/erp/Cartao'
-import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
-import { Badge, EstadoVazio, LinkSecundario, Valor } from '@/components/erp/primitivos'
-import { COR } from '@/components/erp/tokens'
-import { carregarConfiguracoes } from '@/data/financeiro'
+import {
+  AcaoPainel,
+  Celula,
+  Chip,
+  Colunas,
+  Etiqueta,
+  Ferramentas,
+  GradeIndicadores,
+  Indicador,
+  LinhaValor,
+  Num,
+  Painel,
+  Pilha,
+  TabelaUi,
+  Vazio,
+  type ColunaUi,
+} from '@/components/erp/ui'
+import { Progresso } from '@/components/erp/Visualizacoes'
+import { carregarConfiguracoes, type CompetenciaFechada } from '@/data/financeiro'
 import { brl, competenciaPorExtenso, plural, ROTULO_ORIGEM_SALDO } from '@/domain'
 
 import { AlternarCentro, FecharCompetencia, NovoCentroCusto, ReabrirCompetencia } from './Acoes'
 
 /**
- * Configurações financeiras — as regras que o resto do módulo obedece.
+ * Configurações Financeiras — as regras que o resto do módulo obedece.
  *
- * Três coisas moram aqui: o fechamento de competência (que congela o passado),
- * os centros de custo (que cortam o gasto por frente) e o retrato de como
- * cada conta obtém seu saldo. Nenhuma delas é uma preferência de exibição;
- * todas mudam o que os outros números significam.
+ * Três coisas moram aqui, e nenhuma é preferência de exibição: o fechamento
+ * de competência (que congela o passado), os centros de custo (que cortam o
+ * gasto por frente) e o retrato de como cada conta obtém seu saldo. Todas
+ * mudam o que os outros números significam.
  */
 export const dynamic = 'force-dynamic'
+
+interface LinhaMes {
+  competencia: string
+  lancamentos: number
+  semCategoria: number
+  resultado: number
+  fechada: CompetenciaFechada | null
+  travada: boolean
+}
 
 export default async function ConfiguracoesFinanceiras() {
   const c = await carregarConfiguracoes()
 
   if (c.semBanco) {
     return (
-      <EstadoVazio
-        titulo="Configurações indisponíveis"
-        instrucao="O Supabase precisa estar configurado para gerenciar fechamento, centros de custo e contas."
-      />
+      <Pilha>
+        <Painel>
+          <Vazio icone="cadeado" texto="O Supabase precisa estar configurado para gerenciar o módulo." />
+        </Painel>
+      </Pilha>
     )
   }
 
   const travadas = c.competencias.filter((f) => !f.reabertaEm)
   const ultimoFechamento = travadas[0]
   const pendentesDeCategoria = c.abertas.reduce((a, m) => a + m.semCategoria, 0)
-  const semAutomacao = c.categorias.filter((cat) => cat.ativa && !cat.usarEmAutomacao).length
+  const comContaContabil = c.categorias.filter((x) => x.contaContabil).length
+  const conectadas = c.contas.filter((x) => x.origemSaldo === 'api').length
 
-  const kpis: Kpi[] = [
+  // Uma linha por mês com movimento: aberta ou fechada. Listar os doze meses
+  // do ano ofereceria fechar novembro em agosto.
+  const meses: LinhaMes[] = [
+    ...c.abertas.map((m) => {
+      const registro = c.competencias.find((f) => f.competencia === m.competencia) ?? null
+      return {
+        competencia: m.competencia,
+        lancamentos: m.lancamentos,
+        semCategoria: m.semCategoria,
+        resultado: registro?.resultado ?? 0,
+        fechada: registro,
+        travada: false,
+      }
+    }),
+    ...travadas.map((f) => ({
+      competencia: f.competencia,
+      lancamentos: f.lancamentos,
+      semCategoria: 0,
+      resultado: f.resultado,
+      fechada: f,
+      travada: true,
+    })),
+  ].sort((a, b) => b.competencia.localeCompare(a.competencia))
+
+  const colunas: ColunaUi<LinhaMes>[] = [
     {
-      label: 'Competências fechadas',
-      valor: String(travadas.length).padStart(2, '0'),
-      hint: ultimoFechamento
-        ? `A última foi ${competenciaPorExtenso(ultimoFechamento.competencia)}`
-        : 'Nenhum mês congelado ainda',
-      tom: travadas.length ? 'ok' : 'neutro',
+      chave: 'mes',
+      titulo: 'Competência',
+      largura: 'minmax(0,1fr)',
+      render: (m) => (
+        <Celula
+          principal={competenciaPorExtenso(m.competencia)}
+          secundaria={
+            m.travada && m.fechada
+              ? [
+                  `fechada em ${m.fechada.fechadaEm.slice(0, 10)}`,
+                  m.fechada.fechadaPor,
+                  m.fechada.observacao,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')
+              : m.fechada?.reabertaEm
+                ? `reaberta: ${m.fechada.reaberturaMotivo ?? 'sem motivo registrado'}`
+                : plural(m.lancamentos, 'lançamento no mês', 'lançamentos no mês')
+          }
+        />
+      ),
     },
     {
-      label: 'Competências abertas',
-      valor: String(c.abertas.length).padStart(2, '0'),
-      hint: 'Meses com movimento que ainda podem mudar',
-      tom: c.abertas.length > 3 ? 'atencao' : 'neutro',
+      chave: 'lanc',
+      titulo: 'Lançamentos',
+      largura: '108px',
+      alinhamento: 'right',
+      render: (m) => <Num tamanho={12}>{String(m.lancamentos)}</Num>,
     },
     {
-      label: 'Sem categoria',
-      valor: String(pendentesDeCategoria).padStart(2, '0'),
-      hint: pendentesDeCategoria
-        ? 'Fora da DRE até alguém classificar'
-        : 'Todo lançamento está classificado',
-      tom: pendentesDeCategoria ? 'erro' : 'ok',
+      chave: 'pend',
+      titulo: 'Sem categoria',
+      largura: '124px',
+      render: (m) =>
+        m.semCategoria > 0 ? (
+          <Chip tom="atencao">{plural(m.semCategoria, 'lançamento', 'lançamentos')}</Chip>
+        ) : (
+          <span className="font-sans" style={{ fontSize: 10.5, color: 'rgba(242,237,227,.32)' }}>
+            nenhum
+          </span>
+        ),
     },
     {
-      label: 'Centros de custo',
-      valor: String(c.centros.filter((x) => x.ativo).length).padStart(2, '0'),
-      hint: c.centros.length
-        ? `${c.centros.length - c.centros.filter((x) => x.ativo).length} inativo(s)`
-        : 'Nenhum cadastrado — o rateio por frente fica indisponível',
-      tom: 'neutro',
+      chave: 'res',
+      titulo: 'Resultado',
+      largura: '128px',
+      alinhamento: 'right',
+      render: (m) => (
+        <Num tamanho={12.5} tom={m.resultado >= 0 ? 'ok' : 'erro'}>
+          {brl(m.resultado)}
+        </Num>
+      ),
     },
     {
-      label: 'Contas do caixa',
-      valor: String(c.contas.filter((x) => x.ativa).length).padStart(2, '0'),
-      hint: `${c.contas.filter((x) => x.origemSaldo === 'api').length} com saldo lido por integração`,
-      tom: 'neutro',
+      chave: 'estado',
+      titulo: 'Estado',
+      largura: '104px',
+      render: (m) => (
+        <Chip tom={m.travada ? 'ok' : m.semCategoria ? 'atencao' : 'info'}>
+          {m.travada ? 'Fechada' : 'Aberta'}
+        </Chip>
+      ),
     },
     {
-      label: 'Fora da automação',
-      valor: String(semAutomacao).padStart(2, '0'),
-      hint: semAutomacao
-        ? 'Categorias que a classificação automática não pode escolher'
-        : 'Toda categoria ativa está disponível',
-      tom: 'neutro',
+      chave: 'acao',
+      titulo: 'Ação',
+      largura: '158px',
+      alinhamento: 'right',
+      render: (m) =>
+        m.travada ? (
+          <ReabrirCompetencia competencia={m.competencia} />
+        ) : (
+          <FecharCompetencia
+            competencia={m.competencia}
+            lancamentos={m.lancamentos}
+            semCategoria={m.semCategoria}
+            resultado={m.resultado}
+          />
+        ),
     },
   ]
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <FaixaKpis kpis={kpis} />
+    <Pilha gap={16}>
+      <Ferramentas direita={<NovoCentroCusto />} />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.35fr) minmax(0,1fr)', gap: 14 }}>
-        <Cartao>
-          <CabecalhoCartao
-            titulo="Fechamento de competência"
-            nota="Fechar congela valor, categoria e tipo dos lançamentos do mês"
-            acao={<LinkSecundario href="/financeiro/dre" altura={28}>Conferir na DRE</LinkSecundario>}
-          />
+      <GradeIndicadores>
+        <Indicador
+          icone="cadeado"
+          tom={travadas.length ? 'ok' : 'neutro'}
+          rotulo="Competências fechadas"
+          valor={String(travadas.length)}
+          nota={
+            ultimoFechamento
+              ? `a última foi ${competenciaPorExtenso(ultimoFechamento.competencia)}`
+              : 'nenhum mês congelado ainda'
+          }
+          tomNota={travadas.length ? 'ok' : 'neutro'}
+        />
+        <Indicador
+          icone="calendario"
+          tom={c.abertas.length > 3 ? 'atencao' : 'info'}
+          rotulo="Competências abertas"
+          valor={String(c.abertas.length)}
+          nota="Meses com movimento que ainda podem mudar"
+        />
+        <Indicador
+          icone={pendentesDeCategoria ? 'alerta' : 'check-circulo'}
+          tom={pendentesDeCategoria ? 'erro' : 'ok'}
+          rotulo="Lançamentos sem categoria"
+          valor={String(pendentesDeCategoria)}
+          tomValor={pendentesDeCategoria ? 'erro' : 'ok'}
+          nota={
+            pendentesDeCategoria
+              ? 'Ficam fora da DRE até alguém classificar'
+              : 'Todo lançamento está classificado'
+          }
+          tomNota={pendentesDeCategoria ? 'erro' : 'ok'}
+          href={pendentesDeCategoria ? '/financeiro/extrato' : undefined}
+        />
+        <Indicador
+          icone="grade"
+          tom="roxo"
+          rotulo="Centros de custo"
+          valor={String(c.centros.filter((x) => x.ativo).length)}
+          nota={
+            c.centros.length
+              ? `${c.centros.length - c.centros.filter((x) => x.ativo).length} inativo(s)`
+              : 'Nenhum cadastrado — o rateio por frente fica indisponível'
+          }
+        />
+        <Indicador
+          icone="elo"
+          tom={conectadas === c.contas.length ? 'ok' : 'info'}
+          rotulo="Contas do caixa"
+          valor={String(c.contas.filter((x) => x.ativa).length)}
+          nota={`${conectadas} com saldo lido por integração`}
+        />
+        <Indicador
+          icone="documento"
+          tom={comContaContabil === c.categorias.length ? 'ok' : 'atencao'}
+          rotulo="Categorias mapeadas"
+          valor={`${comContaContabil} de ${c.categorias.length}`}
+          nota="Com conta contábil definida para a exportação"
+          tomNota={comContaContabil === c.categorias.length ? 'ok' : 'atencao'}
+          href="/financeiro/contabil"
+        />
+      </GradeIndicadores>
 
-          {c.abertas.length === 0 && c.competencias.length === 0 ? (
-            <VazioInterno texto="Nenhum lançamento registrado ainda — não há competência para fechar." />
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {c.abertas.map((m) => {
-                const dados = c.competencias.find((f) => f.competencia === m.competencia)
-                return (
-                  <Linha
-                    key={m.competencia}
-                    titulo={competenciaPorExtenso(m.competencia)}
-                    detalhe={[
-                      plural(m.lancamentos, 'lançamento', 'lançamentos'),
-                      m.semCategoria > 0 ? `${m.semCategoria} sem categoria` : null,
-                      dados?.reabertaEm
-                        ? `reaberta: ${dados.reaberturaMotivo ?? 'sem motivo registrado'}`
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                    marca={<Badge tom={m.semCategoria ? 'atencao' : 'info'}>Aberta</Badge>}
-                    acao={
-                      <FecharCompetencia
-                        competencia={m.competencia}
-                        lancamentos={m.lancamentos}
-                        semCategoria={m.semCategoria}
-                        resultado={dados?.resultado ?? 0}
-                      />
-                    }
-                  />
-                )
-              })}
+      <Painel
+        titulo="Fechamento de competência"
+        icone="cadeado"
+        nota="fechar congela valor, categoria e tipo dos lançamentos do mês"
+        acao={<AcaoPainel href="/financeiro/dre">Conferir na DRE</AcaoPainel>}
+        rodape={{
+          nota: 'Dar baixa continua liberado em mês fechado: o caixa de setembro não reescreve o resultado de agosto. A reabertura exige motivo e fica registrada.',
+        }}
+      >
+        <TabelaUi
+          colunas={colunas}
+          itens={meses}
+          chaveDe={(m) => m.competencia}
+          larguraMinima={800}
+          faixaDe={(m) => (m.travada ? 'ok' : m.semCategoria ? 'atencao' : null)}
+          vazio={
+            <Vazio
+              icone="calendario"
+              texto="Nenhum lançamento registrado ainda — não há competência para fechar."
+            />
+          }
+        />
+      </Painel>
 
-              {travadas.map((f) => (
-                <Linha
-                  key={f.competencia}
-                  titulo={competenciaPorExtenso(f.competencia)}
-                  detalhe={[
-                    `fechada em ${f.fechadaEm.slice(0, 10)}`,
-                    f.fechadaPor,
-                    f.observacao,
-                    `resultado ${brl(f.resultado)}`,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                  marca={<Badge tom="ok">Fechada</Badge>}
-                  acao={<ReabrirCompetencia competencia={f.competencia} />}
-                />
-              ))}
-            </div>
-          )}
-        </Cartao>
-
-        <Cartao>
-          <CabecalhoCartao
-            titulo="Centros de custo"
-            nota="Cortam o gasto por frente, sem inchar o plano de contas"
-            acao={<NovoCentroCusto />}
-          />
+      <Colunas proporcao="minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)">
+        <Painel
+          titulo="Centros de custo"
+          icone="grade"
+          tom="roxo"
+          nota="cortam o gasto por frente"
+          acao={<NovoCentroCusto />}
+        >
           {c.centros.length === 0 ? (
-            <VazioInterno texto="Nenhum centro de custo cadastrado." />
+            <Vazio
+              icone="grade"
+              texto="Nenhum centro de custo cadastrado. Sem eles, a pergunta “quanto a expedição custou este mês?” só se responde com categoria específica demais."
+            />
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <Pilha gap={0}>
               {c.centros.map((x) => (
-                <span
+                <div
                   key={x.id}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: 12,
                     padding: '10px 0',
-                    borderTop: '1px solid var(--color-borda-sutil)',
-                    opacity: x.ativo ? 1 : 0.55,
+                    borderTop: '1px solid rgba(255,255,255,.05)',
+                    opacity: x.ativo ? 1 : 0.5,
                   }}
                 >
                   <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
-                    <span className="font-sans" style={{ fontSize: 12, color: 'var(--color-corrente)' }}>
+                    <span
+                      className="font-sans"
+                      style={{ fontSize: 12, color: 'rgba(242,237,227,.86)' }}
+                    >
                       {x.nome}
                     </span>
-                    <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>
+                    <Etiqueta>
                       {x.emUso > 0
                         ? plural(x.emUso, 'lançamento usa', 'lançamentos usam')
                         : 'nenhum lançamento usa'}
-                    </span>
+                    </Etiqueta>
                   </span>
                   <AlternarCentro id={x.id} nome={x.nome} ativo={x.ativo} />
-                </span>
+                </div>
               ))}
-            </div>
+            </Pilha>
           )}
-        </Cartao>
-      </div>
+        </Painel>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px,1fr))', gap: 14 }}>
-        <Cartao>
-          <CabecalhoCartao
-            titulo="Origem do saldo de cada conta"
-            acao={<LinkSecundario href="/financeiro/contas" altura={28}>Ajustar</LinkSecundario>}
-          />
-          <span
-            className="font-sans"
-            style={{ fontSize: 10.5, lineHeight: 1.55, color: 'var(--color-terciario)', textWrap: 'pretty' }}
-          >
-            Saldo lido por integração é o mais confiável; informado depende de alguém digitar;
-            calculado é a soma do extrato, que atrasa quando falta importar.
-          </span>
-          {c.contas.map((conta) => (
-            <LinhaResumo
-              key={conta.id}
-              rotulo={conta.nome}
-              nota={ROTULO_ORIGEM_SALDO[conta.origemSaldo]}
-              valor={brl(conta.saldoDisponivel)}
-            />
-          ))}
-        </Cartao>
+        <Painel
+          titulo="Origem do saldo de cada conta"
+          icone="banco"
+          acao={<AcaoPainel href="/financeiro/contas">Ajustar</AcaoPainel>}
+          rodape={{
+            nota: 'Saldo lido por integração é o mais confiável; informado depende de alguém digitar; calculado é a soma do extrato, que atrasa quando falta importar.',
+          }}
+        >
+          <Pilha gap={0}>
+            {c.contas.map((conta) => (
+              <LinhaValor
+                key={conta.id}
+                rotulo={conta.nome}
+                nota={ROTULO_ORIGEM_SALDO[conta.origemSaldo]}
+                valor={brl(conta.saldoDisponivel)}
+                icone={conta.origemSaldo === 'api' ? 'elo' : conta.origemSaldo === 'informado' ? 'lapis' : 'calculadora'}
+                tomIcone={conta.origemSaldo === 'api' ? 'ok' : conta.origemSaldo === 'informado' ? 'ouro' : 'neutro'}
+              />
+            ))}
+          </Pilha>
+        </Painel>
 
-        <Cartao>
-          <CabecalhoCartao
-            titulo="Integração contábil"
-            nota="O pacote que vai para o contador"
-            acao={<LinkSecundario href="/financeiro/contabil" altura={28}>Abrir</LinkSecundario>}
-          />
-          <span
-            className="font-sans"
-            style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--color-secundario)', textWrap: 'pretty' }}
-          >
-            A exportação usa a conta contábil de cada categoria. Categoria sem código sai no
-            arquivo como não classificada, e o contador devolve o pacote pedindo o de-para.
-          </span>
-          <LinhaResumo
-            rotulo="Categorias com conta contábil"
-            valor={`${c.categorias.filter((x) => x.contaContabil).length}/${c.categorias.length}`}
-          />
-          <LinhaResumo
-            rotulo="Competências prontas para exportar"
-            nota="Fechadas e sem lançamento pendente"
-            valor={String(travadas.length)}
-            destaque
-          />
-        </Cartao>
+        <Painel
+          titulo="Prontidão para o contador"
+          icone="enviar"
+          tom="ciano"
+          acao={<AcaoPainel href="/financeiro/contabil">Abrir</AcaoPainel>}
+        >
+          <Pilha gap={12}>
+            <Pilha gap={7}>
+              <Etiqueta>Categorias com conta contábil</Etiqueta>
+              <span style={{ display: 'flex', alignItems: 'baseline', gap: 9 }}>
+                <Num tamanho={18} tom={comContaContabil === c.categorias.length ? 'ok' : 'atencao'}>
+                  {`${comContaContabil}/${c.categorias.length}`}
+                </Num>
+                <span className="font-sans" style={{ fontSize: 11, color: 'rgba(242,237,227,.4)' }}>
+                  mapeadas
+                </span>
+              </span>
+              <Progresso
+                pct={c.categorias.length ? (comContaContabil / c.categorias.length) * 100 : 0}
+                tom={comContaContabil === c.categorias.length ? 'ok' : 'atencao'}
+              />
+            </Pilha>
 
-        <Cartao>
-          <CabecalhoCartao titulo="Últimas alterações" nota="Trilha de auditoria do módulo" />
-          {c.auditoria.length === 0 ? (
-            <VazioInterno texto="Nenhuma alteração registrada." />
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {c.auditoria.map((a) => (
+            <Pilha gap={0}>
+              <LinhaValor
+                rotulo="Competências prontas"
+                nota="fechadas e sem pendência"
+                valor={String(travadas.length)}
+                tom="ok"
+              />
+              <LinhaValor
+                rotulo="Ainda abertas"
+                nota="podem mudar antes do envio"
+                valor={String(c.abertas.length)}
+                tom={c.abertas.length ? 'atencao' : 'neutro'}
+              />
+            </Pilha>
+          </Pilha>
+        </Painel>
+      </Colunas>
+
+      <Painel titulo="Últimas alterações" icone="relogio" nota="trilha de auditoria do módulo">
+        {c.auditoria.length === 0 ? (
+          <Vazio icone="relogio" texto="Nenhuma alteração registrada." />
+        ) : (
+          <Pilha gap={0}>
+            {c.auditoria.map((a) => (
+              <div
+                key={a.id}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '150px minmax(0,1fr) 120px',
+                  gap: 12,
+                  alignItems: 'center',
+                  padding: '9px 0',
+                  borderTop: '1px solid rgba(255,255,255,.05)',
+                }}
+              >
+                <Num tamanho={10.5} peso={400} tom="neutro">
+                  {a.ocorridoEm.slice(0, 16).replace('T', ' ')}
+                </Num>
                 <span
-                  key={a.id}
+                  className="font-sans"
                   style={{
-                    display: 'grid',
-                    gridTemplateColumns: '84px minmax(0,1fr) auto',
-                    gap: 10,
-                    alignItems: 'center',
-                    padding: '8px 0',
-                    borderTop: '1px solid var(--color-borda-sutil)',
+                    fontSize: 11.5,
+                    color: 'rgba(242,237,227,.72)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
                   }}
                 >
-                  <Valor tamanho={10} peso={400} tom="var(--color-terciario)">
-                    {a.ocorridoEm.slice(0, 16).replace('T', ' ')}
-                  </Valor>
-                  <span
-                    className="font-sans"
-                    style={{
-                      fontSize: 11,
-                      color: 'var(--color-corrente)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {`${a.acao} · ${a.entidade} ${a.entidadeId}`}
-                  </span>
-                  <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>
-                    {a.operador ?? '—'}
-                  </span>
+                  {`${a.acao} · ${a.entidade} ${a.entidadeId}`}
                 </span>
-              ))}
-            </div>
-          )}
-        </Cartao>
-      </div>
-
-      {pendentesDeCategoria > 0 && (
-        <Link
-          href="/financeiro/extrato"
-          className="hover:brightness-110"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            padding: '14px 17px',
-            border: '1px solid rgba(194,90,80,.32)',
-            borderRadius: 12,
-            background: 'rgba(194,90,80,.06)',
-            textDecoration: 'none',
-          }}
-        >
-          <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <span className="font-sans" style={{ fontWeight: 600, fontSize: 12, color: COR.erro }}>
-              {`${plural(pendentesDeCategoria, 'lançamento sem categoria', 'lançamentos sem categoria')}`}
-            </span>
-            <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-secundario)' }}>
-              Classificar antes de fechar evita congelar um resultado incompleto.
-            </span>
-          </span>
-        </Link>
-      )}
-    </div>
-  )
-}
-
-function Linha({
-  titulo,
-  detalhe,
-  marca,
-  acao,
-}: {
-  titulo: string
-  detalhe: string
-  marca: React.ReactNode
-  acao: React.ReactNode
-}) {
-  return (
-    <span
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        padding: '11px 0',
-        borderTop: '1px solid var(--color-borda-sutil)',
-      }}
-    >
-      <span style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1, minWidth: 0 }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <span
-            className="font-sans"
-            style={{ fontWeight: 600, fontSize: 12.5, color: 'var(--color-corrente)' }}
-          >
-            {titulo}
-          </span>
-          {marca}
-        </span>
-        <span
-          className="font-sans"
-          style={{
-            fontSize: 10,
-            color: 'var(--color-terciario)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {detalhe}
-        </span>
-      </span>
-      {acao}
-    </span>
+                <span
+                  className="font-sans"
+                  style={{ fontSize: 10.5, color: 'rgba(242,237,227,.38)', textAlign: 'right' }}
+                >
+                  {a.operador ?? '—'}
+                </span>
+              </div>
+            ))}
+          </Pilha>
+        )}
+      </Painel>
+    </Pilha>
   )
 }

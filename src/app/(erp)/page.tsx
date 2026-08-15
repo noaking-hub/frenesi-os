@@ -1,393 +1,637 @@
 import Link from 'next/link'
 
-import { CardKpi, type Kpi } from '@/components/erp/Kpi'
-import { Losango, Rotulo, TituloSecao } from '@/components/erp/primitivos'
-import { COR, FAIXA, type Tom } from '@/components/erp/tokens'
+import {
+  AcaoPainel,
+  Celula,
+  Chip,
+  Colunas,
+  Comparacao,
+  Etiqueta,
+  Ferramentas,
+  GradeIndicadores,
+  Ico,
+  Indicador,
+  LinhaValor,
+  Num,
+  Painel,
+  Pilha,
+  Pilula,
+  Segmentado,
+  TINTA,
+  Vazio,
+  type Delta,
+  type NomeIcone,
+  type TomUi,
+} from '@/components/erp/ui'
+import { AreaPontos, PALETA, RoscaLegenda, curto } from '@/components/erp/Visualizacoes'
 import { carregarDashboard } from '@/data/consultas'
-import { repositorio } from '@/data/repository'
-import { brl, pad2, pct, plural, saldoConsolidado, volume } from '@/domain'
+import { carregarPainelPrincipal, PERIODOS, variacao, type Periodo } from '@/data/painel'
+import { sessaoAtual } from '@/data/sessao'
+import { brl, diaCurtoPt, num, plural } from '@/domain'
 
 /**
- * Dashboard: o dia da operação numa tela.
+ * Dashboard Principal — a central de decisão operacional e gerencial.
  *
- * Tudo aqui é derivado dos mesmos dados das telas responsáveis — nenhum
- * número nasce no dashboard. A versão anterior mostrava "Financeiro ainda
- * não integrado" com o financeiro já integrado: o card foi escrito quando a
- * frase era verdade e ninguém voltou nele. Números de exemplo não entram
- * mais em lugar nenhum desta tela.
+ * O critério do escopo é de dez segundos: ao abrir o ERP, o dono precisa
+ * entender se o negócio está saudável, quais exceções exigem ação e qual
+ * módulo abrir em seguida. Por isso a ordem é sempre a mesma — saúde,
+ * exceções, tendência, diagnóstico —, e nenhum número aparece sem a
+ * comparação que lhe dá sentido.
+ *
+ * A regra de integridade que sustenta os números: faturamento sai de PEDIDOS
+ * PAGOS, caixa sai de LANÇAMENTOS BAIXADOS. As duas grandezas convivem sem se
+ * somar, e é isso que impede o mesmo recebimento de ser contado duas vezes.
  */
-export default async function Dashboard() {
-  const [{ estoque, lotes, sync, parametros, bases, pendencias }, contas, pedidos] =
-    await Promise.all([carregarDashboard(), repositorio().contas(), repositorio().pedidos()])
+export const dynamic = 'force-dynamic'
 
-  const caixa = saldoConsolidado(contas)
-  const esgotadas = bases.filter((b) => b.volumeMl === 0 && b.sobControle)
-  const emRisco = estoque.criticos + estoque.esgotados
-  const acionaveis = pendencias.filter((p) => p.contagem > 0)
-  const total = acionaveis.reduce((a, p) => a + p.contagem, 0)
+const TOM_PENDENCIA: Record<string, TomUi> = {
+  ok: 'ok',
+  atencao: 'atencao',
+  erro: 'erro',
+  info: 'info',
+  ouro: 'ouro',
+  neutro: 'neutro',
+}
 
-  // Tudo no fuso da operação: no deploy o servidor roda em UTC, e "hoje" em
-  // UTC começa 3 horas antes — a venda das 22h cairia no dia seguinte.
-  const SP = { timeZone: 'America/Sao_Paulo' } as const
-  const mes = new Date().toLocaleDateString('pt-BR', { month: 'long', ...SP })
-  const mesNumero = Number(new Date().toLocaleDateString('pt-BR', { month: 'numeric', ...SP }))
-  const pagos = pedidos.filter((p) => p.pagamento === 'pago')
-  const pagosNoMes = pagos.filter((p) => {
-    const [, m] = p.data.split('/')
-    return Number(m.slice(0, 2)) === mesNumero
-  })
-  const vendasNoMes = pagosNoMes.reduce((a, p) => a + p.valor, 0)
+const ICONE_PENDENCIA: Record<string, NomeIcone> = {
+  Urgente: 'alerta',
+  Financeiro: 'cifrao',
+  Preço: 'etiqueta',
+  Bloqueia: 'alerta-circulo',
+  Cadastro: 'documento',
+  Estoque: 'caixa',
+  Devoluções: 'repetir',
+  Entregas: 'carrinho',
+  Transporte: 'alerta',
+}
 
-  // Vendas por dia dos últimos 7 dias. `data` vem como dd/mm — os rótulos de
-  // comparação são gerados pelo mesmo formato, então a virada de ano não
-  // desalinha (os 7 dias são sempre recentes).
-  const dias = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(Date.now() - (6 - i) * 86_400_000)
-    return {
-      rotulo: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', ...SP }),
-      diaSemana: d.toLocaleDateString('pt-BR', { weekday: 'short', ...SP }).replace('.', ''),
-      valor: 0,
-      pedidos: 0,
-    }
-  })
-  const porDia = new Map(dias.map((d) => [d.rotulo, d]))
-  for (const p of pagos) {
-    const alvo = porDia.get(p.data.slice(0, 5))
-    if (!alvo) continue
-    alvo.valor += p.valor
-    alvo.pedidos += 1
+/** Atalhos do §2.3 — os módulos de maior uso, sem replicar o menu inteiro. */
+const ATALHOS: { rotulo: string; href: string; icone: NomeIcone; tom: TomUi }[] = [
+  { rotulo: 'Pedidos', href: '/pedidos', icone: 'carrinho', tom: 'ouro' },
+  { rotulo: 'Envase', href: '/envase', icone: 'frasco', tom: 'ciano' },
+  { rotulo: 'Estoque', href: '/estoque', icone: 'caixa', tom: 'info' },
+  { rotulo: 'Financeiro', href: '/financeiro', icone: 'cifrao', tom: 'ok' },
+  { rotulo: 'CRM', href: '/crm', icone: 'pessoas', tom: 'roxo' },
+  { rotulo: 'Relatórios', href: '/relatorios', icone: 'barras', tom: 'atencao' },
+]
+
+export default async function Dashboard({
+  searchParams,
+}: {
+  searchParams: Promise<{ periodo?: string }>
+}) {
+  const { periodo } = await searchParams
+  const escolhido = (PERIODOS.some((p) => p.id === periodo) ? periodo : '30d') as Periodo
+
+  const [p, geral, usuario] = await Promise.all([
+    carregarPainelPrincipal(escolhido),
+    carregarDashboard(),
+    sessaoAtual(),
+  ])
+
+  const primeiroNome = (usuario?.nome ?? '').trim().split(/\s+/)[0] || null
+
+  if (p.semBanco) {
+    return (
+      <Pilha>
+        <Painel>
+          <Vazio icone="cadeado" texto="O Supabase precisa estar configurado para o Dashboard ler a operação." />
+        </Painel>
+      </Pilha>
+    )
   }
-  const vendas7d = dias.reduce((a, d) => a + d.valor, 0)
-  const pedidos7d = dias.reduce((a, d) => a + d.pedidos, 0)
-  const picoDoPeriodo = Math.max(...dias.map((d) => d.valor), 1)
 
-  const kpis: Kpi[] = [
-    {
-      label: `Vendas em ${mes}`,
-      valor: brl(vendasNoMes),
-      hint: `${plural(pagosNoMes.length, 'pedido pago', 'pedidos pagos')}${
-        pagosNoMes.length ? ` · ticket ${brl(vendasNoMes / pagosNoMes.length)}` : ''
-      }`,
-      tom: 'ouro',
-    },
-    {
-      label: 'Últimos 7 dias',
-      valor: brl(vendas7d),
-      hint: `${plural(pedidos7d, 'pedido pago', 'pedidos pagos')} na semana`,
-      tom: 'ok',
-    },
-    {
-      label: 'Caixa hoje',
-      valor: brl(caixa),
-      hint: contas.map((c) => c.nome).join(' + ') || 'Nenhuma conta cadastrada',
-      tom: caixa >= 0 ? 'ok' : 'erro',
-    },
-    {
-      label: 'Volume em estoque',
-      valor: volume(estoque.volumeTotalMl),
-      hint: `${estoque.comEstoque} de ${bases.length} bases com volume`,
-    },
-    {
-      label: 'Bases em risco',
-      valor: pad2(emRisco),
-      hint: `${estoque.esgotados} esgotada · ${estoque.criticos} abaixo de 20 dias de cobertura`,
-      tom: emRisco ? 'erro' : 'ok',
-    },
-    {
-      label: 'Fora de sincronia',
-      valor: pad2(sync.esgotar + sync.reduzir + sync.repor),
-      hint: `de ${sync.total} variantes · ${sync.excesso} unidades sobrevendíveis`,
-      tom: sync.esgotar ? 'erro' : sync.reduzir ? 'atencao' : 'ok',
-    },
-  ]
+  /** Delta pronto, com a regra de base zero do §10. */
+  const delta = (atual: number, anterior: number, subirEhRuim = false): Delta | undefined => {
+    const v = variacao(atual, anterior)
+    return v === null ? undefined : { pct: v, base: `vs. ${p.base.rotulo}`, subirEhRuim }
+  }
+  const semBase = (anterior: number) =>
+    anterior === 0 ? `sem base de comparação em ${p.base.rotulo}` : undefined
 
-  // Alertas AGREGADOS. A versão anterior listava cada base zerada numa linha
-  // — uma parede de 30 avisos idênticos que ninguém lê é pior que nenhum
-  // aviso. Um alerta por assunto, com os primeiros nomes e a conta do resto.
-  const alertas: { tom: Tom; texto: string }[] = [
-    ...(esgotadas.length
-      ? [
-          {
-            tom: 'erro' as Tom,
-            texto:
-              esgotadas.length === 1
-                ? `${esgotadas[0].nome} zerou — nenhuma variante pode ser fracionada.`
-                : `${esgotadas.length} bases com volume zerado (${esgotadas
-                    .slice(0, 3)
-                    .map((b) => b.nome.split(' ').slice(0, 3).join(' '))
-                    .join('; ')}${esgotadas.length > 3 ? ` e mais ${esgotadas.length - 3}` : ''}). Nenhuma variante delas pode ser fracionada.`,
-          },
-        ]
-      : []),
-    ...estoque.coberturas
-      .filter((c) => c.criticidade === 'urgente' || c.criticidade === 'atencao')
-      .slice(0, 2)
-      .map((c) => ({
-        tom: c.criticidade === 'urgente' ? ('erro' as Tom) : ('atencao' as Tom),
-        texto: `${c.base.nome} acaba em ${c.cobertura} no ritmo atual.`,
-      })),
-    ...(lotes.perda.subestimado
-      ? [
-          {
-            tom: 'atencao' as Tom,
-            texto: `Perda real de ${pct(lotes.perda.mediaPct)} contra ${pct(parametros.perdaPct)} de parâmetro — todo preço calculado está com custo subestimado.`,
-          },
-        ]
-      : []),
-    ...(sync.excesso
-      ? [
-          {
-            tom: 'erro' as Tom,
-            texto: `${sync.excesso} unidades continuam vendáveis na Shopify sem volume que as sustente.`,
-          },
-        ]
-      : []),
-  ]
+  const serieFaturamento = p.serieDiaria.map((d) => d.faturamento)
+
+  // Cobertura média PONDERADA pelo volume disponível, como manda §6.1: a
+  // média simples deixaria uma base de 2 ml com 90 dias de cobertura puxar o
+  // indicador para cima. Bases sem giro ficam de fora — elas não têm "0 dias
+  // de cobertura", têm ausência de consumo, que é outra coisa.
+  const comGiro = geral.estoque.coberturas.filter((c) => c.dias !== null && c.disponivelMl > 0)
+  const mlComGiro = comGiro.reduce((a, c) => a + c.disponivelMl, 0)
+  const coberturaMedia = mlComGiro
+    ? Math.round(comGiro.reduce((a, c) => a + (c.dias ?? 0) * c.disponivelMl, 0) / mlComGiro)
+    : 0
+  const alertas = geral.pendencias.filter((x) => x.contagem > 0)
+  const totalCanal = p.porCanal.reduce((a, c) => a + c.valor, 0)
+  const totalCategoria = p.porCategoria.reduce((a, c) => a + c.valor, 0)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
-      <div
-        className="empilha-900"
-        style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 13 }}
-      >
-        {kpis.map((k) => (
-          <CardKpi key={k.label} kpi={k} />
-        ))}
-      </div>
+    <Pilha gap={16}>
 
-      <div
-        className="empilha-1180"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0,1fr) 372px',
-          gap: 16,
-          alignItems: 'start',
-        }}
-      >
-        <section
-          style={{
-            background: 'linear-gradient(170deg,#141315,#101011)',
-            border: '1px solid var(--color-borda)',
-            borderRadius: 16,
-            overflow: 'hidden',
+      <Ferramentas
+        esquerda={
+          <>
+            <Pilula icone="calendario">
+              {`${p.janela.rotulo} · ${diaCurtoPt(p.janela.de)} a ${diaCurtoPt(p.janela.ate)}`}
+            </Pilula>
+            <Comparacao texto="comparado a" alvo={p.base.rotulo} />
+          </>
+        }
+        direita={
+          <Segmentado opcoes={PERIODOS} ativo={escolhido} base="/" chave="periodo" />
+        }
+      />
+
+      {/* Camada 1 — saúde do negócio */}
+      <GradeIndicadores minimo={206}>
+        <Indicador
+          icone="cifrao"
+          tom="ouro"
+          rotulo="Faturamento total"
+          valor={brl(p.atual.faturamento)}
+          delta={delta(p.atual.faturamento, p.anterior.faturamento)}
+          nota={semBase(p.anterior.faturamento)}
+          faixa={serieFaturamento}
+          href="/relatorios"
+        />
+        <Indicador
+          icone="carrinho"
+          tom="info"
+          rotulo="Pedidos pagos"
+          valor={String(p.atual.pedidos)}
+          delta={delta(p.atual.pedidos, p.anterior.pedidos)}
+          nota={semBase(p.anterior.pedidos)}
+          faixa={p.serieDiaria.map((d) => d.pedidos)}
+          href="/pedidos"
+        />
+        <Indicador
+          icone="etiqueta"
+          tom="ciano"
+          rotulo="Ticket médio"
+          valor={brl(p.atual.ticket)}
+          delta={delta(p.atual.ticket, p.anterior.ticket)}
+          nota={semBase(p.anterior.ticket)}
+        />
+        <Indicador
+          icone="tendencia"
+          tom={p.resultado >= 0 ? 'ok' : 'erro'}
+          rotulo="Resultado gerencial"
+          valor={brl(p.resultado)}
+          tomValor={p.resultado >= 0 ? 'ok' : 'erro'}
+          nota="Competência corrente, por regime gerencial"
+          href="/financeiro/dre"
+        />
+        <Indicador
+          icone="porcento"
+          tom="roxo"
+          rotulo="Margem líquida"
+          valor={`${p.margemPct.toFixed(1).replace('.', ',')}%`}
+          tomValor={p.margemPct >= 0 ? 'ok' : 'erro'}
+          nota={`Sobre ${brl(p.receitaLiquida)} de receita líquida`}
+          href="/financeiro/dre"
+        />
+      </GradeIndicadores>
+
+      <GradeIndicadores minimo={206}>
+        <Indicador
+          icone="pessoas"
+          tom="roxo"
+          rotulo="Clientes novos"
+          valor={String(p.atual.clientesNovos)}
+          delta={delta(p.atual.clientesNovos, p.anterior.clientesNovos)}
+          nota={semBase(p.anterior.clientesNovos) ?? 'Primeiro pedido pago caiu no período'}
+          href="/crm"
+        />
+        <Indicador
+          icone="frasco"
+          tom="ciano"
+          rotulo="Decants vendidos"
+          valor={p.atual.volumeMl > 0 ? `${num(p.atual.volumeMl)} ml` : '—'}
+          nota={
+            p.atual.volumeMl > 0
+              ? 'Volume fracionado efetivamente vendido'
+              : 'Sem volume identificado nas variantes do período'
+          }
+          href="/envase"
+        />
+        <Indicador
+          icone="caixa"
+          tom={geral.estoque.criticos ? 'erro' : 'ok'}
+          rotulo="Estoque crítico"
+          valor={String(geral.estoque.criticos)}
+          tomValor={geral.estoque.criticos ? 'erro' : 'ok'}
+          nota={
+            geral.estoque.criticos
+              ? 'Bases abaixo de 20 dias de cobertura'
+              : 'Nenhuma base abaixo do limite'
+          }
+          tomNota={geral.estoque.criticos ? 'erro' : 'ok'}
+          href="/estoque"
+        />
+        <Indicador
+          icone="saida"
+          tom={p.vencidos.qtd ? 'erro' : 'atencao'}
+          rotulo="Contas a pagar (7 dias)"
+          valor={brl(p.aPagar7.valor)}
+          nota={
+            p.vencidos.qtd
+              ? `${plural(p.vencidos.qtd, 'título vencido', 'títulos vencidos')} · ${brl(p.vencidos.valor)}`
+              : plural(p.aPagar7.qtd, 'título a pagar', 'títulos a pagar')
+          }
+          tomNota={p.vencidos.qtd ? 'erro' : 'neutro'}
+          href="/financeiro/lancamentos?tipo=saida"
+        />
+        <Indicador
+          icone="entrada"
+          tom="ok"
+          rotulo="Contas a receber (7 dias)"
+          valor={brl(p.aReceber7.valor)}
+          nota={plural(p.aReceber7.qtd, 'título a receber', 'títulos a receber')}
+          tomNota="ok"
+          href="/financeiro/lancamentos?tipo=entrada"
+        />
+      </GradeIndicadores>
+
+      {/* Camada 3 — tendência, e camada 2 na coluna da direita */}
+      <Colunas proporcao="minmax(0,1.55fr) minmax(0,1fr) minmax(0,1fr)">
+        <Painel
+          titulo="Faturamento diário"
+          icone="linha"
+          nota="últimos 30 dias"
+          acao={<AcaoPainel href="/relatorios">Ver relatório completo</AcaoPainel>}
+          rodape={{
+            nota: 'Só pedidos pagos, sem cancelados nem estornados. É a mesma base do relatório de vendas.',
           }}
         >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              padding: '17px 20px 15px',
-              borderBottom: '1px solid rgba(255,255,255,.06)',
-            }}
-          >
-            <TituloSecao>Ações pendentes hoje</TituloSecao>
-            <span
-              className="font-mono"
-              style={{
-                fontWeight: 500,
-                fontSize: 10,
-                color: 'var(--color-sobre-ouro)',
-                background: 'var(--color-ouro)',
-                borderRadius: 'var(--radius-pill)',
-                padding: '4px 8px',
-              }}
-            >
-              {total}
-            </span>
-          </div>
+          {serieFaturamento.some((v) => v > 0) ? (
+            <AreaPontos
+              valores={serieFaturamento}
+              rotulos={p.serieDiaria.map((d, i) =>
+                i % 5 === 0 || i === p.serieDiaria.length - 1 ? diaCurtoPt(d.dia) : '',
+              )}
+              altura={228}
+              formatar={curto}
+            />
+          ) : (
+            <Vazio icone="linha" texto="Nenhuma venda paga nos últimos 30 dias." />
+          )}
+        </Painel>
 
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {acionaveis.length === 0 && (
-              <span
-                className="font-sans"
-                style={{ padding: '18px 20px', fontSize: 11.5, lineHeight: 1.5, color: 'var(--color-terciario)' }}
-              >
-                Nada pendente: pedidos despachados, extrato classificado e estoque sob controle.
-              </span>
-            )}
-            {acionaveis.map((p) => (
-              <Link
-                key={p.titulo}
-                href={p.href}
-                className="hover:bg-[rgba(239,209,140,.045)]"
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '3px 34px 1fr auto auto',
-                  alignItems: 'center',
-                  gap: 14,
-                  padding: '14px 20px',
-                  borderTop: '1px solid var(--color-borda-sutil)',
-                }}
-              >
-                <span
-                  aria-hidden
-                  style={{ width: 3, height: 26, borderRadius: 2, background: COR[p.tom] }}
-                />
-                <span className="font-mono" style={{ fontWeight: 500, fontSize: 17, color: COR[p.tom] }}>
-                  {pad2(p.contagem)}
-                </span>
-                <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  <span
-                    className="font-sans"
-                    style={{ fontWeight: 600, fontSize: 12.5, lineHeight: 1.3, color: 'var(--color-corrente)' }}
-                  >
-                    {p.titulo}
-                  </span>
-                  <span
-                    className="font-sans"
-                    style={{ fontSize: 11, lineHeight: 1.35, color: 'rgba(242,237,227,.44)' }}
-                  >
-                    {p.hint}
-                  </span>
-                </span>
-                <span
-                  className="font-sans"
+        <Painel
+          titulo="Vendas por categoria"
+          icone="pizza"
+          nota={p.janela.rotulo.toLowerCase()}
+          rodape={{ link: { href: '/produtos', texto: 'Ver catálogo' } }}
+        >
+          {p.porCategoria.length > 0 ? (
+            <RoscaLegenda
+              fatias={p.porCategoria.map((c) => ({ rotulo: c.rotulo, valor: c.valor }))}
+              total={totalCategoria}
+              legendaTotal="Total vendido"
+              formatar={brl}
+              tamanho={158}
+              maximo={5}
+            />
+          ) : (
+            <Vazio icone="pizza" texto="Nenhuma venda classificada no período." />
+          )}
+        </Painel>
+
+        <Painel
+          titulo="Alertas importantes"
+          icone="sino"
+          tom={alertas.length ? 'atencao' : 'ok'}
+          nota={alertas.length ? `${alertas.length} exigem ação` : undefined}
+          rodape={alertas.length > 4 ? { link: { href: '/relatorios', texto: 'Ver todos os alertas' } } : undefined}
+        >
+          {alertas.length === 0 ? (
+            <Vazio icone="check-circulo" texto="Nenhuma exceção aberta. A operação está em dia." />
+          ) : (
+            <Pilha gap={0}>
+              {alertas.slice(0, 5).map((a) => (
+                <Link
+                  key={a.titulo}
+                  href={a.href}
+                  className="hover:brightness-125"
                   style={{
-                    fontWeight: 500,
-                    fontSize: 10,
-                    letterSpacing: '.09em',
-                    textTransform: 'uppercase',
-                    color: COR[p.tom],
-                    border: `1px solid ${COR[p.tom]}`,
-                    borderRadius: 'var(--radius-pill)',
-                    padding: '4px 9px',
-                    opacity: 0.85,
-                    whiteSpace: 'nowrap',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 10,
+                    padding: '10px 0',
+                    borderTop: '1px solid rgba(255,255,255,.05)',
+                    textDecoration: 'none',
                   }}
                 >
-                  {p.etiqueta}
-                </span>
-                <span aria-hidden style={{ fontSize: 13, color: 'var(--color-apagado)' }}>
-                  →
-                </span>
-              </Link>
-            ))}
-          </div>
-        </section>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <section
-            style={{
-              background: 'linear-gradient(170deg,#141315,#101011)',
-              border: '1px solid var(--color-borda)',
-              borderRadius: 16,
-              padding: '18px 19px',
-            }}
-          >
-            <div style={{ marginBottom: 15 }}>
-              <TituloSecao tamanho={14}>Vendas dos últimos 7 dias</TituloSecao>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-              {dias.map((d) => (
-                <div key={d.rotulo} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span
-                    className="font-mono"
-                    style={{ fontSize: 10, color: 'var(--color-terciario)', width: 58, flex: 'none' }}
-                  >
-                    {`${d.diaSemana} ${d.rotulo}`}
+                  <span style={{ color: TINTA[TOM_PENDENCIA[a.tom] ?? 'neutro'], paddingTop: 1 }}>
+                    <Ico n={ICONE_PENDENCIA[a.etiqueta] ?? 'info'} tamanho={15} />
                   </span>
-                  <span
-                    style={{
-                      flex: 1,
-                      height: 5,
-                      borderRadius: 3,
-                      background: 'rgba(255,255,255,.05)',
-                      overflow: 'hidden',
-                      display: 'block',
-                    }}
-                  >
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
                     <span
+                      className="font-sans"
                       style={{
-                        display: 'block',
-                        height: '100%',
-                        // Proporção sobre o melhor dia da semana — não é número solto.
-                        width: `${Math.round((d.valor / picoDoPeriodo) * 100)}%`,
-                        background: COR.ouro,
-                        borderRadius: 3,
-                        opacity: 0.75,
+                        fontSize: 11.5,
+                        fontWeight: 600,
+                        lineHeight: 1.35,
+                        color: TINTA[TOM_PENDENCIA[a.tom] ?? 'neutro'],
+                        textWrap: 'pretty',
                       }}
-                    />
+                    >
+                      {`${a.contagem} · ${a.titulo}`}
+                    </span>
+                    <span
+                      className="font-sans"
+                      style={{
+                        fontSize: 10.5,
+                        lineHeight: 1.4,
+                        color: 'rgba(242,237,227,.42)',
+                        textWrap: 'pretty',
+                      }}
+                    >
+                      {a.hint}
+                    </span>
                   </span>
+                </Link>
+              ))}
+            </Pilha>
+          )}
+        </Painel>
+      </Colunas>
+
+      {/* Camada 4 — diagnóstico rápido */}
+      <Colunas proporcao="minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr)">
+        <Painel
+          titulo="Top 5 perfumes mais vendidos"
+          icone="frasco"
+          nota={p.janela.rotulo.toLowerCase()}
+          acao={<AcaoPainel href="/produtos">Ver todos os produtos</AcaoPainel>}
+        >
+          {p.topProdutos.length > 0 ? (
+            <Pilha gap={0}>
+              {p.topProdutos.map((t, i) => (
+                <div
+                  key={t.nome}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '26px minmax(0,1fr) 92px 116px',
+                    gap: 12,
+                    alignItems: 'center',
+                    padding: '10px 0',
+                    borderTop: '1px solid rgba(255,255,255,.05)',
+                  }}
+                >
                   <span
                     className="font-mono"
                     style={{
-                      fontWeight: 500,
-                      fontSize: 11.5,
-                      color: d.valor > 0 ? 'var(--color-corrente)' : 'rgba(242,237,227,.35)',
-                      width: 92,
-                      textAlign: 'right',
-                      flex: 'none',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: i === 0 ? TINTA.ouro : 'rgba(242,237,227,.3)',
                     }}
                   >
-                    {d.valor > 0 ? brl(d.valor) : '—'}
+                    {i + 1}
+                  </span>
+                  {t.baseId ? (
+                    <Link
+                      href={`/produtos/${t.baseId}`}
+                      className="hover:brightness-125"
+                      style={{ textDecoration: 'none', minWidth: 0 }}
+                    >
+                      <Celula principal={t.nome} />
+                    </Link>
+                  ) : (
+                    <Celula principal={t.nome} />
+                  )}
+                  <span style={{ textAlign: 'right' }}>
+                    <Num tamanho={11.5} tom="ciano" peso={400}>
+                      {t.ml > 0 ? `${num(t.ml)} ml` : '—'}
+                    </Num>
+                  </span>
+                  <span style={{ textAlign: 'right' }}>
+                    <Num tamanho={12}>{brl(t.faturamento)}</Num>
                   </span>
                 </div>
               ))}
-            </div>
-            <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
-              <Rotulo>
-                {pedidos7d > 0
-                  ? `${plural(pedidos7d, 'pedido pago', 'pedidos pagos')} · ticket ${brl(vendas7d / pedidos7d)}`
-                  : 'Sem venda paga na semana ainda'}
-              </Rotulo>
-              <div style={{ flex: 1 }} />
-              <Link
-                href="/pedidos"
-                className="font-sans hover:text-ouro"
-                style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}
-              >
-                Todos os pedidos →
-              </Link>
-            </div>
-          </section>
+            </Pilha>
+          ) : (
+            <Vazio icone="frasco" texto="Nenhum item vendido no período." />
+          )}
+        </Painel>
 
-          <section className="card-ouro" style={{ borderRadius: 16, padding: '18px 19px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14 }}>
-              <Losango />
-              <TituloSecao tom="ouro" tamanho={14}>
-                Alertas
-              </TituloSecao>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-              {alertas.length === 0 && (
-                <span
-                  className="font-sans"
-                  style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
-                >
-                  Nenhum alerta: estoque, lotes e sincronia não acusam nada nos dados atuais.
-                </span>
-              )}
-              {alertas.map((a) => (
-                <div
-                  key={a.texto}
+        <Painel
+          titulo="Canais de venda"
+          icone="megafone"
+          nota="origem do pedido, não meio de pagamento"
+          rodape={{ link: { href: '/pedidos', texto: 'Ver pedidos' } }}
+        >
+          {p.porCanal.length > 0 ? (
+            <RoscaLegenda
+              fatias={p.porCanal.map((c, i) => ({
+                rotulo: c.rotulo,
+                valor: c.valor,
+                cor: PALETA[i % PALETA.length],
+              }))}
+              total={totalCanal}
+              legendaTotal="Faturamento"
+              formatar={brl}
+              tamanho={158}
+              maximo={5}
+            />
+          ) : (
+            <Vazio icone="megafone" texto="Nenhuma venda com canal identificado." />
+          )}
+        </Painel>
+
+        <Painel
+          titulo="Atividades recentes"
+          icone="relogio"
+          nota="movimentos financeiros baixados"
+          rodape={{ link: { href: '/financeiro/lancamentos', texto: 'Ver todas as atividades' } }}
+        >
+          {p.atividades.length > 0 ? (
+            <Pilha gap={0}>
+              {p.atividades.map((a, i) => (
+                <Link
+                  key={`${a.quando}-${i}`}
+                  href={a.href}
+                  className="hover:brightness-125"
                   style={{
                     display: 'flex',
+                    alignItems: 'center',
                     gap: 10,
-                    padding: '11px 12px',
-                    borderRadius: 10,
-                    background: FAIXA.neutro,
-                    borderLeft: `2px solid ${COR[a.tom]}`,
+                    padding: '9px 0',
+                    borderTop: '1px solid rgba(255,255,255,.05)',
+                    textDecoration: 'none',
                   }}
                 >
+                  <span style={{ color: 'rgba(242,237,227,.3)' }}>
+                    <Ico n="recibo" tamanho={14} />
+                  </span>
                   <span
                     className="font-sans"
                     style={{
                       flex: 1,
                       fontSize: 11.5,
-                      lineHeight: 1.5,
-                      color: 'rgba(242,237,227,.82)',
-                      textWrap: 'pretty',
+                      color: 'rgba(242,237,227,.72)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
                     }}
                   >
                     {a.texto}
                   </span>
-                </div>
+                  <Num tamanho={10} peso={400} tom="neutro">
+                    {diaCurtoPt(a.quando)}
+                  </Num>
+                </Link>
               ))}
-            </div>
-          </section>
+            </Pilha>
+          ) : (
+            <Vazio icone="relogio" texto="Nenhuma baixa registrada ainda." />
+          )}
+        </Painel>
+      </Colunas>
+
+      {/* Faixa inferior — caixa, cobertura e compromissos próximos */}
+      <Colunas proporcao="minmax(0,1.25fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)">
+        <Painel
+          titulo="Fluxo de caixa do dia"
+          icone="carteira"
+          nota="só o que foi movimentado hoje"
+          rodape={{ link: { href: '/financeiro/fluxo-de-caixa', texto: 'Ver fluxo completo' } }}
+        >
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+            <Pilha gap={5}>
+              <Etiqueta>Entradas</Etiqueta>
+              <Num tamanho={15} tom="ok">
+                {brl(p.caixaDia.entradas)}
+              </Num>
+            </Pilha>
+            <Pilha gap={5}>
+              <Etiqueta>Saídas</Etiqueta>
+              <Num tamanho={15} tom="erro">
+                {brl(p.caixaDia.saidas)}
+              </Num>
+            </Pilha>
+            <Pilha gap={5}>
+              <Etiqueta>Saldo do dia</Etiqueta>
+              <Num
+                tamanho={15}
+                tom={p.caixaDia.entradas - p.caixaDia.saidas >= 0 ? 'ouro' : 'erro'}
+              >
+                {brl(p.caixaDia.entradas - p.caixaDia.saidas)}
+              </Num>
+            </Pilha>
+          </div>
+          <LinhaValor
+            rotulo="Saldo disponível nas contas"
+            valor={brl(p.saldoDisponivel)}
+            tom={p.saldoDisponivel > 0 ? 'ok' : 'erro'}
+            destaque
+          />
+          <span
+            className="font-sans"
+            style={{ fontSize: 10, lineHeight: 1.45, color: 'rgba(242,237,227,.34)', textWrap: 'pretty' }}
+          >
+            Transferências entre contas próprias são neutralizadas no consolidado.
+          </span>
+        </Painel>
+
+        <Painel
+          titulo="Cobertura de estoque"
+          icone="caixa"
+          nota="média das bases sob controle"
+          rodape={{ link: { href: '/estoque', texto: 'Ver perfumes base' } }}
+        >
+          <Pilha gap={7}>
+            <Num tamanho={26} tom={geral.estoque.criticos ? 'atencao' : 'ok'} peso={600}>
+              {coberturaMedia > 0 ? `${coberturaMedia} dias` : '—'}
+            </Num>
+            <span
+              className="font-sans"
+              style={{ fontSize: 11, lineHeight: 1.5, color: 'rgba(242,237,227,.45)', textWrap: 'pretty' }}
+            >
+              {geral.estoque.criticos
+                ? `${plural(geral.estoque.criticos, 'base abaixo', 'bases abaixo')} de 20 dias — repor o quanto antes.`
+                : geral.estoque.semGiro
+                  ? `Nenhuma base sob risco. ${plural(geral.estoque.semGiro, 'base sem giro fica', 'bases sem giro ficam')} fora da média.`
+                  : 'Nenhuma base sob risco de ruptura.'}
+            </span>
+          </Pilha>
+        </Painel>
+
+        <Painel
+          titulo="Pagamentos próximos"
+          icone="saida"
+          tom="erro"
+          nota="7 dias"
+          rodape={{ link: { href: '/financeiro/lancamentos?tipo=saida', texto: 'Ver contas a pagar' } }}
+        >
+          <Pilha gap={7}>
+            <Num tamanho={22} tom="erro" peso={600}>
+              {brl(p.aPagar7.valor)}
+            </Num>
+            <span className="font-sans" style={{ fontSize: 11, color: 'rgba(242,237,227,.45)' }}>
+              {plural(p.aPagar7.qtd, 'título a pagar', 'títulos a pagar')}
+            </span>
+            {p.vencidos.qtd > 0 && (
+              <Chip tom="erro">{`${brl(p.vencidos.valor)} já vencidos`}</Chip>
+            )}
+          </Pilha>
+        </Painel>
+
+        <Painel
+          titulo="Recebimentos próximos"
+          icone="entrada"
+          tom="ok"
+          nota="7 dias"
+          rodape={{ link: { href: '/financeiro/lancamentos?tipo=entrada', texto: 'Ver recebimentos' } }}
+        >
+          <Pilha gap={7}>
+            <Num tamanho={22} tom="ok" peso={600}>
+              {brl(p.aReceber7.valor)}
+            </Num>
+            <span className="font-sans" style={{ fontSize: 11, color: 'rgba(242,237,227,.45)' }}>
+              {plural(p.aReceber7.qtd, 'título a receber', 'títulos a receber')}
+            </span>
+          </Pilha>
+        </Painel>
+      </Colunas>
+
+      <Painel titulo="Acesso rápido" icone="grade" nota="os módulos de maior uso">
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+            gap: 11,
+          }}
+        >
+          {ATALHOS.map((a) => (
+            <Link
+              key={a.href}
+              href={a.href}
+              className="hover:border-ouro/35"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 11,
+                padding: '13px 14px',
+                border: '1px solid rgba(255,255,255,.06)',
+                borderRadius: 12,
+                background: 'rgba(255,255,255,.012)',
+                textDecoration: 'none',
+              }}
+            >
+              <span style={{ color: TINTA[a.tom] }}>
+                <Ico n={a.icone} tamanho={17} />
+              </span>
+              <span
+                className="font-sans"
+                style={{ fontSize: 12.5, fontWeight: 600, color: 'rgba(242,237,227,.82)' }}
+              >
+                {a.rotulo}
+              </span>
+            </Link>
+          ))}
         </div>
-      </div>
-    </div>
+      </Painel>
+    </Pilha>
   )
 }

@@ -5,7 +5,9 @@ import { usePathname } from 'next/navigation'
 
 import { sair } from '@/app/entrar/actions'
 
+import { Ico, type NomeIcone } from './IconesUi'
 import { localizar } from './navegacao'
+import { CONTORNO, TINTA, VELADO } from './ui'
 
 const itemMenu: React.CSSProperties = {
   padding: '9px 10px',
@@ -26,7 +28,8 @@ export function Topbar({
   usuario: { nome: string; email: string; papel: 'dono' | 'operacao' } | null
 }) {
   const pathname = usePathname()
-  const { modulo, tela } = localizar(pathname)
+  const cab = localizar(pathname)
+  const { modulo, tela } = cab
   // "Rafael Araújo" vira "Rafael A." e "RA": o topo tem largura fixa, e nome
   // inteiro empurrava o breadcrumb.
   const partes = (usuario?.nome ?? '').trim().split(/\s+/).filter(Boolean)
@@ -58,32 +61,53 @@ export function Topbar({
         borderBottom: '1px solid rgba(255,255,255,.06)',
       }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
-        <span
-          className="font-sans"
-          style={{
-            fontSize: 9.5,
-            lineHeight: 1,
-            letterSpacing: '.2em',
-            textTransform: 'uppercase',
-            color: 'rgba(242,237,227,.34)',
-          }}
-        >
-          {crumb}
-        </span>
-        <h1
-          className="font-display"
-          style={{
-            margin: 0,
-            fontWeight: 600,
-            fontSize: 19,
-            lineHeight: 1,
-            letterSpacing: '.01em',
-            color: 'var(--color-tinta)',
-          }}
-        >
-          {tela}
-        </h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 13, minWidth: 0 }}>
+        {cab.icone && (
+          <span
+            style={{
+              width: 38,
+              height: 38,
+              flex: 'none',
+              borderRadius: 11,
+              display: 'grid',
+              placeItems: 'center',
+              background: VELADO.ouro,
+              border: `1px solid ${CONTORNO.ouro}`,
+              color: TINTA.ouro,
+            }}
+          >
+            <Ico n={cab.icone as NomeIcone} tamanho={18} />
+          </span>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+          <h1
+            className="font-display"
+            style={{
+              margin: 0,
+              fontWeight: 600,
+              fontSize: 22,
+              lineHeight: 1.1,
+              letterSpacing: '.005em',
+              color: 'var(--color-tinta)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {cab.titulo}
+          </h1>
+          <span
+            className="font-sans"
+            style={{
+              fontSize: 11.5,
+              lineHeight: 1.35,
+              color: 'rgba(242,237,227,.44)',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {cab.subtitulo ?? crumb}
+          </span>
+        </div>
       </div>
 
       <div style={{ flex: 1 }} />

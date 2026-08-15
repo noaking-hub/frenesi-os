@@ -1,7 +1,16 @@
-import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
-import { Badge, TituloSecao } from '@/components/erp/primitivos'
-import { Tabela, type Coluna } from '@/components/erp/Tabela'
-import { COR, type Tom } from '@/components/erp/tokens'
+import {
+  Celula,
+  Chip,
+  GradeIndicadores,
+  Indicador,
+  Num,
+  Painel,
+  Pilha,
+  TabelaUi,
+  Vazio,
+  type ColunaUi,
+  type TomUi,
+} from '@/components/erp/ui'
 import { emailConfigurado, credenciaisEmail } from '@/data/email'
 import { repositorio } from '@/data/repository'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
@@ -22,7 +31,7 @@ interface EnvioLinha {
   nota: string
 }
 
-const TOM_ESTADO: Record<EnvioLinha['estado'], Tom> = {
+const TOM_ESTADO: Record<EnvioLinha['estado'], TomUi> = {
   Aceito: 'ok',
   Processando: 'info',
   Recusado: 'erro',
@@ -49,96 +58,41 @@ export default async function IntegracaoContabil() {
   const semConta = categorias.filter((c) => !contas[c.nome])
   const ultimo = envios[0]
 
-  const kpis: Kpi[] = [
-    {
-      label: 'Competência aberta',
-      valor: nomeDaCompetencia(competencia).replace(/ de \d+$/, ''),
-      hint: `${plural(apuracao.pedidos, 'pedido pago', 'pedidos pagos')} no mês`,
-    },
-    {
-      label: 'Receita bruta',
-      valor: brl(apuracao.receita),
-      hint: 'Soma dos pedidos pagos da competência',
-      tom: 'ok',
-    },
-    {
-      label: 'Imposto provisionado',
-      valor: brl(apuracao.receita * (parametros.impostoPct / 100)),
-      // O percentual vem dos parâmetros de precificação — mesma fonte do preço.
-      hint: `${pct(parametros.impostoPct, 0)} sobre a receita apurada`,
-      tom: 'erro',
-    },
-    {
-      label: 'Saídas sem categoria',
-      valor: String(apuracao.semCategoria),
-      hint: apuracao.semCategoria
-        ? 'O contador não tem onde lançar estas linhas'
-        : 'Toda saída do mês está classificada',
-      tom: apuracao.semCategoria ? 'atencao' : 'ok',
-    },
-    {
-      label: 'Categorias sem conta',
-      valor: String(semConta.length),
-      hint: semConta.length
-        ? `Falta amarrar: ${semConta
-            .slice(0, 3)
-            .map((c) => c.nome)
-            .join(', ')}`
-        : 'Plano de contas completo',
-      tom: semConta.length ? 'atencao' : 'ok',
-    },
-    {
-      label: 'Último envio',
-      valor: ultimo?.quando ?? '—',
-      hint: ultimo ? `${ultimo.arquivo} · ${ultimo.estado}` : 'Nenhum arquivo gerado ainda',
-      tom: ultimo?.estado === 'Aceito' ? 'ok' : ultimo ? 'info' : 'atencao',
-    },
-  ]
+  const impostoProvisionado = apuracao.receita * (parametros.impostoPct / 100)
 
-  const colunas: Coluna<EnvioLinha>[] = [
+  const colunas: ColunaUi<EnvioLinha>[] = [
     {
       chave: 'quando',
       titulo: 'Quando',
-      largura: '112px',
+      largura: '116px',
       render: (e) => (
-        <span className="font-mono" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
+        <Num tamanho={11} peso={400} tom="neutro">
           {e.quando}
-        </span>
+        </Num>
       ),
     },
     {
       chave: 'arquivo',
       titulo: 'Arquivo',
-      largura: 'minmax(0,1.3fr)',
-      render: (e) => (
-        <span style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
-          <span
-            className="font-mono"
-            style={{
-              fontWeight: 500,
-              fontSize: 11,
-              color: 'var(--color-ouro)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {e.arquivo}
-          </span>
-          {e.nota && (
-            <span className="font-sans" style={{ fontSize: 10, lineHeight: 1.4, color: COR.atencao, textWrap: 'pretty' }}>
-              {e.nota}
-            </span>
-          )}
-        </span>
-      ),
+      largura: 'minmax(0,1.2fr)',
+      render: (e) => <Celula principal={e.arquivo} secundaria={e.nota || undefined} tom="ouro" />,
     },
     {
       chave: 'conteudo',
       titulo: 'Conteúdo',
       largura: 'minmax(0,1fr)',
       render: (e) => (
-        <span className="font-sans" style={{ fontSize: 11, color: 'var(--color-secundario)', textWrap: 'pretty' }}>
+        <span
+          className="font-sans"
+          style={{
+            display: 'block',
+            fontSize: 11,
+            color: 'rgba(242,237,227,.6)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
           {e.conteudo}
         </span>
       ),
@@ -146,36 +100,90 @@ export default async function IntegracaoContabil() {
     {
       chave: 'registros',
       titulo: 'Registros',
-      largura: '82px',
+      largura: '92px',
       alinhamento: 'right',
-      render: (e) => (
-        <span className="font-mono" style={{ fontSize: 11, color: 'var(--color-secundario)' }}>
-          {e.registros}
-        </span>
-      ),
+      render: (e) => <Num tamanho={11.5}>{String(e.registros)}</Num>,
     },
     {
       chave: 'tamanho',
       titulo: 'Tamanho',
-      largura: '82px',
+      largura: '92px',
       alinhamento: 'right',
       render: (e) => (
-        <span className="font-mono" style={{ fontSize: 11, color: 'var(--color-terciario)' }}>
+        <Num tamanho={11} peso={400} tom="neutro">
           {e.tamanho}
-        </span>
+        </Num>
       ),
     },
     {
       chave: 'estado',
       titulo: 'Estado',
       largura: '112px',
-      render: (e) => <Badge tom={TOM_ESTADO[e.estado]}>{e.estado}</Badge>,
+      render: (e) => <Chip tom={TOM_ESTADO[e.estado]}>{e.estado}</Chip>,
     },
   ]
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <FaixaKpis kpis={kpis} />
+    <Pilha gap={16}>
+
+      <GradeIndicadores>
+        <Indicador
+          icone="calendario"
+          tom="ouro"
+          rotulo="Competência aberta"
+          valor={nomeDaCompetencia(competencia).replace(/ de \d+$/, '')}
+          nota={`${plural(apuracao.pedidos, 'pedido pago', 'pedidos pagos')} no mês`}
+        />
+        <Indicador
+          icone="cifrao"
+          tom="ok"
+          rotulo="Receita bruta apurada"
+          valor={brl(apuracao.receita)}
+          nota="Soma dos pedidos pagos da competência"
+          tomNota="ok"
+        />
+        <Indicador
+          icone="documento"
+          tom="erro"
+          rotulo="Imposto provisionado"
+          valor={brl(impostoProvisionado)}
+          nota={`${pct(parametros.impostoPct, 0)} sobre a receita apurada`}
+        />
+        <Indicador
+          icone={apuracao.semCategoria ? 'alerta' : 'check-circulo'}
+          tom={apuracao.semCategoria ? 'atencao' : 'ok'}
+          rotulo="Saídas sem categoria"
+          valor={String(apuracao.semCategoria)}
+          tomValor={apuracao.semCategoria ? 'atencao' : 'ok'}
+          nota={
+            apuracao.semCategoria
+              ? 'O contador não tem onde lançar estas linhas'
+              : 'Toda saída do mês está classificada'
+          }
+          tomNota={apuracao.semCategoria ? 'atencao' : 'ok'}
+        />
+        <Indicador
+          icone="elo"
+          tom={semConta.length ? 'atencao' : 'ok'}
+          rotulo="Categorias sem conta contábil"
+          valor={String(semConta.length)}
+          tomValor={semConta.length ? 'atencao' : 'ok'}
+          nota={
+            semConta.length
+              ? `Falta amarrar: ${semConta.slice(0, 3).map((c) => c.nome).join(', ')}`
+              : 'Plano de contas completo'
+          }
+          tomNota={semConta.length ? 'atencao' : 'ok'}
+        />
+        <Indicador
+          icone="enviar"
+          tom={ultimo?.estado === 'Aceito' ? 'ok' : ultimo ? 'info' : 'atencao'}
+          rotulo="Último envio"
+          valor={ultimo?.quando ?? '—'}
+          nota={ultimo ? `${ultimo.arquivo} · ${ultimo.estado}` : 'Nenhum arquivo gerado ainda'}
+          tomNota={ultimo?.estado === 'Aceito' ? 'ok' : 'neutro'}
+        />
+      </GradeIndicadores>
 
       <FechamentoCliente
         competenciaInicial={competencia}
@@ -189,22 +197,24 @@ export default async function IntegracaoContabil() {
         }))}
       />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <TituloSecao tamanho={16}>Arquivos gerados</TituloSecao>
-        <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
-          O conteúdo de cada arquivo fica guardado — reabrir em dezembro o que o contador recebeu em
-          agosto devolve o arquivo daquela época, não uma nova apuração.
-        </span>
-      </div>
-
-      <Tabela
-        colunas={colunas}
-        itens={envios}
-        chaveDe={(e) => e.id}
-        bandeiraDe={(e) => (e.estado === 'Recusado' ? 'erro' : null)}
-        vazio="Nenhum fechamento gerado ainda. Apure o mês acima."
-      />
-    </div>
+      <Painel
+        titulo="Arquivos gerados"
+        icone="documento"
+        nota="o conteúdo de cada envio fica guardado"
+        rodape={{
+          nota: 'Reabrir em dezembro o que o contador recebeu em agosto devolve o arquivo daquela época, não uma nova apuração.',
+        }}
+      >
+        <TabelaUi
+          colunas={colunas}
+          itens={envios}
+          chaveDe={(e) => e.id}
+          larguraMinima={800}
+          faixaDe={(e) => (e.estado === 'Recusado' ? 'erro' : null)}
+          vazio={<Vazio icone="documento" texto="Nenhum fechamento gerado ainda. Apure o mês acima." />}
+        />
+      </Painel>
+    </Pilha>
   )
 }
 
