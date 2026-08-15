@@ -6,6 +6,7 @@ import {
   Chip,
   ComTrilha,
   Colunas,
+  Destaque,
   Etiqueta,
   GradeIndicadores,
   Ico,
@@ -62,10 +63,13 @@ const TOM_SITUACAO: Record<SituacaoLancamento, TomUi> = {
 interface Busca {
   situacao?: string
   tipo?: string
+  /** 'sem' lista o que está SEM categoria — a fila do que a DRE não classifica. */
   categoria?: string
   conta?: string
   centro?: string
   q?: string
+  /** 'sem' lista o que está SEM vencimento — o que a projeção de caixa não enxerga. */
+  venc?: string
   /** Janela de vencimento, AAAA-MM-DD inclusivos. */
   de?: string
   ate?: string
@@ -100,7 +104,18 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       // nem histórico de caixa, é um registro que deixou de valer.
       if (!filtro.situacao && situacao === 'cancelado') return false
       if (filtro.tipo && l.tipo !== filtro.tipo) return false
-      if (filtro.categoria && l.categoriaId !== filtro.categoria) return false
+      // 'sem' é o filtro que o extrato tornou necessário: quase cem
+      // lançamentos importados sem categoria, que a DRE não consegue
+      // classificar. Sem esse valor não havia como listá-los para
+      // classificar um a um.
+      if (filtro.categoria === 'sem') {
+        if (l.categoriaId) return false
+      } else if (filtro.categoria && l.categoriaId !== filtro.categoria) {
+        return false
+      }
+      // Mesma ideia para a projeção de caixa: título sem vencimento não é
+      // posicionado em nenhum dia e some do fluxo.
+      if (filtro.venc === 'sem' && l.venceEm) return false
       if (filtro.conta && l.contaId !== filtro.conta) return false
       if (filtro.centro && l.centroCusto !== filtro.centro) return false
       // O período filtra por VENCIMENTO: é a data que decide o que entra na
@@ -155,6 +170,17 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
   for (const l of vivos.filter((x) => x.recorrente)) {
     recorrentesPorCategoria.set(l.categoria, (recorrentesPorCategoria.get(l.categoria) ?? 0) + l.valor)
   }
+
+  // ── Pendências de preenchimento ────────────────────────────────────────
+  //
+  // As duas listas abaixo não são um relatório: são fila de trabalho. Sem
+  // categoria, o lançamento não tem linha na DRE; sem vencimento, ele não tem
+  // dia na projeção de caixa. Nos dois casos o número existe no banco e não
+  // aparece em nenhum total — o pior tipo de dado, o que some sem avisar.
+  const semCategoria = vivos.filter((l) => !l.categoriaId)
+  const semVencimento = vivos.filter((l) => !l.venceEm && saldoAberto(l) > 0)
+  const valorSemCategoria = semCategoria.reduce((a, l) => a + l.valor, 0)
+  const valorSemVencimento = semVencimento.reduce((a, l) => a + saldoAberto(l), 0)
 
   const proximos = vivos
     .filter((l) => saldoAberto(l) > 0 && l.venceEm && l.venceEm >= p.hoje)
@@ -238,10 +264,19 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
           <span style={{ color: 'rgba(242,237,227,.4)', flex: 'none' }}>
             <Ico n={iconeDaCategoria(l.categoria)} tamanho={13} />
           </span>
+          {/* Sem categoria o lançamento não entra na DRE — a linha precisa
+              dizer isso, e não mostrar um campo em branco que passa por
+              detalhe estético. */}
           <Celula
-            principal={l.categoria}
-            secundaria={l.natureza ? ROTULO_NATUREZA[l.natureza] : 'sem natureza gerencial'}
-            tom={l.natureza ? undefined : 'atencao'}
+            principal={l.categoriaId ? l.categoria : 'Sem categoria'}
+            secundaria={
+              !l.categoriaId
+                ? 'classifique para entrar na DRE'
+                : l.natureza
+                  ? ROTULO_NATUREZA[l.natureza]
+                  : 'sem natureza gerencial'
+            }
+            tom={l.categoriaId && l.natureza ? undefined : 'atencao'}
           />
         </span>
       ),
@@ -321,9 +356,17 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
     {
       chave: 'acoes',
       titulo: 'Ações',
-      largura: '128px',
+      largura: '156px',
       alinhamento: 'right',
-      render: ({ l, situacao }) => <AcoesGerenciais lancamento={l} situacao={situacao} />,
+      render: ({ l, situacao }) => (
+        <AcoesGerenciais
+          lancamento={l}
+          situacao={situacao}
+          contas={p.contas}
+          categorias={p.categorias}
+          centros={p.centrosCusto}
+        />
+      ),
     },
   ]
 
@@ -501,6 +544,42 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
           </>
         }
       >
+        {(semCategoria.length > 0 || semVencimento.length > 0) && (
+          <Destaque
+            tom="atencao"
+            icone="alerta"
+            titulo="Lançamentos incompletos ficam fora dos números"
+            acao={
+              <span style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
+                {semCategoria.length > 0 && (
+                  <AcaoPainel href="/financeiro/lancamentos?categoria=sem">
+                    {`Classificar ${semCategoria.length} sem categoria`}
+                  </AcaoPainel>
+                )}
+                {semVencimento.length > 0 && (
+                  <AcaoPainel href="/financeiro/lancamentos?venc=sem">
+                    {`Datar ${semVencimento.length} sem vencimento`}
+                  </AcaoPainel>
+                )}
+              </span>
+            }
+          >
+            <span
+              className="font-sans"
+              style={{ fontSize: 11.5, lineHeight: 1.55, color: 'rgba(242,237,227,.6)', textWrap: 'pretty' }}
+            >
+              {[
+                semCategoria.length > 0 &&
+                  `${plural(semCategoria.length, 'lançamento está', 'lançamentos estão')} sem categoria (${brl(valorSemCategoria)}) — o ERP não sabe o que eles são e por isso nenhum entra na DRE.`,
+                semVencimento.length > 0 &&
+                  `${plural(semVencimento.length, 'lançamento está', 'lançamentos estão')} sem data de vencimento (${brl(valorSemVencimento)}) — a projeção de caixa posiciona cada valor no dia do vencimento, então esses não aparecem no fluxo.`,
+              ]
+                .filter(Boolean)
+                .join(' ')}
+            </span>
+          </Destaque>
+        )}
+
         <BarraDeFiltros
           categorias={p.categorias.map((c) => ({ id: c.id, nome: c.nome }))}
           contas={p.contas.map((c) => ({ id: c.id, nome: c.nome }))}

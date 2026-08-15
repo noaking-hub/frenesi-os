@@ -166,6 +166,300 @@ export async function cancelarCompromisso(id: string, motivo: string): Promise<R
   return { ok: true }
 }
 
+// ── Edição de lançamento ───────────────────────────────────────────────────
+
+export interface EdicaoLancamento {
+  descricao: string
+  favorecido: string
+  valor: number
+  /** AAAA-MM-DD. Vazio deixa o título sem data — e fora da projeção de caixa. */
+  venceEm: string
+  /** Vazio significa "não mexer na categoria", nunca "apagar a categoria". */
+  categoriaId: string
+  contaId: string
+  centroCusto: string | null
+  documento: string
+  observacao: string
+}
+
+interface LinhaEmEdicao {
+  descricao: string
+  favorecido: string | null
+  valor: number | string
+  vence_em: string | null
+  categoria: string | null
+  categoria_id: string | null
+  centro_custo: string | null
+  conta_id: string
+  documento: string | null
+  observacao: string | null
+  tipo: string
+  competencia: string
+  baixado_em: string | null
+  cancelado_em: string | null
+  transferencia_id: string | null
+  origem: string
+}
+
+/** '' e null são a mesma coisa para o operador: "não informado". */
+function texto(v: string | null | undefined): string | null {
+  const t = (v ?? '').trim()
+  return t || null
+}
+
+/** Rejeita 2026-02-31: o formato bate, a data não existe. */
+function dataValida(iso: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false
+  const d = new Date(`${iso}T00:00:00Z`)
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === iso
+}
+
+/** Centavos: 1.005 e 1.0049999 são o mesmo dinheiro e não podem virar "mudou". */
+function centavos(v: number): number {
+  return Math.round(v * 100) / 100
+}
+
+/**
+ * Grava o que mudou na trilha de auditoria do Financeiro.
+ *
+ * A falha aqui NÃO derruba a operação: a alteração já foi persistida e
+ * devolver erro faria o operador repetir uma edição que já valeu. Fica o
+ * `console.error` — perder o rastro é ruim, duplicar a correção é pior.
+ */
+async function registrarAuditoria(entrada: {
+  entidade: string
+  entidadeId: string
+  acao: string
+  anterior: Record<string, unknown>
+  novo: Record<string, unknown>
+  justificativa: string
+}) {
+  const { error } = await supabaseServer().from('financeiro_auditoria').insert({
+    entidade: entrada.entidade,
+    entidade_id: entrada.entidadeId,
+    acao: entrada.acao,
+    valor_anterior: entrada.anterior,
+    valor_novo: entrada.novo,
+    operador: OPERADOR,
+    justificativa: entrada.justificativa,
+  })
+  if (error) console.error('[financeiro] auditoria não registrada:', error)
+}
+
+/**
+ * Edita um lançamento já registrado.
+ *
+ * Existe por duas necessidades que não tinham saída: título lançado sem
+ * vencimento não entra na projeção de caixa (a projeção posiciona o
+ * recebimento na data de vencimento — sem data, ele simplesmente não existe
+ * no gráfico), e lançamento vindo do extrato chega sem categoria, então a DRE
+ * não sabe classificá-lo. Os dois casos são "o registro está certo, falta um
+ * campo" — cancelar e relançar perderia a baixa, a conciliação e o histórico.
+ *
+ * O que NÃO se edita está listado abaixo com o motivo. A regra geral: pode
+ * mudar o que descreve o fato; não pode mudar o que outra parte do sistema já
+ * usou como verdade.
+ */
+export async function editarLancamento(
+  id: string,
+  dados: EdicaoLancamento,
+): Promise<Resposta<{ alteracoes: number }>> {
+  const bloqueio = exigeSupabase('editar lançamentos')
+  if (bloqueio) return bloqueio
+  if (!id) return { ok: false, erro: 'Lançamento não informado.' }
+  if (!dados.descricao.trim()) return { ok: false, erro: 'Informe a descrição.' }
+  if (!(dados.valor > 0)) {
+    return { ok: false, erro: 'O valor deve ser maior que zero. Para anular um lançamento, use Cancelar.' }
+  }
+  if (dados.venceEm && !dataValida(dados.venceEm)) {
+    return { ok: false, erro: 'Vencimento inválido. Use uma data no formato dia/mês/ano.' }
+  }
+  if (!dados.contaId) return { ok: false, erro: 'Escolha a conta.' }
+
+  const sb = supabaseServer()
+  const { data, error: erroLeitura } = await sb
+    .from('lancamentos')
+    .select(
+      'descricao, favorecido, valor, vence_em, categoria, categoria_id, centro_custo, conta_id, documento, observacao, tipo, competencia, baixado_em, cancelado_em, transferencia_id, origem',
+    )
+    .eq('id', id)
+    .maybeSingle()
+  if (erroLeitura) return falha(erroLeitura, 'Falha ao ler o lançamento.')
+  if (!data) return { ok: false, erro: 'Lançamento não encontrado — talvez ele tenha sido removido.' }
+
+  const atual = data as unknown as LinhaEmEdicao
+
+  // Cancelado é registro do que deixou de valer. Editá-lo devolveria vida a
+  // um compromisso que alguém encerrou de propósito — e sem ninguém ver.
+  if (atual.cancelado_em) {
+    return {
+      ok: false,
+      erro: 'Este lançamento está cancelado e não pode ser editado. Crie um novo compromisso no lugar dele.',
+    }
+  }
+
+  // Fechar o mês existe para congelar o passado: é o número que já foi para o
+  // contador. Reabrir é possível e fica registrado com motivo — o que não
+  // pode é o total de agosto mudar em silêncio depois do envio.
+  const mes = String(atual.competencia).slice(0, 7)
+  const { data: fechamento, error: erroFechamento } = await sb
+    .from('competencias_fechadas')
+    .select('competencia')
+    .eq('competencia', mes)
+    .is('reaberta_em', null)
+    .maybeSingle()
+  if (erroFechamento) return falha(erroFechamento, 'Falha ao verificar o fechamento da competência.')
+  if (fechamento) {
+    return {
+      ok: false,
+      erro: `A competência ${mes} está fechada. Reabra-a em Configurações (com o motivo) antes de alterar este lançamento.`,
+    }
+  }
+
+  const ehTransferencia = Boolean(atual.transferencia_id)
+  const veioDoExtrato = atual.origem.startsWith('Extrato ')
+  const jaBaixado = Boolean(atual.baixado_em)
+
+  const valorNovo = centavos(dados.valor)
+  const valorAtual = centavos(Number(atual.valor))
+  const contaNova = dados.contaId
+  const venceNovo = dados.venceEm || null
+
+  // Transferência entre contas próprias tem duas pernas com o mesmo
+  // identificador. Mudar valor ou conta de UM lado deixaria o par
+  // desequilibrado: sairia 500 de uma conta e entrariam 300 na outra, e o
+  // saldo consolidado passaria a inventar dinheiro.
+  if (ehTransferencia && valorNovo !== valorAtual) {
+    return {
+      ok: false,
+      erro: 'Este lançamento é uma perna de transferência: o valor não muda aqui. Cancele a transferência e registre-a de novo com o valor certo.',
+    }
+  }
+  if (ehTransferencia && contaNova !== atual.conta_id) {
+    return {
+      ok: false,
+      erro: 'Este lançamento é uma perna de transferência: a conta não muda aqui. Cancele a transferência e registre-a de novo entre as contas certas.',
+    }
+  }
+
+  // O dinheiro já entrou ou saiu pelo valor antigo. Trocar o valor depois da
+  // baixa faria o saldo da conta divergir do extrato sem nenhum fato por
+  // trás. Categoria, descrição e observação continuam livres — é exatamente
+  // o que se faz ao classificar o que veio do banco.
+  if (jaBaixado && valorNovo !== valorAtual) {
+    return {
+      ok: false,
+      erro: 'Este lançamento já foi baixado: o valor não pode mudar, porque o saldo da conta foi calculado com ele. Se o valor está errado, estorne a baixa antes.',
+    }
+  }
+
+  // A linha do extrato pertence à conta em que ela apareceu. Mover o
+  // lançamento para outra conta faria a conciliação apontar para um extrato
+  // onde aquele movimento nunca existiu.
+  if (veioDoExtrato && contaNova !== atual.conta_id) {
+    return {
+      ok: false,
+      erro: `Este lançamento veio do extrato (${atual.origem}) e pertence à conta em que o movimento apareceu. A conta não pode ser trocada.`,
+    }
+  }
+
+  const patch: Record<string, unknown> = {}
+  const anterior: Record<string, unknown> = {}
+  const novo: Record<string, unknown> = {}
+  const campos: string[] = []
+
+  const anota = (campo: string, coluna: string, antes: unknown, depois: unknown) => {
+    if (antes === depois) return
+    patch[coluna] = depois
+    anterior[campo] = antes
+    novo[campo] = depois
+    campos.push(campo)
+  }
+
+  anota('descrição', 'descricao', atual.descricao, dados.descricao.trim())
+  anota('favorecido', 'favorecido', texto(atual.favorecido), texto(dados.favorecido))
+  anota('valor', 'valor', valorAtual, valorNovo)
+  anota('vencimento', 'vence_em', atual.vence_em, venceNovo)
+  anota('conta', 'conta_id', atual.conta_id, contaNova)
+  anota('centro de custo', 'centro_custo', atual.centro_custo, dados.centroCusto || null)
+  anota('documento', 'documento', texto(atual.documento), texto(dados.documento))
+  anota('observação', 'observacao', texto(atual.observacao), texto(dados.observacao))
+
+  // Categoria vazia não apaga a classificação existente: um lançamento sai da
+  // DRE ao perder a categoria, e ninguém quer isso de propósito. Trocar de
+  // categoria também reescreve o nome desnormalizado — as telas antigas leem
+  // a coluna de texto, e deixá-la para trás faria o mesmo lançamento se
+  // descrever de dois jeitos.
+  if (!dados.categoriaId && atual.categoria_id) {
+    return {
+      ok: false,
+      erro: 'Não é possível deixar um lançamento já classificado sem categoria — ele sairia da DRE. Escolha outra categoria.',
+    }
+  }
+
+  if (dados.categoriaId && dados.categoriaId !== atual.categoria_id) {
+    const { data: cat, error: erroCat } = await sb
+      .from('categorias_financeiras')
+      .select('id, nome, natureza_gerencial, ativa')
+      .eq('id', dados.categoriaId)
+      .maybeSingle()
+    if (erroCat) return falha(erroCat, 'Falha ao ler a categoria.')
+    if (!cat) return { ok: false, erro: 'Categoria não encontrada.' }
+
+    const c = cat as unknown as { nome: string; natureza_gerencial: string; ativa: boolean }
+    if (!c.ativa) {
+      return { ok: false, erro: `A categoria "${c.nome}" está inativa. Reative-a em Categorias ou escolha outra.` }
+    }
+    // Receita em lançamento de saída (e vice-versa) não é digitação errada de
+    // texto: é uma despesa entrando na DRE como faturamento. A natureza da
+    // categoria já responde de que lado ela pode aparecer.
+    const natureza = c.natureza_gerencial
+    if (natureza === 'transferencia' && !ehTransferencia) {
+      return {
+        ok: false,
+        erro: 'Categoria de transferência só vale para transferência entre contas próprias — ela não entra no resultado.',
+      }
+    }
+    if (atual.tipo === 'entrada' && natureza !== 'receita_operacional' && natureza !== 'aporte_retirada' && natureza !== 'transferencia') {
+      return {
+        ok: false,
+        erro: `"${c.nome}" é categoria de despesa e este lançamento é uma entrada. Escolha uma categoria de receita ou de aporte.`,
+      }
+    }
+    if (atual.tipo === 'saida' && natureza === 'receita_operacional') {
+      return {
+        ok: false,
+        erro: `"${c.nome}" é categoria de receita e este lançamento é uma saída. Escolha uma categoria de custo ou despesa.`,
+      }
+    }
+
+    anota('categoria', 'categoria_id', atual.categoria_id, dados.categoriaId)
+    patch.categoria = c.nome
+  }
+
+  if (campos.length === 0) return { ok: true, alteracoes: 0 }
+
+  patch.atualizado_em = new Date().toISOString()
+
+  const { error } = await sb.from('lancamentos').update(patch).eq('id', id)
+  if (error) {
+    console.error('[financeiro] editar lançamento falhou:', error)
+    return falha(error, 'Falha ao salvar a edição.')
+  }
+
+  await registrarAuditoria({
+    entidade: 'lancamento',
+    entidadeId: id,
+    acao: 'editar',
+    anterior,
+    novo,
+    justificativa: `Edição manual de ${campos.join(', ')}`,
+  })
+
+  revalidarFinanceiro()
+  return { ok: true, alteracoes: campos.length }
+}
+
 // ── Transferência ──────────────────────────────────────────────────────────
 
 /**

@@ -18,6 +18,7 @@ import {
   baixarComEncargos,
   cancelarCompromisso,
   criarCompromisso,
+  editarLancamento,
   parcelarLancamento,
 } from './acoes-gerenciais'
 
@@ -464,12 +465,23 @@ export function NovoCompromisso({
 export function AcoesGerenciais({
   lancamento,
   situacao,
+  contas,
+  categorias,
+  centros,
 }: {
   lancamento: LancamentoGerencial
   situacao: SituacaoLancamento
+  /** Sem as listas não há como montar os seletores — o lápis some em vez de
+      abrir um diálogo com combos vazios. */
+  contas?: ContaFinanceira[]
+  categorias?: CategoriaGerencial[]
+  centros?: { id: string; nome: string }[]
 }) {
-  const [aberto, setAberto] = useState<'baixa' | 'parcelar' | 'cancelar' | null>(null)
+  const [aberto, setAberto] = useState<'baixa' | 'parcelar' | 'cancelar' | 'editar' | null>(null)
   const encerrado = situacao === 'liquidado' || situacao === 'cancelado'
+  // Liquidado ainda se edita — é o caso do que veio do extrato já baixado e
+  // sem categoria. Cancelado não: o registro deixou de valer.
+  const podeEditar = Boolean(contas && categorias) && situacao !== 'cancelado'
 
   return (
     <span style={{ display: 'inline-flex', gap: 5, justifyContent: 'flex-end' }}>
@@ -481,6 +493,16 @@ export function AcoesGerenciais({
           rotulo={lancamento.tipo === 'entrada' ? 'Registrar recebimento' : 'Dar baixa'}
           destaque
           onClick={() => setAberto('baixa')}
+        />
+      )}
+      {podeEditar && (
+        <BotaoIcone
+          icone="lapis"
+          rotulo="Editar lançamento"
+          // Sem categoria, o lançamento não entra na DRE: o lápis dourado é o
+          // que faz o operador achar os que faltam classificar.
+          destaque={!lancamento.categoriaId || !lancamento.venceEm}
+          onClick={() => setAberto('editar')}
         />
       )}
       {!encerrado && !lancamento.parcela && !lancamento.transferenciaId && (
@@ -504,7 +526,294 @@ export function AcoesGerenciais({
       {aberto === 'cancelar' && (
         <DialogoCancelar lancamento={lancamento} aoFechar={() => setAberto(null)} />
       )}
+      {aberto === 'editar' && contas && categorias && (
+        <DialogoEditar
+          lancamento={lancamento}
+          contas={contas}
+          categorias={categorias}
+          centros={centros ?? []}
+          aoFechar={() => setAberto(null)}
+        />
+      )}
     </span>
+  )
+}
+
+/**
+ * Edição de um lançamento já registrado.
+ *
+ * Nasceu de dois problemas reais: recebimento lançado sem vencimento não
+ * aparece na projeção de caixa (a projeção posiciona a entrada na data de
+ * vencimento — sem data, ela não existe no gráfico) e lançamento importado do
+ * extrato chega sem categoria, então a DRE não sabe o que ele é.
+ *
+ * Campo travado aparece desabilitado E explicado: esconder o campo faria
+ * parecer que o ERP não sabe editá-lo, quando na verdade ele não DEVE ser
+ * editado ali.
+ */
+function DialogoEditar({
+  lancamento,
+  contas,
+  categorias,
+  centros,
+  aoFechar,
+}: {
+  lancamento: LancamentoGerencial
+  contas: ContaFinanceira[]
+  categorias: CategoriaGerencial[]
+  centros: { id: string; nome: string }[]
+  aoFechar: () => void
+}) {
+  const [descricao, setDescricao] = useState(lancamento.descricao)
+  const [favorecido, setFavorecido] = useState(lancamento.favorecido ?? '')
+  const [valor, setValor] = useState(lancamento.valor.toFixed(2).replace('.', ','))
+  const [venceEm, setVenceEm] = useState(lancamento.venceEm ?? '')
+  const [categoriaId, setCategoriaId] = useState(lancamento.categoriaId ?? '')
+  const [contaId, setContaId] = useState(lancamento.contaId)
+  const [centroCusto, setCentroCusto] = useState(lancamento.centroCusto ?? '')
+  const [documento, setDocumento] = useState(lancamento.documento ?? '')
+  const [observacao, setObservacao] = useState(lancamento.observacao ?? '')
+  const [erro, setErro] = useState<string | null>(null)
+  const [pendente, iniciar] = useTransition()
+
+  const ehTransferencia = Boolean(lancamento.transferenciaId)
+  const veioDoExtrato = lancamento.origem.startsWith('Extrato ')
+  const jaBaixado = Boolean(lancamento.baixadoEm)
+
+  const travaValor = ehTransferencia || jaBaixado
+  const motivoValor = ehTransferencia
+    ? 'Perna de transferência: mudar só um lado desequilibraria o par'
+    : 'Lançamento já baixado: o saldo da conta foi calculado com este valor'
+  const travaConta = ehTransferencia || veioDoExtrato
+  const motivoConta = ehTransferencia
+    ? 'Perna de transferência: a conta faz parte do par'
+    : `Veio do extrato (${lancamento.origem}) e pertence à conta do movimento`
+
+  // A natureza da categoria decide de que lado ela pode aparecer: despesa
+  // classificada como receita não é erro de digitação, é faturamento
+  // inventado na DRE. A categoria atual entra na lista mesmo inativa, senão o
+  // select trocaria a classificação sozinho ao abrir.
+  const disponiveis = categorias.filter((c) => {
+    if (!c.ativa && c.id !== lancamento.categoriaId) return false
+    if (c.natureza === 'transferencia') return ehTransferencia
+    return lancamento.tipo === 'entrada'
+      ? c.natureza === 'receita_operacional' || c.natureza === 'aporte_retirada'
+      : c.natureza !== 'receita_operacional'
+  })
+  const escolhida = disponiveis.find((c) => c.id === categoriaId)
+
+  const salvar = () =>
+    iniciar(async () => {
+      setErro(null)
+      const r = await editarLancamento(lancamento.id, {
+        descricao,
+        favorecido,
+        valor: travaValor ? lancamento.valor : parseNum(valor),
+        venceEm,
+        categoriaId,
+        contaId: travaConta ? lancamento.contaId : contaId,
+        centroCusto: centroCusto || null,
+        documento,
+        observacao,
+      })
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      aoFechar()
+    })
+
+  return (
+    <Modal titulo="Editar lançamento" largura={660} aoFechar={aoFechar}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
+        <TituloSecao tamanho={16}>Editar lançamento</TituloSecao>
+        <span
+          className="font-sans"
+          style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--color-secundario)', textWrap: 'pretty' }}
+        >
+          {`${lancamento.tipo === 'entrada' ? 'A receber' : 'A pagar'} · competência ${lancamento.competencia.slice(0, 7)} · origem ${lancamento.origem}${
+            jaBaixado ? ` · baixado em ${lancamento.baixadoEm}` : ''
+          }`}
+        </span>
+
+        {!lancamento.categoriaId && (
+          <span
+            className="font-sans"
+            style={{
+              padding: '10px 12px',
+              border: '1px solid rgba(233,197,131,.28)',
+              borderRadius: 10,
+              background: 'rgba(233,197,131,.06)',
+              fontSize: 11.5,
+              lineHeight: 1.5,
+              color: COR.ouro,
+              textWrap: 'pretty',
+            }}
+          >
+            Este lançamento está sem categoria e por isso não aparece na DRE. Escolha a categoria
+            que descreve o que ele foi.
+          </span>
+        )}
+
+        {!lancamento.venceEm && (
+          <span
+            className="font-sans"
+            style={{
+              padding: '10px 12px',
+              border: '1px solid rgba(233,197,131,.28)',
+              borderRadius: 10,
+              background: 'rgba(233,197,131,.06)',
+              fontSize: 11.5,
+              lineHeight: 1.5,
+              color: COR.ouro,
+              textWrap: 'pretty',
+            }}
+          >
+            Este lançamento está sem data de vencimento e por isso fica fora da projeção de caixa.
+            Informe a data prevista para ele entrar no fluxo.
+          </span>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,2fr) minmax(0,1fr)', gap: 12 }}>
+          <Campo rotulo="Descrição">
+            <input
+              value={descricao}
+              onChange={(e) => setDescricao(e.target.value)}
+              style={CAMPO}
+            />
+          </Campo>
+          <Campo rotulo="Valor" dica={travaValor ? motivoValor : 'Maior que zero'}>
+            <input
+              value={valor}
+              onChange={(e) => setValor(e.target.value)}
+              inputMode="decimal"
+              disabled={travaValor}
+              style={{ ...CAMPO, opacity: travaValor ? 0.5 : 1, cursor: travaValor ? 'not-allowed' : 'text' }}
+            />
+          </Campo>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 12 }}>
+          <Campo rotulo={lancamento.tipo === 'entrada' ? 'Pagador' : 'Favorecido'}>
+            <input
+              value={favorecido}
+              onChange={(e) => setFavorecido(e.target.value)}
+              placeholder="Quem recebe ou paga"
+              style={CAMPO}
+            />
+          </Campo>
+          <Campo
+            rotulo="Categoria"
+            dica={
+              escolhida
+                ? ROTULO_NATUREZA[escolhida.natureza]
+                : 'Sem categoria, o lançamento fica fora da DRE'
+            }
+          >
+            <select
+              value={categoriaId}
+              onChange={(e) => setCategoriaId(e.target.value)}
+              style={{
+                ...CAMPO,
+                border: categoriaId ? CAMPO.border : `1px solid ${COR.ouro}66`,
+              }}
+            >
+              {/* A opção vazia só existe para quem ainda não tem categoria:
+                  tirar a classificação de um lançamento já classificado o
+                  faria sumir da DRE, e não há motivo para oferecer isso. */}
+              {!lancamento.categoriaId && <option value="">Sem categoria</option>}
+              {disponiveis.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nome}
+                </option>
+              ))}
+            </select>
+          </Campo>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 12 }}>
+          <Campo rotulo="Vencimento" dica="A data que a projeção de caixa usa">
+            <input
+              type="date"
+              value={venceEm}
+              onChange={(e) => setVenceEm(e.target.value)}
+              style={{ ...CAMPO, colorScheme: 'dark' }}
+            />
+          </Campo>
+          <Campo rotulo="Conta" dica={travaConta ? motivoConta : undefined}>
+            <select
+              value={contaId}
+              onChange={(e) => setContaId(e.target.value)}
+              disabled={travaConta}
+              style={{ ...CAMPO, opacity: travaConta ? 0.5 : 1, cursor: travaConta ? 'not-allowed' : 'pointer' }}
+            >
+              {contas.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nome}
+                </option>
+              ))}
+            </select>
+          </Campo>
+          <Campo rotulo="Centro de custo">
+            <select value={centroCusto} onChange={(e) => setCentroCusto(e.target.value)} style={CAMPO}>
+              <option value="">Sem centro de custo</option>
+              {centros.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nome}
+                </option>
+              ))}
+            </select>
+          </Campo>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,2fr)', gap: 12 }}>
+          <Campo rotulo="Documento" dica="NF, boleto ou recibo">
+            <input
+              value={documento}
+              onChange={(e) => setDocumento(e.target.value)}
+              placeholder="NF 1234"
+              style={CAMPO}
+            />
+          </Campo>
+          <Campo rotulo="Observação">
+            <input
+              value={observacao}
+              onChange={(e) => setObservacao(e.target.value)}
+              placeholder="Contexto que ajuda a conferir depois"
+              style={CAMPO}
+            />
+          </Campo>
+        </div>
+
+        <Previa
+          linhas={[
+            {
+              rotulo: 'Valor',
+              valor: brl(travaValor ? lancamento.valor : parseNum(valor)),
+              tom: lancamento.tipo === 'entrada' ? COR.ok : COR.erro,
+            },
+            {
+              rotulo: 'Entra na projeção de caixa em',
+              valor: venceEm || 'sem data — fica fora da projeção',
+              tom: venceEm ? undefined : COR.ouro,
+            },
+            {
+              rotulo: 'Entra na DRE como',
+              valor: escolhida ? escolhida.nome : 'sem categoria — fica fora da DRE',
+              tom: escolhida ? undefined : COR.ouro,
+            },
+          ]}
+        />
+
+        <Erro texto={erro} />
+        <Rodape
+          rotulo="Salvar alterações"
+          aoConfirmar={salvar}
+          aoCancelar={aoFechar}
+          pendente={pendente}
+        />
+      </div>
+    </Modal>
   )
 }
 

@@ -72,9 +72,18 @@ export function BarraDeFiltros({
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
   }
 
-  const ativos = ['situacao', 'tipo', 'categoria', 'conta', 'centro', 'q', 'de', 'ate', 'recorrente'].filter(
-    (k) => params.get(k),
-  ).length
+  const ativos = [
+    'situacao',
+    'tipo',
+    'categoria',
+    'conta',
+    'centro',
+    'q',
+    'de',
+    'ate',
+    'recorrente',
+    'venc',
+  ].filter((k) => params.get(k)).length
 
   return (
     <section
@@ -152,7 +161,22 @@ export function BarraDeFiltros({
             valor={params.get('categoria') ?? ''}
             aoTrocar={(v) => trocar('categoria', v)}
             vazio="Todas"
-            opcoes={categorias.map((c) => ({ valor: c.id, rotulo: c.nome }))}
+            // "Sem categoria" primeiro na lista: é a fila que precisa de
+            // trabalho — quase cem linhas do extrato que a DRE não classifica
+            // enquanto ninguém disser o que elas são.
+            opcoes={[
+              { valor: 'sem', rotulo: 'Sem categoria' },
+              ...categorias.map((c) => ({ valor: c.id, rotulo: c.nome })),
+            ]}
+          />
+        </Campo>
+
+        <Campo rotulo="Vencimento">
+          <Selecao
+            valor={params.get('venc') ?? ''}
+            aoTrocar={(v) => trocar('venc', v)}
+            vazio="Todos"
+            opcoes={[{ valor: 'sem', rotulo: 'Sem data de vencimento' }]}
           />
         </Campo>
 
