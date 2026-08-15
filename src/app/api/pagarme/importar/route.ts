@@ -385,22 +385,27 @@ export async function POST(req: Request) {
   const dias = linhas.map((l) => l.ocorrido_em).filter(Boolean).sort()
 
   /**
-   * Fecha a conta pelo saldo que a própria API reporta.
+   * O fechamento da conta é CALCULADO, mas não é gravado. Duas razões, e
+   * nenhuma delas é técnica.
    *
-   * As três fontes da Pagar.me não casam entre si: os clientes pagaram
-   * R$ 42.972,13 nas cobranças, os recebíveis somam R$ 44.200,09 de bruto
-   * (juros de parcelamento entram aí) e o saldo creditou R$ 46.422,51. Cada
-   * uma responde a uma pergunta diferente e nenhuma é "a" verdade da venda.
+   * A primeira: a diferença tem nome. As três fontes do gateway não casam —
+   * cobranças R$ 42.972,13, recebíveis R$ 44.200,09 de bruto, saldo creditado
+   * R$ 46.422,51 — e a quebra dos recebíveis por tipo explicou por quê: são
+   * 54 estornos por contestação de fraude (R$ 8.219,36), menos 22 disputas
+   * ganhas que devolveram R$ 3.416,13. Perda líquida R$ 4.803,23, que é o
+   * ajuste que este cálculo encontra por outro caminho. Não é venda
+   * desconhecida; é chargeback.
    *
-   * Para o CAIXA, porém, existe uma verdade só, e ela não é opinável: o que a
-   * conta movimentou. A soma dos movimentos é o saldo final, e é dela que sai
-   * este ajuste — a diferença entre o que a importação conhece linha a linha e
-   * o que a conta de fato tem. Ele entra como crédito a classificar, com nome
-   * próprio: dinheiro que entrou e cuja venda não foi identificada é uma
-   * pendência a resolver, não um número para esconder dentro de outro.
+   * A segunda, que decide: a operação determinou que a disputa com o gateway
+   * anterior fica FORA do ERP. Os pedidos foram entregues com comprovante de
+   * recebimento assinado, a cobrança é contestada e não será paga — lançá-la
+   * no financeiro criaria um passivo que a empresa não reconhece.
    *
-   * Sem isto a conta encerrada carregaria saldo que não existe, e o erro
-   * apareceria somado ao Inter e ao Mercado Pago, onde ninguém iria procurar.
+   * O saldo que sobra na conta não vaza para lugar nenhum: ela está inativa, e
+   * `repository.contas()` lê `contas_saldo` com `ativa = true`. Contas e
+   * Caixas, caixa consolidado e concentração ignoram esta conta por
+   * construção. O que ficou no ERP é o que interessa: a receita e a tarifa
+   * reais de cada pedido do período.
    */
   const saldoNaApi = reais(movimentos.reduce((a, m) => a + (m.amount ?? 0), 0))
   const conhecido =
@@ -481,7 +486,10 @@ export async function POST(req: Request) {
 
   // Em lotes: um upsert de 600 linhas com jsonb estoura o limite de corpo do
   // PostgREST antes de estourar o tempo da função.
-  const tudo = [...linhas, ...saques, ...cobrancasDeTarifa, ...(ajuste ? [ajuste] : [])]
+  // SÓ as vendas. Saques, tarifa avulsa e ajuste de fechamento continuam
+  // sendo calculados e aparecem no resumo do ensaio, mas NÃO são gravados —
+  // ver a nota sobre o fechamento acima.
+  const tudo = [...linhas]
   for (let i = 0; i < tudo.length; i += 200) {
     const { error } = await sb
       .from('extrato_linhas')
