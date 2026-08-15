@@ -327,12 +327,77 @@ export async function POST(req: Request) {
     }))
     .filter((l) => l.valor > 0 && l.ocorrido_em)
 
+  // Tarifa avulsa cobrada pelo gateway, fora de qualquer venda.
+  const cobrancasDeTarifa = movimentos
+    .filter((m) => m.type === 'fee_collection' && (m.amount ?? 0) < 0)
+    .map((m) => ({
+      origem: 'pagarme',
+      chave: `pagarme:op:${m.id}`,
+      conta_id: CONTA,
+      ocorrido_em: (m.created_at ?? '').slice(0, 10),
+      descricao: 'Compra paga pela conta',
+      contraparte: 'Tarifa avulsa do gateway',
+      documento: '',
+      tipo: 'saida',
+      valor: reais(Math.abs(m.amount ?? 0)),
+      pedido_id: null as string | null,
+      ignorado: false,
+      interno: false,
+      bruto: { tipo: m.type ?? null },
+    }))
+    .filter((l) => l.valor > 0 && l.ocorrido_em)
+
   const totalPago = pagas.reduce(
     (a, c) => a + reais(c.paid_amount ?? c.last_transaction?.paid_amount ?? c.amount),
     0,
   )
   const totalLiquido = linhas.reduce((a, l) => a + l.valor, 0)
   const dias = linhas.map((l) => l.ocorrido_em).filter(Boolean).sort()
+
+  /**
+   * Fecha a conta pelo saldo que a própria API reporta.
+   *
+   * As três fontes da Pagar.me não casam entre si: os clientes pagaram
+   * R$ 42.972,13 nas cobranças, os recebíveis somam R$ 44.200,09 de bruto
+   * (juros de parcelamento entram aí) e o saldo creditou R$ 46.422,51. Cada
+   * uma responde a uma pergunta diferente e nenhuma é "a" verdade da venda.
+   *
+   * Para o CAIXA, porém, existe uma verdade só, e ela não é opinável: o que a
+   * conta movimentou. A soma dos movimentos é o saldo final, e é dela que sai
+   * este ajuste — a diferença entre o que a importação conhece linha a linha e
+   * o que a conta de fato tem. Ele entra como crédito a classificar, com nome
+   * próprio: dinheiro que entrou e cuja venda não foi identificada é uma
+   * pendência a resolver, não um número para esconder dentro de outro.
+   *
+   * Sem isto a conta encerrada carregaria saldo que não existe, e o erro
+   * apareceria somado ao Inter e ao Mercado Pago, onde ninguém iria procurar.
+   */
+  const saldoNaApi = reais(movimentos.reduce((a, m) => a + (m.amount ?? 0), 0))
+  const conhecido =
+    totalLiquido -
+    saques.reduce((a, s) => a + s.valor, 0) -
+    cobrancasDeTarifa.reduce((a, s) => a + s.valor, 0)
+  const diferenca = Math.round((saldoNaApi - conhecido) * 100) / 100
+  const ajuste =
+    Math.abs(diferenca) < 0.01
+      ? null
+      : {
+          origem: 'pagarme',
+          chave: 'pagarme:fechamento',
+          conta_id: CONTA,
+          // Data do último movimento: o ajuste pertence ao encerramento, não
+          // ao dia em que a importação rodou.
+          ocorrido_em: saques.map((s) => s.ocorrido_em).sort().at(-1) ?? dias.at(-1) ?? '',
+          descricao: diferenca > 0 ? 'Venda recebida' : 'Compra paga pela conta',
+          contraparte: 'Fechamento do gateway – venda não identificada',
+          documento: '',
+          tipo: diferenca > 0 ? 'entrada' : 'saida',
+          valor: Math.abs(diferenca),
+          pedido_id: null as string | null,
+          ignorado: false,
+          interno: false,
+          bruto: { saldoNaApi, conhecido: Math.round(conhecido * 100) / 100 },
+        }
 
   const resumo = {
     periodo: 'conta inteira, sem filtro de data',
@@ -352,11 +417,8 @@ export async function POST(req: Request) {
     movimentosLidos: movimentos.length,
     saques: saques.length,
     totalSacado: Math.round(saques.reduce((a, s) => a + s.valor, 0) * 100) / 100,
-    // Deve fechar em zero: tudo que entrou foi sacado, a conta está encerrada.
-    // Se sobrar diferença, ou falta saque ou falta venda — e o número aqui diz
-    // de quanto é a falta, em vez de deixá-la escondida no saldo da conta.
-    sobraNoGateway:
-      Math.round((totalLiquido - saques.reduce((a, s) => a + s.valor, 0)) * 100) / 100,
+    saldoNaApi: saldoNaApi,
+    ajusteDeFechamento: ajuste ? ajuste.valor : 0,
   }
 
   if (ensaio) {
@@ -389,7 +451,7 @@ export async function POST(req: Request) {
 
   // Em lotes: um upsert de 600 linhas com jsonb estoura o limite de corpo do
   // PostgREST antes de estourar o tempo da função.
-  const tudo = [...linhas, ...saques]
+  const tudo = [...linhas, ...saques, ...cobrancasDeTarifa, ...(ajuste ? [ajuste] : [])]
   for (let i = 0; i < tudo.length; i += 200) {
     const { error } = await sb
       .from('extrato_linhas')
