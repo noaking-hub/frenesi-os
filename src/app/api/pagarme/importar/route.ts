@@ -275,7 +275,9 @@ export async function POST(req: Request) {
   for (let i = 0; i < linhas.length; i += 200) {
     const { error } = await sb
       .from('extrato_linhas')
-      .upsert(linhas.slice(i, i + 200), { onConflict: 'chave' })
+      // A chave primária é (origem, chave) — apontar o conflito só para
+      // `chave` faz o Postgres recusar o upsert inteiro.
+      .upsert(linhas.slice(i, i + 200), { onConflict: 'origem,chave' })
     if (error) return NextResponse.json({ erro: error.message, resumo }, { status: 500 })
   }
 
