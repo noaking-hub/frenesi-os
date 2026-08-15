@@ -14,6 +14,7 @@ import type {
   SituacaoLancamento,
 } from '@/domain'
 
+import { useListasDeEdicao } from './ListasDoFormulario'
 import {
   baixarComEncargos,
   cancelarCompromisso,
@@ -465,18 +466,15 @@ export function NovoCompromisso({
 export function AcoesGerenciais({
   lancamento,
   situacao,
-  contas,
-  categorias,
-  centros,
 }: {
   lancamento: LancamentoGerencial
   situacao: SituacaoLancamento
-  /** Sem as listas não há como montar os seletores — o lápis some em vez de
-      abrir um diálogo com combos vazios. */
-  contas?: ContaFinanceira[]
-  categorias?: CategoriaGerencial[]
-  centros?: { id: string; nome: string }[]
 }) {
+  // As listas vêm do contexto, não de propriedade por linha: repetir contas,
+  // categorias e centros em cada uma das mil linhas da tabela era o que
+  // estourava o payload e derrubava a tela. Sem elas o lápis some, em vez de
+  // abrir um diálogo com combos vazios.
+  const { contas, categorias, centros } = useListasDeEdicao()
   const [aberto, setAberto] = useState<'baixa' | 'parcelar' | 'cancelar' | 'editar' | null>(null)
   const encerrado = situacao === 'liquidado' || situacao === 'cancelado'
   // Liquidado ainda se edita — é o caso do que veio do extrato já baixado e

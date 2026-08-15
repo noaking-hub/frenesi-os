@@ -36,6 +36,7 @@ import {
 import type { LancamentoGerencial, SituacaoLancamento } from '@/domain'
 
 import { AcoesGerenciais, NovoCompromisso } from '../Compromissos'
+import { ProvedorDeListas } from '../ListasDoFormulario'
 import { BarraDeFiltros } from './Filtros'
 
 /**
@@ -138,6 +139,19 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       if (d !== 0) return d
       return (a.l.venceEm ?? '9999').localeCompare(b.l.venceEm ?? '9999')
     })
+
+  /**
+   * Teto de linhas desenhadas de uma vez.
+   *
+   * A tela nasceu listando tudo, e tudo eram trezentos lançamentos. O extrato
+   * do gateway trouxe mais mil, e uma tabela de mil linhas não é uma tabela: é
+   * uma página que demora a abrir e onde ninguém acha nada. O teto corta o
+   * desenho, NÃO a conta — os totais do rodapé e os indicadores continuam
+   * sobre o filtro inteiro, e o rodapé diz quantas ficaram de fora.
+   */
+  const TETO_LINHAS = 250
+  const listadas = visiveis.slice(0, TETO_LINHAS)
+  const ocultas = visiveis.length - listadas.length
 
   const abertos = visiveis.filter((x) => x.situacao !== 'liquidado' && x.situacao !== 'cancelado')
   const somaAberto = (ls: { l: LancamentoGerencial }[]) => ls.reduce((a, x) => a + saldoAberto(x.l), 0)
@@ -358,19 +372,12 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       titulo: 'Ações',
       largura: '156px',
       alinhamento: 'right',
-      render: ({ l, situacao }) => (
-        <AcoesGerenciais
-          lancamento={l}
-          situacao={situacao}
-          contas={p.contas}
-          categorias={p.categorias}
-          centros={p.centrosCusto}
-        />
-      ),
+      render: ({ l, situacao }) => <AcoesGerenciais lancamento={l} situacao={situacao} />,
     },
   ]
 
   return (
+    <ProvedorDeListas contas={p.contas} categorias={p.categorias} centros={p.centrosCusto}>
     <Pilha gap={16}>
 
       <GradeIndicadores>
@@ -594,7 +601,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
         >
           <TabelaUi
             colunas={colunas}
-            itens={visiveis}
+            itens={listadas}
             chaveDe={({ l }) => l.id}
             larguraMinima={1080}
             faixaDe={({ situacao }) =>
@@ -613,7 +620,11 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
             rodape={
               visiveis.length > 0 ? (
                 <RodapeTabela
-                  contagem={plural(visiveis.length, 'lançamento listado', 'lançamentos listados')}
+                  contagem={
+                    ocultas > 0
+                      ? `${listadas.length} de ${visiveis.length} desenhados · use os filtros para ver os outros ${ocultas}`
+                      : plural(visiveis.length, 'lançamento listado', 'lançamentos listados')
+                  }
                   totais={[
                     { rotulo: 'A receber em aberto', valor: brl(somaAberto(entradasAbertas)), tom: 'ok' },
                     { rotulo: 'A pagar em aberto', valor: brl(somaAberto(saidasAbertas)), tom: 'erro' },
@@ -717,6 +728,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
         </Colunas>
       </ComTrilha>
     </Pilha>
+    </ProvedorDeListas>
   )
 }
 

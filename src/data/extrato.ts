@@ -112,6 +112,26 @@ export async function lerExtrato(filtro: FiltroExtrato = {}): Promise<PaginaExtr
         .order('valor', { ascending: false })
         .limit(limite)
 
+  /**
+   * As RESERVAS do Mercado Pago ficam fora da lista.
+   *
+   * O razão do MP escreve uma transferência em três linhas: cria a reserva
+   * (débito), libera a reserva (crédito) e transfere para o banco (débito).
+   * As duas primeiras se anulam — são o MP movendo dinheiro de um bolso para
+   * o outro dentro do próprio saldo. Mostrá-las fazia a tela dizer que o
+   * dinheiro TRANSFERIDO ontem tinha ENTRADO como crédito, etiquetado
+   * "Movimento da conta": o operador via a saída virar entrada.
+   *
+   * O filtro é pela descrição, e não por `interno`, porque a transferência
+   * para o banco TAMBÉM é interna — dinheiro entre contas próprias — e essa
+   * precisa aparecer: é a saída de verdade, a que o operador fez.
+   *
+   * As reservas continuam gravadas. O extrato é cópia fiel do que o gateway
+   * mandou, e apagá-las quebraria a idempotência da importação; elas só não
+   * são listadas.
+   */
+  consulta = consulta.not('descricao', 'ilike', 'Reserva%')
+
   if (filtro.contaId) consulta = consulta.eq('conta_id', filtro.contaId)
   if (filtro.de) consulta = consulta.gte('ocorrido_em', filtro.de)
   if (filtro.ate) consulta = consulta.lte('ocorrido_em', filtro.ate)
