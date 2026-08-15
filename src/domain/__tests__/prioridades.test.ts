@@ -97,6 +97,32 @@ describe('prioridadesDe', () => {
     expect(f.find((p) => p.id === 'estoque-urgente')).toBeUndefined()
   })
 
+  it('base sem compra registrada NUNCA entra na fila', () => {
+    // É regra da casa não contabilizar estoque de produto do qual não se
+    // comprou frasco. Sem esta exclusão a fila anunciava "393 bases zeradas",
+    // que é o catálogo inteiro — e alerta que acusa tudo não acusa nada.
+    const catalogo = Array.from({ length: 393 }, (_, i) => ({
+      nome: `Base ${i}`,
+      marca: null,
+      dias: null,
+      criticidade: 'sem_carga',
+      disponivelMl: 0,
+    }))
+    expect(prioridadesDe({ ...CALMO, estoque: catalogo })).toEqual([])
+  })
+
+  it('sem_carga não contamina a contagem das que estão de fato zeradas', () => {
+    const f = prioridadesDe({
+      ...CALMO,
+      estoque: [
+        { nome: 'Fora do controle', marca: null, dias: null, criticidade: 'sem_carga', disponivelMl: 0 },
+        { nome: 'Sauvage', marca: 'Dior', dias: null, criticidade: 'zero', disponivelMl: 0 },
+      ],
+    })
+    const item = f.find((p) => p.id === 'estoque-zerado')!
+    expect(item.detalhe).toBe('1 base está zerada: Sauvage.')
+  })
+
   it('lista longa de bases vira "e mais N"', () => {
     const estoque = ['A', 'B', 'C', 'D', 'E'].map((nome) => ({
       nome, marca: null, dias: null, criticidade: 'zero', disponivelMl: 0,

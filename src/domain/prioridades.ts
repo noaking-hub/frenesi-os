@@ -116,9 +116,17 @@ export function prioridadesDe(e: EstadoDaOperacao): Prioridade[] {
   }
 
   // ── Estoque ──────────────────────────────────────────────────────────────
+  //
+  // `sem_carga` NUNCA entra na fila. É a base que existe no catálogo e da qual
+  // nunca se comprou um frasco: ela não está zerada, ela está fora do controle
+  // de estoque — e é regra da casa não contabilizar estoque de produto sem
+  // compra registrada. Sem esta exclusão a fila anunciava "393 bases zeradas",
+  // que é o catálogo inteiro, e um alerta que acusa tudo não acusa nada.
+  const emOperacao = e.estoque.filter((b) => b.criticidade !== 'sem_carga')
+
   // Zerado e "acaba antes de repor" são problemas diferentes e viram itens
   // diferentes: um já custa venda perdida, o outro ainda dá para evitar.
-  const zerados = e.estoque.filter((b) => b.criticidade === 'zero' || b.disponivelMl <= 0)
+  const zerados = emOperacao.filter((b) => b.criticidade === 'zero' || b.disponivelMl <= 0)
   if (zerados.length > 0) {
     fila.push({
       id: 'estoque-zerado',
@@ -130,7 +138,7 @@ export function prioridadesDe(e: EstadoDaOperacao): Prioridade[] {
     })
   }
 
-  const acabando = e.estoque.filter(
+  const acabando = emOperacao.filter(
     (b) => b.disponivelMl > 0 && b.dias !== null && b.criticidade === 'urgente',
   )
   if (acabando.length > 0) {

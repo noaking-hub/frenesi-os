@@ -52,6 +52,29 @@ export async function POST(req: Request) {
     } catch (e) {
       relatorio.pedidos = { erro: mensagemDe(e) }
     }
+
+    // QUEM MANDA É O DINHEIRO, E ELE MANDA AQUI — não daqui a uma hora.
+    //
+    // A importação acima reescreve a situação de pagamento com o que a Yampi
+    // diz. Quando ela diz errado, o pedido cai de `pago` para `divergente` e
+    // sai do faturamento. Esta correção existia só na sincronia HORÁRIA, e
+    // como este pulso roda a cada 5 minutos, o número errado ficava no ar 55
+    // minutos de cada hora: era assim que R$ 540,00 sumiam do dia 10/08
+    // mesmo depois de corrigidos.
+    //
+    // Roda imediatamente depois da importação, na mesma execução, olhando o
+    // extrato: se entrou mais dinheiro do que voltou, o pedido está pago —
+    // independente do rótulo que a loja mandou.
+    try {
+      const { data, error } = await supabaseServer().rpc(
+        'corrigir_pagamento_por_estorno_parcial',
+      )
+      if (error) throw error
+      const linha = Array.isArray(data) ? data[0] : data
+      relatorio.estornosParciais = { corrigidos: linha?.corrigidos ?? 0 }
+    } catch (e) {
+      relatorio.estornosParciais = { erro: mensagemDe(e) }
+    }
   } else {
     relatorio.pedidos = { pulado: 'credenciais da Yampi não estão definidas' }
   }

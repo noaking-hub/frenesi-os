@@ -327,7 +327,15 @@ function situacaoDoPedido(
     // total, e supor o contrário transformaria devolução em receita.
     const pago = pagas.reduce((a, t) => a + Math.abs(t.valor), 0)
     const estornado = estornadas.reduce((a, t) => a + Math.abs(t.valor), 0)
-    const parcialComprovado = pago > 0 && estornado > 0 && estornado < pago * 0.99
+
+    // A referência do que foi cobrado é o valor do PEDIDO quando não sobra
+    // transação paga. A Yampi, ao estornar parcialmente, troca o status da
+    // MESMA transação de `paid` para `refunded` — então `pagas` fica vazio, o
+    // total pago vira zero, e a regra anterior rebaixava para `divergente` uma
+    // venda que estava paga. Era exatamente esse o caminho dos R$ 540,00 que
+    // sumiam do dia 10/08 a cada reimportação.
+    const cobrado = pago > 0 ? pago : Math.abs(numero(p.value_total))
+    const parcialComprovado = cobrado > 0 && estornado > 0 && estornado < cobrado * 0.99
     return parcialComprovado ? 'pago' : 'divergente'
   }
 
