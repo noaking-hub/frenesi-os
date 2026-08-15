@@ -35,6 +35,7 @@ const ABERTO = [
   '/api/pedidos/pulso',
   '/api/diagnostico',
   '/api/pagarme',
+  '/api/pagaleve',
 ]
 
 /** Os períodos do Dashboard. Lista fechada: cookie não escolhe consulta. */
