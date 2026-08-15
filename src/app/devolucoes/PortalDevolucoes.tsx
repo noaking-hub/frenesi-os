@@ -104,6 +104,9 @@ export function PortalDevolucoes({
   // protocolo — o comprovante do reembolso mora lá.
   const [tela, setTela] = useState<'fluxo' | 'acompanhar'>('fluxo')
   const [protocoloConsulta, setProtocoloConsulta] = useState('')
+  // Quando o acompanhamento vem de um cartão, o cliente JÁ se identificou no
+  // passo 1: repetir o e-mail/CPF ali seria pedir duas vezes a mesma coisa.
+  const [identConsulta, setIdentConsulta] = useState('')
   const [metodo, setMetodo] = useState<Metodo>('email')
   const [ident, setIdent] = useState('')
   const [pedidos, setPedidos] = useState<PedidoPortal[]>([])
@@ -319,6 +322,7 @@ export function PortalDevolucoes({
         {tela === 'acompanhar' && (
           <Acompanhar
             protocoloInicial={protocoloConsulta}
+            identInicial={identConsulta}
             aoVoltar={() => setTela('fluxo')}
           />
         )}
@@ -490,6 +494,14 @@ export function PortalDevolucoes({
                   pedido={p}
                   selecionado={p.id === pedidoId}
                   aoEscolher={() => {
+                    // Pedido com devolução aberta não recomeça o fluxo: leva
+                    // direto ao acompanhamento dela, já identificado.
+                    if (p.devolucaoAberta) {
+                      setProtocoloConsulta(p.devolucaoAberta)
+                      setIdentConsulta(ident)
+                      setTela('acompanhar')
+                      return
+                    }
                     setPedidoId(p.id)
                     setItens([])
                     setPasso(3)
@@ -1047,6 +1059,7 @@ export function PortalDevolucoes({
             <BotaoPrimario
               onClick={() => {
                 setProtocoloConsulta(protocolo ?? '')
+                setIdentConsulta(ident)
                 setTela('acompanhar')
               }}
               style={{ height: 48 }}
@@ -1119,21 +1132,24 @@ export function PortalDevolucoes({
  */
 function Acompanhar({
   protocoloInicial,
+  identInicial = '',
   aoVoltar,
 }: {
   protocoloInicial: string
+  /** Vem preenchida quando o cliente chegou por um cartão de pedido. */
+  identInicial?: string
   aoVoltar: () => void
 }) {
   const [protocolo, setProtocolo] = useState(protocoloInicial)
-  const [ident, setIdent] = useState('')
+  const [ident, setIdent] = useState(identInicial)
   const [resultado, setResultado] = useState<AcompanhamentoDevolucao | null>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [consultando, iniciar] = useTransition()
 
-  const consultar = () => {
+  const consultar = (protocoloAlvo = protocolo, identAlvo = ident) => {
     setErro(null)
     iniciar(async () => {
-      const r = await consultarDevolucao(protocolo, ident)
+      const r = await consultarDevolucao(protocoloAlvo, identAlvo)
       if (!r.ok) {
         setResultado(null)
         setErro(r.erro)
@@ -1142,6 +1158,17 @@ function Acompanhar({
       setResultado(r.devolucao)
     })
   }
+
+  // Chegando por um cartão, os dois campos já vêm preenchidos: mostrar um
+  // formulário cheio esperando um clique seria trabalho sem propósito.
+  const jaConsultou = useRef(false)
+  useEffect(() => {
+    if (jaConsultou.current) return
+    if (!protocoloInicial || !identInicial) return
+    jaConsultou.current = true
+    consultar(protocoloInicial, identInicial)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [protocoloInicial, identInicial])
 
   const d = resultado
 
@@ -1220,7 +1247,7 @@ function Acompanhar({
         </label>
         <BotaoPrimario
           ativo={protocolo.trim().length > 0 && ident.trim().length > 0 && !consultando}
-          onClick={consultar}
+          onClick={() => consultar()}
           style={{ height: 50 }}
         >
           {consultando ? 'Consultando…' : 'Consultar'}
@@ -1321,7 +1348,7 @@ function Acompanhar({
               "Aguardando fotos" e não tinha como responder. Agora o pedido
               chega escrito, com o campo de reenvio logo abaixo. */}
           {d.status === 'Aguardando fotos' && (
-            <ReenvioDeProvas devolucao={d} identificacao={ident} aoConcluir={consultar} />
+            <ReenvioDeProvas devolucao={d} identificacao={ident} aoConcluir={() => consultar()} />
           )}
 
           {d.reverso && !d.resolucao && (
@@ -1639,7 +1666,7 @@ function CartaoPedido({
         estado: 'elegivel' as const,
         restam: 0,
         selo: 'Em andamento',
-        mensagem: `Devolução ${pedido.devolucaoAberta} já aberta — acompanhe por ela`,
+        mensagem: `Devolução ${pedido.devolucaoAberta} já aberta · toque para acompanhar`,
       }
     : semData
       ? {
@@ -1651,29 +1678,32 @@ function CartaoPedido({
         }
       : statusDevolucao(pedido.diasDesdeEntrega)
   const corPrazo = s.elegivel ? (s.restam <= 2 ? PORTAL.link : PORTAL.ok) : PORTAL.erro
+  // Devolução aberta não abre outra, mas LEVA à que existe: o cliente já se
+  // identificou aqui, mandá-lo à consulta por protocolo seria pedir de novo.
+  const clicavel = s.elegivel || Boolean(pedido.devolucaoAberta)
 
   return (
     <button
       type="button"
-      onClick={s.elegivel ? aoEscolher : undefined}
-      disabled={!s.elegivel}
-      aria-disabled={!s.elegivel}
-      className={s.elegivel ? 'hover:-translate-y-px' : undefined}
+      onClick={clicavel ? aoEscolher : undefined}
+      disabled={!clicavel}
+      aria-disabled={!clicavel}
+      className={clicavel ? 'hover:-translate-y-px' : undefined}
       style={{
         display: 'flex',
         flexDirection: 'column',
         gap: 11,
         padding: '15px 16px',
-        border: `1px solid ${!s.elegivel ? 'rgba(36,31,24,.08)' : selecionado ? PORTAL.ouro : 'rgba(36,31,24,.09)'}`,
-        background: !s.elegivel
+        border: `1px solid ${!clicavel ? 'rgba(36,31,24,.08)' : selecionado ? PORTAL.ouro : 'rgba(36,31,24,.09)'}`,
+        background: !clicavel
           ? 'rgba(36,31,24,.03)'
           : selecionado
             ? 'rgba(176,141,75,.07)'
             : PORTAL.card,
         borderRadius: 15,
-        cursor: s.elegivel ? 'pointer' : 'not-allowed',
+        cursor: clicavel ? 'pointer' : 'not-allowed',
         textAlign: 'left',
-        boxShadow: s.elegivel ? SOMBRA_CARTAO : 'none',
+        boxShadow: clicavel ? SOMBRA_CARTAO : 'none',
         transition: 'transform .15s ease, box-shadow .15s ease',
       }}
     >
@@ -1683,7 +1713,7 @@ function CartaoPedido({
           style={{
             fontWeight: 600,
             fontSize: 15,
-            color: s.elegivel ? PORTAL.tinta : 'rgba(36,31,24,.45)',
+            color: clicavel ? PORTAL.tinta : 'rgba(36,31,24,.45)',
           }}
         >
           {pedido.id}
