@@ -40,6 +40,15 @@ import { supabaseConfigurado, supabaseServer, tudoDe } from './supabase'
 
 const HOJE = () => new Date().toISOString().slice(0, 10)
 
+/**
+ * Prazo de repasse da Pagaleve, o intermediário de Pix parcelado.
+ *
+ * O cliente parcela em até 4x com 15 dias entre parcelas, então o valor só
+ * fecha em 45 dias. Cobrar o prazo dos gateways integrados dessas vendas
+ * inventa pendência onde há uma venda amortizando no combinado.
+ */
+const PRAZO_PAGALEVE_DIAS = 45
+
 function iso(dias: number): string {
   return new Date(Date.now() + dias * 86_400_000).toISOString().slice(0, 10)
 }
@@ -560,6 +569,7 @@ interface RepasseCru {
     comprado_em: string
     pagamento: string
     situacao: string
+    gateway: string | null
     clientes: { nome: string } | null
   } | null
 }
@@ -602,7 +612,7 @@ export async function carregarConciliacao(): Promise<PainelConciliacao> {
       .select(
         'pedido_id, origem, taxa_pct, taxa_real, recebido, creditado_em, meio, bruto_gateway, ' +
           'dispensado_em, dispensa_motivo, ' +
-          'pedidos(valor, comprado_em, pagamento, situacao, clientes(nome))',
+          'pedidos(valor, comprado_em, pagamento, situacao, gateway, clientes(nome))',
       )
       .order('pedido_id', { ascending: false })
       .range(de, ate) as unknown as PromiseLike<{ data: RepasseCru[] | null; error: unknown }>,
@@ -621,7 +631,21 @@ export async function carregarConciliacao(): Promise<PainelConciliacao> {
     const taxaEsperada = taxaReal ?? Math.round(bruto * (Number(r.taxa_pct ?? 0) / 100) * 100) / 100
     const recebido = r.recebido === null ? null : Number(r.recebido)
     const compradoEm = diaDaOperacao(r.pedidos.comprado_em)
-    const prazoVencido = compradoEm < iso(-5)
+
+    // PRAZO DE REPASSE DEPENDE DE QUEM REPASSA.
+    //
+    // Cinco dias serve para Mercado Pago e Pagar.me, que creditam a venda
+    // inteira de uma vez. Não serve para a Pagaleve: ali o cliente parcela o
+    // Pix em até 4x com 15 dias entre parcelas, então o valor só fecha em 45
+    // dias, e o dinheiro chega em depósitos que não correspondem a um pedido
+    // específico. Cobrar cinco dias dessas vendas foi o que encheu a fila de
+    // conciliação com 26 "pendências" que nunca foram pendência nenhuma —
+    // eram vendas em curso, amortizando no prazo combinado.
+    //
+    // A assinatura é inequívoca: venda paga sem meio e sem gateway é venda que
+    // não passou por nenhum intermediário integrado.
+    const foraDosGatewaysIntegrados = !r.meio && !r.pedidos.gateway
+    const prazoVencido = compradoEm < iso(foraDosGatewaysIntegrados ? -PRAZO_PAGALEVE_DIAS : -5)
 
     const { status, liquidoEsperado, diferenca } = avaliarVenda({
       bruto,

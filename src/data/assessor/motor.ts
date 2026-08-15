@@ -100,7 +100,14 @@ CONTEXTO DA OPERAÇÃO:
 - O intermediador de pagamentos é o Mercado Pago desde 22/07/2026. Antes disso era a
   Pagar.me, cujo histórico foi importado. A tarifa varia com o meio de pagamento:
   Pix custa pouco, cartão em 6x sem juros custa até 14,94%.
-- As vendas nascem no checkout da Yampi e na Shopify.`
+- As vendas nascem no checkout da Yampi e na Shopify.
+- Existe um TERCEIRO caminho de pagamento, a PAGALEVE: o cliente parcela o Pix em até
+  4x com 15 dias entre parcelas, e o dinheiro chega em depósitos da Pagaleve para o
+  Mercado Pago ao longo de até 45 dias. Esses depósitos NÃO são vendas do dia em que
+  caem — são repasse de vendas anteriores. Venda pela Pagaleve aparece sem meio de
+  pagamento e sem gateway, e fica "aguardando" na conciliação pelos 45 dias, o que é
+  o comportamento correto e não uma pendência. Se perguntarem por que um depósito não
+  bate com nenhuma venda do dia, é quase sempre isto.`
 }
 
 interface BlocoTexto {
