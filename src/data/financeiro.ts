@@ -9,6 +9,7 @@ import {
   projetarCaixa,
   situacaoDe,
   saldoAberto,
+  SEM_CATEGORIA,
   type AlertaFinanceiro,
   type CategoriaGerencial,
   type ContaFinanceira,
@@ -105,10 +106,11 @@ interface LinhaLancamento {
   descricao: string
   favorecido: string | null
   tipo: string
-  categoria: string
+  categoria: string | null
   categoria_id: string | null
   centro_custo: string | null
-  conta_id: string
+  // Nulo no banco também, ainda que hoje toda linha tenha conta.
+  conta_id: string | null
   competencia: string
   vence_em: string | null
   baixado_em: string | null
@@ -179,8 +181,10 @@ export async function lerLancamentos(opcoes?: {
       categoria: l.categoria,
       natureza: (l.categorias_financeiras?.natureza_gerencial ?? null) as NaturezaGerencial | null,
       centroCusto: l.centro_custo,
-      contaId: l.conta_id,
-      conta: l.contas_bancarias?.nome ?? l.conta_id,
+      // Conta some do banco em teoria; na tela ela vira um traço, e nunca
+      // `null` cru — o domínio promete texto aqui e as colunas confiam nisso.
+      contaId: l.conta_id ?? '',
+      conta: l.contas_bancarias?.nome ?? l.conta_id ?? '—',
       competencia: l.competencia,
       venceEm: l.vence_em,
       baixadoEm: l.baixado_em,
@@ -385,9 +389,12 @@ export async function carregarFluxo(dias = 30): Promise<PainelFluxo> {
   const porCategoria = new Map<string, { valor: number; tipo: 'entrada' | 'saida' }>()
   for (const l of vivos) {
     if (!l.venceEm || l.venceEm > ate) continue
-    const atual = porCategoria.get(l.categoria) ?? { valor: 0, tipo: l.tipo }
+    // Sem categoria é um grupo como outro qualquer: some-lo aqui esconderia
+    // dinheiro real da projeção só porque ninguém classificou ainda.
+    const chave = l.categoria ?? SEM_CATEGORIA
+    const atual = porCategoria.get(chave) ?? { valor: 0, tipo: l.tipo }
     atual.valor += saldoAberto(l)
-    porCategoria.set(l.categoria, atual)
+    porCategoria.set(chave, atual)
   }
 
   const saidas30 = projecao.dias.reduce((a, d) => a + d.saidas, 0)
@@ -893,7 +900,8 @@ export async function carregarVisaoFinanceira(): Promise<VisaoFinanceira> {
   for (const l of lancamentos) {
     if (l.tipo !== 'saida' || l.canceladoEm) continue
     if (l.competencia.slice(0, 7) !== competencia) continue
-    saidasPorCategoria.set(l.categoria, (saidasPorCategoria.get(l.categoria) ?? 0) + l.valor)
+    const chave = l.categoria ?? SEM_CATEGORIA
+    saidasPorCategoria.set(chave, (saidasPorCategoria.get(chave) ?? 0) + l.valor)
   }
 
   const naFila = conciliacao.totais.taxa_divergente.qtd +

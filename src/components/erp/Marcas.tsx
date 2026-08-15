@@ -157,9 +157,14 @@ export function TileMarca({
  * O mockup põe um pictograma antes de cada categoria nas tabelas. O mapa é
  * heurístico de propósito: categoria é cadastro livre do usuário, e um campo
  * "ícone" no banco seria mais um cadastro para esquecer.
+ *
+ * Aceita nulo de propósito: lançamento vindo do extrato entra SEM categoria
+ * até alguém classificar, e a coluna precisa desenhar alguma coisa. A versão
+ * que exigia texto derrubava a tela inteira de Lançamentos com "This page
+ * couldn't load" no dia em que o primeiro crédito a classificar apareceu.
  */
-export function iconeDaCategoria(nome: string): NomeIcone {
-  const n = nome.toLowerCase()
+export function iconeDaCategoria(nome: string | null | undefined): NomeIcone {
+  const n = (nome ?? '').toLowerCase()
   if (/market|ads|tr[aá]fego|an[uú]ncio|meta|google/.test(n)) return 'megafone'
   if (/embalag|caixa|sacola/.test(n)) return 'caixa'
   if (/frete|envio|log[ií]st|correio|transporte/.test(n)) return 'carrinho'

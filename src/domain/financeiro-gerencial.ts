@@ -14,6 +14,15 @@
 // ── Naturezas gerenciais ───────────────────────────────────────────────────
 
 /**
+ * Rótulo do grupo que junta o que ainda não foi classificado.
+ *
+ * Existe como constante, e não como texto solto em cada tela, porque três
+ * lugares agrupam por categoria e um deles escrevendo diferente criaria dois
+ * grupos para a mesma coisa no mesmo relatório.
+ */
+export const SEM_CATEGORIA = 'Sem categoria'
+
+/**
  * Onde a categoria entra no resultado. É o campo que decide se um pagamento
  * vira despesa, custo do produto, investimento — ou nada disso.
  */
@@ -123,7 +132,8 @@ export interface LancamentoGerencial {
   favorecido: string | null
   tipo: 'entrada' | 'saida'
   categoriaId: string | null
-  categoria: string
+  /** Nulo quando o lançamento veio do extrato e ninguém classificou ainda. */
+  categoria: string | null
   natureza: NaturezaGerencial | null
   centroCusto: string | null
   contaId: string

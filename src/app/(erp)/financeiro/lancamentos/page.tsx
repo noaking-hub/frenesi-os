@@ -31,6 +31,7 @@ import {
   ROTULO_NATUREZA,
   ROTULO_SITUACAO_LANCAMENTO,
   saldoAberto,
+  SEM_CATEGORIA,
   situacaoDe,
 } from '@/domain'
 import type { LancamentoGerencial, SituacaoLancamento } from '@/domain'
@@ -182,7 +183,8 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
 
   const recorrentesPorCategoria = new Map<string, number>()
   for (const l of vivos.filter((x) => x.recorrente)) {
-    recorrentesPorCategoria.set(l.categoria, (recorrentesPorCategoria.get(l.categoria) ?? 0) + l.valor)
+    const chave = l.categoria ?? SEM_CATEGORIA
+    recorrentesPorCategoria.set(chave, (recorrentesPorCategoria.get(chave) ?? 0) + l.valor)
   }
 
   // ── Pendências de preenchimento ────────────────────────────────────────
