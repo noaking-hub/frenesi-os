@@ -26,3 +26,22 @@ update lancamentos l
    and l.tipo = 'entrada' and l.categoria_id = 'vendas'
    and l.origem like 'Extrato %' and l.cancelado_em is null
    and p.situacao::text = 'cancelado';
+
+-- Segunda parte do reparo: ao reclassificar eu troquei o RÓTULO e esqueci o
+-- NÚMERO. As três linhas continuavam valendo o bruto do pedido, não o que caiu
+-- na conta — a tarifa retida pelo gateway virava caixa que nunca entrou.
+-- O pedido de R$ 540,00 creditou R$ 459,32; o de R$ 1.041,38 creditou
+-- R$ 885,80; o de R$ 50,25 creditou R$ 49,75.
+update lancamentos l
+   set valor = e.valor, recebido = e.valor
+  from extrato_linhas e
+ where e.chave = l.chave_externa
+   and l.descricao like 'Crédito a classificar – pedido%cancelado'
+   and l.valor <> e.valor;
+
+-- E a tarifa lançada para eles deixa de existir: sem venda não há tarifa de
+-- venda. O que o gateway reteve já está embutido na diferença entre o bruto do
+-- pedido e o crédito, que agora ninguém conta como receita.
+delete from lancamentos
+ where id like 'ext-taxa-%'
+   and pedido_id in (select id from pedidos where situacao::text = 'cancelado');
