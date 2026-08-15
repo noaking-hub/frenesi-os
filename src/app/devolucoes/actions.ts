@@ -9,6 +9,7 @@ import {
   MOTIVOS,
   TIPOS_DE_IMAGEM,
   TIPOS_DE_VIDEO,
+  diasDesdeEntregaDe,
   ehDanificado,
   etapaDe,
   identificarFrete,
@@ -70,6 +71,7 @@ export async function buscarPedidos(
         situacao: p.situacao,
         entregueEm: p.entregueEm,
         diasDesdeEntrega: p.diasDesdeEntrega,
+        devolucaoAberta: null,
         gateway: p.gateway,
         itens: p.itens.map((i) => ({
           perfume: i.perfume,
@@ -85,7 +87,7 @@ export async function buscarPedidos(
   const { data, error } = await sb
     .from('pedidos')
     .select(
-      'id, comprado_em, valor, situacao, entregue_em, entrega_prevista_em, ' +
+      'id, comprado_em, valor, situacao, entregue_em, entrega_prevista_em, entrega_shopify_em, ' +
         'servico_frete, rastreio, pedido_itens(descricao, variante, preco, base_id), ' +
         'clientes!inner(email, cpf)',
     )
@@ -104,6 +106,7 @@ export async function buscarPedidos(
     situacao: string | null
     entregue_em: string | null
     entrega_prevista_em: string | null
+    entrega_shopify_em: string | null
     servico_frete: string | null
     rastreio: string | null
     pedido_itens: { descricao: string; variante: number | null; preco: number | string; base_id: string | null }[]
@@ -133,18 +136,36 @@ export async function buscarPedidos(
     return porNome.find((c) => alvoNome.includes(c.nome))?.url ?? null
   }
 
-  const dia = 86_400_000
+  // Devolução já aberta bloqueia o pedido: sem isto o cliente refaz o fluxo
+  // inteiro e o segundo envio sobrescreve as provas do primeiro.
+  const { data: abertas } = await sb
+    .from('solicitacoes_devolucao')
+    .select('protocolo, pedido_id, status')
+    .in('pedido_id', linhas.map((p) => p.id))
+    .not('status', 'in', '("Concluída","Recusada")')
+  const devolucaoAberta = new Map(
+    ((abertas ?? []) as { protocolo: string; pedido_id: string }[]).map((s) => [
+      s.pedido_id,
+      s.protocolo,
+    ]),
+  )
+
   return linhas.map((p): PedidoPortal => {
-    // Mesmo relógio reserva das telas: sem a entrega real, vale a prometida.
-    const base =
-      p.entregue_em ?? (p.situacao === 'entregue' ? p.entrega_prevista_em : null)
     return {
       id: p.id,
       data: dataCurtaPt(p.comprado_em),
       valor: Number(p.valor),
       situacao: (p.situacao ?? 'pago') as PedidoPortal['situacao'],
       entregueEm: p.entregue_em,
-      diasDesdeEntrega: base ? Math.floor((Date.now() - Date.parse(base)) / dia) : null,
+      // A MESMA função do ERP. Duas cópias da regra é como a data prevista
+      // virou relógio e o portal ofereceu 11 dias onde o CDC dá 7.
+      diasDesdeEntrega: diasDesdeEntregaDe({
+        situacao: p.situacao,
+        entregueEm: p.entregue_em,
+        entregaShopifyEm: p.entrega_shopify_em,
+        entregaPrevistaEm: p.entrega_prevista_em,
+      }),
+      devolucaoAberta: devolucaoAberta.get(p.id) ?? null,
       gateway: identificarFrete(p.servico_frete, p.rastreio).gateway,
       itens: (p.pedido_itens ?? []).map((i) => ({
         perfume: i.descricao,
@@ -405,6 +426,23 @@ export async function abrirDevolucao(
       erro: 'Este pedido está fora do prazo de devolução. Fale com o atendimento.',
     }
   }
+  // Uma devolução aberta por pedido. O banco também garante isso por índice,
+  // mas a recusa precisa acontecer ANTES do update das provas: a segunda
+  // solicitação sobrescrevia a foto da primeira, e trocar a prova depois da
+  // análise é justamente o que a triagem não pode permitir.
+  const { data: jaAberta } = await sb
+    .from('solicitacoes_devolucao')
+    .select('protocolo')
+    .eq('pedido_id', pedidoId)
+    .not('status', 'in', '("Concluída","Recusada")')
+    .maybeSingle()
+  if (jaAberta?.protocolo) {
+    return {
+      ok: false,
+      erro: `Este pedido já tem a devolução ${jaAberta.protocolo} em andamento. Acompanhe por ela — não é preciso abrir outra.`,
+    }
+  }
+
   const fotos = { nivel: Boolean(provas.nivel), lacre: Boolean(provas.lacre) }
 
   const rotulo = MOTIVOS.find((m) => m.id === motivo)
@@ -498,6 +536,8 @@ export interface AcompanhamentoDevolucao {
   reembolsoEm: string | null
   comprovanteUrl: string | null
   trocaPedidoId: string | null
+  /** O que a triagem pediu de novo. Só existe em "Aguardando fotos". */
+  pedidoDeFotos: string | null
 }
 
 export async function consultarDevolucao(
@@ -540,6 +580,7 @@ export async function consultarDevolucao(
         reembolsoEm: null,
         comprovanteUrl: null,
         trocaPedidoId: s.trocaPedidoId ?? null,
+        pedidoDeFotos: null,
       },
     }
   }
@@ -549,7 +590,7 @@ export async function consultarDevolucao(
     .from('solicitacoes_devolucao')
     .select(
       'protocolo, pedido_id, status, aberta_em, reverso, resolucao, reembolso_valor, ' +
-        'reembolso_forma, reembolso_em, comprovante_reembolso, troca_pedido_id, ' +
+        'reembolso_forma, reembolso_em, comprovante_reembolso, troca_pedido_id, pedido_de_fotos, ' +
         'pedidos(clientes(email, cpf))',
     )
     .eq('protocolo', protocolo)
@@ -566,6 +607,7 @@ export async function consultarDevolucao(
     reembolso_em: string | null
     comprovante_reembolso: string | null
     troca_pedido_id: string | null
+    pedido_de_fotos: string | null
     pedidos: { clientes: { email: string | null; cpf: string | null } | null } | null
   } | null
   if (!s) return naoEncontrada
@@ -612,6 +654,75 @@ export async function consultarDevolucao(
       reembolsoEm: dataPt(s.reembolso_em),
       comprovanteUrl,
       trocaPedidoId: s.troca_pedido_id,
+      pedidoDeFotos: s.pedido_de_fotos,
     },
   }
+}
+
+/**
+ * O cliente responde ao pedido de novas provas.
+ *
+ * Mesma máquina do envio original — `prepararEnvioDeProvas` assina, o
+ * navegador sobe, e aqui os caminhos são conferidos contra o rascunho. O que
+ * muda é o destino: em vez de abrir solicitação, troca as provas da que já
+ * existe e devolve o caso para análise.
+ *
+ * A autorização é a mesma da consulta pública: protocolo + e-mail ou CPF da
+ * compra. Protocolo sozinho circula em print; a identidade não.
+ */
+export async function reenviarProvas(
+  protocolo: string,
+  identificacao: string,
+  rascunho: string,
+  caminhos: { nivel?: string; lacre?: string; video?: string },
+): Promise<{ ok: true } | { ok: false; erro: string }> {
+  if (!supabaseConfigurado()) {
+    return { ok: false, erro: 'Envio indisponível agora. Tente novamente em alguns minutos.' }
+  }
+
+  const sb = supabaseServer()
+  const conferido = await conferirRascunho(sb, rascunho, {
+    nivel: caminhos.nivel ?? '',
+    lacre: caminhos.lacre ?? '',
+    video: caminhos.video ?? '',
+  })
+  if (!conferido.ok) return { ok: false, erro: conferido.erro }
+
+  const provas = conferido.provas
+  if (!provas.nivel && !provas.lacre && !provas.video) {
+    return { ok: false, erro: 'Escolha ao menos um arquivo para reenviar.' }
+  }
+
+  // As provas vão para debaixo do protocolo com um sufixo de reenvio: o
+  // arquivo anterior FICA. Substituir a prova original apagaria o que a
+  // triagem já tinha visto, e é justamente o histórico que sustenta a decisão.
+  const mover = async (campo: CampoDeProva) => {
+    const origem = provas[campo]
+    if (!origem) return null
+    const destino = `${protocolo}/${campo}-reenvio.${origem.split('.').pop()}`
+    const { error } = await sb.storage.from(BUCKET).move(origem, destino)
+    if (error) {
+      console.error(`[portal] reenvio de ${campo} em ${protocolo} falhou:`, error)
+      return origem
+    }
+    return destino
+  }
+  const [nivel, lacre, video] = await Promise.all([mover('nivel'), mover('lacre'), mover('video')])
+
+  const { data, error } = await sb.rpc('reenviar_provas_da_devolucao', {
+    p_protocolo: protocolo,
+    p_identificacao: identificacao,
+    p_nivel: nivel,
+    p_lacre: lacre,
+    p_video: video,
+  })
+  if (error) {
+    console.error('[portal] reenviar_provas_da_devolucao falhou:', error)
+    return { ok: false, erro: 'Não foi possível registrar o reenvio. Tente de novo.' }
+  }
+  if (data !== true) {
+    return { ok: false, erro: 'Não encontramos essa devolução aguardando novas fotos.' }
+  }
+
+  return { ok: true }
 }

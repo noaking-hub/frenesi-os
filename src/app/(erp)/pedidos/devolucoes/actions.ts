@@ -181,3 +181,32 @@ export async function concluirDevolucao(form: FormData): Promise<Resposta> {
   revalidatePath('/', 'layout')
   return { ok: true }
 }
+
+/**
+ * Pede novas provas ao cliente, dizendo o que falta.
+ *
+ * O botão antes só trocava o status: nem o cliente sabia o que reenviar, nem
+ * a operação lembrava o que tinha pedido. O texto vai para o portal, na
+ * consulta por protocolo, junto do campo de reenvio.
+ */
+export async function pedirMaisFotos(protocolo: string, texto: string): Promise<Resposta> {
+  const bloqueio = exigeSupabase('pedir novas fotos')
+  if (bloqueio) return bloqueio
+
+  const pedido = texto.trim().slice(0, 400)
+  if (pedido.length < 5) {
+    return { ok: false, erro: 'Escreva o que falta na foto — é isso que o cliente vai ler.' }
+  }
+
+  const { error } = await supabaseServer()
+    .from('solicitacoes_devolucao')
+    .update({ status: 'Aguardando fotos', pedido_de_fotos: pedido })
+    .eq('protocolo', protocolo)
+  if (error) {
+    console.error('[devolucoes] pedirMaisFotos falhou:', error)
+    return { ok: false, erro: mensagemDe(error) }
+  }
+
+  revalidatePath('/', 'layout')
+  return { ok: true }
+}

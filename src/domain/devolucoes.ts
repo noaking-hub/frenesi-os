@@ -62,6 +62,36 @@ export function statusDoPedido(pedido: Pedido): StatusDevolucao {
 }
 
 /**
+ * Quantos dias se passaram desde a entrega. `null` = ainda não entregue.
+ *
+ * A ordem das fontes é a regra, e ela nasceu de um defeito: a data PREVISTA
+ * era usada como relógio reserva, e entrega adiantada — o caso comum — deixa
+ * essa data no futuro. Os dias davam negativo e o portal oferecia 11 dias de
+ * devolução onde o CDC dá 7.
+ *
+ * Previsão futura não conta como entrega. Na falta de tudo, zero: o prazo
+ * corre a partir de agora, que é quando o ERP soube.
+ */
+export function diasDesdeEntregaDe(pedido: {
+  situacao?: string | null
+  entregueEm?: string | null
+  entregaShopifyEm?: string | null
+  entregaPrevistaEm?: string | null
+}): number | null {
+  const entregue = pedido.situacao === 'entregue'
+  const base =
+    pedido.entregueEm ??
+    // A plataforma registra o instante da baixa: nunca no futuro, nunca antes
+    // da entrega de fato.
+    (entregue ? pedido.entregaShopifyEm : null) ??
+    (entregue ? pedido.entregaPrevistaEm : null)
+  if (!base) return entregue ? 0 : null
+
+  const dias = Math.floor((Date.now() - new Date(base).getTime()) / 86_400_000)
+  return Math.max(0, dias)
+}
+
+/**
  * "Frasco chegou danificado ou vazando".
  *
  * Muda o que a segunda foto precisa mostrar — o dano, além do recrave — e o
@@ -120,7 +150,7 @@ export const MOTIVOS: { id: MotivoDevolucao; label: string; desc: string }[] = [
   {
     id: 'm3',
     label: 'Frasco chegou danificado ou vazando',
-    desc: 'Pedimos fotos e um vídeo curto mostrando o vazamento',
+    desc: 'Vamos pedir fotos e um vídeo curto',
   },
   {
     id: 'm4',
@@ -165,6 +195,8 @@ export interface PedidoPortal {
   diasDesdeEntrega: number | null
   /** Plataforma da etiqueta de ida — de onde sai o reverso. */
   gateway: 'Frenet' | 'Melhor Envio'
+  /** Protocolo da devolução já aberta para este pedido. Null = pode abrir. */
+  devolucaoAberta?: string | null
   itens: ItemPortal[]
 }
 

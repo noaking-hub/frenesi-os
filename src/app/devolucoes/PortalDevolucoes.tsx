@@ -31,6 +31,7 @@ import {
   buscarPedidos,
   consultarDevolucao,
   prepararEnvioDeProvas,
+  reenviarProvas,
 } from './actions'
 import type { AcompanhamentoDevolucao, CampoDeProva } from './actions'
 
@@ -761,7 +762,7 @@ export function PortalDevolucoes({
               {/* A cópia é derivada da mesma regra que valida o passo. */}
               <Corpo>
                 {pedeVideo
-                  ? 'Vazamento a gente precisa ver acontecendo: duas fotos e um vídeo curto, todos obrigatórios.'
+                  ? 'Para casos de vazamento, pedimos duas fotos e um vídeo curto.'
                   : 'Precisamos ver que o decant não foi usado. As duas fotos são obrigatórias.'}
               </Corpo>
             </div>
@@ -792,7 +793,7 @@ export function PortalDevolucoes({
                   marca="3"
                   midia="video"
                   titulo="Vídeo do vazamento"
-                  descricao="Uns 15 segundos, com boa luz: gire o frasco mostrando o líquido saindo e o lacre no mesmo enquadramento."
+                  descricao="Um vídeo curto mostrando o vazamento e o lacre do frasco."
                   obrigatoria
                   arquivo={arquivos.video}
                   aoEscolher={(f) => setArquivos((s) => ({ ...s, video: f }))}
@@ -839,9 +840,7 @@ export function PortalDevolucoes({
                 'Decant nitidamente usado.',
                 'Lacre rompido, remontado ou frasco trocado.',
                 'Fotos escuras, tremidas ou que não mostrem o frasco por inteiro.',
-                ...(pedeVideo
-                  ? ['Vídeo em que não dá para ver o líquido saindo nem o lacre do frasco.']
-                  : []),
+                ...(pedeVideo ? ['Vídeo que não mostre o vazamento e o lacre.'] : []),
               ]}
             />
 
@@ -936,10 +935,9 @@ export function PortalDevolucoes({
                   marca: '3',
                   feito: false,
                   titulo: 'Você recebe o código de postagem',
-                  // O reverso sai na mesma plataforma que emitiu a etiqueta de
-                  // ida, e quem o entrega é o ATENDIMENTO — os e-mails
-                  // automáticos ficam desligados até o sistema rodar 100%.
-                  desc: `Nossa equipe entra em contato com o código e o passo a passo · postagem sem custo pela ${pedido.gateway}`,
+                  // Nada de nome de fornecedor aqui: Frenet e Melhor Envio são
+                  // assunto nosso. O cliente vai a uma agência dos Correios.
+                  desc: 'Para levar a uma agência dos Correios · postagem sem custo',
                 },
                 {
                   marca: '4',
@@ -1316,6 +1314,13 @@ function Acompanhar({
             })}
           </div>
 
+          {/* "Pedir mais fotos" antes só mudava o status: o cliente via
+              "Aguardando fotos" e não tinha como responder. Agora o pedido
+              chega escrito, com o campo de reenvio logo abaixo. */}
+          {d.status === 'Aguardando fotos' && (
+            <ReenvioDeProvas devolucao={d} identificacao={ident} aoConcluir={consultar} />
+          )}
+
           {d.reverso && !d.resolucao && (
             <div
               style={{
@@ -1623,15 +1628,25 @@ function CartaoPedido({
   // para contar prazo do que não se sabe, e "aguardando entrega" seria
   // mentira. O caminho é o atendimento.
   const semData = pedido.situacao === 'entregue' && pedido.diasDesdeEntrega === null
-  const s = semData
+  const s = pedido.devolucaoAberta
     ? {
+        // Devolução aberta trava o pedido. Deixar clicar levaria o cliente a
+        // refazer o fluxo inteiro para receber o mesmo protocolo no fim.
         elegivel: false,
-        estado: 'aguardando-entrega' as const,
+        estado: 'elegivel' as const,
         restam: 0,
-        selo: 'Fale com a gente',
-        mensagem: 'Não temos a data exata desta entrega — fale com o atendimento para abrir a devolução.',
+        selo: 'Em andamento',
+        mensagem: `Devolução ${pedido.devolucaoAberta} já aberta — acompanhe por ela`,
       }
-    : statusDevolucao(pedido.diasDesdeEntrega)
+    : semData
+      ? {
+          elegivel: false,
+          estado: 'aguardando-entrega' as const,
+          restam: 0,
+          selo: 'Fale com a gente',
+          mensagem: 'Não temos a data exata desta entrega — fale com o atendimento para abrir a devolução.',
+        }
+      : statusDevolucao(pedido.diasDesdeEntrega)
   const corPrazo = s.elegivel ? (s.restam <= 2 ? PORTAL.link : PORTAL.ok) : PORTAL.erro
 
   return (
@@ -1679,8 +1694,14 @@ function CartaoPedido({
             lineHeight: 1,
             letterSpacing: '.07em',
             textTransform: 'uppercase',
-            color: s.elegivel ? PORTAL.ok : PORTAL.erro,
-            background: s.elegivel ? 'rgba(63,122,82,.12)' : 'rgba(168,58,48,.1)',
+            // Devolução em andamento não é erro: é estado normal, e vermelho
+            // ali faria o cliente achar que algo deu errado com o caso dele.
+            color: s.elegivel ? PORTAL.ok : pedido.devolucaoAberta ? PORTAL.link : PORTAL.erro,
+            background: s.elegivel
+              ? 'rgba(63,122,82,.12)'
+              : pedido.devolucaoAberta
+                ? 'rgba(176,141,75,.16)'
+                : 'rgba(168,58,48,.1)',
             borderRadius: 20,
             padding: '5px 9px',
             whiteSpace: 'nowrap',
@@ -1953,6 +1974,147 @@ function UploadFoto({
           </button>
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * O cliente responde ao pedido de novas provas, sem sair do acompanhamento.
+ *
+ * Reaproveita a mesma máquina do envio original: o servidor assina, o
+ * navegador sobe direto e depois confirma. Aqui nada é obrigatório — a
+ * triagem pode ter pedido só uma das fotos.
+ */
+function ReenvioDeProvas({
+  devolucao,
+  identificacao,
+  aoConcluir,
+}: {
+  devolucao: AcompanhamentoDevolucao
+  identificacao: string
+  aoConcluir: () => void
+}) {
+  const [arquivos, setArquivos] = useState<Record<CampoDeProva, File | null>>({
+    nivel: null,
+    lacre: null,
+    video: null,
+  })
+  const [erro, setErro] = useState<string | null>(null)
+  const [progresso, setProgresso] = useState<number | null>(null)
+  const [enviando, iniciar] = useTransition()
+
+  const escolhidos = (['nivel', 'lacre', 'video'] as CampoDeProva[])
+    .map((campo) => ({ campo, arquivo: arquivos[campo] }))
+    .filter((x): x is { campo: CampoDeProva; arquivo: File } => Boolean(x.arquivo))
+
+  const enviar = () => {
+    if (!escolhidos.length || enviando) return
+    setErro(null)
+    iniciar(async () => {
+      const preparo = await prepararEnvioDeProvas(
+        devolucao.pedidoId,
+        escolhidos.map(({ campo, arquivo }) => ({
+          campo,
+          nome: arquivo.name,
+          tipo: arquivo.type,
+          tamanho: arquivo.size,
+        })),
+      )
+      if (!preparo.ok) {
+        setErro(preparo.erro)
+        return
+      }
+
+      const totalBytes = escolhidos.reduce((a, x) => a + x.arquivo.size, 0)
+      const enviados = new Map<CampoDeProva, number>()
+      setProgresso(0)
+      try {
+        for (const destino of preparo.destinos) {
+          const item = escolhidos.find((x) => x.campo === destino.campo)
+          if (!item) continue
+          await subirDireto(destino.url, item.arquivo, (bytes) => {
+            enviados.set(destino.campo, bytes)
+            const feito = [...enviados.values()].reduce((a, b) => a + b, 0)
+            setProgresso(Math.min(99, Math.round((feito / totalBytes) * 100)))
+          })
+        }
+      } catch {
+        setProgresso(null)
+        setErro('O envio falhou no meio do caminho. Confira a conexão e tente de novo.')
+        return
+      }
+
+      const caminhos: { nivel?: string; lacre?: string; video?: string } = {}
+      for (const d of preparo.destinos) caminhos[d.campo] = d.caminho
+
+      const r = await reenviarProvas(devolucao.protocolo, identificacao, preparo.rascunho, caminhos)
+      setProgresso(null)
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      setArquivos({ nivel: null, lacre: null, video: null })
+      aoConcluir()
+    })
+  }
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+        padding: '16px 14px',
+        borderRadius: 12,
+        border: '1px solid rgba(176,141,75,.35)',
+        background: 'rgba(176,141,75,.06)',
+      }}
+    >
+      <RotuloCampo>Precisamos de novas fotos</RotuloCampo>
+      <span className="font-sans" style={{ fontSize: 12.5, lineHeight: 1.55, color: PORTAL.tinta }}>
+        {devolucao.pedidoDeFotos ?? 'Reenvie as fotos do produto para seguirmos com a análise.'}
+      </span>
+
+      <UploadFoto
+        marca="1"
+        titulo="Nível do líquido no frasco"
+        descricao="Contra a luz, mostrando quanto perfume tem dentro do frasco."
+        obrigatoria={false}
+        arquivo={arquivos.nivel}
+        aoEscolher={(f) => setArquivos((s) => ({ ...s, nivel: f }))}
+      />
+      <UploadFoto
+        marca="2"
+        titulo="Lacre (recrave) do decant"
+        descricao="De perto, mostrando o recrave sem sinais de abertura."
+        obrigatoria={false}
+        arquivo={arquivos.lacre}
+        aoEscolher={(f) => setArquivos((s) => ({ ...s, lacre: f }))}
+      />
+      <UploadFoto
+        marca="3"
+        midia="video"
+        titulo="Vídeo"
+        descricao="Se pedirmos um vídeo, envie por aqui."
+        obrigatoria={false}
+        arquivo={arquivos.video}
+        aoEscolher={(f) => setArquivos((s) => ({ ...s, video: f }))}
+      />
+
+      {progresso !== null && (
+        <span className="font-sans" style={{ fontSize: 11, color: PORTAL.secundario }}>
+          {`Enviando… ${progresso}%. Não feche esta página.`}
+        </span>
+      )}
+      {erro && (
+        <span className="font-sans" style={{ fontSize: 12, color: PORTAL.erro }}>
+          {erro}
+        </span>
+      )}
+
+      <BotaoPrimario ativo={escolhidos.length > 0 && !enviando} onClick={enviar}>
+        {enviando ? 'Enviando…' : 'Reenviar fotos'}
+      </BotaoPrimario>
     </div>
   )
 }

@@ -4,6 +4,7 @@ import {
   INICIO_DA_OPERACAO,
   PARAMETROS_PADRAO,
   aferirItem,
+  diasDesdeEntregaDe,
   identificarFrete,
   iniciaisDe,
   montarEnvio,
@@ -383,15 +384,15 @@ const repositorioSupabase: Repositorio = {
         cashback: Number(p.cashback),
         pagamento: p.pagamento,
         envio: rotuloEnvio(p.envio),
-        // O prazo de devolução corre da entrega REAL. Enquanto a varredura
-        // não repõe o escaneamento da transportadora, a data prometida serve
-        // de relógio reserva — ela é ≥ a entrega de fato, então o cliente
-        // nunca perde prazo porque o nosso dado estava faltando.
-        diasDesdeEntrega: (() => {
-          const base =
-            p.entregue_em ?? (p.situacao === 'entregue' ? p.entrega_prevista_em : null)
-          return base ? Math.floor((Date.now() - new Date(base).getTime()) / dia) : null
-        })(),
+        // Uma regra só, no domínio, para os três lugares que contam este
+        // prazo. Escrita três vezes, ela divergia — e foi assim que a data
+        // prevista virou relógio e o portal ofereceu 11 dias.
+        diasDesdeEntrega: diasDesdeEntregaDe({
+          situacao: p.situacao,
+          entregueEm: p.entregue_em,
+          entregaShopifyEm: p.entrega_shopify_em,
+          entregaPrevistaEm: p.entrega_prevista_em,
+        }),
         entregueEm: p.entregue_em,
         destino: p.destino ?? '',
         cep: p.cep ?? '',
@@ -663,9 +664,9 @@ const repositorioSupabase: Repositorio = {
       .from('solicitacoes_devolucao')
       .select(
         'protocolo, pedido_id, tipo, motivo, comentario, itens, fotos, status, aberta_em, ' +
-          'reverso, lacre, conferencia, foto_nivel, foto_lacre, video, ' +
+          'reverso, lacre, conferencia, foto_nivel, foto_lacre, video, pedido_de_fotos, ' +
           'resolucao, reembolso_valor, reembolso_forma, reembolso_em, comprovante_reembolso, troca_pedido_id, ' +
-          'pedidos(valor, destino, gateway, rastreio, entregue_em, entrega_prevista_em, situacao, clientes(nome, email, telefone, cpf))',
+          'pedidos(valor, destino, gateway, rastreio, entregue_em, entrega_prevista_em, entrega_shopify_em, situacao, clientes(nome, email, telefone, cpf))',
       )
       .order('aberta_em', { ascending: false })
       .limit(200)
@@ -691,14 +692,13 @@ const repositorioSupabase: Repositorio = {
 
     return linhas.map((s): SolicitacaoErp => {
       const cliente = s.pedidos?.clientes
-      // Mesmo relógio reserva de `pedidos()`: sem a entrega real, vale a
-      // prometida — nunca menos prazo para o cliente por dado nosso faltando.
-      const entregue =
-        s.pedidos?.entregue_em ??
-        (s.pedidos?.situacao === 'entregue' ? s.pedidos?.entrega_prevista_em : null)
-      const diasDesdeEntrega = entregue
-        ? Math.floor((Date.now() - Date.parse(entregue)) / dia)
-        : null
+      // Mesmo relógio de `pedidos()` — a mesma função, não uma cópia dela.
+      const diasDesdeEntrega = diasDesdeEntregaDe({
+        situacao: s.pedidos?.situacao,
+        entregueEm: s.pedidos?.entregue_em,
+        entregaShopifyEm: s.pedidos?.entrega_shopify_em,
+        entregaPrevistaEm: s.pedidos?.entrega_prevista_em,
+      })
       const prazo = statusDevolucao(diasDesdeEntrega)
       const cpf = (cliente?.cpf ?? '').replace(/\D/g, '')
 
@@ -1179,6 +1179,7 @@ interface LinhaSolicitacao {
     rastreio: string | null
     entregue_em: string | null
     entrega_prevista_em: string | null
+    entrega_shopify_em: string | null
     situacao: string | null
     clientes: { nome: string; email: string; telefone: string; cpf: string } | null
   } | null

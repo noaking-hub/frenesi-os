@@ -53,7 +53,7 @@ import {
   delta,
 } from '../PedidosCliente'
 
-import { concluirDevolucao, conferirDevolucao, moverSolicitacao } from './actions'
+import { concluirDevolucao, conferirDevolucao, moverSolicitacao, pedirMaisFotos } from './actions'
 import type { SolicitacaoErp } from '@/data/fixtures'
 
 /**
@@ -145,6 +145,21 @@ export function DevolucoesCliente({
       if (!r.ok) return setErro(r.erro)
       setDecisoes((s) => ({ ...s, [d.id]: { ...s[d.id], ...patch } }))
       if (recadoOk) avisar(recadoOk)
+    })
+  }
+
+  const pedirFotos = (d: SolicitacaoErp, texto: string) => {
+    setErro(null)
+    setRecado(null)
+    if (!ligado) {
+      setErro('Sem o Supabase configurado o pedido não seria gravado em lugar nenhum.')
+      return
+    }
+    iniciar(async () => {
+      const r = await pedirMaisFotos(d.id, texto)
+      if (!r.ok) return setErro(r.erro)
+      setDecisoes((s) => ({ ...s, [d.id]: { ...s[d.id], status: 'Aguardando fotos' } }))
+      avisar(`${d.id}: pedido de novas fotos enviado ao portal do cliente.`)
     })
   }
 
@@ -462,6 +477,7 @@ export function DevolucoesCliente({
           reverso={reversoDe(abertaAgora)}
           pendente={pendente}
           aoGravar={(patch, recadoOk) => gravar(abertaAgora, patch, recadoOk)}
+          aoPedirFotos={(texto) => pedirFotos(abertaAgora, texto)}
           aoConferir={() => setConferindo(abertaAgora.id)}
           aoConcluir={() => setConcluindo(abertaAgora.id)}
           aoFechar={() => setAberto(null)}
@@ -493,8 +509,11 @@ export function DevolucoesCliente({
 
 // ── tabela ─────────────────────────────────────────────────────────────────
 
+// O id da Yampi tem 19 caracteres ("YP-1510190164012970") e não cabia nos
+// 84px da coluna: vazava por cima do cliente, e a cidade dele aparecia
+// cortada pela metade. A coluna cresceu, o resto cedeu o que sobrava.
 const GRADE =
-  '128px 84px minmax(150px,1fr) 118px minmax(190px,1.2fr) 92px 148px 138px 120px 60px'
+  '124px 132px minmax(140px,1fr) 96px minmax(180px,1.2fr) 88px 132px 132px 108px 56px'
 
 const COLUNAS = [
   'Protocolo',
@@ -653,7 +672,20 @@ function TabelaDevolucoes({
                   secundaria={`aberta ${d.abertura}`}
                 />
 
-                <span className="font-mono" style={{ fontSize: 10.5, color: 'rgba(242,237,227,.8)' }}>
+                <span
+                  className="font-mono"
+                  title={d.pedidoId}
+                  style={{
+                    fontSize: 10.5,
+                    color: 'rgba(242,237,227,.8)',
+                    // Corta em vez de vazar: célula de grade sem isto empurra
+                    // o conteúdo para cima da coluna vizinha.
+                    minWidth: 0,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
                   {d.pedidoId}
                 </span>
 
@@ -671,10 +703,15 @@ function TabelaDevolucoes({
 
                 <span
                   className="font-sans"
+                  title={d.prazo}
                   style={{
                     fontSize: 10.5,
                     lineHeight: 1.35,
                     color: d.prazoOk ? COR.ok : COR.atencao,
+                    minWidth: 0,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
                   }}
                 >
                   {d.prazo}
@@ -758,6 +795,7 @@ function FichaDevolucao({
   reverso,
   pendente,
   aoGravar,
+  aoPedirFotos,
   aoConferir,
   aoConcluir,
   aoFechar,
@@ -769,6 +807,7 @@ function FichaDevolucao({
   reverso: string
   pendente: boolean
   aoGravar: (patch: Decisao, recadoOk?: string) => void
+  aoPedirFotos: (texto: string) => void
   aoConferir: () => void
   aoConcluir: () => void
   aoFechar: () => void
@@ -778,7 +817,12 @@ function FichaDevolucao({
   const triagem = triarDevolucao(d.itens, d.tipo, d.lacre)
   const acoes = acoesDisponiveis(status, Boolean(reverso))
   const etapa = etapaDe(status)
-  const artigo = d.gateway === 'Frenet' ? 'na' : 'no'
+  // O código do reverso é gerado À MÃO, na plataforma que emitiu a etiqueta
+  // de ida, e digitado aqui. O botão anterior fabricava um código a partir do
+  // rastreio da ida ("RV" + 7 dígitos) — um número que não existia em
+  // plataforma nenhuma e que o cliente levaria ao balcão dos Correios.
+  const [codigoReverso, setCodigoReverso] = useState('')
+  const [oQueFalta, setOQueFalta] = useState('')
   const tomTriagem: Tom =
     d.itens.length === 0 ? 'neutro' : triagem.severidade === 'erro' ? 'erro' : triagem.severidade === 'atencao' ? 'atencao' : 'ok'
 
@@ -1268,18 +1312,43 @@ function FichaDevolucao({
             <BotaoFicha
               primario
               desabilitado={pendente}
-              aoClicar={() => aoGravar({ status: 'Aprovada' }, `${d.id} aprovada — gere o reverso ${artigo} ${d.gateway}.`)}
+              aoClicar={() =>
+                aoGravar(
+                  { status: 'Aprovada' },
+                  `${d.id} aprovada — gere o reverso na plataforma da etiqueta de ida e registre o código aqui.`,
+                )
+              }
             >
               {pendente ? 'Gravando…' : 'Aprovar devolução'}
             </BotaoFicha>
           ))}
         {acoes.emAnalise && (
-          <BotaoFicha
-            desabilitado={pendente || status === 'Aguardando fotos'}
-            aoClicar={() => aoGravar({ status: 'Aguardando fotos' }, `${d.id} marcada como aguardando fotos.`)}
-          >
-            Pedir mais fotos
-          </BotaoFicha>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              value={oQueFalta}
+              onChange={(e) => setOQueFalta(e.target.value.slice(0, 400))}
+              placeholder="O que falta na foto?"
+              aria-label="O que falta na foto"
+              className="font-sans"
+              style={{
+                height: 34,
+                width: 210,
+                padding: '0 11px',
+                border: '1px solid rgba(255,255,255,.14)',
+                background: 'rgba(255,255,255,.03)',
+                color: 'var(--color-corrente)',
+                borderRadius: 9,
+                fontSize: 12,
+                outline: 'none',
+              }}
+            />
+            <BotaoFicha
+              desabilitado={pendente || oQueFalta.trim().length < 5}
+              aoClicar={() => aoPedirFotos(oQueFalta.trim())}
+            >
+              Pedir mais fotos
+            </BotaoFicha>
+          </span>
         )}
         {acoes.emAnalise && !triagem.bloqueado && (
           <BotaoRecusa
@@ -1291,20 +1360,38 @@ function FichaDevolucao({
         )}
 
         {acoes.podeGerarReverso && (
-          <BotaoFicha
-            primario
-            desabilitado={pendente}
-            aoClicar={() =>
-              // O reverso deriva da etiqueta de ida — mesma plataforma, mesmo
-              // radical — até a emissão automática entrar no escopo.
-              aoGravar(
-                { reverso: `RV${d.etiquetaIda.slice(-7)}`, status: 'Aguardando postagem' },
-                `Reverso gerado ${artigo} ${d.gateway} para ${d.id}. Informe o cliente pelo canal de atendimento.`,
-              )
-            }
-          >
-            {pendente ? 'Gravando…' : `Gerar reverso ${artigo} ${d.gateway}`}
-          </BotaoFicha>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              value={codigoReverso}
+              onChange={(e) => setCodigoReverso(e.target.value.toUpperCase().slice(0, 40))}
+              placeholder="Código de postagem reversa"
+              aria-label="Código de postagem reversa"
+              className="font-mono"
+              style={{
+                height: 34,
+                width: 230,
+                padding: '0 11px',
+                border: '1px solid rgba(255,255,255,.14)',
+                background: 'rgba(255,255,255,.03)',
+                color: 'var(--color-corrente)',
+                borderRadius: 9,
+                fontSize: 12,
+                outline: 'none',
+              }}
+            />
+            <BotaoFicha
+              primario
+              desabilitado={pendente || codigoReverso.trim().length < 4}
+              aoClicar={() =>
+                aoGravar(
+                  { reverso: codigoReverso.trim(), status: 'Aguardando postagem' },
+                  `Reverso ${codigoReverso.trim()} registrado em ${d.id} — o cliente recebe o código por e-mail.`,
+                )
+              }
+            >
+              {pendente ? 'Gravando…' : 'Registrar reverso'}
+            </BotaoFicha>
+          </span>
         )}
 
         {acoes.podeReceber && (
