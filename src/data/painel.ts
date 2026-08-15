@@ -324,14 +324,25 @@ export async function carregarPainelPrincipal(
     alvo.faturamento += Number(p.valor)
     alvo.pedidos += 1
   }
-  // Recebido líquido: o que efetivamente caiu (baixas de entrada), sem as
-  // pernas de transferência — mover dinheiro entre contas próprias não é
-  // recebimento. É a metade "caixa" da regra de integridade.
+  /**
+   * Recebido LÍQUIDO — e desta vez líquido de verdade.
+   *
+   * A conversão do extrato lança a venda pelo valor BRUTO do pedido e a
+   * tarifa do intermediador como uma saída separada. Somar só as entradas,
+   * como esta série fazia, devolvia o bruto com a etiqueta "líquido": em
+   * 10/08 a curva marcava R$ 1.161,29 e a tarifa de R$ 107,00 lançada no
+   * mesmo dia não saía de lugar nenhum. Rótulo que mente é pior que número
+   * ausente, porque ninguém confere o que parece certo.
+   *
+   * A tarifa é descontada no dia em que foi cobrada, que é o mesmo dia do
+   * crédito: a conversão grava as duas com a mesma data.
+   */
   for (const l of lancamentos) {
-    if (l.canceladoEm || l.tipo !== 'entrada' || !l.baixadoEm || l.transferenciaId) continue
+    if (l.canceladoEm || !l.baixadoEm || l.transferenciaId) continue
     const alvo = serie.get(l.baixadoEm)
     if (!alvo) continue
-    alvo.recebido += l.recebido
+    if (l.tipo === 'entrada') alvo.recebido += l.recebido
+    else if (l.categoriaId === 'taxas-de-pagamento') alvo.recebido -= l.recebido
   }
 
   const porCanal = new Map<string, { valor: number; pedidos: number }>()
