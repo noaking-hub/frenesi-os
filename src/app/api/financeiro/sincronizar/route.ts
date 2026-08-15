@@ -260,6 +260,21 @@ export async function POST(req: Request) {
     relatorio.repassesConciliados = { erro: mensagemDe(e) }
   }
 
+  // Venda anterior ao primeiro extrato que existe não é pendência: é
+  // conciliação impossível. Sai da fila com data e motivo escritos, em vez de
+  // ficar para sempre pedindo uma decisão que ninguém pode tomar.
+  try {
+    const { data, error } = await supabaseServer().rpc('dispensar_conciliacao_sem_extrato')
+    if (error) throw error
+    const linha = Array.isArray(data) ? data[0] : data
+    relatorio.semExtratoDispensadas = {
+      dispensados: linha?.dispensados ?? 0,
+      corte: linha?.corte ?? null,
+    }
+  } catch (e) {
+    relatorio.semExtratoDispensadas = { erro: mensagemDe(e) }
+  }
+
 
   // A baixa de estoque vem depois da importação da Yampi, que é quem acabou
   // de trazer os faturamentos novos. Antes dela, os pedidos faturados nesta

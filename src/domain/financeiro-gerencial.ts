@@ -509,6 +509,8 @@ export type StatusVenda =
   | 'estornada'
   | 'chargeback'
   | 'aguardando'
+  /** Não há extrato do período: conciliar é impossível, não pendente. */
+  | 'dispensada'
 
 export const ROTULO_STATUS_VENDA: Record<StatusVenda, string> = {
   conciliada: 'Conciliada',
@@ -518,6 +520,7 @@ export const ROTULO_STATUS_VENDA: Record<StatusVenda, string> = {
   estornada: 'Estornada',
   chargeback: 'Chargeback',
   aguardando: 'Aguardando',
+  dispensada: 'Sem extrato',
 }
 
 export interface VendaConciliada {
@@ -556,8 +559,19 @@ export function avaliarVenda(v: {
   chargeback?: boolean
   pagamentoConfirmado: boolean
   prazoVencido?: boolean
+  /** Marcada como impossível de conciliar, com motivo registrado. */
+  dispensada?: boolean
+  /** Pedido cancelado não é venda: não há o que conciliar nele. */
+  cancelada?: boolean
 }): { status: StatusVenda; liquidoEsperado: number; diferenca: number } {
   const liquidoEsperado = arredonda(v.bruto - v.taxaEsperada)
+
+  // A dispensa vem ANTES de tudo: ela é a decisão já tomada sobre esta venda,
+  // e reavaliá-la a devolveria para a fila de onde alguém a tirou de
+  // propósito. Cancelada idem — o pedido deixou de valer.
+  if (v.dispensada || v.cancelada) {
+    return { status: 'dispensada', liquidoEsperado, diferenca: 0 }
+  }
 
   if (v.chargeback) return { status: 'chargeback', liquidoEsperado, diferenca: -v.bruto }
   if (v.estornada) return { status: 'estornada', liquidoEsperado, diferenca: -v.bruto }

@@ -553,6 +553,8 @@ interface RepasseCru {
   creditado_em: string | null
   meio: string | null
   bruto_gateway: string | null
+  dispensado_em: string | null
+  dispensa_motivo: string | null
   pedidos: {
     valor: string
     comprado_em: string
@@ -571,6 +573,7 @@ export async function carregarConciliacao(): Promise<PainelConciliacao> {
     estornada: { qtd: 0, valor: 0 },
     chargeback: { qtd: 0, valor: 0 },
     aguardando: { qtd: 0, valor: 0 },
+    dispensada: { qtd: 0, valor: 0 },
   })
   const vazio: PainelConciliacao = {
     vendas: [],
@@ -598,6 +601,7 @@ export async function carregarConciliacao(): Promise<PainelConciliacao> {
       .from('repasses')
       .select(
         'pedido_id, origem, taxa_pct, taxa_real, recebido, creditado_em, meio, bruto_gateway, ' +
+          'dispensado_em, dispensa_motivo, ' +
           'pedidos(valor, comprado_em, pagamento, situacao, clientes(nome))',
       )
       .order('pedido_id', { ascending: false })
@@ -623,6 +627,8 @@ export async function carregarConciliacao(): Promise<PainelConciliacao> {
       bruto,
       taxaEsperada,
       taxaReal,
+      dispensada: Boolean(r.dispensado_em),
+      cancelada: r.pedidos.situacao === 'cancelado',
       liquidoRecebido: recebido,
       pagamentoConfirmado: r.pedidos.pagamento === 'pago',
       estornada: r.pedidos.situacao === 'cancelado',

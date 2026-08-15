@@ -53,6 +53,7 @@ const TOM: Record<StatusVenda, TomUi> = {
   estornada: 'neutro',
   chargeback: 'erro',
   aguardando: 'info',
+  dispensada: 'neutro',
 }
 
 /** Filas que pedem gente, na ordem em que doem. */
@@ -385,6 +386,15 @@ export default async function Conciliacao({
                 tom: 'atencao',
               },
               { id: 'sem_credito', rotulo: 'Sem crédito', contagem: c.totais.sem_credito.qtd, tom: 'erro' },
+              // Fora da fila de ação de propósito: são as que não têm extrato
+              // do período e nunca vão conciliar. Ficam visíveis numa aba
+              // própria porque some-las seria fingir que não existiram.
+              {
+                id: 'dispensada',
+                rotulo: 'Sem extrato',
+                contagem: c.totais.dispensada.qtd,
+                tom: 'neutro',
+              },
               { id: 'todas', rotulo: 'Todas', contagem: c.vendas.length },
             ]}
             ativo={status}
