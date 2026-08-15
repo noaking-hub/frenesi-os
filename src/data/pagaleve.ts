@@ -1,34 +1,51 @@
 import 'server-only'
 
+import { assinar } from '@/domain/sigv4'
+
 /**
  * Conector da Pagaleve — o intermediário de Pix parcelado.
  *
  * A Pagaleve é o terceiro caminho de dinheiro da operação, e o único que o ERP
  * não enxergava. O cliente parcela o Pix em até 4x com 15 dias entre parcelas,
- * então uma venda só fecha em 45 dias, e o dinheiro chega em depósitos da
- * Pagaleve para o Mercado Pago que não correspondem a um pedido específico.
- * Foi isso que encheu a conciliação de pendências que nunca foram pendência.
+ * então uma venda só fecha em 45 dias, e o dinheiro chega em depósitos que não
+ * correspondem a um pedido específico. Foi isso que encheu a conciliação de
+ * pendências que nunca foram pendência.
  *
- * ESTE ARQUIVO COMEÇA PELA SONDAGEM, DE PROPÓSITO.
+ * A API fica atrás de um AWS API Gateway com assinatura SigV4 — descoberto
+ * pela sondagem, não suposto: o gateway respondeu, palavra por palavra,
+ * "Authorization header requires 'Credential' parameter". Então a "Chave de
+ * API" do painel é um Access Key ID e a "Senha da Chave de API" é um Secret
+ * Access Key, e cada requisição vai assinada.
  *
- * A documentação da Pagaleve não é alcançável do ambiente onde este código foi
- * escrito, e escrever um importador contra um schema imaginado é a forma mais
- * cara de errar: ele "funciona", grava número errado, e ninguém descobre até a
- * conciliação não fechar. Então a primeira coisa que existe aqui é uma função
- * que PERGUNTA à API como ela é — autentica, tenta os caminhos prováveis, e
- * reporta o que cada um respondeu. Com a resposta real em mãos, o importador
- * se escreve em minutos e contra fatos.
+ * A sondagem continua existindo porque duas coisas ainda não são conhecidas: a
+ * REGIÃO do escopo da assinatura e os CAMINHOS reais. Descobrir cada uma por
+ * deploy sairia caro; descobrir as duas numa varredura sai numa ida só.
  */
 
 const BASE = process.env.PAGALEVE_BASE ?? 'https://api.pagaleve.com.br'
 
 /**
- * As variáveis levam o nome que o painel da Pagaleve usa — "Chave de API" e
- * "Senha da Chave de API" — e não `CLIENT_ID`/`CLIENT_SECRET`. Quem cadastra
- * está olhando para o painel, e duas credenciais parecidas com nomes
- * diferentes dos que ele vê é um convite a inverter as duas. Credencial
- * invertida falha com 401, que é indistinguível de credencial errada.
+ * Regiões candidatas, na ordem de probabilidade.
+ *
+ * `sa-east-1` primeiro porque a Pagaleve é brasileira e processa Pix — dado
+ * financeiro nacional costuma ficar em São Paulo. `us-east-1` logo depois
+ * porque é o padrão de quem não escolheu região.
  */
+const REGIOES = ['sa-east-1', 'us-east-1', 'us-east-2', 'us-west-2']
+
+/** Onde vendas e repasses costumam morar numa API de intermediário. */
+const CAMINHOS = [
+  '/checkouts',
+  '/orders',
+  '/v1/orders',
+  '/merchant/orders',
+  '/payments',
+  '/settlements',
+  '/transfers',
+  '/financial/statement',
+  '/',
+]
+
 function credenciais(): { chave: string; senha: string } | null {
   const chave = process.env.PAGALEVE_CHAVE
   const senha = process.env.PAGALEVE_SENHA
@@ -49,23 +66,22 @@ export function comoEstaConfigurada(): string {
 }
 
 interface Tentativa {
-  caminho: string
-  metodo: string
+  alvo: string
   status: number | null
   erro?: string
-  /** Só a FORMA da resposta, nunca o conteúdo: isto vai para log. */
   chaves?: string[]
   amostra?: string
 }
 
 /**
- * Corpo cortado e sem PII, para o diagnóstico poder ser lido em log.
+ * Corpo cortado e sem PII.
  *
- * A sondagem existe para descobrir NOMES DE CAMPO, não para transportar dados
- * de cliente. Trezentos caracteres bastam para reconhecer um schema.
+ * A sondagem existe para descobrir NOMES DE CAMPO e mensagens de erro, não
+ * para transportar dado de cliente. Seiscentos caracteres cabem a mensagem
+ * inteira da AWS, que é onde costuma vir a região esperada.
  */
 function resumo(texto: string): string {
-  return texto.replace(/\s+/g, ' ').slice(0, 300)
+  return texto.replace(/\s+/g, ' ').slice(0, 600)
 }
 
 function chavesDe(json: unknown): string[] {
@@ -74,147 +90,106 @@ function chavesDe(json: unknown): string[] {
   return []
 }
 
-async function tentar(
+/** Uma requisição assinada, com a resposta reduzida à sua forma. */
+async function pedir(
   caminho: string,
-  init: RequestInit & { metodo?: string } = {},
+  region: string,
+  metodo = 'GET',
+  corpo = '',
 ): Promise<Tentativa> {
-  const metodo = init.method ?? 'GET'
+  const c = credenciais()
+  if (!c) return { alvo: caminho, status: null, erro: 'sem credencial' }
+
+  const url = `${BASE}${caminho}`
+  const assinado = assinar(
+    {
+      accessKeyId: c.chave,
+      secretAccessKey: c.senha,
+      region,
+      // `execute-api` é o serviço de todo API Gateway; não há alternativa
+      // plausível aqui, então ele não entra na varredura.
+      service: 'execute-api',
+    },
+    metodo,
+    url,
+    corpo,
+    new Date(),
+    corpo ? { 'content-type': 'application/json' } : {},
+  )
+
   try {
-    const r = await fetch(`${BASE}${caminho}`, { ...init, method: metodo })
+    const r = await fetch(url, {
+      method: metodo,
+      headers: assinado.headers,
+      body: corpo || undefined,
+    })
     const texto = await r.text()
     let json: unknown = null
     try {
       json = JSON.parse(texto)
     } catch {
-      /* resposta não-JSON: a amostra já conta a história */
+      /* não-JSON: a amostra conta a história */
     }
     return {
-      caminho,
-      metodo,
+      alvo: `${metodo} ${caminho} @${region}`,
       status: r.status,
       chaves: json ? chavesDe(json) : undefined,
       amostra: resumo(texto),
     }
   } catch (e) {
     return {
-      caminho,
-      metodo,
+      alvo: `${metodo} ${caminho} @${region}`,
       status: null,
       erro: e instanceof Error ? e.message : String(e),
     }
   }
 }
 
-/** Caminhos prováveis de autenticação, na ordem em que a doc os sugere. */
-const CAMINHOS_DE_AUTENTICACAO = ['/auth', '/authentication', '/v1/auth', '/oauth/token']
-
-/** Onde as vendas e os repasses costumam morar numa API de intermediário. */
-const CAMINHOS_DE_LEITURA = [
-  '/checkouts',
-  '/orders',
-  '/v1/orders',
-  '/payments',
-  '/settlements',
-  '/transfers',
-  '/merchant/orders',
-  '/financial/statement',
-]
-
 export interface Sondagem {
   base: string
   credencial: string
-  autenticacao: Tentativa[]
-  tokenObtido: boolean
-  /** Qual combinação de caminho e formato autenticou — o achado da sondagem. */
-  formaQueFuncionou?: string
-  leitura: Tentativa[]
+  regiaoDescoberta: string | null
+  regioes: Tentativa[]
+  caminhos: Tentativa[]
 }
 
 /**
- * Descobre a API sem chutar: autentica, e se conseguir, lê.
+ * Descobre região e caminhos numa varredura só.
  *
- * Devolve o que CADA caminho respondeu — inclusive os 404, que são informação:
- * eles eliminam hipótese. O que importa aqui não é ter sucesso, é ter certeza.
+ * Primeiro a região: uma requisição por candidata, e a resposta separa as
+ * três hipóteses sem ambiguidade. "Credential should be scoped to a valid
+ * region" diz que a região está errada; qualquer coisa que NÃO seja essa
+ * mensagem diz que a assinatura foi aceita — inclusive um 404, que é ótima
+ * notícia, porque significa que só o caminho falta.
  */
 export async function sondar(): Promise<Sondagem> {
-  const credencial = comoEstaConfigurada()
   const saida: Sondagem = {
     base: BASE,
-    credencial,
-    autenticacao: [],
-    tokenObtido: false,
-    leitura: [],
+    credencial: comoEstaConfigurada(),
+    regiaoDescoberta: null,
+    regioes: [],
+    caminhos: [],
   }
   if (!pagaleveConfigurada()) return saida
 
-  const { chave, senha } = credenciais()!
-  const basic = Buffer.from(`${chave}:${senha}`).toString('base64')
-
-  // Um par "chave + senha" pode viajar de três formas, e nenhuma delas é a
-  // óbvia em todas as APIs. Tentar as três numa rodada custa três requisições
-  // e evita um deploy inteiro só para descobrir qual era — e cada deploy aqui
-  // é pago.
-  const formas: { nome: string; init: RequestInit }[] = [
-    {
-      nome: 'basic',
-      init: {
-        method: 'POST',
-        headers: { authorization: `Basic ${basic}`, 'content-type': 'application/json' },
-        body: '{}',
-      },
-    },
-    {
-      nome: 'corpo-client',
-      init: {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ client_id: chave, client_secret: senha }),
-      },
-    },
-    {
-      nome: 'corpo-api-key',
-      init: {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ api_key: chave, api_secret: senha }),
-      },
-    },
-  ]
-
-  let token: string | null = null
-  for (const caminho of CAMINHOS_DE_AUTENTICACAO) {
-    for (const forma of formas) {
-      const t = await tentar(caminho, forma.init)
-      saida.autenticacao.push({ ...t, caminho: `${caminho} [${forma.nome}]` })
-      if (t.status === 200 && t.amostra) {
-        // O nome do campo do token varia entre APIs; aceita os usuais.
-        const achado = /"(access_token|token|accessToken|id_token)"\s*:\s*"([^"]+)"/.exec(
-          t.amostra,
-        )
-        if (achado) {
-          token = achado[2]
-          saida.tokenObtido = true
-          saida.formaQueFuncionou = `${caminho} [${forma.nome}]`
-          break
-        }
-      }
+  for (const region of REGIOES) {
+    const t = await pedir('/', region)
+    saida.regioes.push(t)
+    const amostra = t.amostra ?? ''
+    const regiaoErrada = /scoped to a valid region|Credential should be scoped/i.test(amostra)
+    const assinaturaErrada = /SignatureDoesNotMatch|not match any credential/i.test(amostra)
+    if (!regiaoErrada && !assinaturaErrada) {
+      saida.regiaoDescoberta = region
+      break
     }
-    if (token) break
   }
 
-  // Sem token, ainda vale tentar ler com a chave direto no header: há API que
-  // dispensa a troca por token e aceita a credencial em toda requisição.
-  if (!token) {
-    saida.leitura.push(
-      await tentar(CAMINHOS_DE_LEITURA[0], { headers: { authorization: `Basic ${basic}` } }),
-    )
-    return saida
-  }
+  // Sem região aceita não adianta varrer caminho: todo caminho responderia o
+  // mesmo erro de assinatura, e a varredura só gastaria requisição.
+  if (!saida.regiaoDescoberta) return saida
 
-  for (const caminho of CAMINHOS_DE_LEITURA) {
-    saida.leitura.push(
-      await tentar(caminho, { headers: { Authorization: `Bearer ${token}` } }),
-    )
+  for (const caminho of CAMINHOS) {
+    saida.caminhos.push(await pedir(caminho, saida.regiaoDescoberta))
   }
   return saida
 }
