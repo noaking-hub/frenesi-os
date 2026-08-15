@@ -170,18 +170,44 @@ export async function POST(req: Request) {
   // sonda não serve aqui: são centenas de movimentos e ela devolve 8 KB.
   if (params.get('saldo') === '1') {
     const { itens } = await paginar<Movimento>('balance/operations', auth)
+    const { itens: pays } = await paginar<Recebivel>('payables', auth)
+    const { itens: chs } = await paginar<Cobranca>('charges', auth)
+
     const porTipo = new Map<string, { n: number; total: number }>()
     for (const m of itens) {
       const chave = m.type ?? 'sem tipo'
       const atual = porTipo.get(chave) ?? { n: 0, total: 0 }
       porTipo.set(chave, { n: atual.n + 1, total: atual.total + (m.amount ?? 0) })
     }
+
+    // As três fontes lado a lado. Se o líquido dos recebíveis bater com o
+    // crédito do saldo, a conta se explica por si e o furo está na leitura das
+    // cobranças; se não bater, entrou dinheiro que não veio de venda nenhuma.
+    const pagas = chs.filter((c) => c.status === 'paid')
+    const porStatus = new Map<string, number>()
+    for (const p of pays) porStatus.set(p.status ?? '?', (porStatus.get(p.status ?? '?') ?? 0) + 1)
+
     return NextResponse.json({
-      movimentos: itens.length,
-      saldoFinal: reais(itens.reduce((a, m) => a + (m.amount ?? 0), 0)),
-      tipos: [...porTipo.entries()]
-        .map(([tipo, v]) => ({ tipo, quantidade: v.n, total: reais(v.total) }))
-        .sort((a, b) => a.total - b.total),
+      saldo: {
+        movimentos: itens.length,
+        saldoFinal: reais(itens.reduce((a, m) => a + (m.amount ?? 0), 0)),
+        tipos: [...porTipo.entries()]
+          .map(([tipo, v]) => ({ tipo, quantidade: v.n, total: reais(v.total) }))
+          .sort((a, b) => a.total - b.total),
+      },
+      recebiveis: {
+        quantidade: pays.length,
+        bruto: reais(pays.reduce((a, p) => a + (p.amount ?? 0), 0)),
+        tarifa: reais(pays.reduce((a, p) => a + (p.fee ?? 0) + (p.anticipation_fee ?? 0), 0)),
+        semCobranca: pays.filter((p) => !p.charge_id).length,
+        porStatus: [...porStatus.entries()].map(([status, n]) => ({ status, n })),
+      },
+      cobrancas: {
+        lidas: chs.length,
+        pagas: pagas.length,
+        bruto: reais(pagas.reduce((a, c) => a + (c.amount ?? 0), 0)),
+        pago: reais(pagas.reduce((a, c) => a + (c.paid_amount ?? c.amount ?? 0), 0)),
+      },
     })
   }
 
