@@ -8,7 +8,7 @@ import {
   lerContas,
 } from '@/data/financeiro'
 import { carregarEstoque } from '@/data/consultas'
-import { carregarPrioridades } from './prioridades'
+import { carregarCentralDoGerente } from './prioridades'
 import { lerExtrato } from '@/data/extrato'
 import { brl } from '@/domain'
 
@@ -273,18 +273,25 @@ export const FERRAMENTAS: Ferramenta[] = [
     parametros: { type: 'object', properties: {} },
     risco: 'leitura',
     executar: async () => {
-      const f = await carregarPrioridades()
+      const c = await carregarCentralDoGerente()
       return {
-        resumo: f.resumo,
+        resumo: c.resumo,
         // A ordem do array É a prioridade — calculada por regra fixa, não por
-        // julgamento. Cada item já vem com o número e onde se resolve.
-        itens: f.itens.map((p) => ({
+        // julgamento. Cada item traz os sete campos do escopo, para o modelo
+        // poder relatar impacto e responsável sem adivinhar nenhum dos dois.
+        itens: c.itens.map((p) => ({
           severidade: p.severidade,
           titulo: p.titulo,
-          detalhe: p.detalhe,
-          ondeResolver: p.href,
-          valorEmJogo: p.valor,
+          impactoFinanceiro: p.impactoFinanceiro,
+          impactoOperacional: p.impactoOperacional,
+          urgencia: p.urgencia,
+          confianca: p.confianca,
+          responsavelSugerido: p.responsavel,
+          proximaAcao: p.proximaAcao,
         })),
+        briefing: c.briefing,
+        resumoExecutivoDoDia: c.executivo,
+        modulosConsultados: c.modulosConsultados,
       }
     },
   },

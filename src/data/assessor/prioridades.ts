@@ -2,61 +2,77 @@ import 'server-only'
 
 import { carregarConciliacao, carregarLancamentos, carregarVisaoFinanceira } from '@/data/financeiro'
 import { carregarPainelPrincipal } from '@/data/painel'
-import { carregarEstoque } from '@/data/consultas'
-import { prioridadesDe, resumoDaFila, type Prioridade } from '@/domain'
+import { carregarEstoque, carregarFilaDeEnvase } from '@/data/consultas'
+import { briefingDe, prioridadesDe, resumoDaFila, type Briefing, type Prioridade } from '@/domain'
 
 /**
- * A fila de decisões: junta o estado da operação e aplica as regras.
+ * A Central do Gerente: prioridades, briefing e resumo executivo.
  *
- * Esta camada NÃO decide nada. Ela só busca — nas mesmas funções que as telas
- * usam — e entrega a `prioridadesDe`, que é pura e testada. Toda a inteligência
- * mora lá; aqui só mora a coleta. É essa separação que torna possível provar
- * por teste que "conta vencida é crítica" sem precisar de banco.
+ * Esta camada NÃO decide nada. Ela busca — nas mesmas funções que as telas do
+ * ERP usam — e entrega a `prioridadesDe` e `briefingDe`, que são puras e
+ * testadas. Toda a inteligência mora lá; aqui só mora a coleta. É essa
+ * separação que permite provar por teste que "conta vencida é crítica" sem
+ * precisar de banco, e é ela que garante que a fila não muda de opinião entre
+ * duas aberturas da tela.
  */
 
-export interface FilaDeDecisoes {
+/** §3.1: "Resumo executivo do dia: vendas, pedidos, estoque, produção, caixa, margem e CRM." */
+export interface ResumoExecutivo {
+  vendas: { valor: number; rotulo: string }
+  pedidos: { qtd: number; rotulo: string }
+  estoque: { criticos: number; rotulo: string }
+  producao: { qtd: number; rotulo: string }
+  caixa: { valor: number; rotulo: string }
+  margem: { pct: number; rotulo: string }
+  crm: { qtd: number; rotulo: string }
+}
+
+export interface CentralDoGerente {
   itens: Prioridade[]
   resumo: string
-  /** Quando os números foram lidos. A fila é sempre de agora, nunca de cache. */
+  briefing: Briefing
+  executivo: ResumoExecutivo
+  /** §3.1: "Indicador de atualização dos dados e módulos consultados." */
+  modulosConsultados: string[]
   apuradoEm: string
 }
 
-export async function carregarPrioridades(): Promise<FilaDeDecisoes> {
-  // As cinco leituras são independentes: em série levariam a soma dos tempos,
-  // e a fila abre junto com a tela.
-  const [visao, painel, conciliacao, estoque, lancamentos] = await Promise.all([
+export async function carregarCentralDoGerente(): Promise<CentralDoGerente> {
+  // As seis leituras são independentes: em série levariam a soma dos tempos, e
+  // a Central abre junto com a tela.
+  const [visao, painel, conciliacao, estoque, lancamentos, envase] = await Promise.all([
     carregarVisaoFinanceira(),
     carregarPainelPrincipal('30d'),
     carregarConciliacao(),
     carregarEstoque(),
     carregarLancamentos(),
+    carregarFilaDeEnvase(),
   ])
 
   // A distinção já vem pronta do domínio e é reaproveitada, não recalculada:
   // `aguardando` é a venda ainda dentro do prazo do gateway, `sem_credito` é a
-  // que passou do prazo. Só a segunda exige ação — se a primeira entrasse na
-  // fila, haveria item novo todo dia e ninguém leria a fila.
+  // que passou do prazo. Só a segunda exige ação.
   const aguardando = conciliacao.vendas.filter((v) => v.status === 'aguardando')
   const vencidas = conciliacao.vendas.filter((v) => v.status === 'sem_credito')
 
-  const itens = prioridadesDe({
+  const estado = {
     caixaHoje: visao.caixaHoje,
     diasAteNegativar: visao.projecao.diasAteNegativar,
     menorSaldo: visao.projecao.menorSaldo,
     menorSaldoEm: visao.projecao.menorSaldoEm,
     vencidos: visao.vencidos,
     aPagar: visao.aPagar,
-    conciliacaoSemCredito: {
-      qtd: aguardando.length + vencidas.length,
-      valor: arredondar([...aguardando, ...vencidas].reduce((a, v) => a + v.bruto, 0)),
+    conciliacaoAguardando: {
+      qtd: aguardando.length,
+      valor: arredondar(aguardando.reduce((a, v) => a + v.bruto, 0)),
     },
     conciliacaoVencida: {
       qtd: vencidas.length,
       valor: arredondar(vencidas.reduce((a, v) => a + v.bruto, 0)),
     },
     // Transferência entre contas próprias não tem categoria porque NÃO É
-    // despesa: o dinheiro só mudou de bolso. Contá-la aqui inflaria a fila com
-    // 62 linhas que ninguém deve classificar — e fila com item impossível de
+    // despesa: o dinheiro só mudou de bolso. Contá-la inflaria a fila com
+    // linhas que ninguém deve classificar — e fila com item impossível de
     // resolver é fila que o operador aprende a ignorar.
     lancamentosSemCategoria: lancamentos.lancamentos.filter(
       (l) => !l.canceladoEm && !l.categoriaId && !l.transferenciaId,
@@ -67,13 +83,42 @@ export async function carregarPrioridades(): Promise<FilaDeDecisoes> {
       dias: c.dias,
       criticidade: c.criticidade,
       disponivelMl: c.disponivelMl,
+      reservadoMl: c.reservadoMl,
     })),
     faturamentoAtual: painel.atual.faturamento,
     faturamentoAnterior: painel.anterior.faturamento,
+    pedidosAtual: painel.atual.pedidos,
+    pedidosAnterior: painel.anterior.pedidos,
     rotuloDoPeriodo: painel.janela.rotulo,
-  })
+  }
 
-  return { itens, resumo: resumoDaFila(itens), apuradoEm: new Date().toISOString() }
+  const itens = prioridadesDe(estado)
+
+  return {
+    itens,
+    resumo: resumoDaFila(itens),
+    briefing: briefingDe(estado, itens),
+    executivo: {
+      vendas: { valor: painel.atual.faturamento, rotulo: painel.janela.rotulo.toLowerCase() },
+      pedidos: { qtd: painel.atual.pedidos, rotulo: 'pagos no período' },
+      // Só o que está sob controle de estoque: base sem compra registrada não
+      // é crítica, é ausente.
+      estoque: { criticos: estoque.criticos, rotulo: 'bases abaixo do limite' },
+      producao: { qtd: envase.pedidos, rotulo: 'pedidos na fila de envase' },
+      caixa: { valor: visao.caixaHoje, rotulo: 'disponível nas contas ativas' },
+      margem: { pct: visao.margemMes, rotulo: 'do mês, por competência' },
+      crm: { qtd: painel.atual.clientesNovos, rotulo: 'clientes novos no período' },
+    },
+    modulosConsultados: [
+      'Dashboard',
+      'Visão Financeira',
+      'Conciliação',
+      'Lançamentos',
+      'Estoque',
+      'Envase',
+    ],
+    apuradoEm: new Date().toISOString(),
+  }
 }
 
 function arredondar(v: number): number {

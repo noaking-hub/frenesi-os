@@ -65,6 +65,36 @@ describe('blocosDaResposta', () => {
     ])
   })
 
+  it('separa os marcadores do escopo §6.2 do texto da frase', () => {
+    const b = blocosDaResposta(
+      'Inferência: a queda veio do frete.\nRecomendação: revisar a tabela.\nCenário: com 10% a mais, sobra caixa.',
+    )
+    expect(b.map((x) => (x.tipo === 'paragrafo' ? x.marcador : null))).toEqual([
+      'inferencia',
+      'recomendacao',
+      'cenario',
+    ])
+    // O rótulo sai do texto: ele vira badge, não fica repetido na frase.
+    expect(b[0].tipo === 'paragrafo' && b[0].partes[0].texto).toBe('a queda veio do frete.')
+  })
+
+  it('aceita o marcador sem acento e com caixa trocada', () => {
+    const b = blocosDaResposta('RECOMENDACAO: fechar o mês.')
+    expect(b[0].tipo === 'paragrafo' && b[0].marcador).toBe('recomendacao')
+  })
+
+  it('frase comum não ganha marcador', () => {
+    const b = blocosDaResposta('O caixa fechou em R$ 10.000,00.')
+    expect(b[0].tipo === 'paragrafo' && b[0].marcador).toBeUndefined()
+  })
+
+  it('palavra parecida no meio da frase não vira marcador', () => {
+    // Só conta no COMEÇO da linha e seguido de dois-pontos: senão qualquer
+    // menção a "recomendação" viraria badge.
+    const b = blocosDaResposta('Segui a recomendação: e deu certo.')
+    expect(b[0].tipo === 'paragrafo' && b[0].marcador).toBeUndefined()
+  })
+
   it('não produz bloco para resposta vazia', () => {
     expect(blocosDaResposta('')).toEqual([])
     expect(blocosDaResposta('\n\n  \n')).toEqual([])

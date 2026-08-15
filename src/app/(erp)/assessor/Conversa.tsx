@@ -5,7 +5,12 @@ import { useRouter } from 'next/navigation'
 
 import { BORDA, COR, FAIXA, FUNDO } from '@/components/erp/tokens'
 import { Ico } from '@/components/erp/IconesUi'
-import { blocosDaResposta, rotuloDaFerramenta } from '@/domain'
+import {
+  blocosDaResposta,
+  rotuloDaFerramenta,
+  ROTULO_DO_MARCADOR,
+  type Marcador as MarcadorDeFala,
+} from '@/domain'
 
 /**
  * A conversa com o Assessor.
@@ -273,6 +278,9 @@ function Resposta({ texto }: { texto: string }) {
         }
         return (
           <p key={i} style={{ margin: 0 }}>
+            {/* §6.2: inferência, cenário e recomendação chegam marcados. Sem
+                isso, palpite e número apurado pesam igual para quem lê. */}
+            {b.marcador && <Marcador tipo={b.marcador} />}
             {b.partes.map((t, k) => (
               <Parte key={k} t={t} />
             ))}
@@ -280,6 +288,37 @@ function Resposta({ texto }: { texto: string }) {
         )
       })}
     </div>
+  )
+}
+
+const TOM_DO_MARCADOR: Record<MarcadorDeFala, { cor: string; fundo: string; borda: string }> = {
+  inferencia: { cor: COR.info, fundo: FUNDO.info, borda: BORDA.info },
+  cenario: { cor: COR.ouro, fundo: FUNDO.ouro, borda: BORDA.ouro },
+  recomendacao: { cor: COR.ok, fundo: FUNDO.ok, borda: BORDA.ok },
+}
+
+function Marcador({ tipo }: { tipo: MarcadorDeFala }) {
+  const t = TOM_DO_MARCADOR[tipo]
+  return (
+    <span
+      className="font-sans"
+      style={{
+        display: 'inline-block',
+        fontSize: 9,
+        fontWeight: 600,
+        letterSpacing: '.08em',
+        textTransform: 'uppercase',
+        color: t.cor,
+        background: t.fundo,
+        border: `1px solid ${t.borda}`,
+        borderRadius: 'var(--radius-chip)',
+        padding: '2px 7px',
+        marginRight: 8,
+        verticalAlign: '2px',
+      }}
+    >
+      {ROTULO_DO_MARCADOR[tipo]}
+    </span>
   )
 }
 

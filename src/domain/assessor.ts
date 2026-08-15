@@ -12,8 +12,36 @@
 
 export type Bloco =
   | { tipo: 'titulo'; texto: string }
-  | { tipo: 'paragrafo'; partes: Trecho[] }
+  | { tipo: 'paragrafo'; partes: Trecho[]; marcador?: Marcador }
   | { tipo: 'lista'; itens: Trecho[][] }
+
+/**
+ * §6.2 do escopo: a fala do modelo é classificada, e a classificação é visível.
+ *
+ * Sem isto, recomendação e fato chegam ao leitor com o mesmo peso — e num ERP
+ * financeiro é essa confusão que faz alguém tratar palpite como número apurado.
+ */
+export type Marcador = 'inferencia' | 'cenario' | 'recomendacao'
+
+export const ROTULO_DO_MARCADOR: Record<Marcador, string> = {
+  inferencia: 'Inferência',
+  cenario: 'Cenário',
+  recomendacao: 'Recomendação',
+}
+
+const MARCADORES: [RegExp, Marcador][] = [
+  [/^infer[êe]ncia\s*:\s*/i, 'inferencia'],
+  [/^cen[áa]rio\s*:\s*/i, 'cenario'],
+  [/^recomenda[çc][ãa]o\s*:\s*/i, 'recomendacao'],
+]
+
+/** Separa o marcador do texto. O marcador vira badge; o resto continua frase. */
+function destacar(linha: string): { marcador?: Marcador; resto: string } {
+  for (const [regex, marcador] of MARCADORES) {
+    if (regex.test(linha)) return { marcador, resto: linha.replace(regex, '') }
+  }
+  return { resto: linha }
+}
 
 export interface Trecho {
   texto: string
@@ -81,7 +109,8 @@ export function blocosDaResposta(texto: string): Bloco[] {
       blocos.push({ tipo: 'titulo', texto: soForte[1] })
       continue
     }
-    blocos.push({ tipo: 'paragrafo', partes: trechos(linha) })
+    const { marcador, resto } = destacar(linha)
+    blocos.push({ tipo: 'paragrafo', partes: trechos(resto), marcador })
   }
   fecharLista()
   return blocos
