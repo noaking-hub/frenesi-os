@@ -402,6 +402,138 @@ export async function marcarEmProducao(ids: string[]): Promise<RespostaProducao>
   }
 }
 
+export interface ItemVendaManual {
+  baseId: string
+  ml: number
+  quantidade: number
+  preco: number
+  descricao: string
+}
+
+export type RespostaVendaManual =
+  | { ok: true; pedidoId: string; total: number; mlBaixado: number }
+  | { ok: false; erro: string }
+
+/**
+ * Canais que uma venda fora da loja pode ter.
+ *
+ * O tipo `canal_venda` no banco recusa qualquer outro valor — e o erro que ele
+ * levanta fala de enum, não de operação. Barrar aqui devolve uma frase que
+ * quem está no balcão entende.
+ */
+const CANAIS_MANUAIS = new Set(['manual', 'whatsapp', 'instagram'])
+
+/**
+ * Registra uma venda que não nasceu na loja chamando `registrar_venda_manual()`.
+ *
+ * A função do banco faz tudo numa transação só: cria o pedido MAN-xxxx e seus
+ * itens, baixa a base com a perda de envase, escreve a movimentação, libera a
+ * reserva, consome frasco/válvula/tampa e grava a entrada JÁ BAIXADA na conta
+ * escolhida. Por isso aqui não há nenhuma escrita solta — meia venda gravada
+ * (estoque baixado sem dinheiro no caixa, ou o contrário) seria pior que venda
+ * nenhuma, e é exatamente o que uma sequência de chamadas produziria se a
+ * segunda falhasse.
+ *
+ * A validação abaixo repete a do banco de propósito: a mesma regra dita em
+ * português, antes da viagem, é o que separa "Informe a quantidade do item 2"
+ * de uma exceção de plpgsql na cara do operador.
+ */
+export async function registrarVendaManual(dados: {
+  itens: ItemVendaManual[]
+  contaId: string
+  canal: string
+  /** Dia da venda, no formato AAAA-MM-DD que o campo de data devolve. */
+  ocorridoEm: string
+  clienteNome: string
+  clienteEmail: string
+  observacao: string
+}): Promise<RespostaVendaManual> {
+  if (!supabaseConfigurado()) {
+    return { ok: false, erro: 'O Supabase precisa estar configurado para registrar vendas.' }
+  }
+
+  const itens = dados.itens.filter((i) => i.baseId)
+  if (itens.length === 0) return { ok: false, erro: 'Adicione ao menos um item à venda.' }
+
+  for (const [i, item] of itens.entries()) {
+    const posicao = `item ${i + 1}`
+    if (!(item.ml > 0)) return { ok: false, erro: `Escolha o tamanho do decant no ${posicao}.` }
+    if (!(item.quantidade > 0)) {
+      return { ok: false, erro: `A quantidade do ${posicao} precisa ser maior que zero.` }
+    }
+    if (item.preco < 0) return { ok: false, erro: `O preço do ${posicao} não pode ser negativo.` }
+  }
+
+  const total = itens.reduce((a, i) => a + i.preco * i.quantidade, 0)
+  if (!(total > 0)) {
+    return { ok: false, erro: 'O total da venda precisa ser maior que zero — informe os preços.' }
+  }
+
+  if (!dados.contaId) return { ok: false, erro: 'Escolha a conta que recebeu o dinheiro.' }
+  if (!CANAIS_MANUAIS.has(dados.canal)) {
+    return { ok: false, erro: 'Canal inválido — use balcão, WhatsApp ou Instagram.' }
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dados.ocorridoEm)) {
+    return { ok: false, erro: 'Informe a data da venda.' }
+  }
+
+  const email = dados.clienteEmail.trim()
+  // E-mail torto vira cliente novo e permanente no CRM — a função do banco
+  // cadastra quem ela não encontra. Recusar antes é mais barato que limpar
+  // depois.
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { ok: false, erro: 'O e-mail do cliente não parece válido. Corrija ou deixe em branco.' }
+  }
+
+  const { data, error } = await supabaseServer().rpc('registrar_venda_manual', {
+    p_itens: itens.map((i) => ({
+      base_id: i.baseId,
+      ml: i.ml,
+      quantidade: i.quantidade,
+      preco: i.preco,
+      descricao: i.descricao,
+    })),
+    p_conta_id: dados.contaId,
+    p_canal: dados.canal,
+    // Meio-dia UTC, não meia-noite: o banco converte `timestamptz` para a
+    // data do lançamento com `::date`, e meia-noite em fuso negativo cai no
+    // dia anterior. Ao meio-dia nenhum fuso praticado troca o dia da venda.
+    p_ocorrido_em: `${dados.ocorridoEm}T12:00:00Z`,
+    p_cliente_nome: dados.clienteNome.trim() || null,
+    p_observacao: dados.observacao.trim() || null,
+    p_operador: OPERADOR,
+    p_cliente_email: email || null,
+  })
+  if (error) {
+    console.error('[venda manual] registrar_venda_manual falhou:', error)
+    return { ok: false, erro: error.message || error.details || 'Falha ao registrar a venda.' }
+  }
+
+  // `returns table (...)` chega como lista de uma linha só.
+  const linha = (Array.isArray(data) ? data[0] : data) as
+    | { pedido_id: string; total: number | string; ml_baixado: number | string }
+    | undefined
+  if (!linha) {
+    return { ok: false, erro: 'A venda foi enviada, mas o banco não devolveu o pedido criado.' }
+  }
+
+  // Uma venda manual mexe em quatro telas ao mesmo tempo: o pedido nasce em
+  // Pedidos, o ml sai de Estoque, o dinheiro entra em Financeiro e os dois
+  // aparecem no Dashboard. Revalidar só Pedidos deixaria as outras três
+  // mostrando o mundo de antes da venda.
+  revalidatePath('/pedidos')
+  revalidatePath('/estoque')
+  revalidatePath('/financeiro')
+  revalidatePath('/')
+
+  return {
+    ok: true,
+    pedidoId: String(linha.pedido_id),
+    total: Number(linha.total),
+    mlBaixado: Number(linha.ml_baixado),
+  }
+}
+
 export type RespostaRastreio =
   | { ok: true; consultados: number; eventos: number; falhas: number; aviso?: string }
   | { ok: false; erro: string }

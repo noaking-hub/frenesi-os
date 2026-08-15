@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, type ReactNode } from 'react'
 
 import { COR } from '@/components/erp/tokens'
 import { plural } from '@/domain'
@@ -27,11 +27,18 @@ export function ImportarPedidos({
   configurada,
   total,
   sincronizadoEm,
+  acao,
 }: {
   configurada: boolean
   total: number
   /** Última importação da Yampi registrada. Null = nunca. */
   sincronizadoEm: string | null
+  /**
+   * Ação da barra que não depende da loja — hoje, a venda manual. Ela vem de
+   * fora porque precisa de dados do servidor (catálogo e contas), e este
+   * componente é de cliente.
+   */
+  acao?: ReactNode
 }) {
   const [erro, setErro] = useState<string | null>(null)
   const [resumo, setResumo] = useState<string | null>(null)
@@ -362,22 +369,30 @@ export function ImportarPedidos({
     })
 
   if (!configurada) {
+    // A ação continua na tela: a venda manual não vem de loja nenhuma, e
+    // esconder o botão junto do aviso deixaria o balcão sem por onde lançar
+    // justamente quando a integração está fora.
     return (
-      <div
-        style={{
-          padding: '13px 15px',
-          borderRadius: 12,
-          background: 'rgba(224,168,74,.07)',
-          border: '1px solid rgba(224,168,74,.28)',
-        }}
-      >
-        <span
-          className="font-sans"
-          style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--color-secundario)', textWrap: 'pretty' }}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+        <div
+          style={{
+            flex: 1,
+            minWidth: 260,
+            padding: '13px 15px',
+            borderRadius: 12,
+            background: 'rgba(224,168,74,.07)',
+            border: '1px solid rgba(224,168,74,.28)',
+          }}
         >
-          A Shopify não está configurada — sem isso não há de onde trazer pedidos. Preencha
-          SHOPIFY_LOJA e as credenciais no <code>.env.local</code>.
-        </span>
+          <span
+            className="font-sans"
+            style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--color-secundario)', textWrap: 'pretty' }}
+          >
+            A Shopify não está configurada — sem isso não há de onde trazer pedidos. Preencha
+            SHOPIFY_LOJA e as credenciais no <code>.env.local</code>.
+          </span>
+        </div>
+        {acao}
       </div>
     )
   }
@@ -434,6 +449,7 @@ export function ImportarPedidos({
         >
           {ferramentas ? '− Ferramentas' : '+ Ferramentas'}
         </button>
+        {acao}
         <button
           type="button"
           onClick={sincronizarTudo}

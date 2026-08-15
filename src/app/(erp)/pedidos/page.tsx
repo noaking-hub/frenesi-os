@@ -1,9 +1,13 @@
 import { carregarPedidos } from '@/data/consultas'
+import { lerContas } from '@/data/financeiro'
+import { repositorio } from '@/data/repository'
 import { shopifyConfigurada } from '@/data/shopify'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
+import { disponivelDe } from '@/domain'
 
 import { ImportarPedidos } from './ImportarPedidos'
 import { PedidosCliente, type Fila } from './PedidosCliente'
+import { VendaManual, type BaseParaVenda, type ContaParaVenda } from './VendaManual'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,6 +33,51 @@ async function ultimaSincroniaYampi(): Promise<string | null> {
   return (data?.executada_em as string) ?? null
 }
 
+/**
+ * O que a venda manual precisa saber para não pedir nada digitado.
+ *
+ * Os tamanhos de decant NÃO são uma lista fixa no código: eles saem das
+ * variantes que o catálogo realmente pratica. Uma lista chumbada aqui
+ * ofereceria um tamanho que ninguém envasa no dia em que o catálogo mudasse,
+ * e o preço praticado — que já existe por variante — é o mesmo número que o
+ * operador digitaria à mão.
+ */
+async function dadosDaVendaManual(): Promise<{
+  bases: BaseParaVenda[]
+  contas: ContaParaVenda[]
+  tamanhos: number[]
+}> {
+  const [perfumes, derivados, contas] = await Promise.all([
+    repositorio().perfumesBase(),
+    repositorio().produtosDerivados(),
+    lerContas(),
+  ])
+
+  const precosPorBase = new Map<string, Record<string, number>>()
+  for (const d of derivados) {
+    if (!(d.precoPraticado > 0)) continue
+    const atual = precosPorBase.get(d.baseId) ?? {}
+    atual[String(d.variante)] = d.precoPraticado
+    precosPorBase.set(d.baseId, atual)
+  }
+
+  return {
+    bases: perfumes.map((b) => ({
+      id: b.id,
+      nome: b.nome,
+      marca: b.marca,
+      // Disponível, não físico: reserva é pedido pago à espera de envase, e
+      // vendê-la de novo no balcão deixaria o cliente da loja sem o dele.
+      disponivelMl: disponivelDe(b),
+      precos: precosPorBase.get(b.id) ?? {},
+    })),
+    contas: contas
+      .filter((c) => c.ativa)
+      .map((c) => ({ id: c.id, nome: c.nome, principal: c.principal })),
+    tamanhos: [...new Set(derivados.map((d) => d.variante))].sort((a, b) => a - b),
+  }
+}
+
 /** `?fila=` na URL abre direto numa fila — é o que torna as filas linkáveis. */
 const FILA_POR_SLUG: Record<string, Fila> = {
   aguardando: 'Aguardando envio',
@@ -44,9 +93,10 @@ export default async function Pedidos({
 }: {
   searchParams: Promise<{ fila?: string }>
 }) {
-  const [itens, sincronizadoEm, { fila }] = await Promise.all([
+  const [itens, sincronizadoEm, venda, { fila }] = await Promise.all([
     carregarPedidos(),
     ultimaSincroniaYampi(),
+    dadosDaVendaManual(),
     searchParams,
   ])
   return (
@@ -55,6 +105,12 @@ export default async function Pedidos({
         configurada={shopifyConfigurada()}
         total={itens.length}
         sincronizadoEm={sincronizadoEm}
+        // Na mesma barra do "Sincronizar agora": as duas são a origem de um
+        // pedido no ERP — uma traz o que a loja vendeu, a outra registra o que
+        // foi vendido fora dela.
+        acao={
+          <VendaManual bases={venda.bases} contas={venda.contas} tamanhos={venda.tamanhos} />
+        }
       />
       <PedidosCliente itens={itens} filaInicial={fila ? FILA_POR_SLUG[fila] : undefined} />
     </div>

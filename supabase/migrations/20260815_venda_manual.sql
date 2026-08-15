@@ -133,3 +133,69 @@ begin
   return query select v_id, v_total, coalesce(v_ml, 0);
 end;
 $$;
+
+-- Corrigir um lançamento antigo de insumo reescreve o razão inteiro: apaga
+-- linhas, regrava saldos, atualiza o cadastro e registra a trilha. Pelo
+-- PostgREST isso são quatro chamadas soltas — e entre a primeira e a última
+-- cabe um faturamento baixando frasco. O estoque terminaria com um saldo que
+-- nunca existiu. Aqui tudo acontece numa transação, com trava na linha do
+-- insumo. O RECÁLCULO continua no TypeScript, onde está testado; esta função
+-- só aplica o resultado.
+create or replace function aplicar_razao_insumo(
+  p_insumo_id text,
+  p_linhas jsonb,
+  p_excluidas text[],
+  p_saldo integer,
+  p_custo numeric,
+  p_trilha text,
+  p_operador text,
+  p_tipo_trilha text default 'estorno'
+)
+returns table (saldo integer, custo_unitario numeric)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_existe boolean;
+begin
+  perform 1 from insumos where id = p_insumo_id for update;
+  select true into v_existe from insumos where id = p_insumo_id;
+  if not v_existe then
+    raise exception 'Insumo % não existe.', p_insumo_id;
+  end if;
+
+  if p_excluidas is not null and array_length(p_excluidas, 1) > 0 then
+    delete from insumo_movimentacoes
+     where insumo_id = p_insumo_id
+       and id = any (p_excluidas::uuid[])
+       -- Baixa de faturamento é intocável: apagá-la faria estoque e venda
+       -- pararem de bater, e a venda é a que tem nota.
+       and pedido_id is null;
+  end if;
+
+  update insumo_movimentacoes m
+     set unidades = (l->>'unidades')::integer,
+         saldo_anterior = (l->>'saldo_anterior')::integer,
+         saldo = (l->>'saldo')::integer,
+         custo_unitario = nullif(l->>'custo_unitario', '')::numeric,
+         descricao = coalesce(nullif(l->>'descricao', ''), m.descricao),
+         ref = nullif(l->>'ref', ''),
+         responsavel = coalesce(nullif(l->>'responsavel', ''), m.responsavel)
+    from jsonb_array_elements(p_linhas) as l
+   where m.id = (l->>'id')::uuid
+     and m.insumo_id = p_insumo_id;
+
+  update insumos
+     set unidades = p_saldo, custo_unitario = p_custo
+   where id = p_insumo_id;
+
+  insert into insumo_movimentacoes (
+    insumo_id, tipo, unidades, saldo_anterior, saldo, descricao, responsavel, ocorrida_em
+  ) values (
+    p_insumo_id, p_tipo_trilha, 0, p_saldo, p_saldo, p_trilha, p_operador, now()
+  );
+
+  return query select p_saldo, p_custo;
+end;
+$$;

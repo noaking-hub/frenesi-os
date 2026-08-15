@@ -72,7 +72,9 @@ export function recalcularRazao(linhas: LinhaRazao[], custoDeReferencia = 0): Re
 
     // A contagem física gravou um SALDO, não um passo: se um lançamento
     // anterior mudou, quem cede é a diferença do ajuste — nunca o número que
-    // a pessoa contou com a mão na prateleira.
+    // a pessoa contou com a mão na prateleira. A saída é o contrário: o que
+    // saiu já saiu, e corrigir uma compra antiga não faz voltar unidade que
+    // o faturamento levou.
     const delta =
       linha.tipo === 'ajuste'
         ? (linha.saldo ?? anterior + linha.unidades) - anterior
