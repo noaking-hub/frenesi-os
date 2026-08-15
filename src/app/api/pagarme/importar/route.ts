@@ -78,6 +78,26 @@ interface Recebivel {
   payment_date?: string
 }
 
+/**
+ * Movimento do saldo da conta. Interessa por um motivo só: o SAQUE.
+ *
+ * Sem ele a conta do gateway ficaria com R$ 41 mil parados que não existem —
+ * o dinheiro entrou, foi sacado para o banco e a conta fechou zerada. Um
+ * caixa que mostra saldo em conta encerrada é pior do que caixa nenhum.
+ */
+interface Movimento {
+  id: number
+  type?: string
+  amount?: number
+  created_at?: string
+  movement_object?: {
+    id?: string
+    status?: string
+    type?: string
+    bank_account?: { bank?: string; holder_name?: string } | null
+  } | null
+}
+
 /** Centavos → reais. A v5 devolve tudo em centavos inteiros. */
 const reais = (centavos: number | undefined | null) => Math.round(centavos ?? 0) / 100
 
@@ -151,6 +171,7 @@ export async function POST(req: Request) {
 
   let cobrancas: Cobranca[]
   let recebiveis: Recebivel[]
+  let movimentos: Movimento[]
   let paginasCobrancas = 0
   let paginasRecebiveis = 0
   try {
@@ -167,6 +188,11 @@ export async function POST(req: Request) {
     const p = await paginar<Recebivel>('payables', auth)
     recebiveis = p.itens
     paginasRecebiveis = p.paginas
+    // Sem os saques a conta do gateway ficaria com R$ 41 mil de saldo que não
+    // existe: o dinheiro entrou, foi transferido para o banco e a conta fechou
+    // zerada. Saldo em conta encerrada contamina o caixa consolidado inteiro.
+    const m = await paginar<Movimento>('balance/operations', auth)
+    movimentos = m.itens
   } catch (e) {
     return NextResponse.json({ erro: (e as Error).message }, { status: 502 })
   }
@@ -223,6 +249,34 @@ export async function POST(req: Request) {
     }
   })
 
+  // Saques para a conta bancária. `amount` vem negativo porque é dinheiro
+  // saindo do saldo do gateway; a tabela do extrato só aceita valor positivo e
+  // guarda a direção em `tipo`. A descrição é a mesma que o Mercado Pago usa,
+  // e não por acaso: é ela que a conversão em caixa reconhece como movimento
+  // entre contas, neutro no consolidado.
+  const saques = movimentos
+    .filter((m) => m.type === 'transfer' && (m.amount ?? 0) < 0)
+    .map((m) => ({
+      origem: 'pagarme',
+      chave: `pagarme:op:${m.id}`,
+      conta_id: CONTA,
+      ocorrido_em: (m.created_at ?? '').slice(0, 10),
+      descricao: 'Transferência para o banco',
+      contraparte: m.movement_object?.bank_account?.holder_name ?? '',
+      documento: m.movement_object?.id ?? '',
+      tipo: 'saida',
+      valor: reais(Math.abs(m.amount ?? 0)),
+      pedido_id: null as string | null,
+      ignorado: false,
+      interno: false,
+      bruto: {
+        banco: m.movement_object?.bank_account?.bank ?? null,
+        meio: m.movement_object?.type ?? null,
+        situacao: m.movement_object?.status ?? null,
+      },
+    }))
+    .filter((l) => l.valor > 0 && l.ocorrido_em)
+
   const totalPago = pagas.reduce(
     (a, c) => a + reais(c.paid_amount ?? c.last_transaction?.paid_amount ?? c.amount),
     0,
@@ -245,10 +299,23 @@ export async function POST(req: Request) {
     tarifaMediaPct: totalPago ? Math.round(((totalPago - totalLiquido) / totalPago) * 10000) / 100 : 0,
     primeira: dias[0] ?? null,
     ultima: dias.at(-1) ?? null,
+    movimentosLidos: movimentos.length,
+    saques: saques.length,
+    totalSacado: Math.round(saques.reduce((a, s) => a + s.valor, 0) * 100) / 100,
+    // Deve fechar em zero: tudo que entrou foi sacado, a conta está encerrada.
+    // Se sobrar diferença, ou falta saque ou falta venda — e o número aqui diz
+    // de quanto é a falta, em vez de deixá-la escondida no saldo da conta.
+    sobraNoGateway:
+      Math.round((totalLiquido - saques.reduce((a, s) => a + s.valor, 0)) * 100) / 100,
   }
 
   if (ensaio) {
-    return NextResponse.json({ ensaio: true, resumo, amostra: linhas.slice(0, 3) })
+    return NextResponse.json({
+      ensaio: true,
+      resumo,
+      amostra: linhas.slice(0, 3),
+      amostraSaques: saques.slice(0, 3),
+    })
   }
 
   const sb = supabaseServer()
@@ -272,12 +339,13 @@ export async function POST(req: Request) {
 
   // Em lotes: um upsert de 600 linhas com jsonb estoura o limite de corpo do
   // PostgREST antes de estourar o tempo da função.
-  for (let i = 0; i < linhas.length; i += 200) {
+  const tudo = [...linhas, ...saques]
+  for (let i = 0; i < tudo.length; i += 200) {
     const { error } = await sb
       .from('extrato_linhas')
       // A chave primária é (origem, chave) — apontar o conflito só para
       // `chave` faz o Postgres recusar o upsert inteiro.
-      .upsert(linhas.slice(i, i + 200), { onConflict: 'origem,chave' })
+      .upsert(tudo.slice(i, i + 200), { onConflict: 'origem,chave' })
     if (error) return NextResponse.json({ erro: error.message, resumo }, { status: 500 })
   }
 
@@ -286,7 +354,7 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     resumo,
-    gravadas: linhas.length,
+    gravadas: tudo.length,
     ligacao: erroLigacao ? erroLigacao.message : ligados,
     conversao: erroConversao ? erroConversao.message : convertido,
   })
