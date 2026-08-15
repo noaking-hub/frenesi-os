@@ -242,6 +242,24 @@ export async function POST(req: Request) {
     relatorio.extratoEmCaixa = { erro: mensagemDe(e) }
   }
 
+  // E o repasse aprende com o extrato. A tela de Conciliação lê `repasses`,
+  // que só a rotina do Mercado Pago preenchia; tudo o que entrou pelo extrato
+  // continuava marcado "pago sem crédito" mesmo com o dinheiro na conta e o
+  // lançamento gravado — 416 vendas e R$ 61 mil de fila falsa. Fila falsa faz
+  // o operador parar de olhar a fila. Roda aqui, logo depois da conversão,
+  // porque é a conversão que acabou de ligar as linhas novas ao pedido.
+  try {
+    const { data, error } = await supabaseServer().rpc('conciliar_repasses_pelo_extrato')
+    if (error) throw error
+    const linha = Array.isArray(data) ? data[0] : data
+    relatorio.repassesConciliados = {
+      preenchidos: linha?.preenchidos ?? 0,
+      aindaSemCredito: linha?.ainda_sem_credito ?? 0,
+    }
+  } catch (e) {
+    relatorio.repassesConciliados = { erro: mensagemDe(e) }
+  }
+
 
   // A baixa de estoque vem depois da importação da Yampi, que é quem acabou
   // de trazer os faturamentos novos. Antes dela, os pedidos faturados nesta
