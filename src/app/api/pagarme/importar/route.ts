@@ -28,10 +28,16 @@ const BASE = 'https://api.pagar.me/core/v5'
 /** A conta do gateway antigo é separada: misturar dois provedores numa conta
  *  só apagaria a data da migração e a comparação de tarifa entre eles. */
 const CONTA = 'pagarme'
-/** Janela informada pela operação: primeira movimentação 09/06, última 22/07.
- *  Uma folga de dias nas duas pontas cobre fuso e liquidação atrasada. */
-const DE = '2026-06-01'
-const ATE = '2026-07-25'
+/**
+ * Sem janela de datas: a conta inteira.
+ *
+ * A primeira versão filtrava 01/06 a 25/07, a janela que a operação informou.
+ * Parecia seguro e não era: a conta creditou R$ 46.422,51 contra R$ 42.972,13
+ * das cobranças lidas — havia dinheiro entrando que o filtro não mostrava, e
+ * a diferença só apareceu quando os saques foram conferidos contra as vendas.
+ * A conta viveu seis semanas e tem 461 movimentos; ler tudo custa segundos e
+ * troca um palpite por um fato.
+ */
 
 /** Teto de páginas. Existe para o laço não virar loop infinito se a API mudar
  *  o contrato de paginação — não para limitar o volume: 200 páginas de 100
@@ -197,16 +203,12 @@ export async function POST(req: Request) {
   let paginasCobrancas = 0
   let paginasRecebiveis = 0
   try {
-    const c = await paginar<Cobranca>(
-      `charges?created_since=${DE}T00:00:00Z&created_until=${ATE}T23:59:59Z`,
-      auth,
-    )
+    const c = await paginar<Cobranca>('charges', auth)
     cobrancas = c.itens
     paginasCobrancas = c.paginas
-    // Os recebíveis vêm sem filtro de data: a conta está encerrada e o volume
-    // total é o do próprio período. Filtrar por data de pagamento deixaria de
-    // fora a parcela que só liquidou depois — e é justamente a tarifa dela
-    // que está faltando.
+    // Recebíveis também sem filtro: filtrar por data de liquidação deixaria de
+    // fora a parcela que só caiu depois — e é justamente a tarifa dela que
+    // faltava quando a tarifa era lida da cobrança.
     const p = await paginar<Recebivel>('payables', auth)
     recebiveis = p.itens
     paginasRecebiveis = p.paginas
@@ -307,7 +309,7 @@ export async function POST(req: Request) {
   const dias = linhas.map((l) => l.ocorrido_em).filter(Boolean).sort()
 
   const resumo = {
-    periodo: `${DE} a ${ATE}`,
+    periodo: 'conta inteira, sem filtro de data',
     cobrancasLidas: cobrancas.length,
     paginasCobrancas,
     recebiveisLidos: recebiveis.length,
