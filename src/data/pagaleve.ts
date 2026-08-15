@@ -22,20 +22,30 @@ import 'server-only'
 
 const BASE = process.env.PAGALEVE_BASE ?? 'https://api.pagaleve.com.br'
 
-/** Aceita os dois formatos: par client/secret ou chave única. */
+/**
+ * As variáveis levam o nome que o painel da Pagaleve usa — "Chave de API" e
+ * "Senha da Chave de API" — e não `CLIENT_ID`/`CLIENT_SECRET`. Quem cadastra
+ * está olhando para o painel, e duas credenciais parecidas com nomes
+ * diferentes dos que ele vê é um convite a inverter as duas. Credencial
+ * invertida falha com 401, que é indistinguível de credencial errada.
+ */
+function credenciais(): { chave: string; senha: string } | null {
+  const chave = process.env.PAGALEVE_CHAVE
+  const senha = process.env.PAGALEVE_SENHA
+  return chave && senha ? { chave, senha } : null
+}
+
 export function pagaleveConfigurada(): boolean {
-  return Boolean(
-    (process.env.PAGALEVE_CLIENT_ID && process.env.PAGALEVE_CLIENT_SECRET) ||
-      process.env.PAGALEVE_API_KEY,
-  )
+  return credenciais() !== null
 }
 
 export function comoEstaConfigurada(): string {
-  if (process.env.PAGALEVE_CLIENT_ID && process.env.PAGALEVE_CLIENT_SECRET) {
-    return 'PAGALEVE_CLIENT_ID + PAGALEVE_CLIENT_SECRET'
-  }
-  if (process.env.PAGALEVE_API_KEY) return 'PAGALEVE_API_KEY'
-  return 'nenhuma credencial definida'
+  if (credenciais()) return 'PAGALEVE_CHAVE + PAGALEVE_SENHA'
+  const faltando = [
+    process.env.PAGALEVE_CHAVE ? null : 'PAGALEVE_CHAVE',
+    process.env.PAGALEVE_SENHA ? null : 'PAGALEVE_SENHA',
+  ].filter(Boolean)
+  return `faltando: ${faltando.join(' e ')}`
 }
 
 interface Tentativa {
@@ -115,6 +125,8 @@ export interface Sondagem {
   credencial: string
   autenticacao: Tentativa[]
   tokenObtido: boolean
+  /** Qual combinação de caminho e formato autenticou — o achado da sondagem. */
+  formaQueFuncionou?: string
   leitura: Tentativa[]
 }
 
@@ -135,33 +147,69 @@ export async function sondar(): Promise<Sondagem> {
   }
   if (!pagaleveConfigurada()) return saida
 
-  const corpo = process.env.PAGALEVE_API_KEY
-    ? { api_key: process.env.PAGALEVE_API_KEY }
-    : {
-        client_id: process.env.PAGALEVE_CLIENT_ID,
-        client_secret: process.env.PAGALEVE_CLIENT_SECRET,
-      }
+  const { chave, senha } = credenciais()!
+  const basic = Buffer.from(`${chave}:${senha}`).toString('base64')
+
+  // Um par "chave + senha" pode viajar de três formas, e nenhuma delas é a
+  // óbvia em todas as APIs. Tentar as três numa rodada custa três requisições
+  // e evita um deploy inteiro só para descobrir qual era — e cada deploy aqui
+  // é pago.
+  const formas: { nome: string; init: RequestInit }[] = [
+    {
+      nome: 'basic',
+      init: {
+        method: 'POST',
+        headers: { authorization: `Basic ${basic}`, 'content-type': 'application/json' },
+        body: '{}',
+      },
+    },
+    {
+      nome: 'corpo-client',
+      init: {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ client_id: chave, client_secret: senha }),
+      },
+    },
+    {
+      nome: 'corpo-api-key',
+      init: {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ api_key: chave, api_secret: senha }),
+      },
+    },
+  ]
 
   let token: string | null = null
   for (const caminho of CAMINHOS_DE_AUTENTICACAO) {
-    const t = await tentar(caminho, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(corpo),
-    })
-    saida.autenticacao.push(t)
-    if (t.status === 200 && t.amostra) {
-      // O nome do campo do token varia entre APIs; aceita os usuais.
-      const achado = /"(access_token|token|accessToken|id_token)"\s*:\s*"([^"]+)"/.exec(t.amostra)
-      if (achado) {
-        token = achado[2]
-        saida.tokenObtido = true
-        break
+    for (const forma of formas) {
+      const t = await tentar(caminho, forma.init)
+      saida.autenticacao.push({ ...t, caminho: `${caminho} [${forma.nome}]` })
+      if (t.status === 200 && t.amostra) {
+        // O nome do campo do token varia entre APIs; aceita os usuais.
+        const achado = /"(access_token|token|accessToken|id_token)"\s*:\s*"([^"]+)"/.exec(
+          t.amostra,
+        )
+        if (achado) {
+          token = achado[2]
+          saida.tokenObtido = true
+          saida.formaQueFuncionou = `${caminho} [${forma.nome}]`
+          break
+        }
       }
     }
+    if (token) break
   }
 
-  if (!token) return saida
+  // Sem token, ainda vale tentar ler com a chave direto no header: há API que
+  // dispensa a troca por token e aceita a credencial em toda requisição.
+  if (!token) {
+    saida.leitura.push(
+      await tentar(CAMINHOS_DE_LEITURA[0], { headers: { authorization: `Basic ${basic}` } }),
+    )
+    return saida
+  }
 
   for (const caminho of CAMINHOS_DE_LEITURA) {
     saida.leitura.push(

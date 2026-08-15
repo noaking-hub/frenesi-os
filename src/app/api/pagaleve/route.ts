@@ -35,7 +35,8 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         erro: 'Credencial da Pagaleve não está no site.',
-        esperado: 'PAGALEVE_CLIENT_ID + PAGALEVE_CLIENT_SECRET, ou PAGALEVE_API_KEY',
+        esperado:
+          'PAGALEVE_CHAVE (a "Chave de API" do painel) e PAGALEVE_SENHA (a "Senha da Chave de API")',
         encontrado: comoEstaConfigurada(),
       },
       { status: 503 },
