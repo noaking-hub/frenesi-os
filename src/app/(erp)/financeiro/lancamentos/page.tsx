@@ -6,6 +6,7 @@ import {
   Colunas,
   Etiqueta,
   GradeIndicadores,
+  Ico,
   Indicador,
   LinhaValor,
   Num,
@@ -17,6 +18,7 @@ import {
   type ColunaUi,
   type TomUi,
 } from '@/components/erp/ui'
+import { iconeDaCategoria } from '@/components/erp/Marcas'
 import { Mini, Progresso, RoscaLegenda } from '@/components/erp/Visualizacoes'
 import { carregarLancamentos } from '@/data/financeiro'
 import {
@@ -219,11 +221,16 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       titulo: 'Categoria',
       largura: '150px',
       render: ({ l }) => (
-        <Celula
-          principal={l.categoria}
-          secundaria={l.natureza ? ROTULO_NATUREZA[l.natureza] : 'sem natureza gerencial'}
-          tom={l.natureza ? undefined : 'atencao'}
-        />
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <span style={{ color: 'rgba(242,237,227,.4)', flex: 'none' }}>
+            <Ico n={iconeDaCategoria(l.categoria)} tamanho={13} />
+          </span>
+          <Celula
+            principal={l.categoria}
+            secundaria={l.natureza ? ROTULO_NATUREZA[l.natureza] : 'sem natureza gerencial'}
+            tom={l.natureza ? undefined : 'atencao'}
+          />
+        </span>
       ),
     },
     {

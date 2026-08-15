@@ -55,8 +55,8 @@ export const CONTORNO: Record<TomUi, string> = {
   neutro: 'rgba(255,255,255,.09)',
 }
 
-const BORDA = '1px solid rgba(255,255,255,.065)'
-const FUNDO_CARTAO = 'linear-gradient(168deg, #15141608, #0E0E0F)'
+const BORDA = '1px solid rgba(255,255,255,.08)'
+const FUNDO_CARTAO = 'linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.012))'
 
 // ── Cabeçalho de página ────────────────────────────────────────────────────
 
@@ -443,15 +443,19 @@ export function Indicador({
   faixa,
   href,
 }: IndicadorProps) {
+  // O valor ocupa a LARGURA TODA, abaixo da linha ícone+rótulo — é o desenho
+  // do mockup, e é o que deixa o número grande sem alargar o cartão. A versão
+  // anterior espremia o valor na coluna ao lado do ícone e o cartão inteiro
+  // parecia menor do que é.
   const conteudo = (
     <>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
         <span
           style={{
-            width: 38,
-            height: 38,
+            width: 28,
+            height: 28,
             flex: 'none',
-            borderRadius: 11,
+            borderRadius: 8,
             display: 'grid',
             placeItems: 'center',
             background: VELADO[tom],
@@ -459,57 +463,60 @@ export function Indicador({
             color: TINTA[tom],
           }}
         >
-          <Ico n={icone} tamanho={18} />
+          <Ico n={icone} tamanho={15} />
         </span>
-        <span style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, flex: 1 }}>
-          <span
-            className="font-sans"
-            style={{
-              fontSize: 12,
-              lineHeight: 1.25,
-              color: 'rgba(242,237,227,.68)',
-              textWrap: 'pretty',
-            }}
-          >
-            {rotulo}
-          </span>
-          <span
-            className="font-mono"
-            style={{
-              fontSize: 21,
-              fontWeight: 500,
-              lineHeight: 1.1,
-              letterSpacing: '-.01em',
-              color: tomValor ? TINTA[tomValor] : 'var(--color-tinta)',
-              wordBreak: 'break-word',
-            }}
-          >
-            {valor}
-          </span>
-          {delta && <LinhaDelta {...delta} />}
-          {!delta && nota && (
-            <span
-              className="font-sans"
-              style={{ fontSize: 11, lineHeight: 1.35, color: TINTA[tomNota], textWrap: 'pretty' }}
-            >
-              {nota}
-            </span>
-          )}
+        <span
+          className="font-sans"
+          style={{
+            fontWeight: 600,
+            fontSize: 10,
+            lineHeight: 1.35,
+            letterSpacing: '.09em',
+            textTransform: 'uppercase',
+            color: 'rgba(242,237,227,.5)',
+            textWrap: 'pretty',
+            minWidth: 0,
+          }}
+        >
+          {rotulo}
         </span>
       </div>
-      {faixa && faixa.length > 1 && (
-        <Faixa valores={faixa} cor={TINTA[tomValor ?? tom]} />
+
+      <span
+        className="font-mono"
+        style={{
+          fontSize: 22,
+          fontWeight: 500,
+          lineHeight: 1.05,
+          letterSpacing: '-.01em',
+          color: tomValor ? TINTA[tomValor] : 'var(--color-tinta)',
+          wordBreak: 'break-word',
+        }}
+      >
+        {valor}
+      </span>
+
+      {delta && <LinhaDelta {...delta} />}
+      {!delta && nota && (
+        <span
+          className="font-sans"
+          style={{ fontSize: 10.5, lineHeight: 1.4, color: TINTA[tomNota], textWrap: 'pretty' }}
+        >
+          {nota}
+        </span>
       )}
+
+      {faixa && faixa.length > 1 && <Faixa valores={faixa} cor={TINTA[tomValor ?? tom]} />}
     </>
   )
 
   const estilo: CSSProperties = {
     display: 'flex',
     flexDirection: 'column',
-    gap: 10,
-    padding: '15px 16px',
+    gap: 9,
+    padding: '14px 15px 13px',
     border: BORDA,
-    borderRadius: 14,
+    borderRadius: 15,
     background: FUNDO_CARTAO,
     minWidth: 0,
     textDecoration: 'none',
@@ -1048,6 +1055,7 @@ export function TabelaUi<T>({
   itens,
   chaveDe,
   faixaDe,
+  selecionadoDe,
   vazio,
   rodape,
   larguraMinima = 720,
@@ -1057,6 +1065,8 @@ export function TabelaUi<T>({
   chaveDe: (item: T) => string
   /** Barra de 2px na borda esquerda quando a linha pede atenção. */
   faixaDe?: (item: T) => TomUi | null
+  /** Linha destacada — a que o painel de detalhe ao lado está mostrando. */
+  selecionadoDe?: (item: T) => boolean
   vazio?: ReactNode
   rodape?: ReactNode
   larguraMinima?: number
@@ -1086,6 +1096,7 @@ export function TabelaUi<T>({
 
           {itens.map((item) => {
             const faixa = faixaDe?.(item) ?? null
+            const marcado = selecionadoDe?.(item) ?? false
             return (
               <div
                 key={chaveDe(item)}
@@ -1097,9 +1108,10 @@ export function TabelaUi<T>({
                   alignItems: 'center',
                   padding: '10px 4px',
                   borderBottom: '1px solid rgba(255,255,255,.04)',
-                  borderLeft: `2px solid ${faixa ? TINTA[faixa] : 'transparent'}`,
+                  borderLeft: `2px solid ${marcado ? TINTA.ouro : faixa ? TINTA[faixa] : 'transparent'}`,
                   marginLeft: -2,
-                  paddingLeft: faixa ? 10 : 4,
+                  paddingLeft: faixa || marcado ? 10 : 4,
+                  background: marcado ? 'rgba(233,197,131,.055)' : undefined,
                 }}
               >
                 {colunas.map((c) => (

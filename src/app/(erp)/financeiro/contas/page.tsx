@@ -1,7 +1,11 @@
+import Link from 'next/link'
+
 import {
   AcaoPainel,
   Bolinha,
   Chip,
+  Destaque,
+  LinkSeta,
   ComTrilha,
   Etiqueta,
   Ferramentas,
@@ -15,6 +19,7 @@ import {
   TINTA,
   Vazio,
 } from '@/components/erp/ui'
+import { TileMarca } from '@/components/erp/Marcas'
 import { Mini, PALETA, RoscaLegenda } from '@/components/erp/Visualizacoes'
 import { lerContas, lerLancamentos } from '@/data/financeiro'
 import {
@@ -84,6 +89,23 @@ export default async function ContasECaixas() {
   // dos lançamentos já baixados — é o único histórico que o ERP tem sem
   // guardar snapshot de saldo.
   const serie = serieDiariaPorConta(lancamentos)
+
+  // O carimbo do rodapé usa a leitura mais RECENTE entre as contas: é a
+  // resposta honesta para "isso aqui está atualizado?".
+  const maisRecente = ativas
+    .map((c) => c.sincronizadoEm)
+    .filter(Boolean)
+    .sort()
+    .at(-1)
+  const ultimaLeitura = maisRecente
+    ? new Date(maisRecente).toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : null
 
   return (
     <Pilha gap={16}>
@@ -162,10 +184,26 @@ export default async function ContasECaixas() {
         trilha={
           <>
             <Painel titulo="Movimentações rápidas" icone="ajustes">
-              <Pilha gap={9}>
+              <Pilha gap={10}>
                 <Transferir contas={ativas} />
-                <AcaoPainel href="/financeiro/extrato">Conciliar extrato</AcaoPainel>
-                <AcaoPainel href="/financeiro/lancamentos">Ver lançamentos da conta</AcaoPainel>
+                <AtalhoRapido
+                  href="/financeiro/extrato"
+                  icone="faisca"
+                  titulo="Conciliar extrato"
+                  sub="Verificar lançamentos pendentes"
+                />
+                <AtalhoRapido
+                  href="/financeiro/lancamentos"
+                  icone="recibo"
+                  titulo="Ver lançamentos"
+                  sub="Contas a pagar e a receber por conta"
+                />
+                <AtalhoRapido
+                  href="/financeiro/configuracoes"
+                  icone="cadeado"
+                  titulo="Fechar competência"
+                  sub="Congelar o resultado do mês"
+                />
               </Pilha>
             </Painel>
 
@@ -267,6 +305,27 @@ export default async function ContasECaixas() {
           </Pilha>
         </Painel>
       </ComTrilha>
+
+      <Destaque tom="info" icone="escudo" titulo="Dica de segurança">
+        <span
+          className="font-sans"
+          style={{ fontSize: 11.5, lineHeight: 1.55, color: 'rgba(242,237,227,.6)', textWrap: 'pretty' }}
+        >
+          Mantenha as contas conectadas e revise os saldos regularmente: a divergência entre o
+          informado e o calculado é sempre um lançamento faltando de um lado ou do outro.
+        </span>
+        <LinkSeta href="/financeiro/extrato">Conferir extrato agora</LinkSeta>
+      </Destaque>
+
+      {ultimaLeitura && (
+        <span
+          className="font-sans"
+          style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 10.5, color: 'rgba(242,237,227,.34)' }}
+        >
+          <Ico n="atualizar" tamanho={12} />
+          {`Dados atualizados em ${ultimaLeitura}`}
+        </span>
+      )}
     </Pilha>
   )
 }
@@ -305,21 +364,7 @@ function LinhaConta({
       }}
     >
       <span style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-        <span
-          style={{
-            width: 40,
-            height: 40,
-            flex: 'none',
-            borderRadius: 11,
-            display: 'grid',
-            placeItems: 'center',
-            background: `${cor}1F`,
-            border: `1px solid ${cor}44`,
-            color: cor,
-          }}
-        >
-          <Ico n={conta.tipo.toLowerCase().includes('carteira') ? 'carteira' : conta.tipo.toLowerCase().includes('caixa') ? 'cofre' : 'banco'} tamanho={18} />
-        </span>
+        <TileMarca nome={`${conta.nome} ${conta.banco} ${conta.tipo}`} tamanho={42} />
         <span style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
             <span
@@ -451,4 +496,62 @@ function serieDiariaPorConta(lancamentos: LancamentoGerencial[]): Map<string, nu
     )
   }
   return saida
+}
+
+
+/** Linha de ação rápida da trilha — ícone, título, subtítulo e seta. */
+function AtalhoRapido({
+  href,
+  icone,
+  titulo,
+  sub,
+}: {
+  href: string
+  icone: Parameters<typeof Ico>[0]['n']
+  titulo: string
+  sub: string
+}) {
+  return (
+    <Link
+      href={href}
+      className="hover:border-ouro/35"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 11,
+        padding: '11px 12px',
+        border: '1px solid rgba(255,255,255,.07)',
+        borderRadius: 11,
+        background: 'rgba(255,255,255,.015)',
+        textDecoration: 'none',
+      }}
+    >
+      <span
+        style={{
+          width: 32,
+          height: 32,
+          flex: 'none',
+          borderRadius: 9,
+          display: 'grid',
+          placeItems: 'center',
+          background: 'rgba(233,197,131,.1)',
+          border: '1px solid rgba(233,197,131,.24)',
+          color: TINTA.ouro,
+        }}
+      >
+        <Ico n={icone} tamanho={15} />
+      </span>
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+        <span className="font-sans" style={{ fontSize: 12, fontWeight: 600, color: 'rgba(242,237,227,.86)' }}>
+          {titulo}
+        </span>
+        <span className="font-sans" style={{ fontSize: 10, color: 'rgba(242,237,227,.4)' }}>
+          {sub}
+        </span>
+      </span>
+      <span style={{ color: 'rgba(242,237,227,.3)' }}>
+        <Ico n="seta-direita" tamanho={13} />
+      </span>
+    </Link>
+  )
 }

@@ -8,6 +8,7 @@ import {
   Etiqueta,
   Ferramentas,
   GradeIndicadores,
+  Ico,
   Indicador,
   LinhaValor,
   ListaBarras,
@@ -16,6 +17,7 @@ import {
   Pilha,
   Pilula,
   Segmentado,
+  TINTA,
   TabelaUi,
   Vazio,
   type ColunaUi,
@@ -23,7 +25,7 @@ import {
 } from '@/components/erp/ui'
 import { BarrasEixo, CORES_SERIE, Legenda } from '@/components/erp/Visualizacoes'
 import { carregarFluxo } from '@/data/financeiro'
-import { brl, diaCurtoPt, plural, situacaoDe } from '@/domain'
+import { brl, coberturaDeCaixa, diaCurtoPt, plural, situacaoDe } from '@/domain'
 import type { DiaDeCaixa, LancamentoGerencial } from '@/domain'
 
 /**
@@ -87,20 +89,33 @@ export default async function FluxoDeCaixa({
   // previsões novas — são a MESMA projeção sob outra hipótese, e a tela diz
   // qual hipótese é cada uma.
   const cenarios = [
-    { id: 'base', rotulo: 'Base', tom: 'ouro' as TomUi, projecao: p },
+    {
+      id: 'base',
+      rotulo: 'Base',
+      tom: 'ouro' as TomUi,
+      hipotese: 'Tudo entra e sai como está lançado',
+      r: reprojetar(p.dias, p.saldoInicial, { fatorEntrada: 1, fatorSaida: 1 }),
+    },
     {
       id: 'conservador',
       rotulo: 'Conservador',
       tom: 'erro' as TomUi,
-      projecao: reprojetar(p.dias, p.saldoInicial, { fatorEntrada: 0.7, fatorSaida: 1 }),
+      hipotese: '30% dos recebimentos previstos atrasam',
+      r: reprojetar(p.dias, p.saldoInicial, { fatorEntrada: 0.7, fatorSaida: 1 }),
     },
     {
       id: 'otimista',
       rotulo: 'Otimista',
       tom: 'ok' as TomUi,
-      projecao: reprojetar(p.dias, p.saldoInicial, { fatorEntrada: 1, fatorSaida: 0.8 }),
+      hipotese: '20% das saídas são adiadas',
+      r: reprojetar(p.dias, p.saldoInicial, { fatorEntrada: 1, fatorSaida: 0.8 }),
     },
   ]
+
+  // O que mais altera a projeção: as categorias ordenadas pelo peso no
+  // horizonte. Não é previsão nova — é a decomposição da que está na tela.
+  const impactoTotal = f.porCategoria.reduce((a, c) => a + c.valor, 0)
+  const maioresImpactos = f.porCategoria.slice(0, 5)
 
   const proximosDias = p.dias.filter((d) => !d.realizado).slice(0, 5)
 
@@ -318,104 +333,115 @@ export default async function FluxoDeCaixa({
         </Painel>
       </Colunas>
 
-      <Colunas proporcao="minmax(0,1.1fr) minmax(0,1fr) minmax(0,1fr)">
+      <Colunas proporcao="minmax(0,1.25fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)">
         <Painel
           titulo="Cenários"
           icone="balanca"
           tom="roxo"
-          nota="A mesma projeção sob outra hipótese"
+          nota="a mesma projeção sob outra hipótese"
         >
-          <Pilha gap={11}>
-            {cenarios.map((c) => (
+          {/* Tabela comparativa, como no mockup: uma linha por grandeza, uma
+              coluna por cenário — comparar em colunas é o que a pergunta
+              "e se atrasar?" pede. */}
+          <div style={{ overflowX: 'auto' }}>
+            <div style={{ minWidth: 330 }}>
               <div
-                key={c.id}
                 style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 7,
-                  padding: '11px 12px',
-                  border: `1px solid ${c.id === 'base' ? 'rgba(233,197,131,.28)' : 'rgba(255,255,255,.06)'}`,
-                  borderRadius: 11,
-                  background: c.id === 'base' ? 'rgba(233,197,131,.05)' : 'rgba(255,255,255,.012)',
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(0,1.2fr) repeat(3, minmax(0,1fr))',
+                  gap: 8,
+                  alignItems: 'center',
+                  paddingBottom: 8,
+                  borderBottom: '1px solid rgba(255,255,255,.07)',
                 }}
               >
-                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Chip tom={c.tom}>{c.rotulo}</Chip>
-                  <div style={{ flex: 1 }} />
-                  <Num tamanho={13} tom={c.projecao.menorSaldo < 0 ? 'erro' : 'ok'}>
-                    {brl(c.projecao.menorSaldo)}
-                  </Num>
-                </span>
-                <span
-                  className="font-sans"
-                  style={{ fontSize: 10.5, lineHeight: 1.45, color: 'rgba(242,237,227,.42)' }}
-                >
-                  {c.id === 'base'
-                    ? 'Tudo entra e sai como está lançado.'
-                    : c.id === 'conservador'
-                      ? '30% dos recebimentos previstos não entram no prazo.'
-                      : '20% das saídas previstas são adiadas para depois do horizonte.'}
-                </span>
-                <span style={{ display: 'flex', gap: 14 }}>
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <Etiqueta>Menor saldo em</Etiqueta>
-                    <Num tamanho={11} peso={400}>
-                      {c.projecao.menorSaldoEm ? diaCurtoPt(c.projecao.menorSaldoEm) : '—'}
-                    </Num>
+                <span />
+                {cenarios.map((c) => (
+                  <span key={c.id} style={{ justifySelf: 'center' }}>
+                    <Chip tom={c.tom}>{c.rotulo}</Chip>
                   </span>
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <Etiqueta>Saldo final</Etiqueta>
-                    <Num tamanho={11} peso={400} tom={c.projecao.saldoFinal < 0 ? 'erro' : undefined}>
-                      {brl(c.projecao.saldoFinal)}
-                    </Num>
-                  </span>
-                </span>
+                ))}
               </div>
-            ))}
+
+              {(
+                [
+                  {
+                    rotulo: 'Menor saldo',
+                    celula: (c: (typeof cenarios)[number]) => (
+                      <Num tamanho={11.5} tom={c.r.menorSaldo < 0 ? 'erro' : 'ok'}>
+                        {brl(c.r.menorSaldo)}
+                      </Num>
+                    ),
+                  },
+                  {
+                    rotulo: 'Data do menor saldo',
+                    celula: (c: (typeof cenarios)[number]) => (
+                      <Num tamanho={11} peso={400} tom="neutro">
+                        {c.r.menorSaldoEm ? diaCurtoPt(c.r.menorSaldoEm) : '—'}
+                      </Num>
+                    ),
+                  },
+                  {
+                    rotulo: 'Cobertura de caixa',
+                    celula: (c: (typeof cenarios)[number]) => {
+                      const cob = coberturaDeCaixa(saldoHoje, c.r.saidasTotais, p.dias.length)
+                      return (
+                        <Num tamanho={11} peso={400} tom="neutro">
+                          {cob === null ? '—' : `${cob} dias`}
+                        </Num>
+                      )
+                    },
+                  },
+                  {
+                    rotulo: 'Saldo final do período',
+                    celula: (c: (typeof cenarios)[number]) => (
+                      <Num tamanho={11.5} tom={c.r.saldoFinal < 0 ? 'erro' : undefined}>
+                        {brl(c.r.saldoFinal)}
+                      </Num>
+                    ),
+                  },
+                ] as const
+              ).map((linha) => (
+                <div
+                  key={linha.rotulo}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(0,1.2fr) repeat(3, minmax(0,1fr))',
+                    gap: 8,
+                    alignItems: 'center',
+                    padding: '8px 0',
+                    borderBottom: '1px solid rgba(255,255,255,.04)',
+                  }}
+                >
+                  <span className="font-sans" style={{ fontSize: 11, color: 'rgba(242,237,227,.55)' }}>
+                    {linha.rotulo}
+                  </span>
+                  {cenarios.map((c) => (
+                    <span key={c.id} style={{ justifySelf: 'center', textAlign: 'center' }}>
+                      {linha.celula(c)}
+                    </span>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <Pilha gap={4}>
+            {cenarios
+              .filter((c) => c.id !== 'base')
+              .map((c) => (
+                <span
+                  key={c.id}
+                  className="font-sans"
+                  style={{ fontSize: 10, lineHeight: 1.45, color: 'rgba(242,237,227,.38)' }}
+                >
+                  {`${c.rotulo}: ${c.hipotese.toLowerCase()}.`}
+                </span>
+              ))}
           </Pilha>
         </Painel>
 
-        <Painel
-          titulo="Fluxo por categoria"
-          icone="pizza"
-          nota="no horizonte"
-          acao={<AcaoPainel href="/financeiro/categorias">Ver categorias</AcaoPainel>}
-        >
-          {saidasCat.length + entradasCat.length > 0 ? (
-            <Pilha gap={14}>
-              {entradasCat.length > 0 && (
-                <Pilha gap={9}>
-                  <Etiqueta>Entradas</Etiqueta>
-                  <ListaBarras
-                    itens={entradasCat.map((c) => ({
-                      rotulo: c.categoria,
-                      valor: c.valor,
-                      texto: brl(c.valor),
-                      tom: 'ok' as TomUi,
-                    }))}
-                  />
-                </Pilha>
-              )}
-              {saidasCat.length > 0 && (
-                <Pilha gap={9}>
-                  <Etiqueta>Saídas</Etiqueta>
-                  <ListaBarras
-                    itens={saidasCat.map((c) => ({
-                      rotulo: c.categoria,
-                      valor: c.valor,
-                      texto: brl(c.valor),
-                      tom: 'erro' as TomUi,
-                    }))}
-                  />
-                </Pilha>
-              )}
-            </Pilha>
-          ) : (
-            <Vazio icone="pizza" texto="Nenhum movimento categorizado no horizonte." />
-          )}
-        </Painel>
-
-        <Painel titulo="Próximos dias" icone="calendario" nota="entradas, saídas e saldo do dia">
+        <Painel titulo="Calendário de compromissos" icone="calendario" nota="próximos dias">
           {proximosDias.length > 0 ? (
             <Pilha gap={9}>
               {proximosDias.map((d) => (
@@ -455,6 +481,106 @@ export default async function FluxoDeCaixa({
             <Vazio icone="calendario" texto="Nenhum dia previsto no horizonte." />
           )}
         </Painel>
+
+        <Painel
+          titulo="Fluxo por categoria"
+          icone="pizza"
+          nota="no horizonte"
+          acao={<AcaoPainel href="/financeiro/categorias">Ver todas</AcaoPainel>}
+        >
+          {saidasCat.length + entradasCat.length > 0 ? (
+            <Pilha gap={14}>
+              {entradasCat.length > 0 && (
+                <Pilha gap={9}>
+                  <Etiqueta>Entradas</Etiqueta>
+                  <ListaBarras
+                    itens={entradasCat.map((c) => ({
+                      rotulo: c.categoria,
+                      valor: c.valor,
+                      texto: brl(c.valor),
+                      tom: 'ok' as TomUi,
+                    }))}
+                  />
+                </Pilha>
+              )}
+              {saidasCat.length > 0 && (
+                <Pilha gap={9}>
+                  <Etiqueta>Saídas</Etiqueta>
+                  <ListaBarras
+                    itens={saidasCat.map((c) => ({
+                      rotulo: c.categoria,
+                      valor: c.valor,
+                      texto: brl(c.valor),
+                      tom: 'erro' as TomUi,
+                    }))}
+                  />
+                </Pilha>
+              )}
+            </Pilha>
+          ) : (
+            <Vazio icone="pizza" texto="Nenhum movimento categorizado no horizonte." />
+          )}
+        </Painel>
+
+        <Painel
+          titulo="O que mais altera a projeção"
+          icone="tendencia"
+          tom="ciano"
+          rodape={{
+            nota: 'Decomposição da projeção acima pelo peso de cada categoria — não é previsão nova.',
+          }}
+        >
+          {maioresImpactos.length > 0 ? (
+            <Pilha gap={0}>
+              {maioresImpactos.map((c, i) => (
+                <div
+                  key={c.categoria}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '10px 0',
+                    borderTop: '1px solid rgba(255,255,255,.05)',
+                  }}
+                >
+                  <span
+                    className="font-mono"
+                    style={{ fontSize: 11, fontWeight: 600, width: 14, color: 'rgba(242,237,227,.32)' }}
+                  >
+                    {i + 1}
+                  </span>
+                  <span style={{ color: c.tipo === 'entrada' ? TINTA.ok : TINTA.erro }}>
+                    <Ico n={c.tipo === 'entrada' ? 'tendencia' : 'queda'} tamanho={14} />
+                  </span>
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+                    <span
+                      className="font-sans"
+                      style={{
+                        fontSize: 11.5,
+                        color: 'rgba(242,237,227,.8)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {c.categoria}
+                    </span>
+                    <span className="font-sans" style={{ fontSize: 9.5, color: 'rgba(242,237,227,.36)' }}>
+                      {impactoTotal > 0
+                        ? `${((c.valor / impactoTotal) * 100).toFixed(1).replace('.', ',')}% do impacto`
+                        : '—'}
+                    </span>
+                  </span>
+                  <Num tamanho={11.5} tom={c.tipo === 'entrada' ? 'ok' : 'erro'}>
+                    {`${c.tipo === 'entrada' ? '+' : '−'} ${brl(c.valor)}`}
+                  </Num>
+                </div>
+              ))}
+            </Pilha>
+          ) : (
+            <Vazio icone="tendencia" texto="Nenhum movimento previsto para decompor." />
+          )}
+        </Painel>
       </Colunas>
 
       <Painel
@@ -490,10 +616,12 @@ function reprojetar(
   let acumulado = saldoInicial
   let menor = saldoInicial
   let menorEm: string | null = null
+  let saidasTotais = 0
 
   for (const d of dias) {
     const entradas = d.realizado ? d.entradas : d.entradas * fatores.fatorEntrada
     const saidas = d.realizado ? d.saidas : d.saidas * fatores.fatorSaida
+    saidasTotais += saidas
     acumulado = Math.round((acumulado + entradas - saidas) * 100) / 100
     if (acumulado < menor) {
       menor = acumulado
@@ -501,5 +629,5 @@ function reprojetar(
     }
   }
 
-  return { menorSaldo: menor, menorSaldoEm: menorEm, saldoFinal: acumulado }
+  return { menorSaldo: menor, menorSaldoEm: menorEm, saldoFinal: acumulado, saidasTotais }
 }

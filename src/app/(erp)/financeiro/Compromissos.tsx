@@ -2,6 +2,7 @@
 
 import { useState, useTransition, type ReactNode } from 'react'
 
+import { Ico, type NomeIcone } from '@/components/erp/IconesUi'
 import { Modal } from '@/components/erp/Modal'
 import { BotaoOuro, BotaoSecundario, Rotulo, TituloSecao } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
@@ -471,16 +472,23 @@ export function AcoesGerenciais({
   const encerrado = situacao === 'liquidado' || situacao === 'cancelado'
 
   return (
-    <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
+    <span style={{ display: 'inline-flex', gap: 5, justifyContent: 'flex-end' }}>
+      {/* Ícones como no mockup, com o rótulo no title/aria — três palavras
+          por linha viravam uma coluna de 180px só de botões. */}
       {!encerrado && (
-        <MiniBotao onClick={() => setAberto('baixa')} destaque>
-          Dar baixa
-        </MiniBotao>
+        <BotaoIcone
+          icone="check"
+          rotulo={lancamento.tipo === 'entrada' ? 'Registrar recebimento' : 'Dar baixa'}
+          destaque
+          onClick={() => setAberto('baixa')}
+        />
       )}
       {!encerrado && !lancamento.parcela && !lancamento.transferenciaId && (
-        <MiniBotao onClick={() => setAberto('parcelar')}>Parcelar</MiniBotao>
+        <BotaoIcone icone="calendario" rotulo="Parcelar" onClick={() => setAberto('parcelar')} />
       )}
-      {!encerrado && <MiniBotao onClick={() => setAberto('cancelar')}>Cancelar</MiniBotao>}
+      {!encerrado && (
+        <BotaoIcone icone="x" rotulo="Cancelar compromisso" onClick={() => setAberto('cancelar')} />
+      )}
       {encerrado && (
         <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>
           {situacao === 'cancelado' ? 'cancelado' : lancamento.baixadoEm ?? 'liquidado'}
@@ -497,6 +505,41 @@ export function AcoesGerenciais({
         <DialogoCancelar lancamento={lancamento} aoFechar={() => setAberto(null)} />
       )}
     </span>
+  )
+}
+
+function BotaoIcone({
+  icone,
+  rotulo,
+  onClick,
+  destaque,
+}: {
+  icone: NomeIcone
+  rotulo: string
+  onClick: () => void
+  destaque?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={rotulo}
+      aria-label={rotulo}
+      className="hover:border-ouro/45 hover:text-ouro"
+      style={{
+        width: 28,
+        height: 28,
+        display: 'grid',
+        placeItems: 'center',
+        border: `1px solid ${destaque ? 'rgba(233,197,131,.34)' : 'rgba(255,255,255,.1)'}`,
+        background: destaque ? 'rgba(233,197,131,.08)' : 'transparent',
+        color: destaque ? '#E9C583' : 'rgba(242,237,227,.55)',
+        borderRadius: 8,
+        cursor: 'pointer',
+      }}
+    >
+      <Ico n={icone} tamanho={13} />
+    </button>
   )
 }
 

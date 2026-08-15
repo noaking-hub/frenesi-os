@@ -86,13 +86,14 @@ export function BarrasEixo({
 
   const saldos = dados.map((d) => d.saldo ?? 0)
   const temSaldo = dados.some((d) => d.saldo !== undefined)
-  const saldoMin = Math.min(0, ...saldos)
-  const saldoMax = Math.max(1, ...saldos)
-  const ySaldo = (v: number) =>
-    margemTopo + util - ((v - saldoMin) / (saldoMax - saldoMin || 1)) * util
+  // A linha do saldo COMPARTILHA o zero com as barras: com escala própria,
+  // um saldo positivo podia cruzar abaixo do eixo R$ 0 e a tela afirmaria
+  // um vermelho que não existe.
+  const saldoAbs = Math.max(1, ...saldos.map(Math.abs))
+  const ySaldo = (v: number) => meio - (v / saldoAbs) * (util / 2)
 
   const fatia = larguraUtil / dados.length
-  const largura = Math.min(fatia * 0.3, 14)
+  const largura = Math.min(fatia * 0.42, 26)
   const cx = (i: number) => margemEsq + (i + 0.5) * fatia
 
   // Régua: zero, ±passo, ±2·passo… até o teto. Rótulos de dois em dois quando
@@ -177,6 +178,9 @@ export function BarrasEixo({
         const hS = escala(d.saida)
         return (
           <g key={`${d.rotulo}-${i}`}>
+            {/* Previsto é sólido com opacidade menor — barra vazada lê como
+                dado faltando, não como futuro. O divisor vertical já separa
+                fato de previsão. */}
             {d.entrada > 0 && (
               <rect
                 x={x}
@@ -184,10 +188,8 @@ export function BarrasEixo({
                 width={largura}
                 height={hE}
                 rx="3"
-                fill={d.previsto ? 'none' : VERDE}
-                stroke={VERDE}
-                strokeWidth={d.previsto ? 1.2 : 0}
-                opacity={d.previsto ? 0.75 : 0.92}
+                fill={VERDE}
+                opacity={d.previsto ? 0.55 : 0.92}
               />
             )}
             {d.saida > 0 && (
@@ -197,10 +199,8 @@ export function BarrasEixo({
                 width={largura}
                 height={hS}
                 rx="3"
-                fill={d.previsto ? 'none' : VERMELHO}
-                stroke={VERMELHO}
-                strokeWidth={d.previsto ? 1.2 : 0}
-                opacity={d.previsto ? 0.75 : 0.92}
+                fill={VERMELHO}
+                opacity={d.previsto ? 0.55 : 0.92}
               />
             )}
           </g>

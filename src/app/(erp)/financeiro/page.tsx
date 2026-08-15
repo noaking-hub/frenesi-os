@@ -2,7 +2,7 @@ import Link from 'next/link'
 
 import {
   AcaoPainel,
-  Bolinha,
+  BotaoLinha,
   Celula,
   Chip,
   Colunas,
@@ -19,12 +19,14 @@ import {
   Painel,
   Pilha,
   Pilula,
+  Segmentado,
   TINTA,
   TabelaUi,
   Vazio,
   type ColunaUi,
   type TomUi,
 } from '@/components/erp/ui'
+import { TileMarca, iconeDaCategoria } from '@/components/erp/Marcas'
 import { BarrasEixo, CORES_SERIE, Legenda, RoscaLegenda } from '@/components/erp/Visualizacoes'
 import { carregarVisaoFinanceira } from '@/data/financeiro'
 import { brl, competenciaPorExtenso, diaCurtoPt, plural } from '@/domain'
@@ -48,7 +50,15 @@ const TOM_ALERTA: Record<AlertaFinanceiro['severidade'], TomUi> = {
   informativo: 'info',
 }
 
-export default async function DashboardFinanceiro() {
+export default async function DashboardFinanceiro({
+  searchParams,
+}: {
+  searchParams: Promise<{ fluxo?: string }>
+}) {
+  const { fluxo } = await searchParams
+  // O mockup abre em 7 dias: horizonte curto o bastante para cada barra ter
+  // nome, com 30 e 90 a um clique para quem procura o vale.
+  const horizonte = ['7', '30', '90'].includes(fluxo ?? '') ? Number(fluxo) : 7
   const v = await carregarVisaoFinanceira()
 
   if (v.semBanco) {
@@ -73,9 +83,7 @@ export default async function DashboardFinanceiro() {
   const totalSaidas = v.saidasPorCategoria.reduce((a, c) => a + c.valor, 0)
   const risco = v.projecao.menorSaldo < 0
 
-  // 21 dias: o suficiente para o vale aparecer sem espremer as barras a ponto
-  // de virarem uma faixa contínua.
-  const barras = v.projecao.dias.slice(0, 21).map((d) => ({
+  const barras = v.projecao.dias.slice(0, horizonte).map((d) => ({
     rotulo: diaCurtoPt(d.dia),
     entrada: d.entradas,
     saida: d.saidas,
@@ -104,7 +112,11 @@ export default async function DashboardFinanceiro() {
             <Comparacao texto="competência de" alvo={competenciaPorExtenso(v.competencia)} />
           </>
         }
-        direita={<AcaoPainel href="/financeiro/configuracoes">Configurações financeiras</AcaoPainel>}
+        direita={
+          <BotaoLinha href="/financeiro/configuracoes" icone="ajustes">
+            Personalizar dashboard
+          </BotaoLinha>
+        }
       />
 
       <GradeIndicadores>
@@ -182,11 +194,21 @@ export default async function DashboardFinanceiro() {
         <Painel
           titulo="Fluxo de caixa projetado"
           icone="barras"
-          nota="Próximos 21 dias"
-          acao={<AcaoPainel href="/financeiro/fluxo-de-caixa">Ver fluxo de caixa</AcaoPainel>}
+          acao={
+            <Segmentado
+              opcoes={[
+                { id: '7', rotulo: '7 dias' },
+                { id: '30', rotulo: '30 dias' },
+                { id: '90', rotulo: '90 dias' },
+              ]}
+              ativo={String(horizonte)}
+              base="/financeiro"
+              chave="fluxo"
+            />
+          }
           rodape={{
             nota: 'Projeção baseada em lançamentos confirmados e contas a pagar/receber futuras.',
-            link: { href: '/financeiro/fluxo-de-caixa', texto: 'Ver fluxo completo' },
+            link: { href: '/financeiro/fluxo-de-caixa', texto: 'Ver fluxo de caixa' },
           }}
         >
           <Legenda
@@ -380,7 +402,7 @@ export default async function DashboardFinanceiro() {
         nota="O saldo mostra de onde veio: integração, informado ou calculado"
         acao={<AcaoPainel href="/financeiro/contas">Ver todas as contas e caixas</AcaoPainel>}
         rodape={{
-          nota: 'Contas conectadas têm o saldo lido pela integração; as demais dependem do extrato.',
+          nota: 'Os saldos são atualizados automaticamente via integração bancária; contas sem integração dependem do extrato ou do saldo informado.',
         }}
       >
         {v.contas.length > 0 ? (
@@ -407,29 +429,27 @@ export default async function DashboardFinanceiro() {
                   textDecoration: 'none',
                 }}
               >
-                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Bolinha
-                    cor={c.cor ?? ['#E9C583', '#5FC084', '#7FA9D8', '#B996E0'][i % 4]}
-                    tamanho={9}
-                  />
-                  <span
-                    className="font-sans"
-                    style={{
-                      flex: 1,
-                      fontSize: 12,
-                      fontWeight: 600,
-                      color: 'rgba(242,237,227,.9)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {c.nome}
+                <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <TileMarca nome={`${c.nome} ${c.banco}`} tamanho={34} />
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
+                    <span
+                      className="font-sans"
+                      style={{
+                        fontSize: 12.5,
+                        fontWeight: 600,
+                        color: 'rgba(242,237,227,.92)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {c.nome}
+                    </span>
+                    <span className="font-sans" style={{ fontSize: 10, color: 'rgba(242,237,227,.38)' }}>
+                      {c.tipo}
+                    </span>
                   </span>
                   {c.principal && <Chip tom="ouro">Padrão</Chip>}
-                </span>
-                <span className="font-sans" style={{ fontSize: 10, color: 'rgba(242,237,227,.38)' }}>
-                  {c.tipo}
                 </span>
                 <Num tamanho={17} peso={500} tom={c.saldoDisponivel < 0 ? 'erro' : undefined}>
                   {brl(c.saldoDisponivel)}
@@ -441,6 +461,28 @@ export default async function DashboardFinanceiro() {
                 </span>
               </Link>
             ))}
+            <Link
+              href="/financeiro/contas"
+              className="hover:border-ouro/40 hover:text-ouro"
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                padding: '13px 14px',
+                border: '1px dashed rgba(255,255,255,.16)',
+                borderRadius: 12,
+                color: 'rgba(242,237,227,.45)',
+                textDecoration: 'none',
+                minHeight: 110,
+              }}
+            >
+              <Ico n="mais" tamanho={17} />
+              <span className="font-sans" style={{ fontSize: 11.5, fontWeight: 600 }}>
+                Adicionar conta ou carteira
+              </span>
+            </Link>
           </div>
         ) : (
           <Vazio icone="banco" texto="Nenhuma conta cadastrada." />
@@ -475,7 +517,27 @@ function ListaDeTitulos({
       chave: 'desc',
       titulo: 'Descrição',
       largura: 'minmax(0,1fr)',
-      render: (l) => <Celula principal={l.descricao} secundaria={l.categoria} />,
+      render: (l) => <Celula principal={l.descricao} secundaria={l.favorecido ?? l.conta} />,
+    },
+    {
+      chave: 'cat',
+      titulo: 'Categoria',
+      largura: '124px',
+      render: (l) => (
+        <Chip tom="neutro" contorno>
+          <Ico n={iconeDaCategoria(l.categoria)} tamanho={11} />
+          <span
+            style={{
+              maxWidth: 88,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {l.categoria}
+          </span>
+        </Chip>
+      ),
     },
     {
       chave: 'valor',
@@ -497,7 +559,7 @@ function ListaDeTitulos({
       colunas={colunas}
       itens={itens}
       chaveDe={(l) => l.id}
-      larguraMinima={300}
+      larguraMinima={380}
       vazio={<Vazio icone="check-circulo" texto={vazio} />}
       rodape={
         itens.length > 0 ? (
