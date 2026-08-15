@@ -226,6 +226,22 @@ export async function POST(req: Request) {
     relatorio.mercadopago = { pulado: 'MERCADOPAGO_ACCESS_TOKEN não está definido' }
   }
 
+  // O extrato vira CAIXA aqui. Sem esta etapa o dinheiro do gateway movia o
+  // saldo da conta mas não existia como lançamento — e o gráfico de recebido,
+  // a DRE por caixa e o fluxo, que leem lançamento, mostravam zero num mês em
+  // que entraram centenas de vendas.
+  try {
+    const { data, error } = await supabaseServer().rpc('converter_extrato_em_caixa')
+    if (error) throw error
+    const linha = Array.isArray(data) ? data[0] : data
+    relatorio.extratoEmCaixa = {
+      criados: linha?.criados ?? 0,
+      total: linha?.total_convertidos ?? 0,
+    }
+  } catch (e) {
+    relatorio.extratoEmCaixa = { erro: mensagemDe(e) }
+  }
+
 
   // A baixa de estoque vem depois da importação da Yampi, que é quem acabou
   // de trazer os faturamentos novos. Antes dela, os pedidos faturados nesta

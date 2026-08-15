@@ -841,10 +841,17 @@ export async function carregarVisaoFinanceira(): Promise<VisaoFinanceira> {
       sb.rpc('dre_gerencial', { p_competencia: competencia }),
       sb.rpc('fluxo_de_caixa', { p_de: hoje, p_ate: iso(90) }),
       carregarConciliacao(),
+      // Linhas do extrato que ainda não viraram caixa. A versão anterior
+      // consultava uma coluna `categoria` que não existe nesta tabela: o
+      // banco respondia 400, o erro era descartado junto com o resultado e o
+      // indicador aparecia zerado — um número errado em silêncio, que é pior
+      // do que número nenhum.
       sb
         .from('extrato_linhas')
-        .select('id', { count: 'exact', head: true })
-        .is('categoria', null),
+        .select('chave', { count: 'exact', head: true })
+        .is('lancamento_id', null)
+        .eq('ignorado', false)
+        .eq('interno', false),
     ])
 
   const caixaHoje = contas.reduce((a, c) => a + c.saldoDisponivel, 0)
