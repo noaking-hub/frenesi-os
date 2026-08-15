@@ -8,6 +8,7 @@ import {
   lerContas,
 } from '@/data/financeiro'
 import { carregarEstoque } from '@/data/consultas'
+import { carregarPrioridades } from './prioridades'
 import { lerExtrato } from '@/data/extrato'
 import { brl } from '@/domain'
 
@@ -257,6 +258,32 @@ export const FERRAMENTAS: Ferramenta[] = [
           cobertura: c.cobertura,
           criticidade: c.criticidade,
           custoPorMl: c.base.custoPorMl,
+        })),
+      }
+    },
+  },
+  {
+    nome: 'prioridades_do_dia',
+    descricao:
+      'A fila do que exige decisão agora, JÁ ORDENADA por severidade pelo ERP: caixa que ' +
+      'negativa, contas vencidas, vendas sem crédito fora do prazo, base zerada ou acabando, ' +
+      'queda de faturamento e lançamentos sem categoria. Use esta ferramenta quando ' +
+      'perguntarem o que fazer, o que está pegando ou como está a operação hoje. NÃO ' +
+      'reordene a fila nem invente urgência: a ordem é a resposta.',
+    parametros: { type: 'object', properties: {} },
+    risco: 'leitura',
+    executar: async () => {
+      const f = await carregarPrioridades()
+      return {
+        resumo: f.resumo,
+        // A ordem do array É a prioridade — calculada por regra fixa, não por
+        // julgamento. Cada item já vem com o número e onde se resolve.
+        itens: f.itens.map((p) => ({
+          severidade: p.severidade,
+          titulo: p.titulo,
+          detalhe: p.detalhe,
+          ondeResolver: p.href,
+          valorEmJogo: p.valor,
         })),
       }
     },

@@ -2,7 +2,10 @@ import { assessorConfigurado } from '@/data/assessor/motor'
 import { conversaDoUsuario, lerMensagens, listarConversas } from '@/data/assessor/conversas'
 import { sessaoAtual } from '@/data/sessao'
 
+import { carregarPrioridades } from '@/data/assessor/prioridades'
+
 import { Conversa, type MensagemNaTela } from './Conversa'
+import { Fila } from './Fila'
 
 /**
  * Meu Assessor — Fase 1.
@@ -24,7 +27,9 @@ export default async function TelaDoAssessor({
   const usuario = await sessaoAtual()
   const usuarioId = usuario?.id ?? null
 
-  const conversas = await listarConversas(usuarioId)
+  // A fila é buscada junto com a lista: ela não depende de pergunta nenhuma,
+  // e o custo de esperá-la em série seria pago na abertura da tela.
+  const [conversas, fila] = await Promise.all([listarConversas(usuarioId), carregarPrioridades()])
 
   // Conversa pedida pela URL só abre se for de quem está pedindo — o id vem do
   // navegador, e o histórico do Assessor tem os números da operação inteira.
@@ -39,16 +44,19 @@ export default async function TelaDoAssessor({
     : []
 
   return (
-    <Conversa
-      key={id ?? 'nova'}
-      conversaId={id}
-      inicial={mensagens}
-      conversas={conversas.map((x) => ({
-        id: x.id,
-        titulo: x.titulo,
-        atualizadaEm: x.atualizadaEm,
-      }))}
-      configurado={assessorConfigurado()}
-    />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+      <Fila itens={fila.itens} resumo={fila.resumo} />
+      <Conversa
+        key={id ?? 'nova'}
+        conversaId={id}
+        inicial={mensagens}
+        conversas={conversas.map((x) => ({
+          id: x.id,
+          titulo: x.titulo,
+          atualizadaEm: x.atualizadaEm,
+        }))}
+        configurado={assessorConfigurado()}
+      />
+    </div>
   )
 }

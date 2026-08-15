@@ -96,6 +96,7 @@ export const ROTULO_DA_FERRAMENTA: Record<string, string> = {
   lancamentos_pendentes: 'Lançamentos pendentes',
   conciliacao_pendente: 'Conciliação pendente',
   estoque_e_cobertura: 'Estoque e cobertura',
+  prioridades_do_dia: 'Prioridades do dia',
   extrato_recente: 'Extrato recente',
 }
 

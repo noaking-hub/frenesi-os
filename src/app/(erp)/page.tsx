@@ -328,26 +328,26 @@ export default async function Dashboard({
           }
           acao={<AcaoPainel href="/relatorios">Ver relatório completo</AcaoPainel>}
           rodape={{
-            nota: 'Faturado: pedidos pagos, sem cancelados. Recebido líquido: baixas de entrada no caixa, já sem tarifas e sem transferências entre contas.',
+            nota: 'As duas linhas medem coisas diferentes e só fecham no acumulado. VENDIDO NO DIA é o valor bruto dos pedidos pagos, pela data da venda. ENTROU NO CAIXA NO DIA é o dinheiro que caiu na conta naquele dia, já sem as tarifas do intermediador — venda de segunda pode cair na quarta, e cartão parcelado leva até 30 dias.',
           }}
         >
           {p.serieDiaria.some((d) => d.faturamento > 0 || d.recebido > 0) ? (
             <Pilha gap={10}>
               <Legenda
                 itens={[
-                  { cor: CORES_SERIE.saldo, rotulo: 'Faturado (pedidos pagos)' },
-                  { cor: CORES_SERIE.entrada, rotulo: 'Recebido líquido (caixa)' },
+                  { cor: CORES_SERIE.saldo, rotulo: 'Vendido no dia (bruto)' },
+                  { cor: CORES_SERIE.entrada, rotulo: 'Entrou no caixa no dia (líquido)' },
                 ]}
               />
               <SerieLinhas
                 series={[
                   {
-                    rotulo: 'Faturado',
+                    rotulo: 'Vendido no dia',
                     cor: CORES_SERIE.saldo,
                     valores: p.serieDiaria.map((d) => d.faturamento),
                   },
                   {
-                    rotulo: 'Recebido líquido',
+                    rotulo: 'Entrou no caixa no dia',
                     cor: CORES_SERIE.entrada,
                     valores: p.serieDiaria.map((d) => d.recebido),
                   },
