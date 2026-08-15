@@ -63,12 +63,19 @@ export const NAV: GrupoNav[] = [
     id: 'financeiro',
     label: 'Financeiro',
     telas: [
+      // A landing do módulo é a Visão Financeira, não a lista de lançamentos:
+      // quem abre o Financeiro quer saber quanto tem, quanto vai ter e o que
+      // exige decisão hoje. Uma lista cronológica não responde nenhuma das três.
+      { id: 'visao', label: 'Visão Financeira', href: '/financeiro', pronta: true },
       { id: 'lancamentos', label: 'Lançamentos', href: '/financeiro/lancamentos', pronta: true },
-      { id: 'contas', label: 'Contas', href: '/financeiro/contas', pronta: true },
+      { id: 'contas', label: 'Contas e caixas', href: '/financeiro/contas', pronta: true },
       { id: 'extrato', label: 'Extrato', href: '/financeiro/extrato', pronta: true },
-      { id: 'conciliacao', label: 'Conciliação', href: '/financeiro', pronta: true },
+      { id: 'conciliacao', label: 'Conciliação', href: '/financeiro/conciliacao', pronta: true },
+      { id: 'fluxo', label: 'Fluxo de caixa', href: '/financeiro/fluxo-de-caixa', pronta: true },
+      { id: 'dre', label: 'DRE gerencial', href: '/financeiro/dre', pronta: true },
       { id: 'categorias', label: 'Categorias', href: '/financeiro/categorias', pronta: true },
       { id: 'contabil', label: 'Integração contábil', href: '/financeiro/contabil', pronta: true },
+      { id: 'cfgfin', label: 'Configurações', href: '/financeiro/configuracoes', pronta: true },
     ],
   },
   {

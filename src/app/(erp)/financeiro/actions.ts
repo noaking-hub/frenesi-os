@@ -4,9 +4,17 @@ import { revalidatePath } from 'next/cache'
 
 import { OPERADOR } from '@/data/operador'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
-import type { NaturezaCategoria } from '@/domain'
 
 export type Resposta<T = object> = ({ ok: true } & T) | { ok: false; erro: string }
+
+/**
+ * Ações da Conciliação.
+ *
+ * O restante do Financeiro migrou para `acoes-gerenciais.ts`, que fala o
+ * vocabulário novo — natureza, competência, transferência, parcela. Só o que
+ * é específico de repasse continua aqui: conciliar um crédito não passa por
+ * nenhum desses conceitos, e movê-lo junto só embaralharia os dois assuntos.
+ */
 
 function falha(e: { message?: string; details?: string }, padrao: string) {
   return { ok: false as const, erro: e.message || e.details || padrao }
@@ -16,357 +24,6 @@ function exigeSupabase(acao: string) {
   return supabaseConfigurado()
     ? null
     : { ok: false as const, erro: `O Supabase precisa estar configurado para ${acao}.` }
-}
-
-export interface NovoLancamento {
-  descricao: string
-  categoria: string
-  contaId: string
-  tipo: 'entrada' | 'saida'
-  valor: number
-  ocorridoEm: string
-  venceEm: string
-  baixado: boolean
-  recorrente: boolean
-  /** Quanto já entrou. Null usa `baixado` como atalho para tudo ou nada. */
-  recebido?: number | null
-  /** mensal, semanal… Null é lançamento único. */
-  recorrencia?: string | null
-  recorrenciaAte?: string | null
-}
-
-/**
- * Cria um lançamento.
- *
- * `baixado` decide o que a tela mostra depois: com baixa é realizado e entra
- * no saldo da conta; sem baixa é previsão e fica na fila.
- */
-export async function criarLancamento(
-  dados: NovoLancamento,
-): Promise<Resposta<{ id: string; criadas: number }>> {
-  const bloqueio = exigeSupabase('criar lançamentos')
-  if (bloqueio) return bloqueio
-  if (!dados.descricao.trim()) return { ok: false, erro: 'Informe a descrição.' }
-  if (!(dados.valor > 0)) return { ok: false, erro: 'O valor deve ser maior que zero.' }
-
-  const { data, error } = await supabaseServer().rpc('registrar_lancamento', {
-    p_descricao: dados.descricao,
-    p_categoria: dados.categoria,
-    p_conta_id: dados.contaId,
-    p_tipo: dados.tipo,
-    p_valor: dados.valor,
-    p_ocorrido_em: dados.ocorridoEm || null,
-    p_vence_em: dados.venceEm || null,
-    p_baixado: dados.baixado,
-    p_recorrente: dados.recorrente,
-    p_origem: 'Manual',
-    p_operador: OPERADOR,
-    p_recebido: dados.recebido ?? null,
-    p_recorrencia: dados.recorrencia || null,
-    p_recorrencia_ate: dados.recorrenciaAte || null,
-  })
-  if (error) {
-    console.error('[financeiro] registrar_lancamento falhou:', error)
-    return falha(error, 'Falha ao criar o lançamento.')
-  }
-
-  const r = (data ?? {}) as { id?: string; criadas?: number }
-  revalidatePath('/', 'layout')
-  return { ok: true, id: String(r.id ?? ''), criadas: Number(r.criadas ?? 1) }
-}
-
-/**
- * Edita o lançamento. Com `serie`, alcança as ocorrências FUTURAS.
- *
- * Nunca as passadas: reescrever o aluguel de março porque o de setembro
- * reajustou mudaria um fato já ocorrido, e o DRE de março passaria a
- * discordar do que foi pago.
- */
-export async function editarLancamento(
-  id: string,
-  dados: Omit<NovoLancamento, 'baixado' | 'recorrente'> & { serie: boolean },
-): Promise<Resposta<{ alterados: number }>> {
-  const bloqueio = exigeSupabase('editar lançamentos')
-  if (bloqueio) return bloqueio
-  if (!dados.descricao.trim()) return { ok: false, erro: 'Informe a descrição.' }
-  if (!(dados.valor > 0)) return { ok: false, erro: 'O valor deve ser maior que zero.' }
-
-  const { data, error } = await supabaseServer().rpc('editar_lancamento', {
-    p_id: id,
-    p_descricao: dados.descricao,
-    p_categoria: dados.categoria,
-    p_conta_id: dados.contaId,
-    p_tipo: dados.tipo,
-    p_valor: dados.valor,
-    p_ocorrido_em: dados.ocorridoEm || null,
-    p_vence_em: dados.venceEm || null,
-    p_serie: dados.serie,
-  })
-  if (error) {
-    console.error('[financeiro] editar_lancamento falhou:', error)
-    return falha(error, 'Falha ao salvar o lançamento.')
-  }
-
-  revalidatePath('/', 'layout')
-  return { ok: true, alterados: Number(data ?? 1) }
-}
-
-/**
- * Registra quanto entrou ou saiu de fato — podendo ser menos que o total.
- *
- * É o que faltava para a venda parcelada: em vez de três lançamentos soltos
- * que o ERP não sabe serem a mesma venda, um lançamento com o combinado e o
- * recebido caminhando até se encontrarem.
- */
-export async function registrarRecebimento(
-  id: string,
-  valor: number,
-  quando: string,
-): Promise<Resposta<{ recebido: number; falta: number; quitado: boolean }>> {
-  const bloqueio = exigeSupabase('registrar recebimentos')
-  if (bloqueio) return bloqueio
-  if (!(valor > 0)) return { ok: false, erro: 'Informe quanto entrou.' }
-
-  const { data, error } = await supabaseServer().rpc('registrar_recebimento', {
-    p_id: id,
-    p_valor: valor,
-    p_quando: quando || null,
-    p_operador: OPERADOR,
-  })
-  if (error) {
-    console.error('[financeiro] registrar_recebimento falhou:', error)
-    return falha(error, 'Falha ao registrar o recebimento.')
-  }
-
-  const r = (data ?? {}) as { recebido?: number; falta?: number; quitado?: boolean }
-  revalidatePath('/', 'layout')
-  return {
-    ok: true,
-    recebido: Number(r.recebido ?? 0),
-    falta: Number(r.falta ?? 0),
-    quitado: Boolean(r.quitado),
-  }
-}
-
-/** Zera os recebimentos e devolve o lançamento para em aberto. */
-export async function estornarRecebimento(id: string): Promise<Resposta> {
-  const bloqueio = exigeSupabase('estornar recebimentos')
-  if (bloqueio) return bloqueio
-
-  const { error } = await supabaseServer().rpc('estornar_recebimento', { p_id: id })
-  if (error) {
-    console.error('[financeiro] estornar_recebimento falhou:', error)
-    return falha(error, 'Falha ao estornar.')
-  }
-  revalidatePath('/', 'layout')
-  return { ok: true }
-}
-
-/** Apaga o lançamento. A linha do extrato que o originou volta para a fila. */
-export async function excluirLancamento(
-  id: string,
-  serie: boolean,
-): Promise<Resposta<{ apagados: number }>> {
-  const bloqueio = exigeSupabase('excluir lançamentos')
-  if (bloqueio) return bloqueio
-
-  const { data, error } = await supabaseServer().rpc('excluir_lancamento', {
-    p_id: id,
-    p_serie: serie,
-  })
-  if (error) {
-    console.error('[financeiro] excluir_lancamento falhou:', error)
-    return falha(error, 'Falha ao excluir o lançamento.')
-  }
-
-  revalidatePath('/', 'layout')
-  return { ok: true, apagados: Number(data ?? 1) }
-}
-
-/** Dar baixa é reconhecer que o dinheiro entrou ou saiu de fato. */
-export async function darBaixa(id: string): Promise<Resposta> {
-  const bloqueio = exigeSupabase('dar baixa')
-  if (bloqueio) return bloqueio
-
-  const { error } = await supabaseServer().rpc('baixar_lancamento', {
-    p_id: id,
-    p_quando: null,
-    p_operador: OPERADOR,
-  })
-  if (error) {
-    console.error('[financeiro] baixar_lancamento falhou:', error)
-    return falha(error, 'Falha ao dar baixa.')
-  }
-
-  revalidatePath('/', 'layout')
-  return { ok: true }
-}
-
-/** Cria uma conta do caixa. O saldo não é informado: ele vem dos lançamentos. */
-export async function criarConta(dados: {
-  nome: string
-  tipo: string
-  banco: string
-  uso: string
-  principal: boolean
-}): Promise<Resposta> {
-  const bloqueio = exigeSupabase('criar contas')
-  if (bloqueio) return bloqueio
-  if (!dados.nome.trim()) return { ok: false, erro: 'Informe o nome da conta.' }
-  if (!dados.banco.trim()) return { ok: false, erro: 'Informe o banco.' }
-
-  const id = dados.nome
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 40)
-  if (!id) return { ok: false, erro: 'O nome não forma um identificador válido.' }
-
-  const sb = supabaseServer()
-  // Só pode haver uma conta principal: duas fariam o Dashboard escolher uma
-  // ao acaso para mostrar como padrão.
-  if (dados.principal) {
-    const { error } = await sb
-      .from('contas_bancarias')
-      .update({ principal: false })
-      .eq('principal', true)
-    if (error) return falha(error, 'Falha ao trocar a conta principal.')
-  }
-
-  const { error } = await sb.from('contas_bancarias').insert({
-    id,
-    nome: dados.nome.trim(),
-    tipo: dados.tipo.trim() || 'Conta corrente',
-    banco: dados.banco.trim(),
-    uso: dados.uso.trim(),
-    principal: dados.principal,
-  })
-  if (error) {
-    console.error('[financeiro] criar conta falhou:', error)
-    if (error.code === '23505') return { ok: false, erro: 'Já existe uma conta com esse nome.' }
-    return falha(error, 'Falha ao criar a conta.')
-  }
-
-  revalidatePath('/', 'layout')
-  return { ok: true }
-}
-
-/**
- * Edita a conta: nome, banco, tipo, uso, principal e o saldo informado.
- *
- * O saldo informado é o campo que faltava. Nem toda conta entrega saldo por
- * API — a do Mercado Pago responde 403 nesse caminho —, e sem um lugar para
- * digitar o saldo real o ERP fica preso ao que conseguiu somar do extrato,
- * que é sempre uma aproximação do dia em que se leu. Digitar o número que
- * está no app é mais honesto que exibir a soma como se fosse o saldo.
- */
-export async function editarConta(
-  id: string,
-  dados: {
-    nome: string
-    tipo: string
-    banco: string
-    uso: string
-    principal: boolean
-    /** Null apaga o saldo informado e devolve o comando ao extrato. */
-    saldoInformado: number | null
-  },
-): Promise<Resposta> {
-  const bloqueio = exigeSupabase('editar contas')
-  if (bloqueio) return bloqueio
-  if (!dados.nome.trim()) return { ok: false, erro: 'Informe o nome da conta.' }
-
-  const sb = supabaseServer()
-  if (dados.principal) {
-    const { error } = await sb
-      .from('contas_bancarias')
-      .update({ principal: false })
-      .eq('principal', true)
-      .neq('id', id)
-    if (error) return falha(error, 'Falha ao trocar a conta principal.')
-  }
-
-  const { error } = await sb
-    .from('contas_bancarias')
-    .update({
-      nome: dados.nome.trim(),
-      tipo: dados.tipo.trim() || 'Conta corrente',
-      banco: dados.banco.trim(),
-      uso: dados.uso.trim(),
-      principal: dados.principal,
-      saldo_informado: dados.saldoInformado,
-      // Sem a data, um saldo digitado em julho tem a mesma cara de um digitado
-      // hoje — e o de julho está errado hoje.
-      saldo_informado_em: dados.saldoInformado === null ? null : new Date().toISOString(),
-    })
-    .eq('id', id)
-  if (error) {
-    console.error('[financeiro] editar conta falhou:', error)
-    return falha(error, 'Falha ao salvar a conta.')
-  }
-
-  revalidatePath('/', 'layout')
-  return { ok: true }
-}
-
-/**
- * Remove a conta, desde que ela esteja vazia.
- *
- * Apagar uma conta com extrato ou lançamento levaria junto o histórico que
- * sustenta o DRE, e nada disso seria reconstruível. Por isso a recusa é
- * explícita e diz quantos registros existem: quem quer mesmo remover sabe o
- * que precisa mover antes.
- */
-export async function removerConta(id: string): Promise<Resposta> {
-  const bloqueio = exigeSupabase('remover contas')
-  if (bloqueio) return bloqueio
-
-  const sb = supabaseServer()
-  const [extrato, lancamentos] = await Promise.all([
-    sb.from('extrato_linhas').select('chave', { count: 'exact', head: true }).eq('conta_id', id),
-    sb.from('lancamentos').select('id', { count: 'exact', head: true }).eq('conta_id', id),
-  ])
-
-  const presos = (extrato.count ?? 0) + (lancamentos.count ?? 0)
-  if (presos > 0) {
-    return {
-      ok: false,
-      erro: `Esta conta tem ${extrato.count ?? 0} linha(s) de extrato e ${lancamentos.count ?? 0} lançamento(s). Apagá-la levaria esse histórico junto — mova ou apague esses registros antes.`,
-    }
-  }
-
-  const { error } = await sb.from('contas_bancarias').delete().eq('id', id)
-  if (error) {
-    console.error('[financeiro] remover conta falhou:', error)
-    return falha(error, 'Falha ao remover a conta.')
-  }
-
-  revalidatePath('/', 'layout')
-  return { ok: true }
-}
-
-/** Cria uma categoria. A natureza é o que separa custo variável de estrutura. */
-export async function criarCategoria(dados: {
-  nome: string
-  natureza: NaturezaCategoria
-}): Promise<Resposta> {
-  const bloqueio = exigeSupabase('criar categorias')
-  if (bloqueio) return bloqueio
-  if (!dados.nome.trim()) return { ok: false, erro: 'Informe o nome da categoria.' }
-
-  const { error } = await supabaseServer()
-    .from('categorias_financeiras')
-    .insert({ nome: dados.nome.trim(), natureza: dados.natureza })
-  if (error) {
-    console.error('[financeiro] criar categoria falhou:', error)
-    if (error.code === '23505') return { ok: false, erro: 'Já existe uma categoria com esse nome.' }
-    return falha(error, 'Falha ao criar a categoria.')
-  }
-
-  revalidatePath('/', 'layout')
-  return { ok: true }
 }
 
 /** Informa quanto a plataforma creditou de um pedido. */
@@ -388,7 +45,8 @@ export async function conciliarRepasse(pedidoId: string, recebido: number): Prom
     return falha(error, 'Falha ao conciliar o repasse.')
   }
 
-  revalidatePath('/', 'layout')
+  revalidatePath('/financeiro/conciliacao')
+  revalidatePath('/financeiro')
   return { ok: true }
 }
 
@@ -408,6 +66,7 @@ export async function preverRepasses(): Promise<Resposta<{ novos: number }>> {
     return falha(error, 'Falha ao prever os repasses.')
   }
 
-  revalidatePath('/', 'layout')
+  revalidatePath('/financeiro/conciliacao')
+  revalidatePath('/financeiro')
   return { ok: true, novos: Number(data) }
 }

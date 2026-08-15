@@ -46,20 +46,40 @@ esperar.
 ### Produção
 Ordens de envase, conclusão com perda real por lote.
 
-### Financeiro — 6 telas
-- **Lançamentos**: criar, editar, excluir, recebimento parcial, recorrência.
-- **Contas**: criar, editar, remover, saldo informado com data.
+### Financeiro — 10 telas
+Reconstruído sobre uma distinção que o módulo anterior não tinha: **caixa** é
+quando o dinheiro se move, **competência** é quando o fato econômico acontece.
+A venda de 30 de agosto que o gateway paga em 15 de setembro é resultado de
+agosto e caixa de setembro — misturar os dois era o que fazia a mesma venda
+ser contada duas vezes.
+
+- **Visão Financeira** (landing): 6 indicadores, alertas que abrem a fila que
+  acusaram, fluxo projetado, composição das saídas e resumo da DRE.
+- **Lançamentos**: contas a pagar e a receber com situação derivada (nunca
+  gravada), filtros na URL, baixa com multa/juros/desconto separados do
+  principal, parcelamento e cancelamento com motivo.
+- **Contas e caixas**: saldo com a ORIGEM declarada (integração, informado ou
+  calculado), divergência contra o extrato, concentração do caixa e
+  transferência entre contas em duas pernas ligadas.
 - **Extrato**: importação automática do Relatório de Liberações do Mercado
   Pago (pedido persistido — sobrevive a F5), conciliação por id de transação
   da Yampi, filtros por período na URL, movimento interno fora da fila,
   contraparte preenchida pela API de pagamentos e **regras de categoria**
-  que classificam sozinhas o destinatário recorrente (motoboy, imposto,
-  anúncios — gerenciadas na tela de Categorias).
-- **Conciliação**: automática, com tarifa real; visões por URL.
-- **Categorias** (entrada e saída) e **Integração contábil** (CSV).
-
-O DRE saiu por decisão do operador — o dashboard mostra vendas do mês e dos
-últimos 7 dias derivadas dos pedidos, e o caixa vem das contas.
+  que classificam sozinhas o destinatário recorrente.
+- **Conciliação**: venda por venda, com a regra que esvaziou o alarme falso —
+  taxa cobrada corretamente é custo, não divergência; divergência é entre a
+  taxa REAL e a esperada.
+- **Fluxo de caixa**: projeção dia a dia com horizonte de 15/30/60/90 dias. O
+  número que decide não é o saldo final, é o MENOR saldo do caminho.
+- **DRE gerencial**: resultado por competência, com % sobre a receita
+  LÍQUIDA, variação contra o mês anterior, evolução de 6 meses e ponto de
+  equilíbrio (que some quando a margem de contribuição é negativa).
+- **Categorias**: o plano de contas gerencial. A natureza escolhida aqui
+  decide em qual linha da DRE cada pagamento cai.
+- **Integração contábil**: CSV pela conta contábil de cada categoria.
+- **Configurações**: fechamento de competência (congela valor, categoria e
+  tipo; reabrir exige motivo e fica registrado), centros de custo e trilha de
+  auditoria.
 
 ### CRM — 2 telas
 - **Clientes**: derivado dos pedidos importados, com filtros e exportação

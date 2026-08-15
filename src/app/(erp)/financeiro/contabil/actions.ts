@@ -42,7 +42,13 @@ async function apurar(competencia: string): Promise<Fechamento> {
         .limit(5000),
       sb
         .from('lancamentos')
-        .select('id, ocorrido_em, descricao, categoria, tipo, valor, pedido_id, contas_bancarias(nome)')
+        // `!lancamentos_conta_id_fkey`: desde que a transferência ganhou
+        // `conta_destino_id`, `lancamentos` tem duas chaves para
+        // `contas_bancarias` e o PostgREST recusa o embed sem saber qual seguir.
+        .select(
+          'id, ocorrido_em, descricao, categoria, tipo, valor, pedido_id, ' +
+            'contas_bancarias!lancamentos_conta_id_fkey(nome)',
+        )
         .gte('ocorrido_em', inicio)
         .lt('ocorrido_em', fim)
         .limit(5000),

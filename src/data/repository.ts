@@ -769,7 +769,10 @@ const repositorioSupabase: Repositorio = {
       .select(
         'id, ocorrido_em, descricao, categoria, conta_id, tipo, valor, recebido, ' +
           'baixado_em, vence_em, recorrente, recorrencia, serie_id, origem, ' +
-          'contas_bancarias(nome)',
+          // Duas chaves de `lancamentos` chegam em `contas_bancarias`
+          // (`conta_id` e `conta_destino_id`): sem apontar qual, o embed é
+          // ambíguo e a consulta inteira volta como erro.
+          'contas_bancarias!lancamentos_conta_id_fkey(nome)',
       )
       .order('ocorrido_em', { ascending: false })
       .limit(500)
