@@ -157,6 +157,28 @@ export async function POST(req: Request) {
     })
   }
 
+  // Radiografia do saldo: agrupa TODO o movimento da conta por tipo e soma.
+  // Existe porque o primeiro ensaio dos saques não fechou — saíram R$ 46,2 mil
+  // contra R$ 41,6 mil de venda, e gravar essa diferença deixaria a conta com
+  // saldo negativo, tão errado quanto o positivo que ela veio corrigir. A
+  // sonda não serve aqui: são centenas de movimentos e ela devolve 8 KB.
+  if (params.get('saldo') === '1') {
+    const { itens } = await paginar<Movimento>('balance/operations', auth)
+    const porTipo = new Map<string, { n: number; total: number }>()
+    for (const m of itens) {
+      const chave = m.type ?? 'sem tipo'
+      const atual = porTipo.get(chave) ?? { n: 0, total: 0 }
+      porTipo.set(chave, { n: atual.n + 1, total: atual.total + (m.amount ?? 0) })
+    }
+    return NextResponse.json({
+      movimentos: itens.length,
+      saldoFinal: reais(itens.reduce((a, m) => a + (m.amount ?? 0), 0)),
+      tipos: [...porTipo.entries()]
+        .map(([tipo, v]) => ({ tipo, quantidade: v.n, total: reais(v.total) }))
+        .sort((a, b) => a.total - b.total),
+    })
+  }
+
   // Sonda: repassa um GET cru para a API e devolve o que voltou. Existe
   // porque descobrir o formato de um gateway às cegas custa um deploy por
   // tentativa — e a tarifa real não estava onde parecia estar (na cobrança),
