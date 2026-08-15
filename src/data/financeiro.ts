@@ -530,6 +530,24 @@ export interface PainelConciliacao {
   semBanco: boolean
 }
 
+interface RepasseCru {
+  pedido_id: string
+  origem: string
+  taxa_pct: string | null
+  taxa_real: string | null
+  recebido: string | null
+  creditado_em: string | null
+  meio: string | null
+  bruto_gateway: string | null
+  pedidos: {
+    valor: string
+    comprado_em: string
+    pagamento: string
+    situacao: string
+    clientes: { nome: string } | null
+  } | null
+}
+
 export async function carregarConciliacao(): Promise<PainelConciliacao> {
   const zerado = (): Record<StatusVenda, { qtd: number; valor: number }> => ({
     conciliada: { qtd: 0, valor: 0 },
@@ -552,36 +570,31 @@ export async function carregarConciliacao(): Promise<PainelConciliacao> {
   }
   if (!supabaseConfigurado()) return { ...vazio, semBanco: true }
 
-  const { data } = await supabaseServer()
-    .from('repasses')
-    .select(
-      'pedido_id, origem, taxa_pct, taxa_real, recebido, creditado_em, meio, bruto_gateway, ' +
-        'pedidos(valor, comprado_em, pagamento, situacao, clientes(nome))',
-    )
-    .order('creditado_em', { ascending: false, nullsFirst: true })
-    .limit(400)
+  // TODOS os repasses, paginados pelo mesmo helper das outras leituras. A
+  // versão anterior pedia 400 linhas com os pendentes na frente — e como
+  // existem mais de 400 pendentes, NENHUM crédito chegava à tela: ela
+  // anunciava "0 conciliadas" e "R$ 0,00 creditado" com 199 repasses já
+  // pagos no banco. Pior, o erro era intermitente: bastava a fila de
+  // pendentes cair abaixo do teto para os créditos reaparecerem sozinhos.
+  //
+  // KPI que muda com o tamanho da página não é KPI. Como toda a soma da tela
+  // sai desta lista, ela precisa ser completa.
+  const data = await tudoDe<RepasseCru>('repasses', (de, ate) =>
+    supabaseServer()
+      .from('repasses')
+      .select(
+        'pedido_id, origem, taxa_pct, taxa_real, recebido, creditado_em, meio, bruto_gateway, ' +
+          'pedidos(valor, comprado_em, pagamento, situacao, clientes(nome))',
+      )
+      .order('pedido_id', { ascending: false })
+      .range(de, ate) as unknown as PromiseLike<{ data: RepasseCru[] | null; error: unknown }>,
+  )
 
   const hoje = HOJE()
   const totais = zerado()
   const vendas: VendaConciliada[] = []
 
-  for (const r of (data ?? []) as unknown as {
-    pedido_id: string
-    origem: string
-    taxa_pct: string | null
-    taxa_real: string | null
-    recebido: string | null
-    creditado_em: string | null
-    meio: string | null
-    bruto_gateway: string | null
-    pedidos: {
-      valor: string
-      comprado_em: string
-      pagamento: string
-      situacao: string
-      clientes: { nome: string } | null
-    } | null
-  }[]) {
+  for (const r of data) {
     if (!r.pedidos) continue
     const bruto = Number(r.bruto_gateway ?? r.pedidos.valor)
     const taxaReal = r.taxa_real === null ? null : Number(r.taxa_real)
@@ -908,13 +921,17 @@ export async function carregarVisaoFinanceira(): Promise<VisaoFinanceira> {
     margemMes: linha('= Margem de contribuição'),
     projecao,
     contas,
-    proximosCompromissos: aPagar
-      .filter((l) => l.venceEm)
-      .sort((a, b) => (a.venceEm ?? '').localeCompare(b.venceEm ?? ''))
+    proximosCompromissos: [...aPagar]
+      .sort((a, b) => (a.venceEm ?? '9999').localeCompare(b.venceEm ?? '9999'))
       .slice(0, 6),
-    proximosRecebimentos: aReceber
-      .filter((l) => l.venceEm)
-      .sort((a, b) => (a.venceEm ?? '').localeCompare(b.venceEm ?? ''))
+    // Recebimento SEM data prevista continua na lista, no fim. Filtrá-lo
+    // fazia a tela se contradizer: o card anunciava "5 recebimentos
+    // previstos" e o painel logo abaixo dizia "nenhum recebimento agendado"
+    // — porque as cinco entradas em aberto estão sem vencimento. Mostrá-las
+    // com "—" é o que revela que falta preencher a data, e é a data que as
+    // coloca na projeção de caixa.
+    proximosRecebimentos: [...aReceber]
+      .sort((a, b) => (a.venceEm ?? '9999').localeCompare(b.venceEm ?? '9999'))
       .slice(0, 6),
     saidasPorCategoria: [...saidasPorCategoria.entries()]
       .map(([categoria, valor]) => ({ categoria, valor }))
