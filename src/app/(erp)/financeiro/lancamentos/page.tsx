@@ -287,7 +287,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
             principal={l.categoriaId ? l.categoria : 'Sem categoria'}
             secundaria={
               !l.categoriaId
-                ? 'classifique para entrar na DRE'
+                ? 'sem linha na DRE'
                 : l.natureza
                   ? ROTULO_NATUREZA[l.natureza]
                   : 'sem natureza gerencial'
@@ -362,11 +362,17 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
     {
       chave: 'origem',
       titulo: 'Origem',
-      largura: '96px',
+      largura: '104px',
+      // "Extrato Mercado Pago" não cabe e saía cortado no meio da palavra. A
+      // conta já está na coluna ao lado, então o que esta coluna informa é a
+      // procedência: veio do extrato do banco ou foi digitado à mão. O nome
+      // completo fica no title, para quem precisar conferir.
       render: ({ l }) => (
-        <Chip tom={l.origem === 'Manual' ? 'neutro' : 'info'} contorno>
-          {l.origem}
-        </Chip>
+        <span title={l.origem}>
+          <Chip tom={l.origem === 'Manual' ? 'neutro' : 'info'} contorno>
+            {l.origem.startsWith('Extrato') ? 'Extrato' : l.origem}
+          </Chip>
+        </span>
       ),
     },
     {

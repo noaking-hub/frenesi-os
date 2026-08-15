@@ -6,7 +6,7 @@ import { Ico, type NomeIcone } from '@/components/erp/IconesUi'
 import { Modal } from '@/components/erp/Modal'
 import { BotaoOuro, BotaoSecundario, Rotulo, TituloSecao } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
-import { brl, parseNum, ROTULO_NATUREZA, saldoAberto } from '@/domain'
+import { brl, diaCurtoPt, parseNum, ROTULO_NATUREZA, saldoAberto } from '@/domain'
 import type {
   CategoriaGerencial,
   ContaFinanceira,
@@ -509,9 +509,26 @@ export function AcoesGerenciais({
       {!encerrado && (
         <BotaoIcone icone="x" rotulo="Cancelar compromisso" onClick={() => setAberto('cancelar')} />
       )}
+      {/* Data de baixa em dd/mm. Antes saía a data ISO inteira, que não cabia
+          na coluna ao lado do lápis e vazava por cima da linha seguinte. O ano
+          fica no title: quem confere baixa de agosto não precisa dele na
+          tabela, quem confere de outro ano precisa saber que existe. */}
       {encerrado && (
-        <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>
-          {situacao === 'cancelado' ? 'cancelado' : lancamento.baixadoEm ?? 'liquidado'}
+        <span
+          className="font-sans"
+          title={lancamento.baixadoEm ?? undefined}
+          style={{
+            fontSize: 10,
+            color: 'var(--color-terciario)',
+            whiteSpace: 'nowrap',
+            alignSelf: 'center',
+          }}
+        >
+          {situacao === 'cancelado'
+            ? 'cancelado'
+            : lancamento.baixadoEm
+              ? diaCurtoPt(lancamento.baixadoEm)
+              : 'liquidado'}
         </span>
       )}
 
