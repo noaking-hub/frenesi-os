@@ -187,6 +187,21 @@ export async function POST(req: Request) {
     const porStatus = new Map<string, number>()
     for (const p of pays) porStatus.set(p.status ?? '?', (porStatus.get(p.status ?? '?') ?? 0) + 1)
 
+    // Recebível por TIPO. O estorno por contestação entra aqui com sinal
+    // negativo e data de liquidação no futuro — dinheiro que a operação já
+    // recebeu e que o gateway vai tirar de volta. Somado junto com a venda,
+    // ele some; separado, vira o número que a disputa custa.
+    const porTipo2 = new Map<string, { n: number; bruto: number; tarifa: number }>()
+    for (const p of pays) {
+      const k = p.type ?? 'sem tipo'
+      const a = porTipo2.get(k) ?? { n: 0, bruto: 0, tarifa: 0 }
+      porTipo2.set(k, {
+        n: a.n + 1,
+        bruto: a.bruto + (p.amount ?? 0),
+        tarifa: a.tarifa + (p.fee ?? 0) + (p.anticipation_fee ?? 0),
+      })
+    }
+
     return NextResponse.json({
       saldo: {
         movimentos: itens.length,
@@ -201,6 +216,21 @@ export async function POST(req: Request) {
         tarifa: reais(pays.reduce((a, p) => a + (p.fee ?? 0) + (p.anticipation_fee ?? 0), 0)),
         semCobranca: pays.filter((p) => !p.charge_id).length,
         porStatus: [...porStatus.entries()].map(([status, n]) => ({ status, n })),
+        porTipo: [...porTipo2.entries()]
+          .map(([tipo, v]) => ({
+            tipo,
+            quantidade: v.n,
+            bruto: reais(v.bruto),
+            tarifa: reais(v.tarifa),
+          }))
+          .sort((a, b) => a.bruto - b.bruto),
+        // Estorno com liquidação ainda no futuro: a conta já está zerada, então
+        // é dívida com o gateway, não perda já absorvida.
+        aindaPorLiquidar: reais(
+          pays
+            .filter((p) => (p.payment_date ?? '') > new Date().toISOString().slice(0, 10))
+            .reduce((a, p) => a + (p.amount ?? 0), 0),
+        ),
       },
       cobrancas: {
         lidas: chs.length,
