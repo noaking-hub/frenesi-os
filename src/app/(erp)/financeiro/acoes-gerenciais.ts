@@ -41,7 +41,6 @@ function revalidarFinanceiro() {
     '/financeiro/dre',
     '/financeiro/conciliacao',
     '/financeiro/categorias',
-    '/financeiro/configuracoes',
   ]) {
     revalidatePath(rota)
   }

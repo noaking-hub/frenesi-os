@@ -8,9 +8,7 @@ import FluxoDeCaixa from '@/app/(erp)/financeiro/fluxo-de-caixa/page'
 import Dre from '@/app/(erp)/financeiro/dre/page'
 import Conciliacao from '@/app/(erp)/financeiro/conciliacao/page'
 import Categorias from '@/app/(erp)/financeiro/categorias/page'
-import ConfiguracoesFinanceiras from '@/app/(erp)/financeiro/configuracoes/page'
 import Extrato from '@/app/(erp)/financeiro/extrato/page'
-import IntegracaoContabil from '@/app/(erp)/financeiro/contabil/page'
 
 /**
  * Aferição de saúde das telas COM OS DADOS REAIS.
@@ -51,15 +49,13 @@ export async function POST(req: Request) {
     { tela: '/', rodar: () => Dashboard({ searchParams: vazio() }) },
     { tela: '/financeiro', rodar: () => DashboardFinanceiro({ searchParams: vazio() }) },
     { tela: '/financeiro/lancamentos', rodar: () => Lancamentos({ searchParams: vazio() }) },
-    { tela: '/financeiro/contas', rodar: () => ContasECaixas() },
+    { tela: '/financeiro/contas', rodar: () => ContasECaixas({ searchParams: vazio() }) },
     { tela: '/financeiro/fluxo-de-caixa', rodar: () => FluxoDeCaixa({ searchParams: vazio() }) },
     { tela: '/financeiro/dre', rodar: () => Dre({ searchParams: vazio() }) },
     { tela: '/financeiro/dre?regime=caixa', rodar: () => Dre({ searchParams: Promise.resolve({ regime: 'caixa' }) }) },
     { tela: '/financeiro/conciliacao', rodar: () => Conciliacao({ searchParams: vazio() }) },
     { tela: '/financeiro/categorias', rodar: () => Categorias() },
-    { tela: '/financeiro/configuracoes', rodar: () => ConfiguracoesFinanceiras() },
     { tela: '/financeiro/extrato', rodar: () => Extrato({ searchParams: vazio() }) },
-    { tela: '/financeiro/contabil', rodar: () => IntegracaoContabil() },
   ]
 
   const resultados: Resultado[] = []

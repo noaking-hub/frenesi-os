@@ -140,8 +140,13 @@ export interface PainelPrincipal {
   base: Janela
   atual: ResumoVendas
   anterior: ResumoVendas
-  /** Faturamento e lucro por dia, para o gráfico de 30 dias. */
-  serieDiaria: { dia: string; faturamento: number; pedidos: number }[]
+  /**
+   * Série diária do período escolhido: faturamento bruto dos pedidos pagos e
+   * recebido LÍQUIDO das baixas de entrada (sem pernas de transferência).
+   * A distância entre as duas curvas é tarifa, prazo de repasse e
+   * inadimplência — por isso elas andam juntas no mesmo gráfico.
+   */
+  serieDiaria: { dia: string; faturamento: number; pedidos: number; recebido: number }[]
   porCategoria: { rotulo: string; valor: number }[]
   porCanal: { rotulo: string; valor: number; pedidos: number }[]
   topProdutos: { nome: string; ml: number; faturamento: number; baseId: string | null }[]
@@ -177,9 +182,35 @@ function mlDoItem(variante: number | null): number {
   return Number.isFinite(ml) && ml > 0 ? ml : 0
 }
 
-export async function carregarPainelPrincipal(periodo: Periodo = '30d'): Promise<PainelPrincipal> {
+/** Janela personalizada: o dono escolhe as duas datas no topo do Dashboard. */
+function janelaLivre(de: string, ate: string): { atual: Janela; base: Janela } {
+  const dias = Math.max(
+    1,
+    Math.round((Date.parse(`${ate}T12:00:00Z`) - Date.parse(`${de}T12:00:00Z`)) / 86_400_000) + 1,
+  )
+  const dia = (iso: string, n: number) =>
+    new Date(Date.parse(`${iso}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10)
+  return {
+    atual: { de, ate, rotulo: 'Período escolhido', dias },
+    // Base equivalente: a mesma quantidade de dias imediatamente anterior,
+    // como manda §10.1 — comparar 5 dias com 31 seria enganoso.
+    base: { de: dia(de, -dias), ate: dia(de, -1), rotulo: 'o período anterior equivalente', dias },
+  }
+}
+
+const DATA_ISO = /^\d{4}-\d{2}-\d{2}$/
+
+export async function carregarPainelPrincipal(
+  periodo: Periodo = '30d',
+  livre?: { de?: string; ate?: string },
+): Promise<PainelPrincipal> {
   const hoje = new Date().toISOString().slice(0, 10)
-  const { atual: janela, base } = janelasDe(periodo, hoje)
+  const personalizado =
+    livre?.de && livre?.ate && DATA_ISO.test(livre.de) && DATA_ISO.test(livre.ate) &&
+    livre.de <= livre.ate && livre.ate <= hoje
+  const { atual: janela, base } = personalizado
+    ? janelaLivre(livre.de as string, livre.ate as string)
+    : janelasDe(periodo, hoje)
 
   const vazio: PainelPrincipal = {
     janela,
@@ -206,9 +237,17 @@ export async function carregarPainelPrincipal(periodo: Periodo = '30d'): Promise
   const sb = supabaseServer()
   const competencia = hoje.slice(0, 7)
 
-  // A janela ampla cobre período e comparação numa consulta só: duas idas ao
-  // banco para a mesma tabela dobrariam a latência da tela inicial.
-  const inicio = base.de < janela.de ? base.de : janela.de
+  const diaAntes = (iso: string, n: number) =>
+    new Date(Date.parse(`${iso}T12:00:00Z`) - n * 86_400_000).toISOString().slice(0, 10)
+
+  // O gráfico segue o período escolhido; num período de um dia só, uma linha
+  // não existe — a janela do gráfico se estica para os 7 dias que terminam
+  // no fim do período, e o rótulo da tela diz isso.
+  const graficoDe = janela.dias >= 7 ? janela.de : diaAntes(janela.ate, 6)
+
+  // A janela ampla cobre período, comparação e gráfico numa consulta só:
+  // três idas ao banco para a mesma tabela triplicariam a latência da tela.
+  const inicio = [base.de, janela.de, graficoDe].sort()[0]
 
   const [{ data: pedidos }, contas, lancamentos, { data: dre }] = await Promise.all([
     sb
@@ -271,12 +310,9 @@ export async function carregarPainelPrincipal(periodo: Periodo = '30d'): Promise
     }
   }
 
-  // Série de 30 dias sempre, independente do período escolhido: o gráfico
-  // responde "para onde estamos indo", e uma série de um dia não responde.
-  const serie = new Map<string, { faturamento: number; pedidos: number }>()
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date(Date.parse(`${hoje}T12:00:00Z`) - i * 86_400_000).toISOString().slice(0, 10)
-    serie.set(d, { faturamento: 0, pedidos: 0 })
+  const serie = new Map<string, { faturamento: number; pedidos: number; recebido: number }>()
+  for (let d = graficoDe; d <= janela.ate; d = diaAntes(d, -1)) {
+    serie.set(d, { faturamento: 0, pedidos: 0, recebido: 0 })
   }
   for (const p of linhas) {
     const d = p.comprado_em.slice(0, 10)
@@ -284,6 +320,15 @@ export async function carregarPainelPrincipal(periodo: Periodo = '30d'): Promise
     if (!alvo) continue
     alvo.faturamento += Number(p.valor)
     alvo.pedidos += 1
+  }
+  // Recebido líquido: o que efetivamente caiu (baixas de entrada), sem as
+  // pernas de transferência — mover dinheiro entre contas próprias não é
+  // recebimento. É a metade "caixa" da regra de integridade.
+  for (const l of lancamentos) {
+    if (l.canceladoEm || l.tipo !== 'entrada' || !l.baixadoEm || l.transferenciaId) continue
+    const alvo = serie.get(l.baixadoEm)
+    if (!alvo) continue
+    alvo.recebido += l.recebido
   }
 
   const porCanal = new Map<string, { valor: number; pedidos: number }>()

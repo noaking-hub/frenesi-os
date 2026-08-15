@@ -4,26 +4,14 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState, type ReactNode } from 'react'
 
 import { Etiqueta, Ico, TINTA } from '@/components/erp/ui'
-import { ROTULO_SITUACAO_LANCAMENTO } from '@/domain'
-import type { SituacaoLancamento } from '@/domain'
 
 /**
- * Filtros que vivem na URL.
+ * Filtros da fila de tratamento, guardados na URL.
  *
- * O estado poderia morar num `useState` e a lista seria filtrada no cliente —
- * mas então o alerta "3 obrigações vencidas" do Dashboard não teria como
- * abrir a fila certa, e um filtro aplicado sumiria no F5. A URL é o estado;
- * este componente só a reescreve.
+ * Na URL e não em estado de cliente porque toda classificação revalida a
+ * árvore: um filtro em `useState` sumiria a cada linha tratada, e o link com
+ * a fila aberta não poderia ser mandado para outra pessoa.
  */
-
-const SITUACOES: SituacaoLancamento[] = [
-  'vencido',
-  'agendado',
-  'parcial',
-  'previsto',
-  'liquidado',
-  'cancelado',
-]
 
 const CAMPO: React.CSSProperties = {
   height: 34,
@@ -38,28 +26,20 @@ const CAMPO: React.CSSProperties = {
   outline: 0,
 }
 
-export function BarraDeFiltros({
-  categorias,
-  contas,
-  centros,
-}: {
-  categorias: { id: string; nome: string }[]
-  contas: { id: string; nome: string }[]
-  centros: { id: string; nome: string }[]
-}) {
+export function FiltrosExtrato({ contas }: { contas: { id: string; nome: string }[] }) {
   const router = useRouter()
   const pathname = usePathname()
   const params = useSearchParams()
 
-  const [texto, setTexto] = useState(params.get('q') ?? '')
+  const [texto, setTexto] = useState(params.get('busca') ?? '')
 
   // Digitar não pode navegar a cada tecla: cada navegação é uma ida ao
   // servidor, e o cursor saltaria. 350 ms é o intervalo entre "parou de
   // digitar" e "quer o resultado".
   useEffect(() => {
-    const atual = params.get('q') ?? ''
+    const atual = params.get('busca') ?? ''
     if (texto === atual) return
-    const t = setTimeout(() => trocar('q', texto), 350)
+    const t = setTimeout(() => trocar('busca', texto), 350)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [texto])
@@ -72,37 +52,53 @@ export function BarraDeFiltros({
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
   }
 
-  const ativos = ['situacao', 'tipo', 'categoria', 'conta', 'centro', 'q', 'de', 'ate', 'recorrente'].filter(
-    (k) => params.get(k),
+  const ativos = ['situacao', 'conta', 'de', 'ate', 'tipo', 'busca'].filter((k) =>
+    params.get(k),
   ).length
 
   return (
-    <section
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-        padding: '15px 16px',
-        border: '1px solid rgba(255,255,255,.065)',
-        borderRadius: 14,
-        background: 'linear-gradient(168deg, #15141608, #0E0E0F)',
-      }}
-    >
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(155px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
           gap: 11,
         }}
       >
-        {/* Período por vencimento: é a data que decide o que aparece na fila
-            de hoje, e o mockup a coloca como primeiro filtro da barra. */}
-        <Campo rotulo="Vencimento de">
+        <Campo rotulo="Mostrar">
+          <Selecao
+            valor={params.get('situacao') ?? ''}
+            aoTrocar={(v) => trocar('situacao', v)}
+            opcoes={[
+              { valor: '', rotulo: 'Precisam de você' },
+              { valor: 'todas', rotulo: 'Todas as linhas' },
+            ]}
+            // "Precisam de você" é o padrão da tela, não um filtro aplicado:
+            // pintá-lo de ouro diria que a lista está recortada quando ela
+            // está no recorte natural.
+            neutraQuandoVazio
+          />
+        </Campo>
+
+        <Campo rotulo="Conta">
+          <Selecao
+            valor={params.get('conta') ?? ''}
+            aoTrocar={(v) => trocar('conta', v)}
+            opcoes={[
+              { valor: '', rotulo: 'Todas as contas' },
+              ...contas.map((c) => ({ valor: c.id, rotulo: c.nome })),
+            ]}
+            neutraQuandoVazio
+          />
+        </Campo>
+
+        <Campo rotulo="De">
           <input
             type="date"
             value={params.get('de') ?? ''}
             onChange={(e) => trocar('de', e.target.value)}
-            className="font-mono"
+            aria-label="Início do período"
+            className="font-sans"
             style={{ ...CAMPO, colorScheme: 'dark' }}
           />
         </Campo>
@@ -112,70 +108,22 @@ export function BarraDeFiltros({
             type="date"
             value={params.get('ate') ?? ''}
             onChange={(e) => trocar('ate', e.target.value)}
-            className="font-mono"
+            aria-label="Fim do período"
+            className="font-sans"
             style={{ ...CAMPO, colorScheme: 'dark' }}
           />
         </Campo>
 
-        <Campo rotulo="Status">
-          <Selecao
-            valor={params.get('situacao') ?? ''}
-            aoTrocar={(v) => trocar('situacao', v)}
-            vazio="Todos"
-            opcoes={SITUACOES.map((s) => ({ valor: s, rotulo: ROTULO_SITUACAO_LANCAMENTO[s] }))}
-          />
-        </Campo>
-
-        <Campo rotulo="Tipo">
+        <Campo rotulo="Direção">
           <Selecao
             valor={params.get('tipo') ?? ''}
             aoTrocar={(v) => trocar('tipo', v)}
-            vazio="Todos"
             opcoes={[
-              { valor: 'entrada', rotulo: 'A receber' },
-              { valor: 'saida', rotulo: 'A pagar' },
+              { valor: '', rotulo: 'Todas' },
+              { valor: 'entrada', rotulo: 'Entradas' },
+              { valor: 'saida', rotulo: 'Saídas' },
             ]}
-          />
-        </Campo>
-
-        <Campo rotulo="Conta">
-          <Selecao
-            valor={params.get('conta') ?? ''}
-            aoTrocar={(v) => trocar('conta', v)}
-            vazio="Todas"
-            opcoes={contas.map((c) => ({ valor: c.id, rotulo: c.nome }))}
-          />
-        </Campo>
-
-        <Campo rotulo="Categoria">
-          <Selecao
-            valor={params.get('categoria') ?? ''}
-            aoTrocar={(v) => trocar('categoria', v)}
-            vazio="Todas"
-            opcoes={categorias.map((c) => ({ valor: c.id, rotulo: c.nome }))}
-          />
-        </Campo>
-
-        {centros.length > 0 && (
-          <Campo rotulo="Centro de custo">
-            <Selecao
-              valor={params.get('centro') ?? ''}
-              aoTrocar={(v) => trocar('centro', v)}
-              vazio="Todos"
-              opcoes={centros.map((c) => ({ valor: c.id, rotulo: c.nome }))}
-            />
-          </Campo>
-        )}
-
-        <Campo rotulo="Recorrente">
-          <Selecao
-            valor={params.get('recorrente') ?? ''}
-            aoTrocar={(v) => trocar('recorrente', v)}
-            vazio="Todos"
-            opcoes={[
-              { valor: 'sim', rotulo: 'Só recorrentes' },
-              { valor: 'nao', rotulo: 'Só avulsos' },
-            ]}
+            neutraQuandoVazio
           />
         </Campo>
       </div>
@@ -188,7 +136,7 @@ export function BarraDeFiltros({
             alignItems: 'center',
             gap: 9,
             flex: 1,
-            minWidth: 240,
+            minWidth: 220,
             height: 34,
             padding: '0 11px',
             border: '1px solid rgba(255,255,255,.08)',
@@ -202,8 +150,8 @@ export function BarraDeFiltros({
           <input
             value={texto}
             onChange={(e) => setTexto(e.target.value)}
-            placeholder="Buscar descrição, favorecido ou documento…"
-            aria-label="Buscar lançamento"
+            placeholder="Buscar descrição, contraparte, documento ou pedido…"
+            aria-label="Buscar movimento"
             className="font-sans"
             style={{
               flex: 1,
@@ -245,7 +193,7 @@ export function BarraDeFiltros({
           </button>
         )}
       </div>
-    </section>
+    </div>
   )
 }
 
@@ -262,13 +210,14 @@ function Selecao({
   valor,
   aoTrocar,
   opcoes,
-  vazio,
+  neutraQuandoVazio,
 }: {
   valor: string
   aoTrocar: (v: string) => void
   opcoes: { valor: string; rotulo: string }[]
-  vazio: string
+  neutraQuandoVazio?: boolean
 }) {
+  const aplicado = Boolean(valor) || !neutraQuandoVazio
   return (
     <select
       value={valor}
@@ -276,13 +225,12 @@ function Selecao({
       className="font-sans"
       style={{
         ...CAMPO,
-        // Filtro aplicado ganha borda dourada: sem isso, quem volta à tela não
-        // sabe por que a lista está curta.
+        // Filtro aplicado ganha borda dourada: sem isso, quem volta à tela
+        // não sabe por que a lista está curta.
         border: valor ? `1px solid ${TINTA.ouro}55` : CAMPO.border,
-        color: valor ? TINTA.ouro : CAMPO.color,
+        color: valor && aplicado ? TINTA.ouro : CAMPO.color,
       }}
     >
-      <option value="">{vazio}</option>
       {opcoes.map((o) => (
         <option key={o.valor} value={o.valor}>
           {o.rotulo}

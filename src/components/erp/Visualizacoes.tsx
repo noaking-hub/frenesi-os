@@ -60,22 +60,29 @@ export function BarrasEixo({
   altura = 260,
   serieTracejada,
   rotuloTracejada,
+  formatarDica,
 }: {
   dados: DiaSerie[]
   altura?: number
   /** Série secundária em tracejado — compromissos, meta, cenário. */
   serieTracejada?: (number | null)[]
   rotuloTracejada?: string
+  /** Formatador dos valores da dica de hover; sem ele, escala curta. */
+  formatarDica?: (v: number) => string
 }) {
   if (dados.length === 0) return null
 
   const L = 1000
   const A = altura
   const margemEsq = 74
-  const margemTopo = 16
+  // O topo reserva uma faixa própria para os rótulos Realizado|Projetado:
+  // era essa faixa em cima do primeiro nível da régua que fazia texto
+  // sobrepor o "R$ 1k" do eixo.
+  const margemTopo = 30
   const margemBase = 30
   const util = A - margemTopo - margemBase
   const larguraUtil = L - margemEsq - 12
+  const fmt = formatarDica ?? curto
 
   const maiorBarra = Math.max(1, ...dados.map((d) => Math.max(d.entrada, d.saida)))
   const passo = passoBonito(maiorBarra / 2)
@@ -114,6 +121,8 @@ export function BarrasEixo({
       role="img"
       aria-label="Entradas, saídas e saldo acumulado por dia"
     >
+      {/* Dica por dia, como no mockup: aparece no hover da coluna inteira. */}
+      <style>{`.vz-dia .vz-dica{opacity:0;pointer-events:none;transition:opacity .1s ease}.vz-dia:hover .vz-dica{opacity:1}.vz-dia .vz-halo{opacity:0}.vz-dia:hover .vz-halo{opacity:1}`}</style>
       {niveis.map((v) => {
         const y = meio - escala(v)
         return (
@@ -144,7 +153,7 @@ export function BarrasEixo({
         <>
           <line
             x1={xCorte}
-            y1={margemTopo - 4}
+            y1={margemTopo - 6}
             x2={xCorte}
             y2={A - margemBase}
             stroke="rgba(255,255,255,.16)"
@@ -152,7 +161,7 @@ export function BarrasEixo({
           />
           <text
             x={xCorte - 8}
-            y={margemTopo + 4}
+            y={margemTopo - 12}
             textAnchor="end"
             fontSize="10"
             fill="rgba(242,237,227,.34)"
@@ -162,7 +171,7 @@ export function BarrasEixo({
           </text>
           <text
             x={xCorte + 8}
-            y={margemTopo + 4}
+            y={margemTopo - 12}
             fontSize="10"
             fill="rgba(242,237,227,.34)"
             fontFamily="var(--font-sans, sans-serif)"
@@ -261,7 +270,7 @@ export function BarrasEixo({
       {rotuloTracejada && serieTracejada && (
         <text
           x={L - 12}
-          y={margemTopo + 4}
+          y={margemTopo - 12}
           textAnchor="end"
           fontSize="10"
           fill={AZUL}
@@ -270,6 +279,292 @@ export function BarrasEixo({
           {rotuloTracejada}
         </text>
       )}
+
+      {dados.map((d, i) => {
+        const larguraDica = 168
+        const linhas: { rotulo: string; valor: string; cor: string }[] = [
+          { rotulo: 'Entradas', valor: fmt(d.entrada), cor: VERDE },
+          { rotulo: 'Saídas', valor: fmt(-Math.abs(d.saida)), cor: VERMELHO },
+          ...(d.saldo !== undefined
+            ? [{ rotulo: 'Saldo proj.', valor: fmt(d.saldo), cor: OURO }]
+            : []),
+        ]
+        const alturaDica = 24 + linhas.length * 15
+        // A dica gruda no topo da coluna e desvia da borda direita.
+        const xDica = Math.min(Math.max(cx(i) - larguraDica / 2, margemEsq), L - larguraDica - 8)
+        return (
+          <g key={`h${i}`} className="vz-dia">
+            <rect
+              x={margemEsq + i * fatia}
+              y={margemTopo - 6}
+              width={fatia}
+              height={util + 6}
+              fill="transparent"
+            />
+            <line
+              className="vz-halo"
+              x1={cx(i)}
+              y1={margemTopo - 4}
+              x2={cx(i)}
+              y2={A - margemBase}
+              stroke="rgba(255,255,255,.14)"
+              strokeWidth="1"
+            />
+            <g className="vz-dica">
+              <rect
+                x={xDica}
+                y={margemTopo - 2}
+                width={larguraDica}
+                height={alturaDica}
+                rx="9"
+                fill="#151413"
+                stroke="rgba(255,255,255,.14)"
+              />
+              <text
+                x={xDica + 12}
+                y={margemTopo + 14}
+                fontSize="10"
+                fontWeight="600"
+                fill="rgba(242,237,227,.82)"
+                fontFamily="var(--font-sans, sans-serif)"
+              >
+                {d.rotulo}
+              </text>
+              {linhas.map((l, j) => (
+                <g key={l.rotulo}>
+                  <text
+                    x={xDica + 12}
+                    y={margemTopo + 30 + j * 15}
+                    fontSize="9.5"
+                    fill="rgba(242,237,227,.5)"
+                    fontFamily="var(--font-sans, sans-serif)"
+                  >
+                    {l.rotulo}
+                  </text>
+                  <text
+                    x={xDica + larguraDica - 12}
+                    y={margemTopo + 30 + j * 15}
+                    textAnchor="end"
+                    fontSize="10"
+                    fontWeight="600"
+                    fill={l.cor}
+                    fontFamily="var(--font-mono, monospace)"
+                  >
+                    {l.valor}
+                  </text>
+                </g>
+              ))}
+            </g>
+          </g>
+        )
+      })}
+    </svg>
+  )
+}
+
+export interface SerieLinha {
+  rotulo: string
+  cor: string
+  valores: number[]
+}
+
+/**
+ * Linhas comparadas sobre o mesmo eixo — faturado × recebido líquido.
+ *
+ * Duas grandezas que não podem ser somadas, mas precisam ser vistas juntas:
+ * a distância vertical entre as linhas É a informação (tarifas, prazo de
+ * repasse, inadimplência). Cada dia ganha dica de hover com os dois valores.
+ */
+export function SerieLinhas({
+  series,
+  rotulos,
+  altura = 240,
+  formatar,
+}: {
+  series: SerieLinha[]
+  rotulos: string[]
+  altura?: number
+  formatar: (v: number) => string
+}) {
+  const n = rotulos.length
+  if (n < 2 || series.length === 0) return null
+
+  const L = 1000
+  const A = altura
+  const margemEsq = 66
+  const margemTopo = 14
+  const margemBase = 26
+  const util = A - margemTopo - margemBase
+
+  const todos = series.flatMap((s) => s.valores)
+  const max = Math.max(1, ...todos)
+  const passo = passoBonito(max / 3)
+  const teto = Math.ceil(max / passo) * passo || passo
+
+  const y = (v: number) => margemTopo + util - (v / teto) * util
+  const x = (i: number) => margemEsq + (i / (n - 1)) * (L - margemEsq - 26)
+  const fatia = (L - margemEsq - 26) / (n - 1)
+
+  const niveis: number[] = []
+  for (let v = 0; v <= teto + 1e-9; v += passo) niveis.push(Math.round(v * 100) / 100)
+
+  const saltoRotulo = n > 16 ? Math.ceil(n / 12) : 1
+
+  return (
+    <svg
+      viewBox={`0 0 ${L} ${A}`}
+      preserveAspectRatio="none"
+      style={{ width: '100%', height: altura, display: 'block', overflow: 'visible' }}
+      role="img"
+      aria-label={series.map((s) => s.rotulo).join(' e ')}
+    >
+      <style>{`.vz-dia .vz-dica{opacity:0;pointer-events:none;transition:opacity .1s ease}.vz-dia:hover .vz-dica{opacity:1}.vz-dia .vz-halo{opacity:0}.vz-dia:hover .vz-halo{opacity:1}`}</style>
+
+      {niveis.map((v) => (
+        <g key={v}>
+          <line
+            x1={margemEsq}
+            y1={y(v)}
+            x2={L - 26}
+            y2={y(v)}
+            stroke={v === 0 ? 'rgba(255,255,255,.12)' : 'rgba(255,255,255,.045)'}
+            strokeWidth="1"
+          />
+          <text
+            x={margemEsq - 10}
+            y={y(v) + 3.5}
+            textAnchor="end"
+            fontSize="10.5"
+            fill="rgba(242,237,227,.36)"
+            fontFamily="var(--font-mono, monospace)"
+          >
+            {curto(v)}
+          </text>
+        </g>
+      ))}
+
+      {series.map((s, si) => {
+        const traco = s.valores.map((v, i) => `${x(i)},${y(v)}`).join(' ')
+        const id = `sl${si}-${s.valores.length}`
+        return (
+          <g key={s.rotulo}>
+            {/* Só a primeira série ganha área: duas áreas empilhadas viram
+                lama visual e sugerem soma que não existe. */}
+            {si === 0 && (
+              <>
+                <defs>
+                  <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={s.cor} stopOpacity=".22" />
+                    <stop offset="100%" stopColor={s.cor} stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+                <polygon
+                  points={`${x(0)},${y(0)} ${traco} ${x(n - 1)},${y(0)}`}
+                  fill={`url(#${id})`}
+                />
+              </>
+            )}
+            <polyline points={traco} fill="none" stroke={s.cor} strokeWidth="1.9" />
+          </g>
+        )
+      })}
+
+      {rotulos.map((r, i) =>
+        i % saltoRotulo === 0 || i === n - 1 ? (
+          <text
+            key={r + i}
+            x={x(i)}
+            y={A - 7}
+            textAnchor="middle"
+            fontSize="10.5"
+            fill="rgba(242,237,227,.4)"
+            fontFamily="var(--font-sans, sans-serif)"
+          >
+            {r}
+          </text>
+        ) : null,
+      )}
+
+      {rotulos.map((r, i) => {
+        const larguraDica = 172
+        const alturaDica = 24 + series.length * 15
+        const xDica = Math.min(Math.max(x(i) - larguraDica / 2, margemEsq), L - larguraDica - 8)
+        return (
+          <g key={`h${i}`} className="vz-dia">
+            <rect
+              x={x(i) - fatia / 2}
+              y={margemTopo}
+              width={fatia}
+              height={util}
+              fill="transparent"
+            />
+            <line
+              className="vz-halo"
+              x1={x(i)}
+              y1={margemTopo}
+              x2={x(i)}
+              y2={A - margemBase}
+              stroke="rgba(255,255,255,.14)"
+              strokeWidth="1"
+            />
+            {series.map((s) => (
+              <circle
+                key={s.rotulo}
+                className="vz-halo"
+                cx={x(i)}
+                cy={y(s.valores[i] ?? 0)}
+                r="3.4"
+                fill={s.cor}
+              />
+            ))}
+            <g className="vz-dica">
+              <rect
+                x={xDica}
+                y={margemTopo + 2}
+                width={larguraDica}
+                height={alturaDica}
+                rx="9"
+                fill="#151413"
+                stroke="rgba(255,255,255,.14)"
+              />
+              <text
+                x={xDica + 12}
+                y={margemTopo + 18}
+                fontSize="10"
+                fontWeight="600"
+                fill="rgba(242,237,227,.82)"
+                fontFamily="var(--font-sans, sans-serif)"
+              >
+                {r}
+              </text>
+              {series.map((s, j) => (
+                <g key={s.rotulo}>
+                  <text
+                    x={xDica + 12}
+                    y={margemTopo + 34 + j * 15}
+                    fontSize="9.5"
+                    fill="rgba(242,237,227,.5)"
+                    fontFamily="var(--font-sans, sans-serif)"
+                  >
+                    {s.rotulo}
+                  </text>
+                  <text
+                    x={xDica + larguraDica - 12}
+                    y={margemTopo + 34 + j * 15}
+                    textAnchor="end"
+                    fontSize="10"
+                    fontWeight="600"
+                    fill={s.cor}
+                    fontFamily="var(--font-mono, monospace)"
+                  >
+                    {formatar(s.valores[i] ?? 0)}
+                  </text>
+                </g>
+              ))}
+            </g>
+          </g>
+        )
+      })}
     </svg>
   )
 }
@@ -545,29 +840,35 @@ export function AreaPontos({
 
       {valores.map((v, i) => {
         const ultimo = i === valores.length - 1
+        // O rótulo do último ponto não pode vazar da moldura: no canto
+        // direito a cápsula desliza para dentro, como no mockup da DRE.
+        const xr = ultimo ? Math.min(x(i), L - 86) : x(i)
         return (
           <g key={i}>
             <circle cx={x(i)} cy={y(v)} r={ultimo ? 4.4 : 3} fill={tinta} />
+            {ultimo && (
+              <circle cx={x(i)} cy={y(v)} r="7.5" fill="none" stroke={tinta} opacity=".4" />
+            )}
             {(rotularTodos || ultimo) && (
               <>
                 {ultimo && (
                   <rect
-                    x={x(i) - 52}
-                    y={y(v) - 26}
-                    width={104}
-                    height={17}
-                    rx="8"
+                    x={xr - 56}
+                    y={y(v) - 28}
+                    width={112}
+                    height={18}
+                    rx="9"
                     fill={tinta}
-                    opacity=".16"
+                    opacity=".18"
                   />
                 )}
                 <text
-                  x={x(i)}
-                  y={y(v) - 14}
+                  x={xr}
+                  y={y(v) - 15}
                   textAnchor="middle"
-                  fontSize={ultimo ? '11' : '10'}
+                  fontSize={ultimo ? '11' : '9.5'}
                   fontWeight={ultimo ? '600' : '400'}
-                  fill={ultimo ? tinta : 'rgba(242,237,227,.5)'}
+                  fill={ultimo ? tinta : 'rgba(242,237,227,.55)'}
                   fontFamily="var(--font-mono, monospace)"
                 >
                   {formatar(v)}

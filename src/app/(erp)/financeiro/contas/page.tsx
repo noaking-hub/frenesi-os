@@ -1,7 +1,6 @@
 import Link from 'next/link'
 
 import {
-  AcaoPainel,
   Bolinha,
   Chip,
   Destaque,
@@ -16,9 +15,11 @@ import {
   Num,
   Painel,
   Pilha,
+  Segmentado,
   TINTA,
   Vazio,
 } from '@/components/erp/ui'
+import type { NomeIcone } from '@/components/erp/ui'
 import { TileMarca } from '@/components/erp/Marcas'
 import { Mini, PALETA, RoscaLegenda } from '@/components/erp/Visualizacoes'
 import { lerContas, lerLancamentos } from '@/data/financeiro'
@@ -28,7 +29,6 @@ import {
   divergenciaDeSaldo,
   horasDesdeSincronia,
   plural,
-  ROTULO_ORIGEM_SALDO,
   saldoAberto,
 } from '@/domain'
 import type { ContaFinanceira, LancamentoGerencial } from '@/domain'
@@ -46,13 +46,30 @@ import { EditarConta, InformarSaldo, NovaConta, Transferir } from './Acoes'
  */
 export const dynamic = 'force-dynamic'
 
-export default async function ContasECaixas() {
+// A ordenação vive na URL para o F5 e o link compartilhado manterem o recorte.
+const ORDENS = [
+  { id: 'posicao', rotulo: 'Posição' },
+  { id: 'saldo', rotulo: 'Saldo' },
+  { id: 'nome', rotulo: 'Nome' },
+  { id: 'atualizacao', rotulo: 'Atualização' },
+] as const
+
+type Ordem = (typeof ORDENS)[number]['id']
+
+export default async function ContasECaixas({
+  searchParams,
+}: {
+  searchParams: Promise<{ ordem?: string }>
+}) {
+  const sp = await searchParams
+  const ordem: Ordem = ORDENS.some((o) => o.id === sp.ordem) ? (sp.ordem as Ordem) : 'posicao'
+
   const [contas, lancamentos] = await Promise.all([lerContas(), lerLancamentos()])
 
   if (contas.length === 0) {
     return (
       <Pilha>
-      <Ferramentas direita={<NovaConta />} />
+        <Ferramentas direita={<NovaConta />} />
         <Painel>
           <Vazio
             icone="banco"
@@ -67,15 +84,26 @@ export default async function ContasECaixas() {
   const consolidado = ativas.reduce((a, c) => a + c.saldoDisponivel, 0)
   const entradas30 = ativas.reduce((a, c) => a + c.entradas30d, 0)
   const saidas30 = ativas.reduce((a, c) => a + c.saidas30d, 0)
-  const aLiquidar = ativas.reduce((a, c) => a + c.saldoALiquidar, 0)
 
+  // Comprometido = o que já está nas contas mas não é gastável: bloqueado
+  // pelo banco ou aguardando liquidação do gateway. É dinheiro visível no
+  // saldo do app que ainda não paga boleto.
+  const comprometido = ativas.reduce((a, c) => a + c.saldoALiquidar + c.saldoBloqueado, 0)
+
+  // "Livre depois de pagar" desconta as contas a pagar em aberto: é o único
+  // número da linha que autoriza uma decisão, e por isso muda de cor.
   const vivos = lancamentos.filter((l) => !l.canceladoEm && saldoAberto(l) > 0)
-  const comprometido = vivos
-    .filter((l) => l.tipo === 'saida')
-    .reduce((a, l) => a + saldoAberto(l), 0)
+  const aPagar = vivos.filter((l) => l.tipo === 'saida').reduce((a, l) => a + saldoAberto(l), 0)
+  const livre = consolidado - aPagar
 
   const conectadas = ativas.filter((c) => c.origemSaldo === 'api').length
   const agora = Date.now()
+
+  const pctDoConsolidado = (parte: number) =>
+    `${((parte / consolidado) * 100).toFixed(1).replace('.', ',')}% do saldo consolidado`
+
+  // ── Alertas: só o que os dados sustentam ─────────────────────────────────
+  const negativas = ativas.filter((c) => c.saldoDisponivel < 0)
 
   const divergentes = ativas
     .map((c) => ({ conta: c, dif: divergenciaDeSaldo(c) }))
@@ -85,10 +113,23 @@ export default async function ContasECaixas() {
     .map((c) => ({ conta: c, horas: horasDesdeSincronia(c, agora) }))
     .filter((x): x is { conta: ContaFinanceira; horas: number } => x.horas !== null && x.horas >= 24)
 
+  const comALiquidar = ativas.filter((c) => c.saldoALiquidar > 0)
+
+  const totalAlertas =
+    negativas.length + divergentes.length + desatualizadas.length + comALiquidar.length
+
   // Movimento diário por conta, para a faixa de tendência de cada linha. Sai
   // dos lançamentos já baixados — é o único histórico que o ERP tem sem
   // guardar snapshot de saldo.
   const serie = serieDiariaPorConta(lancamentos)
+
+  // A ordenação não separa ativas de inativas de propósito: a lista é o
+  // inventário completo, e a inativa aparece apagada onde a ordem a colocar.
+  const ordenadas = [...contas]
+  if (ordem === 'saldo') ordenadas.sort((a, b) => b.saldoDisponivel - a.saldoDisponivel)
+  else if (ordem === 'nome') ordenadas.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+  else if (ordem === 'atualizacao')
+    ordenadas.sort((a, b) => (b.sincronizadoEm ?? '').localeCompare(a.sincronizadoEm ?? ''))
 
   // O carimbo do rodapé usa a leitura mais RECENTE entre as contas: é a
   // resposta honesta para "isso aqui está atualizado?".
@@ -98,26 +139,15 @@ export default async function ContasECaixas() {
     .sort()
     .at(-1)
   const ultimaLeitura = maisRecente
-    ? new Date(maisRecente).toLocaleString('pt-BR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      })
+    ? `${new Date(maisRecente).toLocaleDateString('pt-BR')} às ${new Date(maisRecente).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
     : null
+
+  // O atalho "Registrar saldo" da trilha age sobre a conta padrão: é a que o
+  // dono confere no app do banco todo dia.
+  const contaPadrao = ativas.find((c) => c.principal) ?? ativas[0]
 
   return (
     <Pilha gap={16}>
-      <Ferramentas
-        direita={
-          <span style={{ display: 'inline-flex', gap: 9 }}>
-            <Transferir contas={ativas} />
-            <NovaConta />
-          </span>
-        }
-      />
-
       <GradeIndicadores>
         <Indicador
           icone="carteira"
@@ -130,17 +160,17 @@ export default async function ContasECaixas() {
         <Indicador
           icone="entrada"
           tom="ok"
-          rotulo="Entradas em 30 dias"
+          rotulo="Entradas no período"
           valor={brl(entradas30)}
-          nota="Movimentos já baixados no período"
+          nota="Baixado nos últimos 30 dias"
           tomNota="ok"
         />
         <Indicador
           icone="saida"
           tom="erro"
-          rotulo="Saídas em 30 dias"
+          rotulo="Saídas no período"
           valor={brl(saidas30)}
-          nota="Movimentos já baixados no período"
+          nota="Baixado nos últimos 30 dias"
           tomNota="erro"
         />
         <Indicador
@@ -148,22 +178,18 @@ export default async function ContasECaixas() {
           tom="atencao"
           rotulo="Comprometido"
           valor={brl(comprometido)}
-          nota={
-            consolidado > 0
-              ? `${((comprometido / consolidado) * 100).toFixed(1).replace('.', ',')}% do saldo consolidado`
-              : 'Contas a pagar em aberto'
-          }
+          nota={consolidado > 0 ? pctDoConsolidado(comprometido) : 'Bloqueado ou aguardando liquidação'}
         />
         <Indicador
           icone="escudo"
-          tom={consolidado - comprometido > 0 ? 'ok' : 'erro'}
+          tom={livre > 0 ? 'ok' : 'erro'}
           rotulo="Livre depois de pagar"
-          valor={brl(consolidado - comprometido)}
-          tomValor={consolidado - comprometido > 0 ? 'ok' : 'erro'}
+          valor={brl(livre)}
+          tomValor={livre > 0 ? 'ok' : 'erro'}
           nota={
             consolidado > 0
-              ? `${(((consolidado - comprometido) / consolidado) * 100).toFixed(1).replace('.', ',')}% do saldo consolidado`
-              : 'Sem saldo para liquidar o que está aberto'
+              ? pctDoConsolidado(livre)
+              : 'Disponível menos contas a pagar em aberto'
           }
         />
         <Indicador
@@ -172,42 +198,48 @@ export default async function ContasECaixas() {
           rotulo="Contas conectadas"
           valor={`${conectadas} de ${ativas.length}`}
           nota={
-            conectadas === ativas.length
-              ? 'Todos os saldos vêm de integração'
-              : 'As demais dependem de saldo informado ou do extrato'
+            ativas.length > 0
+              ? `${Math.round((conectadas / ativas.length) * 100)}% conectadas via API`
+              : 'Nenhuma conta ativa'
           }
           tomNota={conectadas === ativas.length ? 'ok' : 'neutro'}
         />
       </GradeIndicadores>
 
+      <Ferramentas direita={<NovaConta />} />
+
       <ComTrilha
+        largura={330}
         trilha={
           <>
-            <Painel titulo="Movimentações rápidas" icone="ajustes">
-              <Pilha gap={10}>
-                <Transferir contas={ativas} />
-                <AtalhoRapido
+            <Painel titulo="Movimentações rápidas" icone="faisca">
+              {/* Grade 2×2 como no mockup: duas ações de modal e dois links
+                  para as telas que completam o fluxo. Nada aqui é inerte. */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(2, minmax(0,1fr))',
+                  gap: 9,
+                }}
+              >
+                <Transferir contas={ativas} atalho />
+                {contaPadrao && <InformarSaldo conta={contaPadrao} atalho />}
+                <AtalhoLink
                   href="/financeiro/extrato"
-                  icone="faisca"
+                  icone="documento"
                   titulo="Conciliar extrato"
                   sub="Verificar lançamentos pendentes"
                 />
-                <AtalhoRapido
-                  href="/financeiro/lancamentos"
-                  icone="recibo"
-                  titulo="Ver lançamentos"
-                  sub="Contas a pagar e a receber por conta"
+                <AtalhoLink
+                  href="/financeiro/dre"
+                  icone="balanca"
+                  titulo="Conferir o resultado"
+                  sub="DRE do mês por competência e caixa"
                 />
-                <AtalhoRapido
-                  href="/financeiro/configuracoes"
-                  icone="cadeado"
-                  titulo="Fechar competência"
-                  sub="Congelar o resultado do mês"
-                />
-              </Pilha>
+              </div>
             </Painel>
 
-            <Painel titulo="Distribuição do saldo" icone="pizza" tom="ciano">
+            <Painel titulo="Distribuição do saldo por conta" icone="pizza" tom="ciano">
               {consolidado > 0 ? (
                 <>
                   <RoscaLegenda
@@ -221,7 +253,7 @@ export default async function ContasECaixas() {
                     total={consolidado}
                     legendaTotal="Caixa total"
                     formatar={brl}
-                    tamanho={150}
+                    tamanho={140}
                   />
                   <div
                     style={{
@@ -247,16 +279,35 @@ export default async function ContasECaixas() {
             <Painel
               titulo="Alertas das contas"
               icone="sino"
-              tom={divergentes.length || desatualizadas.length ? 'atencao' : 'ok'}
+              tom={totalAlertas > 0 ? 'atencao' : 'ok'}
+              rodape={
+                totalAlertas > 0
+                  ? {
+                      nota: plural(totalAlertas, 'alerta no total', 'alertas no total'),
+                      link: { href: '/financeiro/extrato', texto: 'Abrir extrato' },
+                    }
+                  : undefined
+              }
             >
-              {divergentes.length + desatualizadas.length === 0 ? (
+              {totalAlertas === 0 ? (
                 <Vazio icone="check-circulo" texto="Nenhuma conta pede atenção agora." />
               ) : (
                 <Pilha gap={0}>
+                  {negativas.map((c) => (
+                    <LinhaValor
+                      key={`n-${c.id}`}
+                      icone="alerta-circulo"
+                      tomIcone="erro"
+                      rotulo={`Saldo negativo em ${c.nome}`}
+                      nota="A conta está descoberta"
+                      valor={brl(c.saldoDisponivel)}
+                      tom="erro"
+                    />
+                  ))}
                   {divergentes.map(({ conta, dif }) => (
                     <LinhaValor
                       key={`d-${conta.id}`}
-                      icone="alerta-circulo"
+                      icone="alerta"
                       tomIcone="erro"
                       rotulo={`${conta.nome}: saldo divergente`}
                       nota="Informado não bate com o somado do extrato"
@@ -275,6 +326,17 @@ export default async function ContasECaixas() {
                       tom="atencao"
                     />
                   ))}
+                  {comALiquidar.map((c) => (
+                    <LinhaValor
+                      key={`l-${c.id}`}
+                      icone="ampulheta"
+                      tomIcone="info"
+                      rotulo={`A liquidar em ${c.nome}`}
+                      nota="Recebido, mas ainda indisponível para uso"
+                      valor={brl(c.saldoALiquidar)}
+                      tom="info"
+                    />
+                  ))}
                 </Pilha>
               )}
             </Painel>
@@ -284,22 +346,27 @@ export default async function ContasECaixas() {
         <Painel
           titulo="Contas e carteiras"
           icone="banco"
-          nota="Cada saldo declara de onde veio"
-          rodape={{
-            nota: 'Mantenha as contas conectadas e revise os saldos: a divergência contra o extrato é sempre um lançamento faltando de um lado ou do outro.',
-            link: { href: '/financeiro/extrato', texto: 'Abrir extrato' },
-          }}
+          acao={
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+              <Etiqueta>Ordenar por</Etiqueta>
+              <Segmentado
+                opcoes={[...ORDENS]}
+                ativo={ordem}
+                base="/financeiro/contas"
+                chave="ordem"
+              />
+            </span>
+          }
         >
           <Pilha gap={10}>
-            {contas.map((c, i) => (
+            {ordenadas.map((c) => (
               <LinhaConta
                 key={c.id}
                 conta={c}
                 contas={ativas}
                 agora={agora}
-                cor={c.cor ?? PALETA[i % PALETA.length]}
+                cor={c.cor ?? PALETA[contas.indexOf(c) % PALETA.length]}
                 serie={serie.get(c.id) ?? []}
-                aLiquidarTotal={aLiquidar}
               />
             ))}
           </Pilha>
@@ -314,7 +381,7 @@ export default async function ContasECaixas() {
           Mantenha as contas conectadas e revise os saldos regularmente: a divergência entre o
           informado e o calculado é sempre um lançamento faltando de um lado ou do outro.
         </span>
-        <LinkSeta href="/financeiro/extrato">Conferir extrato agora</LinkSeta>
+        <LinkSeta href="/financeiro/extrato">Ver recomendações</LinkSeta>
       </Destaque>
 
       {ultimaLeitura && (
@@ -330,6 +397,30 @@ export default async function ContasECaixas() {
   )
 }
 
+/**
+ * Rótulo relativo da última leitura — "Hoje, 08:32", "Ontem, 22:14",
+ * "Há 2 dias". Relativo porque a pergunta da coluna é "posso confiar?", e a
+ * distância no tempo responde mais rápido que uma data completa.
+ */
+function quandoAtualizou(sincronizadoEm: string | null, agora: number): string {
+  if (!sincronizadoEm) return 'Nunca sincronizada'
+  const d = new Date(sincronizadoEm)
+  const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  const hoje = new Date(agora)
+  if (d.toDateString() === hoje.toDateString()) return `Hoje, ${hora}`
+  if (d.toDateString() === new Date(agora - 86_400_000).toDateString()) return `Ontem, ${hora}`
+  const dias = Math.max(1, Math.floor((agora - d.getTime()) / 86_400_000))
+  return `Há ${plural(dias, 'dia', 'dias')}`
+}
+
+/** Como o mockup rotula cada origem de saldo na coluna de atualização. */
+const ORIGEM_LINHA: Record<ContaFinanceira['origemSaldo'], { texto: string; cor: string }> = {
+  api: { texto: 'Conectada via API', cor: TINTA.ok },
+  informado: { texto: 'Registro manual', cor: TINTA.ouro },
+  calculado: { texto: 'Calculado pelo ERP', cor: 'rgba(242,237,227,.5)' },
+}
+
+/** A linha-painel de uma conta: marca, saldo, movimento, tendência e origem. */
 function LinhaConta({
   conta,
   contas,
@@ -342,18 +433,16 @@ function LinhaConta({
   agora: number
   cor: string
   serie: number[]
-  aLiquidarTotal: number
 }) {
-  const horas = horasDesdeSincronia(conta, agora)
-  const dif = divergenciaDeSaldo(conta)
   const fatia = concentracao(conta, contas)
+  const origem = ORIGEM_LINHA[conta.origemSaldo]
 
   return (
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: 'minmax(0,1.5fr) 148px 150px 116px minmax(0,150px)',
-        gap: 14,
+        gridTemplateColumns: 'minmax(0,1.45fr) 132px 112px 112px 100px minmax(0,1.2fr)',
+        gap: 12,
         alignItems: 'center',
         padding: '14px 15px',
         border: '1px solid rgba(255,255,255,.06)',
@@ -364,7 +453,7 @@ function LinhaConta({
       }}
     >
       <span style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-        <TileMarca nome={`${conta.nome} ${conta.banco} ${conta.tipo}`} tamanho={42} />
+        <TileMarca nome={`${conta.nome} ${conta.banco} ${conta.tipo}`} tamanho={44} />
         <span style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
             <span
@@ -384,11 +473,7 @@ function LinhaConta({
             {!conta.ativa && <Chip tom="neutro">Inativa</Chip>}
           </span>
           <span className="font-sans" style={{ fontSize: 10.5, color: 'rgba(242,237,227,.4)' }}>
-            {[conta.tipo, conta.banco, conta.finalidade].filter(Boolean).join(' · ')}
-          </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <InformarSaldo conta={conta} />
-            <EditarConta conta={conta} />
+            {[conta.tipo, conta.banco].filter(Boolean).join(' · ')}
           </span>
         </span>
       </span>
@@ -404,66 +489,40 @@ function LinhaConta({
       </span>
 
       <span style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-        <Etiqueta>Movimento 30 dias</Etiqueta>
-        <Num tamanho={12} tom="ok" peso={500}>
-          {`+ ${brl(conta.entradas30d)}`}
+        <Etiqueta>Entradas (30d)</Etiqueta>
+        <Num tamanho={12.5} tom="ok" peso={500}>
+          {brl(conta.entradas30d)}
         </Num>
-        <Num tamanho={12} tom="erro" peso={500}>
-          {`− ${brl(conta.saidas30d)}`}
-        </Num>
-        {conta.saldoALiquidar > 0 && (
-          <Num tamanho={10} tom="info" peso={400}>
-            {`${brl(conta.saldoALiquidar)} a liquidar`}
-          </Num>
-        )}
       </span>
 
-      <span style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <Etiqueta>Tendência</Etiqueta>
-        <Mini valores={serie.length > 1 ? serie : [0, 0]} largura={104} altura={30} />
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <Etiqueta>Saídas (30d)</Etiqueta>
+        <Num tamanho={12.5} tom="erro" peso={500}>
+          {brl(conta.saidas30d)}
+        </Num>
       </span>
 
-      <span style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
-        <Etiqueta>Origem do saldo</Etiqueta>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <Bolinha
-            cor={
-              conta.origemSaldo === 'api'
-                ? TINTA.ok
-                : conta.origemSaldo === 'informado'
-                  ? TINTA.ouro
-                  : TINTA.neutro
-            }
-            tamanho={7}
-          />
-          <span
-            className="font-sans"
-            style={{
-              fontSize: 11,
-              color:
-                conta.origemSaldo === 'api'
-                  ? TINTA.ok
-                  : conta.origemSaldo === 'informado'
-                    ? TINTA.ouro
-                    : 'rgba(242,237,227,.5)',
-            }}
-          >
-            {ROTULO_ORIGEM_SALDO[conta.origemSaldo]}
+      <Mini valores={serie.length > 1 ? serie : [0, 0]} largura={96} altura={30} />
+
+      <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
+          <Etiqueta>Última atualização</Etiqueta>
+          <span className="font-sans" style={{ fontSize: 11.5, color: 'rgba(242,237,227,.78)' }}>
+            {quandoAtualizou(conta.sincronizadoEm, agora)}
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Bolinha cor={origem.cor} tamanho={6} />
+            <span className="font-sans" style={{ fontSize: 10, color: origem.cor }}>
+              {origem.texto}
+            </span>
           </span>
         </span>
-        {horas !== null && (
-          <span
-            className="font-sans"
-            style={{ fontSize: 10, color: horas >= 24 ? TINTA.atencao : 'rgba(242,237,227,.36)' }}
-          >
-            {horas < 1 ? 'lido agora há pouco' : `última leitura há ${horas} h`}
-          </span>
-        )}
-        {dif !== null && Math.abs(dif) > 0.05 && (
-          <Num tamanho={10} tom="erro" peso={400}>
-            {`${dif > 0 ? '+' : '−'} ${brl(Math.abs(dif))} vs. extrato`}
-          </Num>
-        )}
+        {/* As ações da linha são reais: os dois modais que já existem. O kebab
+            do mockup viraria menu inerte, e botão que não faz nada é proibido. */}
+        <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+          <InformarSaldo conta={conta} />
+          <EditarConta conta={conta} />
+        </span>
       </span>
     </div>
   )
@@ -498,59 +557,62 @@ function serieDiariaPorConta(lancamentos: LancamentoGerencial[]): Map<string, nu
   return saida
 }
 
-
-/** Linha de ação rápida da trilha — ícone, título, subtítulo e seta. */
-function AtalhoRapido({
+/** Tile de atalho em LINK — o mesmo desenho do tile de ação, para navegar. */
+function AtalhoLink({
   href,
   icone,
   titulo,
   sub,
 }: {
   href: string
-  icone: Parameters<typeof Ico>[0]['n']
+  icone: NomeIcone
   titulo: string
   sub: string
 }) {
   return (
     <Link
       href={href}
-      className="hover:border-ouro/35"
+      className="hover:border-ouro/40"
       style={{
         display: 'flex',
-        alignItems: 'center',
-        gap: 11,
+        flexDirection: 'column',
+        gap: 8,
         padding: '11px 12px',
         border: '1px solid rgba(255,255,255,.07)',
         borderRadius: 11,
         background: 'rgba(255,255,255,.015)',
         textDecoration: 'none',
+        minWidth: 0,
       }}
     >
-      <span
-        style={{
-          width: 32,
-          height: 32,
-          flex: 'none',
-          borderRadius: 9,
-          display: 'grid',
-          placeItems: 'center',
-          background: 'rgba(233,197,131,.1)',
-          border: '1px solid rgba(233,197,131,.24)',
-          color: TINTA.ouro,
-        }}
-      >
-        <Ico n={icone} tamanho={15} />
+      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span
+          style={{
+            width: 30,
+            height: 30,
+            flex: 'none',
+            borderRadius: 8,
+            display: 'grid',
+            placeItems: 'center',
+            background: 'rgba(233,197,131,.1)',
+            border: '1px solid rgba(233,197,131,.24)',
+            color: TINTA.ouro,
+          }}
+        >
+          <Ico n={icone} tamanho={14} />
+        </span>
+        <span style={{ flex: 1 }} />
+        <span style={{ color: 'rgba(242,237,227,.3)', display: 'grid', placeItems: 'center' }}>
+          <Ico n="seta-direita" tamanho={12} />
+        </span>
       </span>
-      <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
-        <span className="font-sans" style={{ fontSize: 12, fontWeight: 600, color: 'rgba(242,237,227,.86)' }}>
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+        <span className="font-sans" style={{ fontSize: 11.5, fontWeight: 600, color: 'rgba(242,237,227,.88)' }}>
           {titulo}
         </span>
-        <span className="font-sans" style={{ fontSize: 10, color: 'rgba(242,237,227,.4)' }}>
+        <span className="font-sans" style={{ fontSize: 9.5, lineHeight: 1.35, color: 'rgba(242,237,227,.4)' }}>
           {sub}
         </span>
-      </span>
-      <span style={{ color: 'rgba(242,237,227,.3)' }}>
-        <Ico n="seta-direita" tamanho={13} />
       </span>
     </Link>
   )

@@ -113,8 +113,8 @@ export default async function DashboardFinanceiro({
           </>
         }
         direita={
-          <BotaoLinha href="/financeiro/configuracoes" icone="ajustes">
-            Personalizar dashboard
+          <BotaoLinha href="/financeiro/categorias" icone="ajustes">
+            Plano de categorias
           </BotaoLinha>
         }
       />
@@ -219,7 +219,7 @@ export default async function DashboardFinanceiro({
             ]}
           />
           {barras.length > 0 ? (
-            <BarrasEixo dados={barras} altura={244} />
+            <BarrasEixo dados={barras} altura={244} formatarDica={brl} />
           ) : (
             <Vazio icone="barras" texto="Sem movimentos previstos no horizonte." />
           )}

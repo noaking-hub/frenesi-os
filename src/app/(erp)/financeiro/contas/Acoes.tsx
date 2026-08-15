@@ -2,9 +2,10 @@
 
 import { useState, useTransition } from 'react'
 
+import { Ico, type NomeIcone } from '@/components/erp/IconesUi'
 import { Modal } from '@/components/erp/Modal'
 import { BotaoOuro, TituloSecao } from '@/components/erp/primitivos'
-import { COR } from '@/components/erp/tokens'
+import { BORDA, COR, FUNDO } from '@/components/erp/tokens'
 import { brl, parseNum } from '@/domain'
 import type { ContaFinanceira } from '@/domain'
 
@@ -17,8 +18,75 @@ import {
 } from '../acoes-gerenciais'
 import { CAMPO, Campo, Erro, Previa, Rodape } from '../Compromissos'
 
+/**
+ * Tile de atalho das "Movimentações rápidas" — a versão BOTÃO do atalho em
+ * link da trilha. Existe aqui, e não no kit, porque só as ações de modal
+ * desta tela precisam dele: o mockup desenha o mesmo tile para link e para
+ * ação, e um botão inerte imitando link seria pior que a duplicação.
+ */
+function TileAtalho({
+  icone,
+  titulo,
+  sub,
+  onClick,
+}: {
+  icone: NomeIcone
+  titulo: string
+  sub: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="font-sans hover:border-ouro/40"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'stretch',
+        gap: 8,
+        padding: '11px 12px',
+        border: '1px solid rgba(255,255,255,.07)',
+        borderRadius: 11,
+        background: 'rgba(255,255,255,.015)',
+        cursor: 'pointer',
+        textAlign: 'left',
+        minWidth: 0,
+      }}
+    >
+      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span
+          style={{
+            width: 30,
+            height: 30,
+            flex: 'none',
+            borderRadius: 8,
+            display: 'grid',
+            placeItems: 'center',
+            background: FUNDO.ouro,
+            border: `1px solid ${BORDA.ouro}`,
+            color: COR.ouro,
+          }}
+        >
+          <Ico n={icone} tamanho={14} />
+        </span>
+        <span style={{ flex: 1 }} />
+        <span style={{ color: 'rgba(242,237,227,.3)', display: 'grid', placeItems: 'center' }}>
+          <Ico n="seta-direita" tamanho={12} />
+        </span>
+      </span>
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+        <span style={{ fontSize: 11.5, fontWeight: 600, color: 'rgba(242,237,227,.88)' }}>
+          {titulo}
+        </span>
+        <span style={{ fontSize: 9.5, lineHeight: 1.35, color: 'rgba(242,237,227,.4)' }}>{sub}</span>
+      </span>
+    </button>
+  )
+}
+
 /** Transferência entre contas próprias — as duas pernas nascem juntas. */
-export function Transferir({ contas }: { contas: ContaFinanceira[] }) {
+export function Transferir({ contas, atalho }: { contas: ContaFinanceira[]; atalho?: boolean }) {
   const [aberto, setAberto] = useState(false)
   const [origem, setOrigem] = useState(contas[0]?.id ?? '')
   const [destino, setDestino] = useState(contas[1]?.id ?? '')
@@ -53,9 +121,18 @@ export function Transferir({ contas }: { contas: ContaFinanceira[] }) {
 
   return (
     <>
-      <BotaoOuro altura={32} onClick={() => setAberto(true)}>
-        Transferir entre contas
-      </BotaoOuro>
+      {atalho ? (
+        <TileAtalho
+          icone="transferir"
+          titulo="Transferir entre contas"
+          sub="Entre suas contas e carteiras"
+          onClick={() => setAberto(true)}
+        />
+      ) : (
+        <BotaoOuro altura={32} onClick={() => setAberto(true)}>
+          Transferir entre contas
+        </BotaoOuro>
+      )}
 
       {aberto && (
         <Modal titulo="Transferir entre contas" largura={540} aoFechar={() => setAberto(false)}>
@@ -143,7 +220,7 @@ export function Transferir({ contas }: { contas: ContaFinanceira[] }) {
  * para digitar o número real, o ERP exibiria a soma do extrato como se fosse
  * saldo — que é sempre a foto do dia em que se leu, não a de agora.
  */
-export function InformarSaldo({ conta }: { conta: ContaFinanceira }) {
+export function InformarSaldo({ conta, atalho }: { conta: ContaFinanceira; atalho?: boolean }) {
   const [aberto, setAberto] = useState(false)
   const [valor, setValor] = useState(
     conta.origemSaldo === 'informado' ? conta.saldoInformado.toFixed(2).replace('.', ',') : '',
@@ -167,24 +244,33 @@ export function InformarSaldo({ conta }: { conta: ContaFinanceira }) {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setAberto(true)}
-        className="font-sans hover:text-ouro"
-        style={{
-          border: 0,
-          background: 'transparent',
-          padding: 0,
-          color: 'var(--color-terciario)',
-          fontSize: 10,
-          fontWeight: 600,
-          cursor: 'pointer',
-          textDecoration: 'underline',
-          textUnderlineOffset: 3,
-        }}
-      >
-        Informar saldo
-      </button>
+      {atalho ? (
+        <TileAtalho
+          icone="lapis"
+          titulo="Registrar saldo"
+          sub="Atualizar saldo manualmente"
+          onClick={() => setAberto(true)}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAberto(true)}
+          className="font-sans hover:text-ouro"
+          style={{
+            border: 0,
+            background: 'transparent',
+            padding: 0,
+            color: 'var(--color-terciario)',
+            fontSize: 10,
+            fontWeight: 600,
+            cursor: 'pointer',
+            textDecoration: 'underline',
+            textUnderlineOffset: 3,
+          }}
+        >
+          Informar saldo
+        </button>
+      )}
 
       {aberto && (
         <Modal titulo="Informar saldo" largura={470} aoFechar={() => setAberto(false)}>
@@ -270,7 +356,7 @@ export function NovaConta() {
   return (
     <>
       <BotaoOuro altura={32} onClick={() => setAberto(true)}>
-        + Nova conta
+        + Nova conta ou carteira
       </BotaoOuro>
       {aberto && <EditorConta conta={null} aoFechar={() => setAberto(false)} />}
     </>

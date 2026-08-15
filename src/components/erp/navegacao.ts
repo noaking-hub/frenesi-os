@@ -153,22 +153,6 @@ export const NAV: GrupoNav[] = [
         subtitulo: 'Plano de contas gerencial do Financeiro',
         icone: 'etiqueta',
       },
-      {
-        id: 'contabil',
-        label: 'Integração Contábil',
-        href: '/financeiro/contabil',
-        pronta: true,
-        subtitulo: 'Amarração do financeiro ao plano de contas do escritório',
-        icone: 'enviar',
-      },
-      {
-        id: 'cfgfin',
-        label: 'Configurações Financeiras',
-        href: '/financeiro/configuracoes',
-        pronta: true,
-        subtitulo: 'Fechamento de competência, centros de custo e origem dos saldos',
-        icone: 'engrenagem',
-      },
     ],
   },
   {

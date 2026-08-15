@@ -16,7 +16,7 @@ import {
   Vazio,
   type TomUi,
 } from '@/components/erp/ui'
-import { AreaPontos, curto } from '@/components/erp/Visualizacoes'
+import { AreaPontos } from '@/components/erp/Visualizacoes'
 import { carregarDre, lerLancamentos } from '@/data/financeiro'
 import {
   brl,
@@ -468,8 +468,8 @@ export default async function Dre({
               <AreaPontos
                 valores={evolucao.map((e) => e.resultado)}
                 rotulos={evolucao.map((e) => `${e.competencia.slice(5)}/${e.competencia.slice(2, 4)}`)}
-                altura={196}
-                formatar={curto}
+                altura={208}
+                formatar={brl}
                 rotularTodos
               />
             ) : (

@@ -23,7 +23,7 @@ import {
   type NomeIcone,
   type TomUi,
 } from '@/components/erp/ui'
-import { AreaPontos, PALETA, RoscaLegenda, curto } from '@/components/erp/Visualizacoes'
+import { Legenda, RoscaLegenda, SerieLinhas, CORES_SERIE, curto } from '@/components/erp/Visualizacoes'
 import { carregarDashboard } from '@/data/consultas'
 import { carregarPainelPrincipal, PERIODOS, variacao, type Periodo } from '@/data/painel'
 import { sessaoAtual } from '@/data/sessao'
@@ -78,13 +78,14 @@ const ATALHOS: { rotulo: string; href: string; icone: NomeIcone; tom: TomUi }[] 
 export default async function Dashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ periodo?: string }>
+  searchParams: Promise<{ periodo?: string; de?: string; ate?: string }>
 }) {
-  const { periodo } = await searchParams
+  const { periodo, de, ate } = await searchParams
   const escolhido = (PERIODOS.some((p) => p.id === periodo) ? periodo : '30d') as Periodo
+  const livre = de && ate ? { de, ate } : undefined
 
   const [p, geral, usuario] = await Promise.all([
-    carregarPainelPrincipal(escolhido),
+    carregarPainelPrincipal(escolhido, livre),
     carregarDashboard(),
     sessaoAtual(),
   ])
@@ -121,7 +122,6 @@ export default async function Dashboard({
     ? Math.round(comGiro.reduce((a, c) => a + (c.dias ?? 0) * c.disponivelMl, 0) / mlComGiro)
     : 0
   const alertas = geral.pendencias.filter((x) => x.contagem > 0)
-  const totalCanal = p.porCanal.reduce((a, c) => a + c.valor, 0)
   const totalCategoria = p.porCategoria.reduce((a, c) => a + c.valor, 0)
 
   return (
@@ -137,13 +137,81 @@ export default async function Dashboard({
           </>
         }
         direita={
-          <Segmentado opcoes={PERIODOS} ativo={escolhido} base="/" chave="periodo" />
+          <>
+            <Segmentado
+              opcoes={PERIODOS}
+              ativo={livre ? '' : escolhido}
+              base="/"
+              chave="periodo"
+            />
+            {/* Período livre: qualquer intervalo de datas, via GET — a URL é
+                o estado, e o link do navegador continua compartilhável. */}
+            <form action="/" method="get" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="date"
+                name="de"
+                defaultValue={livre?.de}
+                required
+                className="font-mono"
+                style={{
+                  height: 30,
+                  padding: '0 8px',
+                  fontSize: 11,
+                  color: 'var(--color-tinta)',
+                  background: 'rgba(255,255,255,.04)',
+                  border: '1px solid rgba(255,255,255,.1)',
+                  borderRadius: 9,
+                  colorScheme: 'dark',
+                }}
+              />
+              <span className="font-sans" style={{ fontSize: 10.5, color: 'rgba(242,237,227,.4)' }}>
+                a
+              </span>
+              <input
+                type="date"
+                name="ate"
+                defaultValue={livre?.ate}
+                required
+                className="font-mono"
+                style={{
+                  height: 30,
+                  padding: '0 8px',
+                  fontSize: 11,
+                  color: 'var(--color-tinta)',
+                  background: 'rgba(255,255,255,.04)',
+                  border: '1px solid rgba(255,255,255,.1)',
+                  borderRadius: 9,
+                  colorScheme: 'dark',
+                }}
+              />
+              <button
+                type="submit"
+                className="font-sans hover:brightness-110"
+                style={{
+                  height: 30,
+                  padding: '0 12px',
+                  fontSize: 10.5,
+                  fontWeight: 600,
+                  letterSpacing: '.06em',
+                  textTransform: 'uppercase',
+                  color: '#141310',
+                  background: TINTA.ouro,
+                  border: 0,
+                  borderRadius: 9,
+                  cursor: 'pointer',
+                }}
+              >
+                Filtrar
+              </button>
+            </form>
+          </>
         }
       />
 
       {/* Camada 1 — saúde do negócio */}
-      <GradeIndicadores minimo={206}>
+      <GradeIndicadores minimo={206} conectada>
         <Indicador
+          plano
           icone="cifrao"
           tom="ouro"
           rotulo="Faturamento total"
@@ -154,6 +222,7 @@ export default async function Dashboard({
           href="/relatorios"
         />
         <Indicador
+          plano
           icone="carrinho"
           tom="info"
           rotulo="Pedidos pagos"
@@ -164,6 +233,7 @@ export default async function Dashboard({
           href="/pedidos"
         />
         <Indicador
+          plano
           icone="etiqueta"
           tom="ciano"
           rotulo="Ticket médio"
@@ -172,6 +242,7 @@ export default async function Dashboard({
           nota={semBase(p.anterior.ticket)}
         />
         <Indicador
+          plano
           icone="tendencia"
           tom={p.resultado >= 0 ? 'ok' : 'erro'}
           rotulo="Resultado gerencial"
@@ -181,6 +252,7 @@ export default async function Dashboard({
           href="/financeiro/dre"
         />
         <Indicador
+          plano
           icone="porcento"
           tom="roxo"
           rotulo="Margem líquida"
@@ -189,10 +261,8 @@ export default async function Dashboard({
           nota={`Sobre ${brl(p.receitaLiquida)} de receita líquida`}
           href="/financeiro/dre"
         />
-      </GradeIndicadores>
-
-      <GradeIndicadores minimo={206}>
         <Indicador
+          plano
           icone="pessoas"
           tom="roxo"
           rotulo="Clientes novos"
@@ -202,6 +272,7 @@ export default async function Dashboard({
           href="/crm"
         />
         <Indicador
+          plano
           icone="frasco"
           tom="ciano"
           rotulo="Decants vendidos"
@@ -214,6 +285,7 @@ export default async function Dashboard({
           href="/envase"
         />
         <Indicador
+          plano
           icone="caixa"
           tom={geral.estoque.criticos ? 'erro' : 'ok'}
           rotulo="Estoque crítico"
@@ -228,6 +300,7 @@ export default async function Dashboard({
           href="/estoque"
         />
         <Indicador
+          plano
           icone="saida"
           tom={p.vencidos.qtd ? 'erro' : 'atencao'}
           rotulo="Contas a pagar (7 dias)"
@@ -241,6 +314,7 @@ export default async function Dashboard({
           href="/financeiro/lancamentos?tipo=saida"
         />
         <Indicador
+          plano
           icone="entrada"
           tom="ok"
           rotulo="Contas a receber (7 dias)"
@@ -256,23 +330,44 @@ export default async function Dashboard({
         <Painel
           titulo="Faturamento diário"
           icone="linha"
-          nota="últimos 30 dias"
+          nota={
+            p.janela.dias >= 7
+              ? p.janela.rotulo.toLowerCase()
+              : `7 dias até ${diaCurtoPt(p.janela.ate)}`
+          }
           acao={<AcaoPainel href="/relatorios">Ver relatório completo</AcaoPainel>}
           rodape={{
-            nota: 'Só pedidos pagos, sem cancelados nem estornados. É a mesma base do relatório de vendas.',
+            nota: 'Faturado: pedidos pagos, sem cancelados. Recebido líquido: baixas de entrada no caixa, já sem tarifas e sem transferências entre contas.',
           }}
         >
-          {serieFaturamento.some((v) => v > 0) ? (
-            <AreaPontos
-              valores={serieFaturamento}
-              rotulos={p.serieDiaria.map((d, i) =>
-                i % 5 === 0 || i === p.serieDiaria.length - 1 ? diaCurtoPt(d.dia) : '',
-              )}
-              altura={228}
-              formatar={curto}
-            />
+          {p.serieDiaria.some((d) => d.faturamento > 0 || d.recebido > 0) ? (
+            <Pilha gap={10}>
+              <Legenda
+                itens={[
+                  { cor: CORES_SERIE.saldo, rotulo: 'Faturado (pedidos pagos)' },
+                  { cor: CORES_SERIE.entrada, rotulo: 'Recebido líquido (caixa)' },
+                ]}
+              />
+              <SerieLinhas
+                series={[
+                  {
+                    rotulo: 'Faturado',
+                    cor: CORES_SERIE.saldo,
+                    valores: p.serieDiaria.map((d) => d.faturamento),
+                  },
+                  {
+                    rotulo: 'Recebido líquido',
+                    cor: CORES_SERIE.entrada,
+                    valores: p.serieDiaria.map((d) => d.recebido),
+                  },
+                ]}
+                rotulos={p.serieDiaria.map((d) => diaCurtoPt(d.dia))}
+                altura={216}
+                formatar={brl}
+              />
+            </Pilha>
           ) : (
-            <Vazio icone="linha" texto="Nenhuma venda paga nos últimos 30 dias." />
+            <Vazio icone="linha" texto="Nenhuma venda paga nem recebimento no período." />
           )}
         </Painel>
 
@@ -357,7 +452,7 @@ export default async function Dashboard({
       </Colunas>
 
       {/* Camada 4 — diagnóstico rápido */}
-      <Colunas proporcao="minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr)">
+      <Colunas proporcao="minmax(0,1.5fr) minmax(0,1fr)">
         <Painel
           titulo="Top 5 perfumes mais vendidos"
           icone="frasco"
@@ -412,30 +507,6 @@ export default async function Dashboard({
             </Pilha>
           ) : (
             <Vazio icone="frasco" texto="Nenhum item vendido no período." />
-          )}
-        </Painel>
-
-        <Painel
-          titulo="Canais de venda"
-          icone="megafone"
-          nota="origem do pedido, não meio de pagamento"
-          rodape={{ link: { href: '/pedidos', texto: 'Ver pedidos' } }}
-        >
-          {p.porCanal.length > 0 ? (
-            <RoscaLegenda
-              fatias={p.porCanal.map((c, i) => ({
-                rotulo: c.rotulo,
-                valor: c.valor,
-                cor: PALETA[i % PALETA.length],
-              }))}
-              total={totalCanal}
-              legendaTotal="Faturamento"
-              formatar={brl}
-              tamanho={158}
-              maximo={5}
-            />
-          ) : (
-            <Vazio icone="megafone" texto="Nenhuma venda com canal identificado." />
           )}
         </Painel>
 

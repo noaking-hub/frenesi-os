@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+
 import {
   AcaoPainel,
   Celula,
@@ -64,6 +66,11 @@ interface Busca {
   conta?: string
   centro?: string
   q?: string
+  /** Janela de vencimento, AAAA-MM-DD inclusivos. */
+  de?: string
+  ate?: string
+  /** 'sim' | 'nao' — o mockup separa o que se repete todo mês do avulso. */
+  recorrente?: string
 }
 
 export default async function Lancamentos({ searchParams }: { searchParams: Promise<Busca> }) {
@@ -96,6 +103,12 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       if (filtro.categoria && l.categoriaId !== filtro.categoria) return false
       if (filtro.conta && l.contaId !== filtro.conta) return false
       if (filtro.centro && l.centroCusto !== filtro.centro) return false
+      // O período filtra por VENCIMENTO: é a data que decide o que entra na
+      // fila de trabalho. Título sem vencimento fica fora da janela.
+      if (filtro.de && (!l.venceEm || l.venceEm < filtro.de)) return false
+      if (filtro.ate && (!l.venceEm || l.venceEm > filtro.ate)) return false
+      if (filtro.recorrente === 'sim' && !l.recorrente) return false
+      if (filtro.recorrente === 'nao' && l.recorrente) return false
       if (busca) {
         const alvo = `${l.descricao} ${l.favorecido ?? ''} ${l.documento ?? ''}`.toLowerCase()
         if (!alvo.includes(busca)) return false
@@ -537,97 +550,143 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
           />
         </Painel>
 
-        <Colunas proporcao="repeat(auto-fit, minmax(190px, 1fr))" gap={12}>
-          <Painel padding="14px 15px">
-            <Pilha gap={8}>
-              <Etiqueta>Taxa de pagamento</Etiqueta>
-              <Num tamanho={19} tom={taxaPagamento >= 80 ? 'ok' : 'atencao'}>
-                {`${taxaPagamento.toFixed(1).replace('.', ',')}%`}
-              </Num>
-              <Progresso pct={taxaPagamento} tom={taxaPagamento >= 80 ? 'ok' : 'atencao'} />
-              <span className="font-sans" style={{ fontSize: 10, color: 'rgba(242,237,227,.38)' }}>
-                {`${pagas.length} de ${saidas.length} contas pagas`}
-              </span>
-            </Pilha>
-          </Painel>
+        {/* Os cinco cartões do rodapé têm a MESMA estrutura em três faixas —
+            rótulo, número, medidor e nota — e altura mínima igual: com
+            conteúdo de tamanhos diferentes, cada um terminava numa altura e a
+            linha parecia desalinhada. */}
+        <Colunas proporcao="repeat(5, minmax(0, 1fr))" gap={12}>
+          <Metrica
+            rotulo="Taxa de pagamento"
+            valor={`${taxaPagamento.toFixed(1).replace('.', ',')}%`}
+            tom={taxaPagamento >= 80 ? 'ok' : 'atencao'}
+            medidor={<Progresso pct={taxaPagamento} tom={taxaPagamento >= 80 ? 'ok' : 'atencao'} />}
+            nota={`${pagas.length} de ${saidas.length} contas pagas`}
+          />
 
-          <Painel padding="14px 15px">
-            <Pilha gap={8}>
-              <Etiqueta>Prazo médio de pagamento</Etiqueta>
-              <Num tamanho={19} tom={prazoPagamento !== null && prazoPagamento > 0 ? 'erro' : 'ok'}>
-                {prazoPagamento === null
-                  ? '—'
-                  : `${Math.abs(prazoPagamento).toFixed(1).replace('.', ',')} dias`}
-              </Num>
-              <span
-                className="font-sans"
-                style={{ fontSize: 10, lineHeight: 1.4, color: 'rgba(242,237,227,.38)' }}
-              >
-                {prazoPagamento === null
-                  ? 'Nenhuma conta baixada com vencimento definido'
-                  : prazoPagamento > 0
-                    ? 'em média DEPOIS do vencimento'
-                    : 'em média ANTES do vencimento'}
-              </span>
-            </Pilha>
-          </Painel>
-
-          <Painel padding="14px 15px">
-            <Pilha gap={8}>
-              <Etiqueta>Prazo médio de recebimento</Etiqueta>
-              <Num tamanho={19} tom={prazoRecebimento !== null && prazoRecebimento > 0 ? 'atencao' : 'ok'}>
-                {prazoRecebimento === null
-                  ? '—'
-                  : `${Math.abs(prazoRecebimento).toFixed(1).replace('.', ',')} dias`}
-              </Num>
-              <span
-                className="font-sans"
-                style={{ fontSize: 10, lineHeight: 1.4, color: 'rgba(242,237,227,.38)' }}
-              >
-                {prazoRecebimento === null
-                  ? 'Nenhum recebimento baixado ainda'
-                  : prazoRecebimento > 0
-                    ? 'o dinheiro entra depois do previsto'
-                    : 'o dinheiro entra antes do previsto'}
-              </span>
-            </Pilha>
-          </Painel>
-
-          <Painel padding="14px 15px">
-            <Pilha gap={8}>
-              <Etiqueta>Inadimplência</Etiqueta>
-              <Num tamanho={19} tom={inadimplencia > 5 ? 'erro' : 'ok'}>
-                {`${inadimplencia.toFixed(1).replace('.', ',')}%`}
-              </Num>
-              <Progresso pct={inadimplencia} tom={inadimplencia > 5 ? 'erro' : 'ok'} />
-              <span className="font-sans" style={{ fontSize: 10, color: 'rgba(242,237,227,.38)' }}>
-                {`${brl(p.vencidos.valor)} vencido em aberto`}
-              </span>
-            </Pilha>
-          </Painel>
-
-          <Painel padding="14px 15px">
-            <Pilha gap={8}>
-              <Etiqueta>Saldo projetado</Etiqueta>
-              <Num tamanho={19} tom={p.saldoProjetado < 0 ? 'erro' : 'ouro'}>
-                {brl(p.saldoProjetado)}
-              </Num>
+          <Metrica
+            rotulo="Prazo médio de pagamento"
+            valor={
+              prazoPagamento === null
+                ? '—'
+                : `${Math.abs(prazoPagamento).toFixed(1).replace('.', ',')} dias`
+            }
+            tom={prazoPagamento !== null && prazoPagamento > 0 ? 'erro' : 'ok'}
+            medidor={
               <Mini
-                valores={[
-                  p.contas.reduce((a, c) => a + c.saldoDisponivel, 0),
-                  p.saldoProjetado,
-                ]}
+                valores={pagas.length > 1 ? [0, prazoPagamento ?? 0] : [0, 0]}
+                largura={140}
+                altura={26}
+                tom={prazoPagamento !== null && prazoPagamento > 0 ? 'erro' : 'ok'}
+              />
+            }
+            nota={
+              prazoPagamento === null
+                ? 'Nenhuma conta baixada com vencimento definido'
+                : prazoPagamento > 0
+                  ? 'em média DEPOIS do vencimento'
+                  : 'em média ANTES do vencimento'
+            }
+          />
+
+          <Metrica
+            rotulo="Prazo médio de recebimento"
+            valor={
+              prazoRecebimento === null
+                ? '—'
+                : `${Math.abs(prazoRecebimento).toFixed(1).replace('.', ',')} dias`
+            }
+            tom={prazoRecebimento !== null && prazoRecebimento > 0 ? 'atencao' : 'ok'}
+            medidor={
+              <Mini
+                valores={prazoRecebimento !== null ? [0, prazoRecebimento] : [0, 0]}
+                largura={140}
+                altura={26}
+                tom={prazoRecebimento !== null && prazoRecebimento > 0 ? 'atencao' : 'ok'}
+              />
+            }
+            nota={
+              prazoRecebimento === null
+                ? 'Nenhum recebimento baixado ainda'
+                : prazoRecebimento > 0
+                  ? 'o dinheiro entra depois do previsto'
+                  : 'o dinheiro entra antes do previsto'
+            }
+          />
+
+          <Metrica
+            rotulo="Inadimplência"
+            valor={`${inadimplencia.toFixed(1).replace('.', ',')}%`}
+            tom={inadimplencia > 5 ? 'erro' : 'ok'}
+            medidor={<Progresso pct={inadimplencia} tom={inadimplencia > 5 ? 'erro' : 'ok'} />}
+            nota={`${brl(p.vencidos.valor)} vencido em aberto`}
+          />
+
+          <Metrica
+            rotulo="Saldo projetado"
+            valor={brl(p.saldoProjetado)}
+            tom={p.saldoProjetado < 0 ? 'erro' : 'ouro'}
+            medidor={
+              <Mini
+                valores={[p.contas.reduce((a, c) => a + c.saldoDisponivel, 0), p.saldoProjetado]}
                 largura={140}
                 altura={26}
                 tom={p.saldoProjetado < 0 ? 'erro' : 'ok'}
               />
-              <span className="font-sans" style={{ fontSize: 10, color: 'rgba(242,237,227,.38)' }}>
-                depois de liquidar tudo que está em aberto
-              </span>
-            </Pilha>
-          </Painel>
+            }
+            nota="depois de liquidar tudo que está em aberto"
+          />
         </Colunas>
       </ComTrilha>
     </Pilha>
+  )
+}
+
+/**
+ * Cartão de métrica do rodapé: sempre as mesmas quatro faixas, sempre a
+ * mesma altura. É a uniformidade que faz a linha inteira parecer uma régua,
+ * e não cinco cartões soltos.
+ */
+function Metrica({
+  rotulo,
+  valor,
+  tom,
+  medidor,
+  nota,
+}: {
+  rotulo: string
+  valor: string
+  tom: TomUi
+  medidor: ReactNode
+  nota: string
+}) {
+  return (
+    <Painel padding="14px 15px 13px">
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          minHeight: 118,
+        }}
+      >
+        <Etiqueta>{rotulo}</Etiqueta>
+        <Num tamanho={19} tom={tom}>
+          {valor}
+        </Num>
+        <div style={{ height: 26, display: 'flex', alignItems: 'center' }}>{medidor}</div>
+        <span
+          className="font-sans"
+          style={{
+            marginTop: 'auto',
+            fontSize: 10,
+            lineHeight: 1.4,
+            color: 'rgba(242,237,227,.38)',
+            textWrap: 'pretty',
+          }}
+        >
+          {nota}
+        </span>
+      </div>
+    </Painel>
   )
 }

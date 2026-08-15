@@ -103,7 +103,6 @@ export default async function Categorias() {
 
   const semLigacao = lancamentos.filter((l) => !l.canceladoEm && !l.categoriaId).length
   const foraDaDre = categorias.filter((c) => !impactaResultado(c.natureza) || !c.impactaDre).length
-  const semContaContabil = categorias.filter((c) => c.ativa && !c.contaContabil).length
   const ativas = categorias.filter((c) => c.ativa).length
 
   const maiorValor = Math.max(1, ...enriquecidas.map((x) => x.valorMes))
@@ -117,7 +116,6 @@ export default async function Categorias() {
         <Celula
           principal={c.nome}
           secundaria={[
-            c.contaContabil || 'sem conta contábil',
             c.centroCusto,
             c.emUso > 0 ? plural(c.emUso, 'lançamento', 'lançamentos') : 'nunca usada',
           ]
@@ -288,26 +286,6 @@ export default async function Categorias() {
             />
           </Painel>
 
-          {semContaContabil > 0 && (
-            <Painel
-              titulo="Pendências do plano de contas"
-              icone="alerta"
-              tom="atencao"
-              rodape={{ link: { href: '/financeiro/contabil', texto: 'Abrir integração contábil' } }}
-            >
-              <span
-                className="font-sans"
-                style={{
-                  fontSize: 11.5,
-                  lineHeight: 1.6,
-                  color: 'rgba(242,237,227,.6)',
-                  textWrap: 'pretty',
-                }}
-              >
-                {`${plural(semContaContabil, 'categoria ativa está', 'categorias ativas estão')} sem conta contábil. No arquivo do escritório elas saem como não classificadas, e o contador devolve o pacote pedindo o de‑para.`}
-              </span>
-            </Painel>
-          )}
         </Pilha>
       </Colunas>
     </Pilha>

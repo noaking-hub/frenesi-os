@@ -16,13 +16,20 @@ interface Marca {
   icone?: NomeIcone
   /** Marcas de fundo claro (BB, PagBank) precisam de texto escuro. */
   textoCor?: string
+  /** Logomarca real, hospedada no Storage do projeto — fora do repositório. */
+  logo?: string
 }
 
+// As logomarcas ficam num bucket público do Supabase Storage, importadas do
+// Brandfetch por uma edge function. O repositório é público; a arte
+// registrada mora no Storage do dono, não no git.
+const STORAGE = 'https://gxzvlknlxwihooqgctst.supabase.co/storage/v1/object/public/marcas'
+
 const MARCAS: { chave: RegExp; marca: Marca }[] = [
-  { chave: /mercado\s*pago/i, marca: { cor: '#009EE3', texto: 'MP' } },
-  { chave: /\binter\b/i, marca: { cor: '#FF7A00', texto: 'in' } },
-  { chave: /sicoob/i, marca: { cor: '#00AE9D', texto: 'Si' } },
-  { chave: /bradesco/i, marca: { cor: '#CC092F', texto: 'B' } },
+  { chave: /mercado\s*pago/i, marca: { cor: '#009EE3', texto: 'MP', logo: `${STORAGE}/mercado-pago.jpeg` } },
+  { chave: /\binter\b/i, marca: { cor: '#FF7A00', texto: 'in', logo: `${STORAGE}/inter.jpeg` } },
+  { chave: /sicoob/i, marca: { cor: '#00AE9D', texto: 'Si', logo: `${STORAGE}/sicoob.jpeg` } },
+  { chave: /bradesco/i, marca: { cor: '#CC092F', texto: 'B', logo: `${STORAGE}/bradesco.png` } },
   { chave: /nubank|nu\s*pagamentos/i, marca: { cor: '#820AD1', texto: 'Nu' } },
   { chave: /ita[uú]/i, marca: { cor: '#EC7000', texto: 'It' } },
   { chave: /santander/i, marca: { cor: '#EC0000', texto: 'S' } },
@@ -81,6 +88,36 @@ export function TileMarca({
         <span className="font-display" style={{ fontWeight: 600, fontSize: tamanho * 0.42 }}>
           {inicial}
         </span>
+      </span>
+    )
+  }
+
+  // A logomarca real vem do Storage; o monograma segue por baixo como
+  // fallback, aparecendo se a imagem falhar ou enquanto ela carrega.
+  if (m.logo) {
+    return (
+      <span
+        aria-hidden
+        style={{
+          width: tamanho,
+          height: tamanho,
+          flex: 'none',
+          borderRadius: raio,
+          overflow: 'hidden',
+          display: 'grid',
+          placeItems: 'center',
+          background: m.cor,
+          boxShadow: 'inset 0 -1px 0 rgba(0,0,0,.18)',
+        }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={m.logo}
+          alt=""
+          width={tamanho}
+          height={tamanho}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+        />
       </span>
     )
   }

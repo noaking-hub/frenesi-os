@@ -281,7 +281,7 @@ export default async function FluxoDeCaixa({
             ]}
           />
           {barras.length > 0 ? (
-            <BarrasEixo dados={barras} altura={280} />
+            <BarrasEixo dados={barras} altura={280} formatarDica={brl} />
           ) : (
             <Vazio icone="barras" texto="Nenhum movimento no período." />
           )}

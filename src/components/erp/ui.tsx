@@ -420,6 +420,11 @@ export interface IndicadorProps {
   /** Série curta desenhada no pé do cartão. */
   faixa?: number[]
   href?: string
+  /**
+   * Sem moldura própria: célula de uma GradeIndicadores conectada, onde a
+   * borda e o raio pertencem ao grupo e o vão de 1px vira o divisor.
+   */
+  plano?: boolean
 }
 
 /**
@@ -442,6 +447,7 @@ export function Indicador({
   tomNota = 'neutro',
   faixa,
   href,
+  plano,
 }: IndicadorProps) {
   // O valor ocupa a LARGURA TODA, abaixo da linha ícone+rótulo — é o desenho
   // do mockup, e é o que deixa o número grande sem alargar o cartão. A versão
@@ -510,17 +516,27 @@ export function Indicador({
     </>
   )
 
-  const estilo: CSSProperties = {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 9,
-    padding: '14px 15px 13px',
-    border: BORDA,
-    borderRadius: 15,
-    background: FUNDO_CARTAO,
-    minWidth: 0,
-    textDecoration: 'none',
-  }
+  const estilo: CSSProperties = plano
+    ? {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 9,
+        padding: '15px 16px 14px',
+        background: '#111013',
+        minWidth: 0,
+        textDecoration: 'none',
+      }
+    : {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 9,
+        padding: '14px 15px 13px',
+        border: BORDA,
+        borderRadius: 15,
+        background: FUNDO_CARTAO,
+        minWidth: 0,
+        textDecoration: 'none',
+      }
 
   return href ? (
     <Link href={href} className="hover:border-ouro/30" style={estilo}>
@@ -583,10 +599,34 @@ function Faixa({ valores, cor }: { valores: number[]; cor: string }) {
 export function GradeIndicadores({
   children,
   minimo = 218,
+  conectada,
 }: {
   children: ReactNode
   minimo?: number
+  /**
+   * Cards colados, como no mockup do Dashboard: a moldura pertence ao grupo
+   * e o vão de 1px sobre o fundo claro vira o fio divisor entre as células.
+   * Os filhos precisam vir com `plano` para não desenhar moldura própria.
+   */
+  conectada?: boolean
 }) {
+  if (conectada) {
+    return (
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(auto-fit, minmax(${minimo}px, 1fr))`,
+          gap: 1,
+          background: 'rgba(255,255,255,.08)',
+          border: BORDA,
+          borderRadius: 15,
+          overflow: 'hidden',
+        }}
+      >
+        {children}
+      </div>
+    )
+  }
   return (
     <div
       style={{
@@ -685,6 +725,10 @@ export function Painel({
             flexWrap: 'wrap',
             paddingTop: 11,
             borderTop: '1px solid rgba(255,255,255,.05)',
+            // Cola o rodapé no pé do cartão: numa linha de cards com alturas
+            // esticadas pela grade, é isso que faz os rodapés se alinharem
+            // entre vizinhos em vez de flutuar cada um numa altura.
+            marginTop: 'auto',
           }}
         >
           {rodape.nota && (
@@ -1252,13 +1296,26 @@ export function Colunas({
   children,
   proporcao = '1fr 1fr',
   gap = 14,
+  aoTopo,
 }: {
   children: ReactNode
   proporcao?: string
   gap?: number
+  /** Cartões com a altura do próprio conteúdo, sem esticar até o vizinho. */
+  aoTopo?: boolean
 }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: proporcao, gap, alignItems: 'start' }}>
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: proporcao,
+        gap,
+        // Esticados por padrão: no mockup os cartões de uma linha terminam
+        // todos na mesma altura, e com `start` cada um parava no fim do
+        // próprio conteúdo — era isso que fazia a linha parecer torta.
+        alignItems: aoTopo ? 'start' : 'stretch',
+      }}
+    >
       {children}
     </div>
   )
