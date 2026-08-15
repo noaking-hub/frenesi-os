@@ -199,3 +199,32 @@ begin
   return query select p_saldo, p_custo;
 end;
 $$;
+
+-- Casa o crédito da Pagar.me com o pedido do ERP pelo CÓDIGO do pedido no
+-- gateway, guardado em `documento`. Sem o elo o crédito continua sendo caixa
+-- (o dinheiro entrou), mas fica sem pedido — e é o pedido que traz o valor
+-- BRUTO, sem o qual a tarifa retida não pode ser calculada.
+create or replace function ligar_extrato_pagarme()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_ligados integer;
+begin
+  update extrato_linhas e
+     set pedido_id = p.id
+    from pedidos p
+   where e.origem = 'pagarme'
+     and e.pedido_id is null
+     and e.documento is not null
+     and (
+       p.id = e.documento
+       or p.shopify_numero = e.documento
+       or p.id = 'YP-' || e.documento
+     );
+  get diagnostics v_ligados = row_count;
+  return v_ligados;
+end;
+$$;

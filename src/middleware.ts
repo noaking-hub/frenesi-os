@@ -34,6 +34,7 @@ const ABERTO = [
   '/api/tela',
   '/api/pedidos/pulso',
   '/api/diagnostico',
+  '/api/pagarme',
 ]
 
 export async function middleware(req: NextRequest) {
