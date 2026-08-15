@@ -44,27 +44,6 @@ import { brl, diaCurtoPt, num, plural } from '@/domain'
  */
 export const dynamic = 'force-dynamic'
 
-const TOM_PENDENCIA: Record<string, TomUi> = {
-  ok: 'ok',
-  atencao: 'atencao',
-  erro: 'erro',
-  info: 'info',
-  ouro: 'ouro',
-  neutro: 'neutro',
-}
-
-const ICONE_PENDENCIA: Record<string, NomeIcone> = {
-  Urgente: 'alerta',
-  Financeiro: 'cifrao',
-  Preço: 'etiqueta',
-  Bloqueia: 'alerta-circulo',
-  Cadastro: 'documento',
-  Estoque: 'caixa',
-  Devoluções: 'repetir',
-  Entregas: 'carrinho',
-  Transporte: 'alerta',
-}
-
 /** Atalhos do §2.3 — os módulos de maior uso, sem replicar o menu inteiro. */
 const ATALHOS: { rotulo: string; href: string; icone: NomeIcone; tom: TomUi }[] = [
   { rotulo: 'Pedidos', href: '/pedidos', icone: 'carrinho', tom: 'ouro' },
@@ -121,7 +100,6 @@ export default async function Dashboard({
   const coberturaMedia = mlComGiro
     ? Math.round(comGiro.reduce((a, c) => a + (c.dias ?? 0) * c.disponivelMl, 0) / mlComGiro)
     : 0
-  const alertas = geral.pendencias.filter((x) => x.contagem > 0)
   const totalCategoria = p.porCategoria.reduce((a, c) => a + c.valor, 0)
 
   return (
@@ -325,8 +303,10 @@ export default async function Dashboard({
         />
       </GradeIndicadores>
 
-      {/* Camada 3 — tendência, e camada 2 na coluna da direita */}
-      <Colunas proporcao="minmax(0,1.55fr) minmax(0,1fr) minmax(0,1fr)">
+      {/* Camada 3 — tendência. Duas colunas, não três: os alertas subiram para
+          o chip do topo, e a série diária — que é o gráfico que se lê traçado
+          por traçado — ficou com a largura que a terceira coluna tomava. */}
+      <Colunas proporcao="minmax(0,2.2fr) minmax(0,1fr)">
         <Painel
           titulo="Faturamento diário"
           icone="linha"
@@ -362,7 +342,7 @@ export default async function Dashboard({
                   },
                 ]}
                 rotulos={p.serieDiaria.map((d) => diaCurtoPt(d.dia))}
-                altura={216}
+                altura={280}
                 formatar={brl}
               />
             </Pilha>
@@ -388,65 +368,6 @@ export default async function Dashboard({
             />
           ) : (
             <Vazio icone="pizza" texto="Nenhuma venda classificada no período." />
-          )}
-        </Painel>
-
-        <Painel
-          titulo="Alertas importantes"
-          icone="sino"
-          tom={alertas.length ? 'atencao' : 'ok'}
-          nota={alertas.length ? `${alertas.length} exigem ação` : undefined}
-          rodape={alertas.length > 4 ? { link: { href: '/relatorios', texto: 'Ver todos os alertas' } } : undefined}
-        >
-          {alertas.length === 0 ? (
-            <Vazio icone="check-circulo" texto="Nenhuma exceção aberta. A operação está em dia." />
-          ) : (
-            <Pilha gap={0}>
-              {alertas.slice(0, 5).map((a) => (
-                <Link
-                  key={a.titulo}
-                  href={a.href}
-                  className="hover:brightness-125"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 10,
-                    padding: '10px 0',
-                    borderTop: '1px solid rgba(255,255,255,.05)',
-                    textDecoration: 'none',
-                  }}
-                >
-                  <span style={{ color: TINTA[TOM_PENDENCIA[a.tom] ?? 'neutro'], paddingTop: 1 }}>
-                    <Ico n={ICONE_PENDENCIA[a.etiqueta] ?? 'info'} tamanho={15} />
-                  </span>
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
-                    <span
-                      className="font-sans"
-                      style={{
-                        fontSize: 11.5,
-                        fontWeight: 600,
-                        lineHeight: 1.35,
-                        color: TINTA[TOM_PENDENCIA[a.tom] ?? 'neutro'],
-                        textWrap: 'pretty',
-                      }}
-                    >
-                      {`${a.contagem} · ${a.titulo}`}
-                    </span>
-                    <span
-                      className="font-sans"
-                      style={{
-                        fontSize: 10.5,
-                        lineHeight: 1.4,
-                        color: 'rgba(242,237,227,.42)',
-                        textWrap: 'pretty',
-                      }}
-                    >
-                      {a.hint}
-                    </span>
-                  </span>
-                </Link>
-              ))}
-            </Pilha>
           )}
         </Painel>
       </Colunas>

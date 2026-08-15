@@ -5,10 +5,12 @@ import { sessaoAtual } from '@/data/sessao'
 import { origemDados } from '@/data/repository'
 
 export default async function ErpLayout({ children }: { children: React.ReactNode }) {
-  // A contagem de alertas do topo é a mesma que alimenta as pendências do
-  // Dashboard — uma grandeza, um cálculo.
+  // O chip do topo agora ABRE a lista, então ele recebe as pendências
+  // inteiras: a contagem que ele exibe é o tamanho do que ele mostra ao ser
+  // clicado — uma grandeza, um cálculo, sem chance de o número dizer sete e a
+  // lista trazer outra coisa.
   const [{ pendencias }, usuario] = await Promise.all([carregarDashboard(), sessaoAtual()])
-  const alertas = pendencias.filter((p) => p.contagem > 0 && p.tom !== 'ouro').length
+  const alertas = pendencias.filter((p) => p.contagem > 0 && p.tom !== 'ouro')
 
   return (
     <div

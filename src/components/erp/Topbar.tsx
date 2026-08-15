@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 
 import { sair } from '@/app/entrar/actions'
 
+import { AlertasDoTopo, type AlertaTopo } from './AlertasDoTopo'
 import { Ico, type NomeIcone } from './IconesUi'
 import { localizar } from './navegacao'
 import { CONTORNO, TINTA, VELADO } from './ui'
@@ -23,7 +24,8 @@ export function Topbar({
   alertas,
   usuario,
 }: {
-  alertas: number
+  /** A lista inteira, não a contagem: o chip do topo abre o detalhe. */
+  alertas: AlertaTopo[]
   /** Null quando a autenticação ainda não está configurada (desenvolvimento). */
   usuario: { nome: string; email: string; papel: 'dono' | 'operacao' } | null
 }) {
@@ -164,35 +166,7 @@ export function Topbar({
         </kbd>
       </label>
 
-      <button
-        type="button"
-        className="font-sans hover:border-ouro/35 hover:text-ouro"
-        style={{
-          height: 36,
-          padding: '0 14px',
-          border: '1px solid rgba(255,255,255,.09)',
-          background: 'rgba(255,255,255,.03)',
-          color: 'var(--color-secundario)',
-          fontWeight: 600,
-          fontSize: 11.5,
-          borderRadius: 9,
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-        }}
-      >
-        <span
-          aria-hidden
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: '50%',
-            background: alertas ? 'var(--color-atencao)' : 'var(--color-ok)',
-          }}
-        />
-        {alertas === 1 ? '1 alerta' : `${alertas} alertas`}
-      </button>
+      <AlertasDoTopo alertas={alertas} />
 
       <div
         style={{
