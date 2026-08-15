@@ -43,3 +43,37 @@ export function parseNum(v: string | number): number {
   const n = parseFloat(String(v).replace(',', '.'))
   return Number.isNaN(n) ? 0 : n
 }
+
+/**
+ * Fuso da operação. A FRENESI vende, fatura e fecha o caixa no horário de
+ * Brasília; o banco guarda `timestamptz`, que o PostgREST devolve em UTC.
+ */
+export const FUSO_DA_OPERACAO = 'America/Sao_Paulo'
+
+// 'en-CA' formata data como AAAA-MM-DD, que é o formato que o resto do
+// domínio compara com `<` e `>`. Criado uma vez: instanciar Intl por linha
+// custa caro num laço de milhares de pedidos.
+const DIA_LOCAL = new Intl.DateTimeFormat('en-CA', {
+  timeZone: FUSO_DA_OPERACAO,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+/**
+ * O DIA em que a venda aconteceu para quem trabalha aqui.
+ *
+ * Cortar os dez primeiros caracteres do ISO devolve a data em UTC, e isso
+ * jogava todo pedido feito depois das 21h para o dia seguinte. No gráfico de
+ * faturamento diário aparecia como divergência contra a loja: 13/08 fechava
+ * R$ 1.779,35 aqui e R$ 2.585,97 lá, porque quatro pedidos da noite tinham
+ * migrado para 14/08. Não faltava venda — faltava fuso.
+ *
+ * Data pura (AAAA-MM-DD) volta intacta: ela já é um dia, não um instante, e
+ * convertê-la a empurraria um dia para trás.
+ */
+export function diaDaOperacao(instante: string): string {
+  if (instante.length <= 10) return instante
+  const d = new Date(instante)
+  return Number.isNaN(d.getTime()) ? instante.slice(0, 10) : DIA_LOCAL.format(d)
+}

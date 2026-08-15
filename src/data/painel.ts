@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { saldoAberto, situacaoDe } from '@/domain'
+import { diaDaOperacao, saldoAberto, situacaoDe } from '@/domain'
 import type { LancamentoGerencial } from '@/domain'
 
 import { lerContas, lerLancamentos } from './financeiro'
@@ -253,8 +253,11 @@ export async function carregarPainelPrincipal(
     sb
       .from('pedidos')
       .select('id, cliente_id, canal, valor, comprado_em, pagamento, situacao')
-      .gte('comprado_em', `${inicio}T00:00:00Z`)
-      .lte('comprado_em', `${janela.ate}T23:59:59Z`)
+      // O dia de Brasília começa às 03:00Z e termina às 03:00Z do dia
+      // seguinte. Buscar até "ate T23:59:59Z" deixava de fora justamente os
+      // pedidos das 21h à meia-noite — os do fim do expediente.
+      .gte('comprado_em', `${inicio}T03:00:00Z`)
+      .lt('comprado_em', `${diaAntes(janela.ate, -1)}T03:00:00Z`)
       .limit(5000),
     lerContas(),
     lerLancamentos(),
@@ -268,7 +271,7 @@ export async function carregarPainelPrincipal(
   )
 
   const noPeriodo = (p: LinhaPedido, j: Janela) => {
-    const d = p.comprado_em.slice(0, 10)
+    const d = diaDaOperacao(p.comprado_em)
     return d >= j.de && d <= j.ate
   }
 
@@ -288,7 +291,7 @@ export async function carregarPainelPrincipal(
   const primeiroPedido = new Map<string, string>()
   for (const p of linhas) {
     if (!p.cliente_id) continue
-    const d = p.comprado_em.slice(0, 10)
+    const d = diaDaOperacao(p.comprado_em)
     const atual = primeiroPedido.get(p.cliente_id)
     if (!atual || d < atual) primeiroPedido.set(p.cliente_id, d)
   }
@@ -315,7 +318,7 @@ export async function carregarPainelPrincipal(
     serie.set(d, { faturamento: 0, pedidos: 0, recebido: 0 })
   }
   for (const p of linhas) {
-    const d = p.comprado_em.slice(0, 10)
+    const d = diaDaOperacao(p.comprado_em)
     const alvo = serie.get(d)
     if (!alvo) continue
     alvo.faturamento += Number(p.valor)

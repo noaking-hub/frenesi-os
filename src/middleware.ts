@@ -37,6 +37,9 @@ const ABERTO = [
   '/api/pagarme',
 ]
 
+/** Os períodos do Dashboard. Lista fechada: cookie não escolhe consulta. */
+const PERIODOS_LEMBRADOS = new Set(['hoje', 'ontem', '7d', '30d', 'mes', 'mes-anterior'])
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
@@ -94,6 +97,29 @@ export async function middleware(req: NextRequest) {
     // estava fazendo em vez de cair no Dashboard e ter que navegar de novo.
     destino.searchParams.set('de', `${pathname}${req.nextUrl.search}`)
     return NextResponse.redirect(destino)
+  }
+
+  /**
+   * Lembra o período escolhido no Dashboard.
+   *
+   * O filtro vive na URL — é o que deixa o alerta abrir a fila exata e o link
+   * ser compartilhável —, mas quem trabalha na tela todo dia escolhe "Mês
+   * atual" uma vez e não quer reescolher a cada visita. O cookie guarda a
+   * ÚLTIMA escolha; a URL continua mandando quando existe.
+   *
+   * Aqui, e não na página, porque componente de servidor não pode escrever
+   * cookie durante a renderização — o middleware é o único ponto do caminho
+   * que pode, e ele já passa por toda requisição.
+   */
+  if (pathname === '/') {
+    const periodo = req.nextUrl.searchParams.get('periodo')
+    if (periodo && PERIODOS_LEMBRADOS.has(periodo)) {
+      resposta.cookies.set('frenesi-periodo', periodo, {
+        path: '/',
+        maxAge: 60 * 60 * 24 * 365,
+        sameSite: 'lax',
+      })
+    }
   }
 
   return resposta

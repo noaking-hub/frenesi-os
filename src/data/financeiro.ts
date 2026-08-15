@@ -5,6 +5,7 @@ import {
   avaliarVenda,
   coberturaDeCaixa,
   competenciaAnterior,
+  diaDaOperacao,
   montarDreGerencial,
   projetarCaixa,
   situacaoDe,
@@ -72,6 +73,12 @@ export async function lerContas(): Promise<ContaFinanceira[]> {
     supabaseServer()
       .from('saldos_das_contas')
       .select('*')
+      // Conta encerrada não entra no caixa disponível. A do gateway anterior
+      // estava somando R$ 41 mil que não existiam mais — o dinheiro foi
+      // sacado e gasto meses atrás, e o saldo só permanecia porque a
+      // importação das vendas deixou os lançamentos apontando para ela. Os
+      // lançamentos ficam, que é o que concilia a venda; o SALDO não.
+      .eq('ativa', true)
       .order('principal', { ascending: false })
       .range(de, ate) as unknown as PromiseLike<{ data: LinhaConta[] | null; error: unknown }>,
   )
@@ -609,7 +616,7 @@ export async function carregarConciliacao(): Promise<PainelConciliacao> {
     // previsão, e a tela precisa dizer isso em vez de acusar divergência.
     const taxaEsperada = taxaReal ?? Math.round(bruto * (Number(r.taxa_pct ?? 0) / 100) * 100) / 100
     const recebido = r.recebido === null ? null : Number(r.recebido)
-    const compradoEm = r.pedidos.comprado_em.slice(0, 10)
+    const compradoEm = diaDaOperacao(r.pedidos.comprado_em)
     const prazoVencido = compradoEm < iso(-5)
 
     const { status, liquidoEsperado, diferenca } = avaliarVenda({

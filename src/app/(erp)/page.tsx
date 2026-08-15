@@ -1,3 +1,4 @@
+import { cookies } from 'next/headers'
 import Link from 'next/link'
 
 import {
@@ -60,7 +61,17 @@ export default async function Dashboard({
   searchParams: Promise<{ periodo?: string; de?: string; ate?: string }>
 }) {
   const { periodo, de, ate } = await searchParams
-  const escolhido = (PERIODOS.some((p) => p.id === periodo) ? periodo : '30d') as Periodo
+  // A URL manda; sem ela, vale a última escolha guardada pelo middleware;
+  // sem nenhuma das duas, 30 dias. Assim quem trabalha em "Mês atual" abre a
+  // tela nele, e o link com `?periodo=` continua levando aonde aponta.
+  const lembrado = (await cookies()).get('frenesi-periodo')?.value
+  const escolhido = (
+    PERIODOS.some((p) => p.id === periodo)
+      ? periodo
+      : PERIODOS.some((p) => p.id === lembrado)
+        ? lembrado
+        : '30d'
+  ) as Periodo
   const livre = de && ate ? { de, ate } : undefined
 
   const [p, geral, usuario] = await Promise.all([
