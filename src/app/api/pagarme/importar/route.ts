@@ -71,8 +71,21 @@ export async function POST(req: Request) {
     return NextResponse.json({ erro: 'Supabase não configurado.' }, { status: 400 })
   }
 
-  const ensaio = new URL(req.url).searchParams.get('dry') === '1'
+  const params = new URL(req.url).searchParams
+  const ensaio = params.get('dry') === '1'
   const auth = `Basic ${Buffer.from(`${chave}:`).toString('base64')}`
+
+  // Sonda: repassa um GET cru para a API e devolve o que voltou. Existe
+  // porque descobrir o formato de um gateway às cegas custa um deploy por
+  // tentativa — e a tarifa real não está onde parecia estar (na cobrança),
+  // e sim nos recebíveis. Some junto com esta rota quando o histórico
+  // estiver importado.
+  const sonda = params.get('sonda')
+  if (sonda) {
+    const r = await fetch(`${BASE}/${sonda}`, { headers: { Authorization: auth } })
+    const texto = await r.text()
+    return NextResponse.json({ status: r.status, corpo: texto.slice(0, 8000) })
+  }
 
   const cobrancas: Cobranca[] = []
   let pagina = 1
