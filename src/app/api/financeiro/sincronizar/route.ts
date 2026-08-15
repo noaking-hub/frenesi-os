@@ -275,6 +275,28 @@ export async function POST(req: Request) {
     relatorio.semExtratoDispensadas = { erro: mensagemDe(e) }
   }
 
+  // Estorno PARCIAL não derruba a venda inteira.
+  //
+  // A leitura da Yampi marcava como divergente qualquer pedido com estorno, e
+  // faturamento só conta pedido pago — então um item que esgotou e foi
+  // reembolsado apagava a venda toda do faturado. Era assim que o dia 10/08
+  // aparecia com faturado MENOR que o recebido líquido: o dinheiro estava na
+  // conta, mas a venda que o gerou tinha sumido do gráfico.
+  //
+  // Roda aqui, e não só na leitura, porque o pulso de 5 minutos reimporta e
+  // reverteria a correção. Quem decide é o extrato: se entrou mais do que
+  // saiu, o pedido está pago.
+  try {
+    const { data, error } = await supabaseServer().rpc(
+      'corrigir_pagamento_por_estorno_parcial',
+    )
+    if (error) throw error
+    const linha = Array.isArray(data) ? data[0] : data
+    relatorio.estornosParciais = { corrigidos: linha?.corrigidos ?? 0 }
+  } catch (e) {
+    relatorio.estornosParciais = { erro: mensagemDe(e) }
+  }
+
 
   // A baixa de estoque vem depois da importação da Yampi, que é quem acabou
   // de trazer os faturamentos novos. Antes dela, os pedidos faturados nesta

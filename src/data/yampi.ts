@@ -308,9 +308,29 @@ function situacaoDoPedido(
 ): 'pago' | 'pendente' | 'divergente' | 'cancelado' {
   const transacoes = transacoesDoPedido(p as unknown as Record<string, unknown>)
   const situacoes = transacoes.map((t) => t.status.toLowerCase())
-  const temEstorno = situacoes.some((s) => /refund|estorn|chargeback|devolv/.test(s))
+  const estornadas = transacoes.filter((t) => /refund|estorn|chargeback|devolv/.test(t.status.toLowerCase()))
+  const pagas = transacoes.filter((t) => /paid|approv|authoriz|captur|settl/.test(t.status.toLowerCase()))
   const temPagamento = situacoes.some((s) => /paid|approv|authoriz|captur|settl/.test(s))
-  if (temEstorno) return 'divergente'
+
+  if (estornadas.length > 0) {
+    // ESTORNO PARCIAL NÃO DESFAZ A VENDA.
+    //
+    // Antes, qualquer estorno derrubava o pedido para `divergente` — e
+    // `divergente` não conta no faturamento. Um item que esgotou depois da
+    // compra, reembolsado sozinho enquanto o resto seguia para o cliente,
+    // apagava a venda inteira do relatório. Foi assim que R$ 540,00 de um
+    // pedido entregue sumiram do dia 10/08.
+    //
+    // Só se rebaixa o que dá para PROVAR que foi parcial: os dois valores
+    // conhecidos e o estorno abaixo do pago. Valor ausente mantém o
+    // comportamento antigo, porque estorno de valor desconhecido pode ser
+    // total, e supor o contrário transformaria devolução em receita.
+    const pago = pagas.reduce((a, t) => a + Math.abs(t.valor), 0)
+    const estornado = estornadas.reduce((a, t) => a + Math.abs(t.valor), 0)
+    const parcialComprovado = pago > 0 && estornado > 0 && estornado < pago * 0.99
+    return parcialComprovado ? 'pago' : 'divergente'
+  }
+
   if (temPagamento) return 'pago'
   // Transações existem e nenhuma pagou: recusada, anulada ou esperando.
   if (situacoes.length > 0) return 'cancelado'

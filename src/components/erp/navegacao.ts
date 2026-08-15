@@ -44,6 +44,17 @@ export const NAV: GrupoNav[] = [
     subtitulo: 'Central de decisão operacional e gerencial',
     icone: 'grade',
   },
+  // Logo abaixo do Dashboard porque é a outra forma de fazer a mesma pergunta:
+  // um mostra os números da operação, o outro responde sobre eles.
+  {
+    id: 'ia',
+    label: 'Meu Assessor',
+    href: '/assessor',
+    pronta: true,
+    titulo: 'Meu Assessor',
+    subtitulo: 'O gerente de IA que lê o ERP e responde com os números de lá',
+    icone: 'ia',
+  },
   {
     id: 'pedidos',
     label: 'Pedidos',
