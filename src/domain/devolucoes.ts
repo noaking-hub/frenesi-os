@@ -74,17 +74,36 @@ export function ehDanificado(motivo: MotivoDevolucao | ''): boolean {
 }
 
 /**
- * Quais fotos bastam: as duas, sempre.
+ * Vazamento exige VÍDEO, além das duas fotos.
  *
- * Nível e lacre são as duas provas que sustentam uma recusa — sem elas não há
- * como contestar depois. O motivo escolhido pelo cliente muda o enquadramento
- * pedido, nunca a exigência.
+ * Foto de frasco molhado prova pouco: pode ser de outra compra, de outro
+ * frasco, da internet. Vídeo curto mostra o líquido saindo, com o lacre no
+ * mesmo enquadramento, e é a peça que sustenta uma recusa ou uma disputa com
+ * a operadora do cartão. A foto continua obrigatória porque prova o ESTADO
+ * (nível, recrave); o vídeo prova o EVENTO.
  */
-export function fotosCompletas(
-  _motivo: MotivoDevolucao | '',
-  fotos: { nivel: boolean; lacre: boolean },
+export function videoObrigatorio(motivo: MotivoDevolucao | ''): boolean {
+  return ehDanificado(motivo)
+}
+
+/** Provas obrigatórias por motivo, na ordem em que o portal as pede. */
+export const TIPOS_DE_IMAGEM = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']
+/** MP4 e WEBM cobrem Android; QuickTime é o que o iPhone grava. */
+export const TIPOS_DE_VIDEO = ['video/mp4', 'video/quicktime', 'video/webm']
+export const LIMITE_FOTO_BYTES = 12 * 1024 * 1024
+export const LIMITE_VIDEO_BYTES = 60 * 1024 * 1024
+
+/**
+ * Quais provas bastam: as duas fotos sempre, mais o vídeo quando há dano.
+ *
+ * Nível e lacre são o que sustenta uma recusa — sem elas não há como
+ * contestar depois. O motivo muda o que se pede a MAIS, nunca a menos.
+ */
+export function provasCompletas(
+  motivo: MotivoDevolucao | '',
+  provas: { nivel: boolean; lacre: boolean; video: boolean },
 ): boolean {
-  return fotos.nivel && fotos.lacre
+  return provas.nivel && provas.lacre && (!videoObrigatorio(motivo) || provas.video)
 }
 
 export const MOTIVOS: { id: MotivoDevolucao; label: string; desc: string }[] = [
@@ -101,7 +120,7 @@ export const MOTIVOS: { id: MotivoDevolucao; label: string; desc: string }[] = [
   {
     id: 'm3',
     label: 'Frasco chegou danificado ou vazando',
-    desc: 'Fotografe o frasco e o lacre mostrando o dano',
+    desc: 'Pedimos fotos e um vídeo curto mostrando o vazamento',
   },
   {
     id: 'm4',

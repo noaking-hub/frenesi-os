@@ -536,8 +536,11 @@ export interface SolicitacaoErp {
   reverso: string
   lacre: EstadoLacre
   fotos: string[]
-  /** Fotos enviadas pelo portal, já com URL assinada para a ficha exibir. */
-  fotosArquivos?: { rotulo: string; url: string }[]
+  /**
+   * Provas enviadas pelo portal, já com URL assinada para a ficha exibir.
+   * `video` muda o que a ficha renderiza — imagem não toca.
+   */
+  fotosArquivos?: { rotulo: string; url: string; video?: boolean }[]
   /** Resolução registrada na conclusão. Null = ainda não concluída. */
   resolucao?: string | null
   reembolsoValor?: number | null

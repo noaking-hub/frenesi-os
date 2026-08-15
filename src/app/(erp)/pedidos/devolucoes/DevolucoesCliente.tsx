@@ -983,45 +983,75 @@ function FichaDevolucao({
                   </span>
                 )}
                 <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)', marginTop: 4 }}>
-                  Fotos enviadas pelo cliente
+                  {(d.fotosArquivos ?? []).some((f) => f.video)
+                    ? 'Provas enviadas pelo cliente'
+                    : 'Fotos enviadas pelo cliente'}
                 </span>
                 {(d.fotosArquivos ?? []).length > 0 ? (
                   // As fotos de verdade, vindas do portal — clicar abre em
                   // tamanho cheio numa aba (URL assinada de vida curta).
                   <span style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {(d.fotosArquivos ?? []).map((f) => (
-                      <a
-                        key={f.rotulo}
-                        href={f.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        title={`${f.rotulo} — abrir em tamanho cheio`}
-                        className="hover:border-ouro/50"
-                        style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 4,
-                          textDecoration: 'none',
-                        }}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={f.url}
-                          alt={f.rotulo}
-                          style={{
-                            width: 96,
-                            height: 96,
-                            objectFit: 'cover',
-                            borderRadius: 9,
-                            border: '1px solid rgba(255,255,255,.12)',
-                            background: '#121114',
-                          }}
-                        />
-                        <span className="font-sans" style={{ fontSize: 9.5, color: 'var(--color-terciario)' }}>
-                          {f.rotulo}
+                    {(d.fotosArquivos ?? []).map((f) =>
+                      // O vídeo toca AQUI, na ficha: a decisão de recusar sai
+                      // de ver o vazamento, e abrir noutra aba para depois
+                      // voltar é onde a análise se perde.
+                      f.video ? (
+                        <span
+                          key={f.rotulo}
+                          style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+                        >
+                          <video
+                            src={f.url}
+                            controls
+                            playsInline
+                            preload="metadata"
+                            style={{
+                              width: 170,
+                              height: 96,
+                              objectFit: 'cover',
+                              borderRadius: 9,
+                              border: '1px solid rgba(255,255,255,.12)',
+                              background: '#121114',
+                            }}
+                          />
+                          <span className="font-sans" style={{ fontSize: 9.5, color: 'var(--color-terciario)' }}>
+                            {f.rotulo}
+                          </span>
                         </span>
-                      </a>
-                    ))}
+                      ) : (
+                        <a
+                          key={f.rotulo}
+                          href={f.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={`${f.rotulo} — abrir em tamanho cheio`}
+                          className="hover:border-ouro/50"
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 4,
+                            textDecoration: 'none',
+                          }}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={f.url}
+                            alt={f.rotulo}
+                            style={{
+                              width: 96,
+                              height: 96,
+                              objectFit: 'cover',
+                              borderRadius: 9,
+                              border: '1px solid rgba(255,255,255,.12)',
+                              background: '#121114',
+                            }}
+                          />
+                          <span className="font-sans" style={{ fontSize: 9.5, color: 'var(--color-terciario)' }}>
+                            {f.rotulo}
+                          </span>
+                        </a>
+                      ),
+                    )}
                   </span>
                 ) : d.fotos.length > 0 ? (
                   // Solicitação anterior ao upload: só a confirmação existe.

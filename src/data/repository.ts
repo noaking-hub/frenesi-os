@@ -663,7 +663,7 @@ const repositorioSupabase: Repositorio = {
       .from('solicitacoes_devolucao')
       .select(
         'protocolo, pedido_id, tipo, motivo, comentario, itens, fotos, status, aberta_em, ' +
-          'reverso, lacre, conferencia, foto_nivel, foto_lacre, ' +
+          'reverso, lacre, conferencia, foto_nivel, foto_lacre, video, ' +
           'resolucao, reembolso_valor, reembolso_forma, reembolso_em, comprovante_reembolso, troca_pedido_id, ' +
           'pedidos(valor, destino, gateway, rastreio, entregue_em, entrega_prevista_em, situacao, clientes(nome, email, telefone, cpf))',
       )
@@ -677,7 +677,7 @@ const repositorioSupabase: Repositorio = {
     // Fotos e comprovantes vivem num bucket privado: a ficha os exibe por URL
     // assinada de vida curta, geradas num lote só — uma chamada por leitura.
     const caminhos = linhas.flatMap(
-      (s) => [s.foto_nivel, s.foto_lacre, s.comprovante_reembolso].filter(Boolean) as string[],
+      (s) => [s.foto_nivel, s.foto_lacre, s.video, s.comprovante_reembolso].filter(Boolean) as string[],
     )
     const urlAssinada = new Map<string, string>()
     if (caminhos.length) {
@@ -741,7 +741,12 @@ const repositorioSupabase: Repositorio = {
           s.foto_lacre && urlAssinada.get(s.foto_lacre)
             ? { rotulo: 'Lacre / dano', url: urlAssinada.get(s.foto_lacre)! }
             : null,
-        ].filter(Boolean) as { rotulo: string; url: string }[],
+          // O vídeo é a prova do vazamento em movimento — pedido só quando o
+          // motivo é dano, e a peça que sustenta a recusa de má-fé.
+          s.video && urlAssinada.get(s.video)
+            ? { rotulo: 'Vídeo do vazamento', url: urlAssinada.get(s.video)!, video: true }
+            : null,
+        ].filter(Boolean) as { rotulo: string; url: string; video?: boolean }[],
         resolucao: s.resolucao,
         reembolsoValor: s.reembolso_valor === null ? null : Number(s.reembolso_valor),
         reembolsoForma: s.reembolso_forma,
@@ -1160,6 +1165,7 @@ interface LinhaSolicitacao {
   conferencia: { perfume: string; variante: VarianteMl; medido_ml: number | string; observacao?: string }[]
   foto_nivel: string | null
   foto_lacre: string | null
+  video: string | null
   resolucao: string | null
   reembolso_valor: number | string | null
   reembolso_forma: 'pix' | 'estorno-cartao' | null

@@ -12,16 +12,17 @@ import {
   coberturaDe,
   conciliarLotesAbertos,
   desvioAds,
-  fotosCompletas,
   frascoDe,
   margemDe,
   pisoMargem,
   previaEncerramento,
+  provasCompletas,
   ratearAds,
   sincronizarBase,
   sincronizarVariante,
   statusDevolucao,
   unidadesPossiveis,
+  videoObrigatorio,
   volumeConsumido,
 } from '..'
 import type { Lote, PerfumeBase } from '..'
@@ -402,17 +403,26 @@ describe('devoluções', () => {
     expect(s.mensagem).toContain('entregue há 32 dias')
   })
 
-  it('exige as duas fotos no caso geral', () => {
-    expect(fotosCompletas('m1', { nivel: true, lacre: false })).toBe(false)
-    expect(fotosCompletas('m1', { nivel: true, lacre: true })).toBe(true)
+  it('exige as duas fotos no caso geral, e não pede vídeo', () => {
+    expect(provasCompletas('m1', { nivel: true, lacre: false, video: false })).toBe(false)
+    expect(provasCompletas('m1', { nivel: true, lacre: true, video: false })).toBe(true)
   })
 
-  it('exige o lacre também quando o frasco chegou danificado', () => {
-    // Dispensava, e a dispensa virou porta de má-fé: alegar vazamento,
-    // receber reembolso sem mostrar o lacre e nunca devolver o frasco.
-    expect(fotosCompletas('m3', { nivel: true, lacre: false })).toBe(false)
-    expect(fotosCompletas('m3', { nivel: false, lacre: true })).toBe(false)
-    expect(fotosCompletas('m3', { nivel: true, lacre: true })).toBe(true)
+  it('exige lacre E vídeo quando o frasco chegou danificado', () => {
+    // A dispensa do lacre virou porta de má-fé: alegar vazamento, receber
+    // reembolso sem mostrar o lacre e nunca devolver o frasco. O vídeo entra
+    // porque foto de frasco molhado pode ser de qualquer frasco.
+    expect(provasCompletas('m3', { nivel: true, lacre: false, video: true })).toBe(false)
+    expect(provasCompletas('m3', { nivel: false, lacre: true, video: true })).toBe(false)
+    expect(provasCompletas('m3', { nivel: true, lacre: true, video: false })).toBe(false)
+    expect(provasCompletas('m3', { nivel: true, lacre: true, video: true })).toBe(true)
+  })
+
+  it('vídeo só é cobrado no motivo de dano', () => {
+    expect(videoObrigatorio('m3')).toBe(true)
+    for (const outro of ['m1', 'm2', 'm4', 'm5'] as const) {
+      expect(videoObrigatorio(outro)).toBe(false)
+    }
   })
 })
 

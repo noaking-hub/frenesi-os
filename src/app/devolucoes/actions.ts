@@ -4,12 +4,17 @@ import { avisarDevolucaoAberta } from '@/data/notificacoes'
 import { repositorio } from '@/data/repository'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import {
+  LIMITE_FOTO_BYTES,
+  LIMITE_VIDEO_BYTES,
   MOTIVOS,
+  TIPOS_DE_IMAGEM,
+  TIPOS_DE_VIDEO,
   ehDanificado,
   etapaDe,
-  fotosCompletas,
   identificarFrete,
+  provasCompletas,
   statusDevolucao,
+  videoObrigatorio,
 } from '@/domain'
 import type { MotivoDevolucao, PedidoPortal, TipoSolicitacao, VarianteMl } from '@/domain'
 
@@ -155,19 +160,175 @@ export async function buscarPedidos(
   })
 }
 
-const TIPOS_DE_IMAGEM = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/heic',
-  'image/heif',
-])
-const TAMANHO_MAXIMO = 8 * 1024 * 1024
+export type CampoDeProva = 'nivel' | 'lacre' | 'video'
+const CAMPOS: CampoDeProva[] = ['nivel', 'lacre', 'video']
+const BUCKET = 'devolucoes'
 
-function extensaoDe(arquivo: File): string {
-  const daExtensao = arquivo.name.split('.').pop()?.toLowerCase()
+function limiteDe(campo: CampoDeProva): number {
+  return campo === 'video' ? LIMITE_VIDEO_BYTES : LIMITE_FOTO_BYTES
+}
+function tiposDe(campo: CampoDeProva): string[] {
+  return campo === 'video' ? TIPOS_DE_VIDEO : TIPOS_DE_IMAGEM
+}
+
+/** Extensão do nome enviado, saneada — o nome do cliente vira caminho no bucket. */
+function extensaoSegura(nome: string, tipo: string): string {
+  const daExtensao = nome.split('.').pop()?.toLowerCase()
   if (daExtensao && /^[a-z0-9]{2,5}$/.test(daExtensao)) return daExtensao
-  return arquivo.type.split('/')[1] ?? 'jpg'
+  return (tipo.split('/')[1] ?? 'bin').replace(/[^a-z0-9]/g, '').slice(0, 5) || 'bin'
+}
+
+/**
+ * Prepara o envio das provas: URLs assinadas para o navegador subir DIRETO.
+ *
+ * Antes o arquivo vinha dentro do FormData da server action, ou seja, passava
+ * inteiro pela função da Netlify — que recusa requisição acima de ~6 MB. O
+ * portal prometia 8 MB por foto e a plataforma cortava antes; duas fotos de
+ * celular novo já não cabiam. Vídeo, então, nunca caberia.
+ *
+ * Agora a função só assina o destino. O byte vai do celular para o Storage,
+ * sem intermediário, e o teto passa a ser o do bucket.
+ *
+ * O endpoint é público, então ele não assina nada sem antes conferir que o
+ * pedido existe e está no prazo — a mesma checagem da abertura.
+ */
+export async function prepararEnvioDeProvas(
+  pedidoId: string,
+  arquivos: { campo: CampoDeProva; nome: string; tipo: string; tamanho: number }[],
+): Promise<
+  | { ok: true; rascunho: string; destinos: { campo: CampoDeProva; caminho: string; url: string }[] }
+  | { ok: false; erro: string }
+> {
+  if (!supabaseConfigurado()) {
+    return { ok: false, erro: 'Envio indisponível agora. Tente novamente em alguns minutos.' }
+  }
+  if (!arquivos.length || arquivos.length > CAMPOS.length) {
+    return { ok: false, erro: 'Escolha as fotos antes de enviar.' }
+  }
+
+  for (const a of arquivos) {
+    if (!CAMPOS.includes(a.campo)) return { ok: false, erro: 'Arquivo inválido.' }
+    if (!tiposDe(a.campo).includes(a.tipo)) {
+      return {
+        ok: false,
+        erro:
+          a.campo === 'video'
+            ? 'O vídeo precisa ser MP4, MOV ou WEBM.'
+            : 'As fotos precisam ser imagens (JPG, PNG, WEBP ou HEIC).',
+      }
+    }
+    if (a.tamanho <= 0 || a.tamanho > limiteDe(a.campo)) {
+      return {
+        ok: false,
+        erro:
+          a.campo === 'video'
+            ? 'O vídeo pode ter no máximo 60 MB. Grave uns 15 segundos.'
+            : 'Cada foto pode ter no máximo 12 MB.',
+      }
+    }
+  }
+
+  const sb = supabaseServer()
+  if (!(await pedidoElegivel(sb, pedidoId))) {
+    return { ok: false, erro: 'Pedido não encontrado ou fora do prazo de devolução.' }
+  }
+
+  const rascunho = crypto.randomUUID()
+  const destinos: { campo: CampoDeProva; caminho: string; url: string }[] = []
+  for (const a of arquivos) {
+    const caminho = `rascunhos/${rascunho}-${a.campo}.${extensaoSegura(a.nome, a.tipo)}`
+    const { data, error } = await sb.storage.from(BUCKET).createSignedUploadUrl(caminho)
+    if (error || !data) {
+      console.error('[portal] createSignedUploadUrl falhou:', error)
+      return { ok: false, erro: 'Não foi possível preparar o envio. Tente de novo.' }
+    }
+    destinos.push({ campo: a.campo, caminho, url: data.signedUrl })
+  }
+  return { ok: true, rascunho, destinos }
+}
+
+/**
+ * Confere no bucket o que o cliente diz ter enviado.
+ *
+ * Com upload direto, o servidor não vê o byte passar — então ele confere
+ * depois, contra o que o Storage realmente guardou: o caminho tem que
+ * pertencer a ESTE rascunho, o objeto tem que existir, e tipo e tamanho têm
+ * que respeitar o limite do campo. Sem isso, "o arquivo subiu" seria palavra
+ * do navegador, e o navegador é do outro lado.
+ */
+async function conferirRascunho(
+  sb: ReturnType<typeof supabaseServer>,
+  rascunho: string,
+  caminhos: Record<CampoDeProva, string>,
+): Promise<
+  { ok: true; provas: Record<CampoDeProva, string | null> } | { ok: false; erro: string }
+> {
+  const vazio = { nivel: null, lacre: null, video: null } as Record<CampoDeProva, string | null>
+  if (!/^[0-9a-f-]{36}$/i.test(rascunho)) {
+    return { ok: false, erro: 'Envie as fotos obrigatórias antes de concluir.' }
+  }
+
+  const { data: objetos, error } = await sb.storage
+    .from(BUCKET)
+    .list('rascunhos', { limit: 100, search: rascunho })
+  if (error) {
+    console.error('[portal] list do rascunho falhou:', error)
+    return { ok: false, erro: 'Não foi possível confirmar o envio das fotos. Tente de novo.' }
+  }
+
+  const porNome = new Map(
+    (objetos ?? []).map((o) => [
+      `rascunhos/${o.name}`,
+      {
+        tamanho: Number(o.metadata?.size ?? 0),
+        tipo: String(o.metadata?.mimetype ?? ''),
+      },
+    ]),
+  )
+
+  const provas = { ...vazio }
+  for (const campo of CAMPOS) {
+    const caminho = caminhos[campo]
+    if (!caminho) continue
+    if (!caminho.startsWith(`rascunhos/${rascunho}-${campo}.`)) {
+      return { ok: false, erro: 'Arquivo inválido. Reenvie as fotos.' }
+    }
+    const objeto = porNome.get(caminho)
+    if (!objeto) {
+      return { ok: false, erro: 'O envio não foi concluído. Reenvie as fotos.' }
+    }
+    if (!tiposDe(campo).includes(objeto.tipo) || objeto.tamanho > limiteDe(campo)) {
+      await sb.storage.from(BUCKET).remove([caminho])
+      return {
+        ok: false,
+        erro:
+          campo === 'video'
+            ? 'O vídeo precisa ser MP4, MOV ou WEBM, com até 60 MB.'
+            : 'As fotos precisam ser imagens de até 12 MB.',
+      }
+    }
+    provas[campo] = caminho
+  }
+  return { ok: true, provas }
+}
+
+/** Prazo conferido no servidor, com o mesmo relógio das telas. */
+async function pedidoElegivel(
+  sb: ReturnType<typeof supabaseServer>,
+  pedidoId: string,
+): Promise<boolean> {
+  if (!pedidoId) return false
+  const { data: pedido } = await sb
+    .from('pedidos')
+    .select('id, situacao, entregue_em, entrega_prevista_em')
+    .eq('id', pedidoId)
+    .maybeSingle()
+  if (!pedido) return false
+  const base =
+    (pedido.entregue_em as string | null) ??
+    (pedido.situacao === 'entregue' ? (pedido.entrega_prevista_em as string | null) : null)
+  const dias = base ? Math.floor((Date.now() - Date.parse(base)) / 86_400_000) : null
+  return statusDevolucao(dias).elegivel
 }
 
 /**
@@ -207,49 +368,44 @@ export async function abrirDevolucao(
     return { ok: false, erro: 'Informe o motivo da devolução.' }
   }
 
-  // Nível e lacre, sempre — a MESMA regra da tela (`fotosCompletas`). Esta
-  // é a barreira que vale: a tela pode ser burlada, o servidor não.
-  const arquivoNivel = form.get('fotoNivel')
-  const arquivoLacre = form.get('fotoLacre')
-  const fotos = {
-    nivel: arquivoNivel instanceof File && arquivoNivel.size > 0,
-    lacre: arquivoLacre instanceof File && arquivoLacre.size > 0,
-  }
-  if (!fotosCompletas(motivo, fotos)) {
-    return { ok: false, erro: 'Envie as fotos obrigatórias antes de concluir.' }
-  }
-  for (const arquivo of [arquivoNivel, arquivoLacre]) {
-    if (!(arquivo instanceof File) || arquivo.size === 0) continue
-    if (!TIPOS_DE_IMAGEM.has(arquivo.type)) {
-      return { ok: false, erro: 'As fotos precisam ser imagens (JPG, PNG, WEBP ou HEIC).' }
-    }
-    if (arquivo.size > TAMANHO_MAXIMO) {
-      return { ok: false, erro: 'Cada foto pode ter no máximo 8 MB.' }
-    }
-  }
-
   const sb = supabaseServer()
 
-  // Reconferência de prazo no servidor, com o mesmo relógio das telas:
-  // entrega real e, na falta dela, a prometida no checkout.
-  const { data: pedido, error: erroPedido } = await sb
-    .from('pedidos')
-    .select('id, situacao, entregue_em, entrega_prevista_em')
-    .eq('id', pedidoId)
-    .maybeSingle()
-  if (erroPedido || !pedido) {
-    return { ok: false, erro: 'Pedido não encontrado. Confira e tente de novo.' }
+  // As provas já estão no bucket, sob o rascunho. O que chega aqui é o
+  // caminho — e caminho vindo do cliente é palpite até ser conferido contra o
+  // rascunho que ESTA sessão assinou.
+  const rascunho = String(form.get('rascunho') ?? '')
+  const enviados = await conferirRascunho(sb, rascunho, {
+    nivel: String(form.get('provaNivel') ?? ''),
+    lacre: String(form.get('provaLacre') ?? ''),
+    video: String(form.get('provaVideo') ?? ''),
+  })
+  if (!enviados.ok) return { ok: false, erro: enviados.erro }
+  const provas = enviados.provas
+
+  // A MESMA regra da tela (`provasCompletas`). Esta é a barreira que vale: a
+  // tela pode ser burlada, o servidor não.
+  if (
+    !provasCompletas(motivo, {
+      nivel: Boolean(provas.nivel),
+      lacre: Boolean(provas.lacre),
+      video: Boolean(provas.video),
+    })
+  ) {
+    return {
+      ok: false,
+      erro: videoObrigatorio(motivo)
+        ? 'Envie as duas fotos e o vídeo do vazamento antes de concluir.'
+        : 'Envie as fotos obrigatórias antes de concluir.',
+    }
   }
-  const base =
-    (pedido.entregue_em as string | null) ??
-    (pedido.situacao === 'entregue' ? (pedido.entrega_prevista_em as string | null) : null)
-  const dias = base ? Math.floor((Date.now() - Date.parse(base)) / 86_400_000) : null
-  if (!statusDevolucao(dias).elegivel) {
+
+  if (!(await pedidoElegivel(sb, pedidoId))) {
     return {
       ok: false,
       erro: 'Este pedido está fora do prazo de devolução. Fale com o atendimento.',
     }
   }
+  const fotos = { nivel: Boolean(provas.nivel), lacre: Boolean(provas.lacre) }
 
   const rotulo = MOTIVOS.find((m) => m.id === motivo)
   // O tipo decide a régua da triagem: em arrependimento, volume abaixo do
@@ -285,31 +441,30 @@ export async function abrirDevolucao(
 
   const protocolo = String(data)
 
-  // Upload DEPOIS do protocolo existir: o caminho carrega o protocolo, e uma
-  // falha aqui não desfaz a solicitação — a foto pode ser reapresentada na
-  // análise, o registro não.
-  const subir = async (arquivo: unknown, nome: 'nivel' | 'lacre') => {
-    if (!(arquivo instanceof File) || arquivo.size === 0) return null
-    const caminho = `${protocolo}/${nome}.${extensaoDe(arquivo)}`
-    const { error: erroUpload } = await sb.storage
-      .from('devolucoes')
-      .upload(caminho, arquivo, { contentType: arquivo.type, upsert: true })
-    if (erroUpload) {
-      console.error(`[portal] upload da foto ${nome} de ${protocolo} falhou:`, erroUpload)
-      return null
+  // As provas saem do rascunho e passam a morar sob o protocolo. Só depois do
+  // protocolo existir: uma falha aqui não desfaz a solicitação — o arquivo
+  // segue no rascunho e a triagem o encontra, o registro é o que não pode
+  // faltar.
+  const mover = async (campo: CampoDeProva) => {
+    const origem = provas[campo]
+    if (!origem) return null
+    const destino = `${protocolo}/${campo}.${origem.split('.').pop()}`
+    const { error: erroMove } = await sb.storage.from(BUCKET).move(origem, destino)
+    if (erroMove) {
+      console.error(`[portal] mover ${campo} de ${protocolo} falhou:`, erroMove)
+      return origem
     }
-    return caminho
+    return destino
   }
-  const [caminhoNivel, caminhoLacre] = await Promise.all([
-    subir(arquivoNivel, 'nivel'),
-    subir(arquivoLacre, 'lacre'),
+  const [caminhoNivel, caminhoLacre, caminhoVideo] = await Promise.all([
+    mover('nivel'),
+    mover('lacre'),
+    mover('video'),
   ])
-  if (caminhoNivel || caminhoLacre) {
-    await sb
-      .from('solicitacoes_devolucao')
-      .update({ foto_nivel: caminhoNivel, foto_lacre: caminhoLacre })
-      .eq('protocolo', protocolo)
-  }
+  await sb
+    .from('solicitacoes_devolucao')
+    .update({ foto_nivel: caminhoNivel, foto_lacre: caminhoLacre, video: caminhoVideo })
+    .eq('protocolo', protocolo)
 
   // Confirmação por e-mail — pronta, mas atrás da trava AVISOS_DE_PEDIDO:
   // desligada, o fato entra no log como dispensado e nada sai. A função nunca

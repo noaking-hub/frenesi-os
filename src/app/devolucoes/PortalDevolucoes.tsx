@@ -19,14 +19,20 @@ import {
   brl,
   descreveVariante,
   ehDanificado,
-  fotosCompletas,
   plural,
+  provasCompletas,
   statusDevolucao,
+  videoObrigatorio,
 } from '@/domain'
 import type { MotivoDevolucao, PedidoPortal } from '@/domain'
 
-import { abrirDevolucao, buscarPedidos, consultarDevolucao } from './actions'
-import type { AcompanhamentoDevolucao } from './actions'
+import {
+  abrirDevolucao,
+  buscarPedidos,
+  consultarDevolucao,
+  prepararEnvioDeProvas,
+} from './actions'
+import type { AcompanhamentoDevolucao, CampoDeProva } from './actions'
 
 /**
  * Portal de devoluções — a vitrine da marca no pior momento da compra.
@@ -38,6 +44,35 @@ import type { AcompanhamentoDevolucao } from './actions'
  */
 
 const PASSOS = ['Acesso', 'Pedidos', 'Itens', 'Motivo', 'Fotos', 'Pronto'] as const
+
+/**
+ * Sobe um arquivo direto para o Storage, pela URL assinada.
+ *
+ * XHR e não fetch por um motivo só: `upload.onprogress`. Um vídeo de 40 MB em
+ * rede de celular leva um minuto, e barra parada em "Enviando…" faz o cliente
+ * fechar a aba achando que travou — e aí não há devolução nem prova.
+ */
+function subirDireto(url: string, arquivo: File, aoProgredir: (bytes: number) => void) {
+  return new Promise<void>((resolve, reject) => {
+    // Multipart com o campo vazio: é exatamente o que o SDK do Supabase manda
+    // no navegador para uma URL assinada. Escrever à mão o caminho binário
+    // funcionaria, mas divergir do cliente oficial em algo que só quebra em
+    // produção não vale a economia de três linhas.
+    const corpo = new FormData()
+    corpo.append('cacheControl', '3600')
+    corpo.append('', arquivo)
+
+    const xhr = new XMLHttpRequest()
+    xhr.open('PUT', url, true)
+    xhr.setRequestHeader('x-upsert', 'true')
+    xhr.upload.onprogress = (e) => aoProgredir(e.loaded)
+    xhr.onload = () =>
+      xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`HTTP ${xhr.status}`))
+    xhr.onerror = () => reject(new Error('rede'))
+    xhr.onabort = () => reject(new Error('cancelado'))
+    xhr.send(corpo)
+  })
+}
 
 type Metodo = 'email' | 'cpf'
 
@@ -76,13 +111,17 @@ export function PortalDevolucoes({
   const [itens, setItens] = useState<string[]>([])
   const [motivo, setMotivo] = useState<MotivoDevolucao | ''>('')
   const [comentario, setComentario] = useState('')
-  const [arquivos, setArquivos] = useState<{ nivel: File | null; lacre: File | null }>({
+  const [arquivos, setArquivos] = useState<Record<CampoDeProva, File | null>>({
     nivel: null,
     lacre: null,
+    video: null,
   })
   const [protocolo, setProtocolo] = useState<string | null>(null)
   const [erroEnvio, setErroEnvio] = useState<string | null>(null)
   const [enviando, iniciarEnvio] = useTransition()
+  // Progresso do upload direto, 0..100. Vídeo em rede de celular demora, e
+  // uma tela parada com "Enviando…" faz o cliente fechar a aba.
+  const [progresso, setProgresso] = useState<number | null>(null)
 
   const pedido = pedidos.find((p) => p.id === pedidoId) ?? null
   const chaveItem = (idx: number) => `${pedidoId}-${idx}`
@@ -93,9 +132,11 @@ export function PortalDevolucoes({
   const total = selecionados.reduce((a, i) => a + i.preco, 0)
 
   const danificado = ehDanificado(motivo)
-  const fotosOk = fotosCompletas(motivo, {
+  const pedeVideo = videoObrigatorio(motivo)
+  const fotosOk = provasCompletas(motivo, {
     nivel: Boolean(arquivos.nivel),
     lacre: Boolean(arquivos.lacre),
+    video: Boolean(arquivos.video),
   })
 
   const voltar = () => setPasso((p) => Math.max(1, p - 1))
@@ -123,23 +164,76 @@ export function PortalDevolucoes({
     setItens([])
     setMotivo('')
     setComentario('')
-    setArquivos({ nivel: null, lacre: null })
+    setArquivos({ nivel: null, lacre: null, video: null })
   }
 
   const enviar = () => {
     if (!fotosOk || !pedido || enviando) return
     setErroEnvio(null)
-    const form = new FormData()
-    form.set('pedidoId', pedido.id)
-    form.set('motivo', motivo)
-    form.set('comentario', comentario)
-    for (const i of selecionados) {
-      form.append('item', i.variante === null ? i.perfume : `${i.perfume} · ${i.variante} ml`)
-    }
-    if (arquivos.nivel) form.set('fotoNivel', arquivos.nivel)
-    if (arquivos.lacre) form.set('fotoLacre', arquivos.lacre)
+
+    const aEnviar = (['nivel', 'lacre', 'video'] as CampoDeProva[])
+      .map((campo) => ({ campo, arquivo: arquivos[campo] }))
+      .filter((x): x is { campo: CampoDeProva; arquivo: File } => Boolean(x.arquivo))
+
     iniciarEnvio(async () => {
+      // 1. O servidor assina os destinos. Ele confere o pedido antes de
+      //    assinar — URL de upload não sai de graça para quem passar por aqui.
+      const preparo = await prepararEnvioDeProvas(
+        pedido.id,
+        aEnviar.map(({ campo, arquivo }) => ({
+          campo,
+          nome: arquivo.name,
+          tipo: arquivo.type,
+          tamanho: arquivo.size,
+        })),
+      )
+      if (!preparo.ok) {
+        setErroEnvio(preparo.erro)
+        return
+      }
+
+      // 2. Os bytes vão do celular DIRETO para o Storage. É o que permite
+      //    vídeo: pela server action, nada acima de ~6 MB passaria.
+      const totalBytes = aEnviar.reduce((a, x) => a + x.arquivo.size, 0)
+      const enviados = new Map<CampoDeProva, number>()
+      setProgresso(0)
+      try {
+        for (const destino of preparo.destinos) {
+          const item = aEnviar.find((x) => x.campo === destino.campo)
+          if (!item) continue
+          await subirDireto(destino.url, item.arquivo, (bytes) => {
+            enviados.set(destino.campo, bytes)
+            const feito = [...enviados.values()].reduce((a, b) => a + b, 0)
+            setProgresso(Math.min(99, Math.round((feito / totalBytes) * 100)))
+          })
+        }
+      } catch {
+        setProgresso(null)
+        setErroEnvio(
+          'O envio dos arquivos falhou no meio do caminho. Confira a conexão e tente de novo.',
+        )
+        return
+      }
+      setProgresso(100)
+
+      // 3. Só então a solicitação nasce — com os caminhos, não com os bytes.
+      const form = new FormData()
+      form.set('pedidoId', pedido.id)
+      form.set('motivo', motivo)
+      form.set('comentario', comentario)
+      form.set('rascunho', preparo.rascunho)
+      for (const d of preparo.destinos) {
+        form.set(
+          d.campo === 'nivel' ? 'provaNivel' : d.campo === 'lacre' ? 'provaLacre' : 'provaVideo',
+          d.caminho,
+        )
+      }
+      for (const i of selecionados) {
+        form.append('item', i.variante === null ? i.perfume : `${i.perfume} · ${i.variante} ml`)
+      }
+
       const r = await abrirDevolucao(form)
+      setProgresso(null)
       // Só avança quando a solicitação existe do outro lado. Mostrar
       // "enviada" e não ter registrado nada é o erro que o cliente só
       // descobre quando cobra uma resposta.
@@ -663,11 +757,11 @@ export function PortalDevolucoes({
         {tela === 'fluxo' && passo === 5 && (
           <Passo>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <TituloPasso>Fotos do produto</TituloPasso>
+              <TituloPasso>{pedeVideo ? 'Fotos e vídeo do produto' : 'Fotos do produto'}</TituloPasso>
               {/* A cópia é derivada da mesma regra que valida o passo. */}
               <Corpo>
-                {danificado
-                  ? 'Precisamos ver o dano e o lacre do decant. As duas fotos são obrigatórias.'
+                {pedeVideo
+                  ? 'Vazamento a gente precisa ver acontecendo: duas fotos e um vídeo curto, todos obrigatórios.'
                   : 'Precisamos ver que o decant não foi usado. As duas fotos são obrigatórias.'}
               </Corpo>
             </div>
@@ -693,7 +787,49 @@ export function PortalDevolucoes({
                 arquivo={arquivos.lacre}
                 aoEscolher={(f) => setArquivos((s) => ({ ...s, lacre: f }))}
               />
+              {pedeVideo && (
+                <UploadFoto
+                  marca="3"
+                  midia="video"
+                  titulo="Vídeo do vazamento"
+                  descricao="Uns 15 segundos, com boa luz: gire o frasco mostrando o líquido saindo e o lacre no mesmo enquadramento."
+                  obrigatoria
+                  arquivo={arquivos.video}
+                  aoEscolher={(f) => setArquivos((s) => ({ ...s, video: f }))}
+                />
+              )}
             </div>
+
+            {progresso !== null && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                <div
+                  style={{
+                    height: 6,
+                    borderRadius: 6,
+                    background: 'rgba(36,31,24,.09)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${progresso}%`,
+                      background: PORTAL.ouro,
+                      borderRadius: 6,
+                      transition: 'width .2s ease',
+                    }}
+                  />
+                </div>
+                <span
+                  className="font-sans"
+                  style={{ fontSize: 11, lineHeight: 1.5, color: 'rgba(36,31,24,.55)' }}
+                >
+                  {progresso < 100
+                    ? `Enviando arquivos… ${progresso}%. Não feche esta página.`
+                    : 'Arquivos enviados. Registrando a solicitação…'}
+                </span>
+              </div>
+            )}
 
             {/* Sem menção ao critério interno dos 10% — ele nunca aparece ao cliente. */}
             <BlocoAviso
@@ -703,6 +839,9 @@ export function PortalDevolucoes({
                 'Decant nitidamente usado.',
                 'Lacre rompido, remontado ou frasco trocado.',
                 'Fotos escuras, tremidas ou que não mostrem o frasco por inteiro.',
+                ...(pedeVideo
+                  ? ['Vídeo em que não dá para ver o líquido saindo nem o lacre do frasco.']
+                  : []),
               ]}
             />
 
@@ -715,7 +854,7 @@ export function PortalDevolucoes({
             <div style={{ display: 'flex', gap: 9 }}>
               <BotaoSecundario onClick={voltar}>Voltar</BotaoSecundario>
               <BotaoPrimario ativo={fotosOk && !enviando} onClick={enviar} style={{ flex: 1 }}>
-                {enviando ? 'Enviando fotos…' : 'Enviar solicitação'}
+                {enviando ? 'Enviando…' : 'Enviar solicitação'}
               </BotaoPrimario>
             </div>
           </Passo>
@@ -1612,6 +1751,7 @@ function UploadFoto({
   obrigatoria,
   arquivo,
   aoEscolher,
+  midia = 'foto',
 }: {
   marca: string
   titulo: string
@@ -1619,7 +1759,10 @@ function UploadFoto({
   obrigatoria: boolean
   arquivo: File | null
   aoEscolher: (arquivo: File | null) => void
+  /** Vídeo troca a câmera do celular, a pré-visualização e os rótulos. */
+  midia?: 'foto' | 'video'
 }) {
+  const ehVideo = midia === 'video'
   const entrada = useRef<HTMLInputElement>(null)
   const [preview, setPreview] = useState<string | null>(null)
 
@@ -1692,7 +1835,7 @@ function UploadFoto({
                 whiteSpace: 'nowrap',
               }}
             >
-              {obrigatoria ? 'Obrigatória' : 'Opcional'}
+              {obrigatoria ? (ehVideo ? 'Obrigatório' : 'Obrigatória') : 'Opcional'}
             </span>
           </span>
           <span
@@ -1711,18 +1854,37 @@ function UploadFoto({
 
       {preview && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={preview}
-            alt={`Pré-visualização: ${titulo}`}
-            style={{
-              width: 84,
-              height: 84,
-              objectFit: 'cover',
-              borderRadius: 11,
-              border: '1px solid rgba(36,31,24,.1)',
-            }}
-          />
+          {/* O vídeo é reproduzível aqui mesmo: o cliente confere se o
+              vazamento aparece ANTES de enviar, e não depois da recusa. */}
+          {ehVideo ? (
+            <video
+              src={preview}
+              controls
+              playsInline
+              preload="metadata"
+              style={{
+                width: 132,
+                height: 84,
+                objectFit: 'cover',
+                borderRadius: 11,
+                border: '1px solid rgba(36,31,24,.1)',
+                background: '#000',
+              }}
+            />
+          ) : (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={preview}
+              alt={`Pré-visualização: ${titulo}`}
+              style={{
+                width: 84,
+                height: 84,
+                objectFit: 'cover',
+                borderRadius: 11,
+                border: '1px solid rgba(36,31,24,.1)',
+              }}
+            />
+          )}
           <span
             className="font-sans"
             style={{ fontSize: 11, lineHeight: 1.5, color: 'rgba(36,31,24,.55)', overflowWrap: 'anywhere' }}
@@ -1735,7 +1897,7 @@ function UploadFoto({
       <input
         ref={entrada}
         type="file"
-        accept="image/*"
+        accept={ehVideo ? 'video/*' : 'image/*'}
         capture="environment"
         style={{ display: 'none' }}
         onChange={(e) => {
@@ -1762,7 +1924,13 @@ function UploadFoto({
             cursor: 'pointer',
           }}
         >
-          {feita ? 'Trocar foto' : 'Tirar ou escolher foto'}
+          {feita
+            ? ehVideo
+              ? 'Trocar vídeo'
+              : 'Trocar foto'
+            : ehVideo
+              ? 'Gravar ou escolher vídeo'
+              : 'Tirar ou escolher foto'}
         </button>
         {feita && (
           <button

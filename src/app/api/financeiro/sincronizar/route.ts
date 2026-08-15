@@ -243,6 +243,19 @@ export async function POST(req: Request) {
     relatorio.baixaDeEstoque = { erro: mensagemDe(e) }
   }
 
+  // Provas que subiram e nunca viraram solicitação: o cliente escolheu as
+  // fotos, elas foram para o bucket e ele fechou a aba antes de concluir.
+  // Sem esta varrida, cada desistência deixaria um arquivo pago para sempre.
+  try {
+    const sb = supabaseServer()
+    const { data: vencidos } = await sb.rpc('rascunhos_de_devolucao_vencidos')
+    const nomes = ((vencidos ?? []) as { nome: string }[]).map((v) => v.nome)
+    if (nomes.length) await sb.storage.from('devolucoes').remove(nomes)
+    relatorio.rascunhosDeDevolucao = { removidos: nomes.length }
+  } catch (e) {
+    relatorio.rascunhosDeDevolucao = { erro: mensagemDe(e) }
+  }
+
   // A loja é atualizada por ÚLTIMO, e a ordem é o ponto.
   //
   // Rodando antes da baixa, a Shopify recebia um volume que ainda não tinha
