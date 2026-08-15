@@ -23,6 +23,7 @@ export type EventoNotificacao =
   | 'pedido_entregue'
   | 'devolucao_aberta'
   | 'devolucao_aprovada'
+  | 'devolucao_novas_fotos'
   | 'devolucao_concluida'
   | 'devolucao_recebida'
   | 'cashback_creditado'
@@ -109,6 +110,7 @@ export const ASSUNTO: Record<EventoNotificacao, string> = {
   pedido_entregue: 'Seu pedido chegou · {pedido}',
   devolucao_aberta: 'Recebemos sua solicitação de devolução · {protocolo}',
   devolucao_aprovada: 'Devolução aprovada · código de postagem · {protocolo}',
+  devolucao_novas_fotos: 'Precisamos de novas fotos · {protocolo}',
   devolucao_concluida: 'Devolução concluída · {protocolo}',
   devolucao_recebida: 'Recebemos sua devolução · {pedido}',
   cashback_creditado: 'Você ganhou cashback na Frenesi',
@@ -123,6 +125,7 @@ export const ROTULO_EVENTO: Record<EventoNotificacao, string> = {
   pedido_entregue: 'Pedido entregue',
   devolucao_aberta: 'Devolução aberta no portal',
   devolucao_aprovada: 'Devolução aprovada · reverso enviado',
+  devolucao_novas_fotos: 'Novas fotos pedidas ao cliente',
   devolucao_concluida: 'Devolução concluída · resolução informada',
   devolucao_recebida: 'Devolução recebida',
   cashback_creditado: 'Cashback creditado',
@@ -353,4 +356,42 @@ export function emailEntregue(d: {
     .join(LOJA)
 
   return { assunto: ASSUNTO.pedido_entregue.replace('{pedido}', d.pedido), html }
+}
+
+/**
+ * Pedido de novas provas — o e-mail que faltava.
+ *
+ * Sem ele, "pedir mais fotos" dependia de o cliente entrar no portal por
+ * acaso: o caso ficava parado em "Aguardando fotos" e ninguém do outro lado
+ * sabia que a bola estava com ele. Reaproveita a moldura da conclusão porque
+ * ela tem os campos genéricos ({destaque}, {corpo}, {nota}) — o que muda aqui
+ * é o texto, não o desenho.
+ */
+export function emailDevolucaoNovasFotos(
+  d: { nome: string | null; protocolo: string; oQueFalta: string },
+  modelo: ModeloEmailRecuperacao = MODELO_DEVOLUCAO_NOVAS_FOTOS_PADRAO,
+): { assunto: string; html: string } {
+  const nome = d.nome?.trim().split(/\s+/)[0] || 'Olá'
+  const preenche = (t: string) =>
+    t
+      .split('{nome}').join(escapa(nome))
+      .split('{protocolo}').join(escapa(d.protocolo))
+      .split('{resolucao}').join(escapa('Precisamos de novas fotos'))
+      .split('{destaque}').join(escapa(d.protocolo))
+      .split('{corpo}').join(escapa(d.oQueFalta))
+      .split('{nota}').join(escapa('Consulte este protocolo no portal para reenviar'))
+  return {
+    assunto: preenche(modelo.assunto),
+    html: preenche(modelo.html || HTML_VALIDADO_DEVOLUCAO_CONCLUIDA),
+  }
+}
+
+/** Placeholders: {nome}, {protocolo}. O que falta entra no corpo. */
+export const MODELO_DEVOLUCAO_NOVAS_FOTOS_PADRAO: ModeloEmailRecuperacao = {
+  assunto: 'Precisamos de novas fotos · {protocolo}',
+  titulo: '{nome}, precisamos de novas fotos',
+  mensagem:
+    'Entre no portal de devoluções com o seu protocolo e o e-mail da compra para reenviar. A análise continua assim que as fotos chegarem.',
+  textoBotao: 'Reenviar no portal',
+  html: HTML_VALIDADO_DEVOLUCAO_CONCLUIDA,
 }

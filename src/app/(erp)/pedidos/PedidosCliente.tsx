@@ -1994,7 +1994,16 @@ export function Alternador({
   )
 }
 
-export function Faixa({ tom, texto, aoFechar }: { tom: Tom; texto: string; aoFechar: () => void }) {
+export function Faixa({
+  tom,
+  texto,
+  aoFechar,
+}: {
+  tom: Tom
+  texto: string
+  /** Sem `aoFechar` a faixa não tem botão: estado permanente não se fecha. */
+  aoFechar?: () => void
+}) {
   return (
     <div
       style={{
@@ -2013,21 +2022,23 @@ export function Faixa({ tom, texto, aoFechar }: { tom: Tom; texto: string; aoFec
       >
         {texto}
       </span>
-      <button
-        type="button"
-        onClick={aoFechar}
-        aria-label="Fechar aviso"
-        style={{
-          border: 0,
-          background: 'transparent',
-          color: COR[tom],
-          cursor: 'pointer',
-          fontSize: 11,
-          lineHeight: 1,
-        }}
-      >
-        ✕
-      </button>
+      {aoFechar && (
+        <button
+          type="button"
+          onClick={aoFechar}
+          aria-label="Fechar aviso"
+          style={{
+            border: 0,
+            background: 'transparent',
+            color: COR[tom],
+            cursor: 'pointer',
+            fontSize: 11,
+            lineHeight: 1,
+          }}
+        >
+          ✕
+        </button>
+      )}
     </div>
   )
 }

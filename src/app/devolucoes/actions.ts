@@ -504,7 +504,7 @@ export async function abrirDevolucao(
     .update({ foto_nivel: caminhoNivel, foto_lacre: caminhoLacre, video: caminhoVideo })
     .eq('protocolo', protocolo)
 
-  // Confirmação por e-mail — pronta, mas atrás da trava AVISOS_DE_PEDIDO:
+  // Confirmação por e-mail, atrás da trava AVISOS_DE_DEVOLUCAO:
   // desligada, o fato entra no log como dispensado e nada sai. A função nunca
   // lança; a solicitação registrada é o que importa.
   await avisarDevolucaoAberta(protocolo)

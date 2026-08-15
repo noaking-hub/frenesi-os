@@ -100,9 +100,12 @@ interface Decisao {
 export function DevolucoesCliente({
   solicitacoes,
   ligado,
+  avisosLigados,
 }: {
   solicitacoes: SolicitacaoErp[]
   ligado: boolean
+  /** AVISOS_DE_DEVOLUCAO=1. Desligado, nenhum e-mail sai para o cliente. */
+  avisosLigados: boolean
 }) {
   const [fila, setFila] = useState<Fila>('Todas')
   const [busca, setBusca] = useState('')
@@ -357,6 +360,14 @@ export function DevolucoesCliente({
 
       {erro && <Faixa tom="erro" texto={erro} aoFechar={() => setErro(null)} />}
       {recado && <Faixa tom="ok" texto={recado} aoFechar={() => setRecado(null)} />}
+      {/* Aprovar uma devolução achando que o código foi por e-mail, com a
+          trava desligada, deixa o cliente esperando por nada. A tela avisa. */}
+      {ligado && !avisosLigados && (
+        <Faixa
+          tom="atencao"
+          texto="Os e-mails de devolução estão desligados: as decisões são gravadas, mas nada é enviado ao cliente. Ligue AVISOS_DE_DEVOLUCAO=1 nas variáveis do site."
+        />
+      )}
 
       <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
         {FILAS.map((f) => (

@@ -2,7 +2,11 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { avisarDevolucaoAprovada, avisarDevolucaoConcluida } from '@/data/notificacoes'
+import {
+  avisarDevolucaoAprovada,
+  avisarDevolucaoConcluida,
+  avisarDevolucaoNovasFotos,
+} from '@/data/notificacoes'
 import { mensagemDe } from '@/data/shopify'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import type { StatusSolicitacao, VarianteMl } from '@/domain'
@@ -36,8 +40,8 @@ export async function moverSolicitacao(
     return { ok: false, erro: mensagemDe(error) }
   }
 
-  // Reverso recém-gerado dispara o e-mail de aprovação — pronto, mas atrás da
-  // trava AVISOS_DE_PEDIDO; desligado, o fato só entra no log.
+  // Reverso registrado dispara o e-mail com o código, atrás da trava
+  // AVISOS_DE_DEVOLUCAO; desligada, o fato só entra no log.
   if (status === 'Aguardando postagem' && reverso.trim()) {
     await avisarDevolucaoAprovada(protocolo)
   }
@@ -174,8 +178,8 @@ export async function concluirDevolucao(form: FormData): Promise<Resposta> {
     return { ok: false, erro: mensagemDe(error) }
   }
 
-  // E-mail de conclusão (com o comprovante em anexo) — pronto, atrás da
-  // trava AVISOS_DE_PEDIDO; desligado, o fato só entra no log.
+  // E-mail de conclusão (com o comprovante em anexo), atrás da trava
+  // AVISOS_DE_DEVOLUCAO; desligada, o fato só entra no log.
   await avisarDevolucaoConcluida(protocolo)
 
   revalidatePath('/', 'layout')
@@ -206,6 +210,10 @@ export async function pedirMaisFotos(protocolo: string, texto: string): Promise<
     console.error('[devolucoes] pedirMaisFotos falhou:', error)
     return { ok: false, erro: mensagemDe(error) }
   }
+
+  // O e-mail é o que faz o pedido CHEGAR. Sem ele o caso ficaria parado em
+  // "Aguardando fotos" esperando o cliente entrar no portal por acaso.
+  await avisarDevolucaoNovasFotos(protocolo, pedido)
 
   revalidatePath('/', 'layout')
   return { ok: true }

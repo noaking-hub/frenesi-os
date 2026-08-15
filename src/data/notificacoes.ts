@@ -6,6 +6,7 @@ import {
   emailDevolucaoAberta,
   emailDevolucaoAprovada,
   emailDevolucaoConcluida,
+  emailDevolucaoNovasFotos,
   emailEntregue,
   emailEnvio,
   identificarFrete,
@@ -33,9 +34,11 @@ import { supabaseConfigurado, supabaseServer } from './supabase'
  *     quem perde a corrida pela chave primária não manda nada. Sem isso, a
  *     rotina de hora em hora e um clique na tela ao mesmo tempo mandariam o
  *     mesmo aviso duas vezes.
- *  3. **Desligado por padrão.** Sem `AVISOS_DE_PEDIDO=1` nada sai. Uma rotina
- *     que começa a escrever para clientes reais no primeiro deploy é o tipo de
- *     coisa que não dá para desfazer depois de acontecer.
+ *  3. **Desligado por padrão.** Sem `AVISOS_DE_PEDIDO=1` (pedidos) ou
+ *     `AVISOS_DE_DEVOLUCAO=1` (devoluções) nada sai. Uma rotina que começa a
+ *     escrever para clientes reais no primeiro deploy é o tipo de coisa que
+ *     não dá para desfazer depois de acontecer. As travas são separadas para
+ *     que um módulo pronto não fique refém do outro.
  *
  * Desligado, a rotina ainda RODA — e registra cada fato como dispensado. Essa
  * parte é o que torna a trava reversível com segurança: sem ela, os envios que
@@ -53,6 +56,21 @@ type ModeloEnvio = Parameters<typeof emailEnvio>[1]
 
 export function avisosDePedidoLigados(): boolean {
   return process.env.AVISOS_DE_PEDIDO?.trim() === '1'
+}
+
+/**
+ * Trava PRÓPRIA das devoluções.
+ *
+ * O módulo de devoluções ficou pronto antes dos avisos de pedido, e prender os
+ * dois na mesma chave obrigaria a ligar tudo junto. Aqui a devolução é o caso
+ * em que o silêncio custa caro: o cliente que abriu uma devolução está
+ * esperando resposta, e o código de postagem sem e-mail nunca chega nele.
+ *
+ * Vale a mesma disciplina da outra trava: desligada, o fato entra no log como
+ * dispensado, e ligar depois não despeja avisos atrasados.
+ */
+export function avisosDeDevolucaoLigados(): boolean {
+  return process.env.AVISOS_DE_DEVOLUCAO?.trim() === '1'
 }
 
 interface LinhaPedidoAviso {
@@ -272,20 +290,27 @@ function mensagemDoAviso(
  * Um aviso de devolução, com as três travas do módulo: chave derivada do fato
  * (`DEV-1042|devolucao_aberta`), vaga reservada antes do envio, e — com o
  * módulo desligado — o fato entra no log como dispensado, sem sair e-mail.
- * Ligar `AVISOS_DE_PEDIDO=1` depois só avisa o que acontecer daí em diante.
+ * Ligar `AVISOS_DE_DEVOLUCAO=1` depois só avisa o que acontecer daí em diante.
  *
  * Nunca lança: o aviso é coadjuvante. Falhar o registro da devolução porque o
  * provedor de e-mail espirrou inverteria a importância das coisas.
  */
 async function avisarDevolucao(
   protocolo: string,
-  evento: 'devolucao_aberta' | 'devolucao_aprovada',
+  evento: 'devolucao_aberta' | 'devolucao_aprovada' | 'devolucao_novas_fotos',
   montar: (d: {
     nome: string | null
     email: string
     pedido: string
     reverso: string
+    oQueFalta: string | null
   }) => { assunto: string; html: string } | null,
+  /**
+   * Distingue dois fatos do MESMO evento. Pedir fotos duas vezes, com
+   * observações diferentes, são dois fatos — e sem isto o segundo e-mail
+   * nunca sairia, porque a chave já existiria no log.
+   */
+  sufixoDaChave = '',
 ): Promise<void> {
   try {
     if (!supabaseConfigurado()) return
@@ -293,7 +318,7 @@ async function avisarDevolucao(
 
     const { data } = await sb
       .from('solicitacoes_devolucao')
-      .select('protocolo, pedido_id, motivo, reverso, pedidos(clientes(nome, email))')
+      .select('protocolo, pedido_id, motivo, reverso, pedido_de_fotos, pedidos(clientes(nome, email))')
       .eq('protocolo', protocolo)
       .maybeSingle()
     const s = data as unknown as {
@@ -301,6 +326,7 @@ async function avisarDevolucao(
       pedido_id: string
       motivo: string
       reverso: string
+      pedido_de_fotos: string | null
       pedidos: {
         clientes: { nome: string | null; email: string | null } | null
       } | null
@@ -313,11 +339,12 @@ async function avisarDevolucao(
       email,
       pedido: s.pedido_id,
       reverso: s.reverso,
+      oQueFalta: s.pedido_de_fotos,
     })
     if (!mensagem) return
 
-    const chave = `${protocolo}|${evento}`
-    const desligado = !avisosDePedidoLigados() || !emailConfigurado()
+    const chave = `${protocolo}|${evento}${sufixoDaChave}`
+    const desligado = !avisosDeDevolucaoLigados() || !emailConfigurado()
 
     if (desligado) {
       await sb.from('notificacoes_enviadas').upsert(
@@ -447,7 +474,7 @@ export async function avisarDevolucaoConcluida(protocolo: string): Promise<void>
     )
 
     const chave = `${protocolo}|devolucao_concluida`
-    const desligado = !avisosDePedidoLigados() || !emailConfigurado()
+    const desligado = !avisosDeDevolucaoLigados() || !emailConfigurado()
 
     if (desligado) {
       await sb.from('notificacoes_enviadas').upsert(
@@ -514,4 +541,28 @@ export async function avisarDevolucaoConcluida(protocolo: string): Promise<void>
   } catch (e) {
     console.error(`[devolucoes] aviso de conclusão de ${protocolo} não registrado:`, e)
   }
+}
+
+/**
+ * Pedido de novas provas — chamado quando a triagem marca "Aguardando fotos".
+ *
+ * A chave inclui o texto pedido, e não só o protocolo: se a operação pedir
+ * fotos de novo, com outra observação, é outro fato e merece outro e-mail. A
+ * regra de "um fato, um e-mail" continua valendo — o que muda é o que conta
+ * como fato.
+ */
+export async function avisarDevolucaoNovasFotos(protocolo: string, oQueFalta: string): Promise<void> {
+  // Soma simples dos caracteres: não precisa ser criptográfico, precisa ser
+  // estável — o mesmo pedido repetido não pode virar dois e-mails.
+  let marca = 0
+  for (const c of oQueFalta.trim()) marca = (marca * 31 + c.charCodeAt(0)) % 1_000_000
+  await avisarDevolucao(
+    protocolo,
+    'devolucao_novas_fotos',
+    (d) =>
+      d.oQueFalta
+        ? emailDevolucaoNovasFotos({ nome: d.nome, protocolo, oQueFalta: d.oQueFalta })
+        : null,
+    `|${marca}`,
+  )
 }
