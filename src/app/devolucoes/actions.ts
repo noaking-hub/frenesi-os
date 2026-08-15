@@ -551,7 +551,11 @@ export async function consultarDevolucao(
     erro: 'Não encontramos essa devolução. Confira o protocolo e o e-mail ou CPF da compra.',
   }
 
-  if (!/^DEV-\d{1,10}$/.test(protocolo) || ident.length < 6) return naoEncontrada
+  // Dois formatos: o aleatório de hoje ("K7QM-4XT9") e o sequencial antigo
+  // ("DEV-1003"), que ainda existe em casos abertos antes da troca. Recusar o
+  // antigo deixaria cliente com e-mail na mão sem conseguir consultar.
+  const formatoValido = /^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(protocolo) || /^DEV-\d{1,10}$/.test(protocolo)
+  if (!formatoValido || ident.length < 6) return naoEncontrada
 
   // Só dígitos é CPF; o resto é e-mail — o cliente não precisa escolher.
   const digitos = ident.replace(/\D/g, '')

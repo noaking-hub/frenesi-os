@@ -288,7 +288,7 @@ function mensagemDoAviso(
 
 /**
  * Um aviso de devolução, com as três travas do módulo: chave derivada do fato
- * (`DEV-1042|devolucao_aberta`), vaga reservada antes do envio, e — com o
+ * (`K7QM-4XT9|devolucao_aberta`), vaga reservada antes do envio, e — com o
  * módulo desligado — o fato entra no log como dispensado, sem sair e-mail.
  * Ligar `AVISOS_DE_DEVOLUCAO=1` depois só avisa o que acontecer daí em diante.
  *

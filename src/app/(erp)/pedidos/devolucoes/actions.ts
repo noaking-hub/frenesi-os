@@ -13,6 +13,19 @@ import type { StatusSolicitacao, VarianteMl } from '@/domain'
 
 export type Resposta<T = object> = ({ ok: true } & T) | { ok: false; erro: string }
 
+/**
+ * Revalida SÓ a tela de devoluções.
+ *
+ * Era `revalidatePath('/', 'layout')`, que manda o Next refazer todas as rotas
+ * do layout do ERP — dezenas de consultas. Somado ao envio do e-mail, a ação
+ * passava do tempo da função na Netlify: o banco gravava, o e-mail saía, e a
+ * resposta nunca chegava ao navegador. O botão ficava em "Gravando…" para
+ * sempre, com o trabalho já feito do outro lado.
+ */
+function revalidarDevolucoes() {
+  revalidatePath('/pedidos/devolucoes')
+}
+
 function exigeSupabase(acao: string) {
   return supabaseConfigurado()
     ? null
@@ -46,7 +59,7 @@ export async function moverSolicitacao(
     await avisarDevolucaoAprovada(protocolo)
   }
 
-  revalidatePath('/', 'layout')
+  revalidarDevolucoes()
   return { ok: true }
 }
 
@@ -81,7 +94,7 @@ export async function conferirDevolucao(
     return { ok: false, erro: mensagemDe(error) }
   }
 
-  revalidatePath('/', 'layout')
+  revalidarDevolucoes()
   return { ok: true }
 }
 
@@ -182,7 +195,7 @@ export async function concluirDevolucao(form: FormData): Promise<Resposta> {
   // AVISOS_DE_DEVOLUCAO; desligada, o fato só entra no log.
   await avisarDevolucaoConcluida(protocolo)
 
-  revalidatePath('/', 'layout')
+  revalidarDevolucoes()
   return { ok: true }
 }
 
@@ -215,6 +228,6 @@ export async function pedirMaisFotos(protocolo: string, texto: string): Promise<
   // "Aguardando fotos" esperando o cliente entrar no portal por acaso.
   await avisarDevolucaoNovasFotos(protocolo, pedido)
 
-  revalidatePath('/', 'layout')
+  revalidarDevolucoes()
   return { ok: true }
 }

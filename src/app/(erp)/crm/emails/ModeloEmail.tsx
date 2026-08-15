@@ -107,13 +107,13 @@ export function ModeloEmail({
     }
     if (tipo === 'devolucao-aberta') {
       return emailDevolucaoAberta(
-        { nome: 'Marina Fontes', pedido: 'YP-1510190959842609', protocolo: 'DEV-1043' },
+        { nome: 'Marina Fontes', pedido: 'YP-1510190959842609', protocolo: 'K7QM-4XT9' },
         modelo,
       )
     }
     if (tipo === 'devolucao-aprovada') {
       return emailDevolucaoAprovada(
-        { nome: 'Marina Fontes', protocolo: 'DEV-1043', reverso: 'RV4471120BR' },
+        { nome: 'Marina Fontes', protocolo: 'K7QM-4XT9', reverso: 'RV4471120BR' },
         modelo,
       )
     }
@@ -121,7 +121,7 @@ export function ModeloEmail({
       return emailDevolucaoConcluida(
         {
           nome: 'Marina Fontes',
-          protocolo: 'DEV-1043',
+          protocolo: 'K7QM-4XT9',
           resolucao: 'Reembolso integral',
           reembolsoValor: 189.8,
           reembolsoForma: 'pix',
@@ -426,7 +426,7 @@ export function ModeloEmail({
                   envio confundiria: ali o dado de exemplo é outro. */}
               dados de exemplo
               {tipo.startsWith('devolucao')
-                ? ' · DEV-1043'
+                ? ' · K7QM-4XT9'
                 : tipo === 'envio'
                 ? ' · AD778124948BR · Correios'
                 : tipo === 'cashback'

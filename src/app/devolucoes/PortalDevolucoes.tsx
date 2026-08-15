@@ -1155,7 +1155,7 @@ function Acompanhar({
           Acompanhar devolução
         </h1>
         <Corpo>
-          Informe o protocolo (ex.: DEV-1043) e o e-mail ou CPF usado na compra.
+          Informe o protocolo que enviamos por e-mail e o e-mail ou CPF usado na compra.
         </Corpo>
       </div>
 
@@ -1175,8 +1175,11 @@ function Acompanhar({
           <RotuloCampo>Protocolo</RotuloCampo>
           <input
             value={protocolo}
-            onChange={(e) => setProtocolo(e.target.value)}
-            placeholder="DEV-0000"
+            // Maiúsculas na digitação: o protocolo é maiúsculo por natureza
+            // e o cliente que digita minúsculo não pode receber "não
+            // encontrada" por causa disso.
+            onChange={(e) => setProtocolo(e.target.value.toUpperCase())}
+            placeholder="XXXX-XXXX"
             className="font-mono focus:border-[#B08D4B]"
             style={{
               height: 48,

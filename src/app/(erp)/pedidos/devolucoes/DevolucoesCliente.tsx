@@ -487,6 +487,7 @@ export function DevolucoesCliente({
           status={statusDe(abertaAgora)}
           reverso={reversoDe(abertaAgora)}
           pendente={pendente}
+          avisosLigados={avisosLigados}
           aoGravar={(patch, recadoOk) => gravar(abertaAgora, patch, recadoOk)}
           aoPedirFotos={(texto) => pedirFotos(abertaAgora, texto)}
           aoConferir={() => setConferindo(abertaAgora.id)}
@@ -805,6 +806,7 @@ function FichaDevolucao({
   status,
   reverso,
   pendente,
+  avisosLigados,
   aoGravar,
   aoPedirFotos,
   aoConferir,
@@ -817,6 +819,8 @@ function FichaDevolucao({
   status: StatusSolicitacao
   reverso: string
   pendente: boolean
+  /** AVISOS_DE_DEVOLUCAO=1 — decide o que a ficha promete ao operador. */
+  avisosLigados: boolean
   aoGravar: (patch: Decisao, recadoOk?: string) => void
   aoPedirFotos: (texto: string) => void
   aoConferir: () => void
@@ -1176,10 +1180,12 @@ function FichaDevolucao({
                 )}
               </span>
             </div>
-            {/* Honestidade: o sistema NÃO envia e-mail nenhum por enquanto —
-                regra do cliente até o ERP rodar 100%. A ficha diz isso em vez
-                de alegar "instruções enviadas". */}
-            <Campo rotulo="Aviso ao cliente" valor="Desligado até o sistema rodar 100%" />
+            {/* Derivado da trava, não escrito à mão: a ficha não pode dizer
+                "avisado" quando os e-mails estão desligados. */}
+            <Campo
+              rotulo="Aviso ao cliente"
+              valor={avisosLigados ? 'E-mail automático a cada etapa' : 'Desligado — nada é enviado'}
+            />
             <Campo rotulo="Contato" valor={d.telefone} mono />
           </Bloco>
 

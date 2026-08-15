@@ -1,5 +1,6 @@
 import {
   HTML_VALIDADO_DEVOLUCAO_ABERTA,
+  HTML_VALIDADO_DEVOLUCAO_NOVAS_FOTOS,
   HTML_VALIDADO_DEVOLUCAO_APROVADA,
   HTML_VALIDADO_DEVOLUCAO_CONCLUIDA,
   HTML_VALIDADO_ENTREGUE,
@@ -363,9 +364,11 @@ export function emailEntregue(d: {
  *
  * Sem ele, "pedir mais fotos" dependia de o cliente entrar no portal por
  * acaso: o caso ficava parado em "Aguardando fotos" e ninguém do outro lado
- * sabia que a bola estava com ele. Reaproveita a moldura da conclusão porque
- * ela tem os campos genéricos ({destaque}, {corpo}, {nota}) — o que muda aqui
- * é o texto, não o desenho.
+ * sabia que a bola estava com ele. A moldura é a mesma da conclusão, com os
+ * textos próprios: reusar o template inteiro mandou ao cliente um pedido de
+ * fotos dizendo "caso encerrado" — o que muda aqui
+ * é o texto, não o desenho. O que a operação pediu vai no lugar de destaque
+ * da moldura — é a informação que o cliente precisa ler primeiro.
  */
 export function emailDevolucaoNovasFotos(
   d: { nome: string | null; protocolo: string; oQueFalta: string },
@@ -376,13 +379,13 @@ export function emailDevolucaoNovasFotos(
     t
       .split('{nome}').join(escapa(nome))
       .split('{protocolo}').join(escapa(d.protocolo))
-      .split('{resolucao}').join(escapa('Precisamos de novas fotos'))
+      .split('{resolucao}').join(escapa(d.oQueFalta))
       .split('{destaque}').join(escapa(d.protocolo))
-      .split('{corpo}').join(escapa(d.oQueFalta))
-      .split('{nota}').join(escapa('Consulte este protocolo no portal para reenviar'))
+      .split('{corpo}').join(escapa('Reenvie pelo portal com este protocolo e o e-mail da compra.'))
+      .split('{nota}').join(escapa('Protocolo da sua devolução'))
   return {
     assunto: preenche(modelo.assunto),
-    html: preenche(modelo.html || HTML_VALIDADO_DEVOLUCAO_CONCLUIDA),
+    html: preenche(modelo.html || HTML_VALIDADO_DEVOLUCAO_NOVAS_FOTOS),
   }
 }
 
@@ -393,5 +396,5 @@ export const MODELO_DEVOLUCAO_NOVAS_FOTOS_PADRAO: ModeloEmailRecuperacao = {
   mensagem:
     'Entre no portal de devoluções com o seu protocolo e o e-mail da compra para reenviar. A análise continua assim que as fotos chegarem.',
   textoBotao: 'Reenviar no portal',
-  html: HTML_VALIDADO_DEVOLUCAO_CONCLUIDA,
+  html: HTML_VALIDADO_DEVOLUCAO_NOVAS_FOTOS,
 }

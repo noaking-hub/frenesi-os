@@ -102,19 +102,19 @@ export async function enviarTeste(
     const r =
       chave === 'devolucao-aberta'
         ? emailDevolucaoAberta(
-            { nome: 'Marina Fontes', pedido: 'YP-1510190959842609', protocolo: 'DEV-1043' },
+            { nome: 'Marina Fontes', pedido: 'YP-1510190959842609', protocolo: 'K7QM-4XT9' },
             m,
           )
         : chave === 'devolucao-aprovada'
         ? emailDevolucaoAprovada(
-            { nome: 'Marina Fontes', protocolo: 'DEV-1043', reverso: 'RV4471120BR' },
+            { nome: 'Marina Fontes', protocolo: 'K7QM-4XT9', reverso: 'RV4471120BR' },
             m,
           )
         : chave === 'devolucao-concluida'
         ? emailDevolucaoConcluida(
             {
               nome: 'Marina Fontes',
-              protocolo: 'DEV-1043',
+              protocolo: 'K7QM-4XT9',
               resolucao: 'Reembolso integral',
               reembolsoValor: 189.8,
               reembolsoForma: 'pix',
