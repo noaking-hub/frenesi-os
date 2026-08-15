@@ -194,7 +194,7 @@ export default async function Categorias() {
       titulo: 'No mês',
       largura: '150px',
       alinhamento: 'right',
-      render: ({ c, valorMes }, ) => (
+      render: ({ c, valorMes }) => (
         <span style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end', width: '100%' }}>
           <Valor tamanho={12} peso={400} tom={valorMes === 0 ? 'neutro' : undefined}>
             {valorMes === 0 ? '—' : brl(valorMes)}

@@ -1,6 +1,6 @@
 import { Cartao, CabecalhoCartao, VazioInterno } from '@/components/erp/Cartao'
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
-import { Badge, Losango, Valor } from '@/components/erp/primitivos'
+import { Badge, EstadoVazio, Losango, Valor } from '@/components/erp/primitivos'
 import { Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR, type Tom } from '@/components/erp/tokens'
 import { carregarLancamentos } from '@/data/financeiro'
@@ -14,7 +14,6 @@ import {
   situacaoDe,
 } from '@/domain'
 import type { LancamentoGerencial, SituacaoLancamento } from '@/domain'
-import { EstadoVazio } from '@/components/erp/primitivos'
 
 import { AcoesGerenciais, NovoCompromisso } from '../Compromissos'
 import { BarraDeFiltros } from './Filtros'
