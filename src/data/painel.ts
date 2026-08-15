@@ -120,7 +120,8 @@ interface LinhaPedido {
 interface LinhaItem {
   pedido_id: string
   descricao: string | null
-  variante: string | null
+  /** Volume do decant em ml — a coluna é smallint, não um título "5ml". */
+  variante: number | null
   quantidade: number | string
   preco: number | string
   base_id: string | null
@@ -166,11 +167,14 @@ const VAZIO_VENDAS: ResumoVendas = {
   volumeMl: 0,
 }
 
-/** ml de uma variante, lido do título — "3ml", "5 ml", "10ML". */
-function mlDaVariante(texto: string | null): number {
-  if (!texto) return 0
-  const m = texto.match(/(\d+(?:[.,]\d+)?)\s*ml/i)
-  return m ? Number(m[1].replace(',', '.')) : 0
+/**
+ * ml de um item. `variante` já É o volume (smallint no banco) — o resto do
+ * domínio a trata assim. A primeira versão tentava ler "5ml" de um título e
+ * quebrava o Dashboard inteiro em produção: número não tem .match().
+ */
+function mlDoItem(variante: number | null): number {
+  const ml = Number(variante ?? 0)
+  return Number.isFinite(ml) && ml > 0 ? ml : 0
 }
 
 export async function carregarPainelPrincipal(periodo: Periodo = '30d'): Promise<PainelPrincipal> {
@@ -257,7 +261,7 @@ export async function carregarPainelPrincipal(periodo: Periodo = '30d'): Promise
     const ids = new Set(doPeriodo.map((p) => p.id))
     const volume = itensAtual
       .filter((i) => ids.has(i.pedido_id))
-      .reduce((a, i) => a + mlDaVariante(i.variante) * Number(i.quantidade), 0)
+      .reduce((a, i) => a + mlDoItem(i.variante) * Number(i.quantidade), 0)
     return {
       faturamento: Math.round(faturamento * 100) / 100,
       pedidos: doPeriodo.length,
@@ -314,7 +318,7 @@ export async function carregarPainelPrincipal(periodo: Periodo = '30d'): Promise
 
     const nome = (i.base_id && nomeDe.get(i.base_id)) || i.descricao || 'Sem identificação'
     const atual = porProduto.get(nome) ?? { ml: 0, faturamento: 0, baseId: i.base_id }
-    atual.ml += mlDaVariante(i.variante) * Number(i.quantidade)
+    atual.ml += mlDoItem(i.variante) * Number(i.quantidade)
     atual.faturamento += receita
     porProduto.set(nome, atual)
   }
