@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import type { ReactNode } from 'react'
 
 import {
@@ -61,6 +62,55 @@ import { BarraDeFiltros } from './Filtros'
  */
 export const dynamic = 'force-dynamic'
 
+/** A mesma URL, trocando só a página — os filtros seguem intactos. */
+function comPagina(filtro: Busca, pagina: number): string {
+  const qs = new URLSearchParams()
+  for (const [k, v] of Object.entries(filtro)) {
+    if (v && k !== 'pagina') qs.set(k, v)
+  }
+  if (pagina > 1) qs.set('pagina', String(pagina))
+  const s = qs.toString()
+  return s ? `/financeiro/lancamentos?${s}` : '/financeiro/lancamentos'
+}
+
+/** Um passo da paginação. Sem destino, vira texto apagado — nunca botão morto. */
+function Passo({ href, children }: { href: string | null; children: ReactNode }) {
+  const estilo = {
+    height: 30,
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '0 13px',
+    borderRadius: 8,
+    border: '1px solid rgba(255,255,255,.09)',
+    fontSize: 11.5,
+    fontWeight: 600,
+    textDecoration: 'none',
+  } as const
+  if (!href) {
+    return (
+      <span
+        className="font-sans"
+        aria-disabled
+        style={{ ...estilo, color: 'rgba(242,237,227,.22)', borderColor: 'rgba(255,255,255,.05)' }}
+      >
+        {children}
+      </span>
+    )
+  }
+  return (
+    <Link href={href} className="font-sans hover:text-ouro" style={{ ...estilo, color: 'rgba(242,237,227,.7)' }}>
+      {children}
+    </Link>
+  )
+}
+
+/** N dias para trás de uma data AAAA-MM-DD, em UTC para não escorregar de dia. */
+function recuar(dia: string, dias: number): string {
+  const d = new Date(`${dia}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() - dias)
+  return d.toISOString().slice(0, 10)
+}
+
 const TOM_SITUACAO: Record<SituacaoLancamento, TomUi> = {
   previsto: 'info',
   agendado: 'neutro',
@@ -83,6 +133,10 @@ interface Busca {
   /** Janela do dia do movimento, AAAA-MM-DD inclusivos. */
   de?: string
   ate?: string
+  /** Atalho de janela: '7' | '30' | 'mes' | 'tudo'. Sem nada, vale '7'. */
+  periodo?: string
+  /** Página da lista, 1-based. */
+  pagina?: string
   /** 'sim' | 'nao' — o mockup separa o que se repete todo mês do avulso. */
   recorrente?: string
 }
@@ -103,6 +157,28 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       </Pilha>
     )
   }
+
+  /**
+   * A janela padrão é de 7 DIAS, e não "todo o histórico".
+   *
+   * Abrir a tela carregava 1.244 lançamentos e desenhava 250 — segundos de
+   * espera para responder uma pergunta que quase sempre é sobre esta semana.
+   * Quem precisa do histórico inteiro pede: o atalho "Tudo" está a um clique,
+   * e o rodapé sempre diz qual janela está valendo.
+   *
+   * Data digitada à mão vence o atalho — quem escolheu 01/06 quer 01/06.
+   */
+  const atalho = ['7', '30', 'mes', 'tudo'].includes(filtro.periodo ?? '')
+    ? (filtro.periodo as '7' | '30' | 'mes' | 'tudo')
+    : '7'
+  const temDataManual = Boolean(filtro.de || filtro.ate)
+  const janela = temDataManual
+    ? { de: filtro.de ?? '', ate: filtro.ate ?? '' }
+    : atalho === 'tudo'
+      ? { de: '', ate: '' }
+      : atalho === 'mes'
+        ? { de: `${p.hoje.slice(0, 7)}-01`, ate: p.hoje }
+        : { de: recuar(p.hoje, atalho === '30' ? 29 : 6), ate: p.hoje }
 
   const comSituacao = p.lancamentos.map((l) => ({ l, situacao: situacaoDe(l, p.hoje) }))
   const busca = (filtro.q ?? '').trim().toLowerCase()
@@ -132,8 +208,8 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       // por vencimento descartava 1.223 das 1.244 linhas — tudo que já
       // aconteceu não tem vencimento, e a janela devolvia só as parcelas do
       // financiamento.
-      if (filtro.de && l.ocorridoEm < filtro.de) return false
-      if (filtro.ate && l.ocorridoEm > filtro.ate) return false
+      if (janela.de && l.ocorridoEm < janela.de) return false
+      if (janela.ate && l.ocorridoEm > janela.ate) return false
       if (filtro.recorrente === 'sim' && !l.recorrente) return false
       if (filtro.recorrente === 'nao' && l.recorrente) return false
       if (busca) {
@@ -166,16 +242,21 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
     })
 
   /**
-   * Teto de linhas desenhadas de uma vez.
+   * Paginação de 50, no lugar do teto cego de 250.
    *
-   * A tela nasceu listando tudo, e tudo eram trezentos lançamentos. O extrato
-   * do gateway trouxe mais mil, e uma tabela de mil linhas não é uma tabela: é
-   * uma página que demora a abrir e onde ninguém acha nada. O teto corta o
-   * desenho, NÃO a conta — os totais do rodapé e os indicadores continuam
-   * sobre o filtro inteiro, e o rodapé diz quantas ficaram de fora.
+   * O teto anterior cortava o desenho e não oferecia saída: as linhas 251 em
+   * diante simplesmente não existiam para quem estava na tela. A página é a
+   * mesma economia de desenho com uma diferença que importa — dá para chegar
+   * às outras.
+   *
+   * Os totais e indicadores continuam sobre o FILTRO INTEIRO, não sobre a
+   * página: "entrou R$ 2.841,13" tem de responder pela semana, não pelas
+   * cinquenta linhas que couberam na tela.
    */
-  const TETO_LINHAS = 250
-  const listadas = visiveis.slice(0, TETO_LINHAS)
+  const POR_PAGINA = 50
+  const paginas = Math.max(1, Math.ceil(visiveis.length / POR_PAGINA))
+  const pagina = Math.min(Math.max(1, Number(filtro.pagina ?? '1') || 1), paginas)
+  const listadas = visiveis.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA)
   const ocultas = visiveis.length - listadas.length
 
   /*
@@ -195,10 +276,9 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
     .filter((x) => x.l.tipo === 'entrada')
     .reduce((a, x) => a + x.l.recebido, 0)
   const saiu = movidos.filter((x) => x.l.tipo === 'saida').reduce((a, x) => a + x.l.recebido, 0)
-  const periodoNaTela =
-    filtro.de || filtro.ate
-      ? `${filtro.de ? diaCurtoPt(filtro.de) : 'início'} a ${filtro.ate ? diaCurtoPt(filtro.ate) : 'hoje'}`
-      : 'todo o histórico'
+  const periodoNaTela = !janela.de && !janela.ate
+    ? 'todo o histórico'
+    : `${janela.de ? diaCurtoPt(janela.de) : 'início'} a ${janela.ate ? diaCurtoPt(janela.ate) : 'hoje'}`
 
   const abertos = visiveis.filter((x) => x.situacao !== 'liquidado' && x.situacao !== 'cancelado')
   const somaAberto = (ls: { l: LancamentoGerencial }[]) => ls.reduce((a, x) => a + saldoAberto(x.l), 0)
@@ -615,9 +695,15 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
             titulo="Lançamentos incompletos ficam fora dos números"
             acao={
               <span style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
+                {/* Manda para a FILA DA IA, não para uma lista crua. Lá cada
+                    linha chega com a categoria sugerida, a confiança e o
+                    motivo da sugestão, e dá para aprovar em lote. O link
+                    antigo trazia de volta para cá com um filtro, deixando o
+                    trabalho inteiro na mão de quem já não sabia o que a linha
+                    era — e é dessa dúvida que a fila cuida. */}
                 {semCategoria.length > 0 && (
-                  <AcaoPainel href="/financeiro/lancamentos?categoria=sem">
-                    {`Classificar ${semCategoria.length} sem categoria`}
+                  <AcaoPainel href="/assessor/classificacao">
+                    {`Classificar ${semCategoria.length} com ajuda da IA`}
                   </AcaoPainel>
                 )}
                 {semVencimento.length > 0 && (
@@ -634,7 +720,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
             >
               {[
                 semCategoria.length > 0 &&
-                  `${plural(semCategoria.length, 'lançamento está', 'lançamentos estão')} sem categoria (${brl(valorSemCategoria)}) — o ERP não sabe o que eles são e por isso nenhum entra na DRE.`,
+                  `${plural(semCategoria.length, 'lançamento está', 'lançamentos estão')} sem categoria (${brl(valorSemCategoria)}) — nenhum entra na DRE enquanto ninguém disser o que são. A fila de classificação mostra cada um com a sugestão do ERP, a confiança e o porquê.`,
                 semVencimento.length > 0 &&
                   `${plural(semVencimento.length, 'lançamento está', 'lançamentos estão')} sem data de vencimento (${brl(valorSemVencimento)}) — a projeção de caixa posiciona cada valor no dia do vencimento, então esses não aparecem no fluxo.`,
               ]
@@ -678,9 +764,9 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
               visiveis.length > 0 ? (
                 <RodapeTabela
                   contagem={
-                    ocultas > 0
-                      ? `${listadas.length} de ${visiveis.length} desenhados · use os filtros para ver os outros ${ocultas}`
-                      : plural(visiveis.length, 'lançamento listado', 'lançamentos listados')
+                    paginas > 1
+                      ? `${(pagina - 1) * POR_PAGINA + 1}–${(pagina - 1) * POR_PAGINA + listadas.length} de ${visiveis.length} · página ${pagina} de ${paginas} · ${periodoNaTela}`
+                      : `${plural(visiveis.length, 'lançamento', 'lançamentos')} · ${periodoNaTela}`
                   }
                   totais={[
                     { rotulo: 'A receber em aberto', valor: brl(somaAberto(entradasAbertas)), tom: 'ok' },
@@ -695,6 +781,35 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
               ) : null
             }
           />
+
+          {/* Navegação em links, não em botões: a página vive na URL como os
+              filtros, então dá para voltar pelo histórico do navegador e para
+              mandar "olha a página 3" para alguém. */}
+          {paginas > 1 && (
+            <nav
+              aria-label="Paginação dos lançamentos"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                paddingTop: 13,
+                marginTop: 2,
+                borderTop: '1px solid rgba(255,255,255,.05)',
+              }}
+            >
+              <Passo href={pagina > 1 ? comPagina(filtro, pagina - 1) : null}>← Anterior</Passo>
+              <span
+                className="font-sans"
+                style={{ fontSize: 11.5, color: 'rgba(242,237,227,.5)', padding: '0 6px' }}
+              >
+                {`Página ${pagina} de ${paginas}`}
+              </span>
+              <Passo href={pagina < paginas ? comPagina(filtro, pagina + 1) : null}>
+                Próxima →
+              </Passo>
+            </nav>
+          )}
         </Painel>
 
         {/* Os cinco cartões do rodapé têm a MESMA estrutura em três faixas —

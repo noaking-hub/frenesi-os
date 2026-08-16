@@ -68,9 +68,21 @@ export function BarraDeFiltros({
     const novo = new URLSearchParams(params.toString())
     if (valor) novo.set(chave, valor)
     else novo.delete(chave)
+    // Mexeu no filtro, volta para a primeira página. Ficar na página 7 depois
+    // de trocar o período mostra uma tela vazia e parece defeito.
+    novo.delete('pagina')
+    // Data à mão e atalho são a MESMA decisão dita de dois jeitos; manter os
+    // dois faria a tela obedecer a um e exibir o outro aceso.
+    if (chave === 'de' || chave === 'ate') novo.delete('periodo')
+    if (chave === 'periodo') {
+      novo.delete('de')
+      novo.delete('ate')
+    }
     const qs = novo.toString()
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
   }
+
+  const periodoAtivo = params.get('de') || params.get('ate') ? '' : (params.get('periodo') ?? '7')
 
   const ativos = [
     'situacao',
@@ -97,6 +109,50 @@ export function BarraDeFiltros({
         background: 'linear-gradient(168deg, #15141608, #0E0E0F)',
       }}
     >
+      {/* O período é a decisão que mais muda o que a tela mostra, então é o
+          primeiro controle e o único em forma de botão: um clique, sem abrir
+          calendário. Os campos de data continuam logo abaixo para a janela
+          que nenhum atalho cobre. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+        <Etiqueta>Período</Etiqueta>
+        {(
+          [
+            ['7', '7 dias'],
+            ['30', '30 dias'],
+            ['mes', 'Este mês'],
+            ['tudo', 'Tudo'],
+          ] as [string, string][]
+        ).map(([valor, rotulo]) => {
+          const aceso = periodoAtivo === valor
+          return (
+            <button
+              key={valor}
+              type="button"
+              onClick={() => trocar('periodo', valor)}
+              className="font-sans"
+              style={{
+                height: 28,
+                padding: '0 12px',
+                borderRadius: 8,
+                border: `1px solid ${aceso ? 'rgba(239,209,140,.42)' : 'rgba(255,255,255,.08)'}`,
+                background: aceso ? 'rgba(239,209,140,.10)' : 'transparent',
+                color: aceso ? TINTA.ouro : 'rgba(242,237,227,.55)',
+                fontSize: 11.5,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              {rotulo}
+            </button>
+          )
+        })}
+        {!periodoAtivo && (
+          <span className="font-sans" style={{ fontSize: 11, color: 'rgba(242,237,227,.4)' }}>
+            janela escolhida à mão
+          </span>
+        )}
+      </div>
+
       <div
         style={{
           display: 'grid',

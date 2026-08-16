@@ -977,6 +977,15 @@ async function importarEComplementar(
   try {
     const nomeados = await enriquecerContrapartes()
     if (nomeados > 0) linhas.push(`${nomeados} movimento(s) ganharam o nome do destinatário.`)
+    // O nome tem de descer para o lançamento: é lá que a classificação lê o
+    // favorecido. Roda sempre, porque a conversão em caixa acontece antes do
+    // enriquecimento e deixa lançamentos sem o nome que agora existe.
+    const { data: descidos } = await supabaseServer().rpc(
+      'propagar_contraparte_para_lancamentos',
+    )
+    if (Number(descidos ?? 0) > 0) {
+      linhas.push(`${descidos} lançamento(s) passaram a mostrar de quem é o movimento.`)
+    }
   } catch {
     /* enriquecer é melhoria, não pré-requisito */
   }
@@ -1014,33 +1023,44 @@ async function importarEComplementar(
  * pedidos da Yampi: procura strings em campos com cara de nome em vez de
  * apostar num caminho fixo, porque o formato varia por meio de pagamento.
  */
-async function enriquecerContrapartes(limite = 60): Promise<number> {
+async function enriquecerContrapartes(limite = 90): Promise<number> {
   const sb = supabaseServer()
   const { data, error } = await sb
     .from('extrato_linhas')
-    .select('chave')
+    // `documento` guarda o id do pagamento; `chave` é composta
+    // (`2026-08-15:173952068842:payment:-15271:1`). Consultar a API com a
+    // chave era pedir um pagamento que não existe, e o `catch` engolia o 404
+    // — a rotina rodava desde sempre e nomeava zero movimentos.
+    .select('chave, documento')
     .eq('origem', 'mercadopago')
     .eq('contraparte', '')
-    .eq('tipo', 'saida')
-    .is('lancamento_id', null)
     .eq('ignorado', false)
+    // Sem filtro de tipo: a ENTRADA sem pedido é tão anônima quanto a saída, e
+    // "Crédito a classificar" sem contraparte é impossível de categorizar.
+    //
+    // Sem filtro de `lancamento_id` também. Ele excluía exatamente as linhas
+    // que precisam do nome: a conversão em caixa roda antes desta rotina, então
+    // toda linha interessante JÁ tem lançamento. Era uma condição que garantia
+    // que o enriquecimento nunca alcançaria quem precisava dele.
+    .order('ocorrido_em', { ascending: false })
     .limit(limite)
   if (error) throw error
 
   let nomeados = 0
   for (const linha of data ?? []) {
-    const chave = String(linha.chave)
-    // Chave que não é id numérico de pagamento não tem onde ser consultada.
-    if (!/^\d{6,}$/.test(chave)) continue
+    const id = String(linha.documento ?? '')
+    // Id que não é numérico não é pagamento consultável (saldo inicial,
+    // ajuste manual). Pular é o certo; tentar geraria 404 a cada rodada.
+    if (!/^\d{6,}$/.test(id)) continue
     try {
-      const pagamento = await chamar(`/v1/payments/${chave}`)
+      const pagamento = await chamar(`/v1/payments/${id}`)
       const nome = nomeDaContraparte(pagamento)
       if (!nome) continue
       const { error: erroGravar } = await sb
         .from('extrato_linhas')
         .update({ contraparte: nome })
         .eq('origem', 'mercadopago')
-        .eq('chave', chave)
+        .eq('chave', String(linha.chave))
       if (erroGravar) throw erroGravar
       nomeados++
     } catch {
