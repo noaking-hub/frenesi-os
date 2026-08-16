@@ -122,6 +122,58 @@ export async function POST(req: Request) {
     relatorio.yampi = { pulado: 'credenciais da Yampi não estão definidas' }
   }
 
+  // A Pagaleve entra AQUI, e o lugar é a parte que importa.
+  //
+  // Ela nasceu no fim da rotina, depois do Mercado Pago, e ali nunca rodava.
+  // Medido: a corrente é cortada por tempo antes de chegar lá — a espera pelo
+  // relatório do Mercado Pago sozinha pode consumir 150 segundos, e o que vem
+  // atrás dela é etapa que só executa em rodada de sorte. O sintoma era o
+  // pior possível para um financeiro: nenhum erro, nenhum aviso, e a Pagaleve
+  // simplesmente parada no tempo enquanto a tela dizia estar em dia.
+  //
+  // Aqui ela é barata e determinística: autentica, lê o mês corrente, casa
+  // pelo checkout que a Yampi acabou de trazer, agenda as parcelas e concilia.
+  // Depende só dos pedidos, que vieram na etapa anterior.
+  //
+  // Vir antes da conciliação pelo extrato é seguro: aquela só preenche linha
+  // com `recebido` nulo, e toda venda da Pagaleve sai daqui com `recebido`
+  // escrito — nem que seja zero, quando ainda não houve crédito.
+  if (pagaleveConfigurada()) {
+    try {
+      const p = await importarPagaleve({ gravar: true, janelaDePedidosDias: JANELA_PAGALEVE_DIAS })
+      relatorio.pagaleve = {
+        vendasLidas: (p.transacoes as { lidas?: number }).lidas ?? 0,
+        casadas: (p.transacoes as { casadas?: number }).casadas ?? 0,
+        porIdentificador: (p.transacoes as { porIdentificador?: number }).porIdentificador ?? 0,
+        porValorEData: (p.transacoes as { porValorEData?: number }).porValorEData ?? 0,
+        semPedido: (p.transacoes as { orfas?: number }).orfas ?? 0,
+        repassesGravados: p.gravados,
+        parcelasGravadas: p.parcelasGravadas,
+        datasInformadasPreservadas: p.parcelasProtegidas,
+        parcelasVinculadas: p.parcelasVinculadas,
+        vendas: p.conciliadas,
+        recebido: p.recebido ?? 0,
+      }
+    } catch (e) {
+      relatorio.pagaleve = { erro: mensagemDe(e) }
+      // A API caiu, mas as parcelas que já estão no banco continuam vencendo.
+      // Conciliar o que se tem é melhor que deixar a fila envelhecer por causa
+      // de um erro de rede em terceiro.
+      try {
+        const { data } = await supabaseServer().rpc('conciliar_pagaleve')
+        const linha = Array.isArray(data) ? data[0] : data
+        relatorio.pagaleveConciliacaoDeReserva = {
+          vendas: linha?.vendas ?? 0,
+          recebido: linha?.recebido ?? 0,
+        }
+      } catch (e2) {
+        relatorio.pagaleveConciliacaoDeReserva = { erro: mensagemDe(e2) }
+      }
+    }
+  } else {
+    relatorio.pagaleve = { pulado: 'PAGALEVE_CHAVE/PAGALEVE_SENHA não estão definidas' }
+  }
+
   // Entrega local logo depois dos pedidos, e ANTES das etapas lentas: a
   // Netlify corta a função por tempo, e os carimbos mostram a corrente
   // morrendo no meio a cada duas ou três rodadas. A operação marca "entregue"
@@ -286,57 +338,6 @@ export async function POST(req: Request) {
     }
   } catch (e) {
     relatorio.semExtratoDispensadas = { erro: mensagemDe(e) }
-  }
-
-  // A Pagaleve entra na conciliação como os outros intermediadores — e entra
-  // INTEIRA: busca as vendas novas na API, monta o cronograma de parcelas,
-  // liga ao pedido e só então concilia.
-  //
-  // Antes daqui só rodava a conciliação, sobre uma tabela que o operador
-  // enchia à mão com o relatório exportado do painel. Era automação pela
-  // metade, que é a pior espécie: a tela mostrava a Pagaleve em dia enquanto
-  // toda venda posterior ao último relatório estava fora da conta.
-  //
-  // Ela é o terceiro caminho de dinheiro da operação e o único que liquida em
-  // parcelas: uma venda vira caixa ao longo de até dois meses. `recebido` é a
-  // soma das parcelas EFETIVAMENTE creditadas, nunca o valor da venda —
-  // fingir que entrou tudo no dia da compra inventaria dinheiro que ainda não
-  // chegou, e é justamente esse otimismo que fazia a conciliação acusar
-  // pendência onde havia venda saudável amortizando no prazo.
-  if (pagaleveConfigurada()) {
-    try {
-      const p = await importarPagaleve({ gravar: true, janelaDePedidosDias: JANELA_PAGALEVE_DIAS })
-      relatorio.pagaleve = {
-        vendasLidas: (p.transacoes as { lidas?: number }).lidas ?? 0,
-        casadas: (p.transacoes as { casadas?: number }).casadas ?? 0,
-        porIdentificador: (p.transacoes as { porIdentificador?: number }).porIdentificador ?? 0,
-        porValorEData: (p.transacoes as { porValorEData?: number }).porValorEData ?? 0,
-        semPedido: (p.transacoes as { orfas?: number }).orfas ?? 0,
-        repassesGravados: p.gravados,
-        parcelasGravadas: p.parcelasGravadas,
-        datasInformadasPreservadas: p.parcelasProtegidas,
-        parcelasVinculadas: p.parcelasVinculadas,
-        vendas: p.conciliadas,
-        recebido: p.recebido ?? 0,
-      }
-    } catch (e) {
-      relatorio.pagaleve = { erro: mensagemDe(e) }
-      // A API caiu, mas as parcelas que já estão no banco continuam vencendo.
-      // Conciliar o que se tem é melhor que deixar a fila envelhecer por causa
-      // de um erro de rede em terceiro.
-      try {
-        const { data } = await supabaseServer().rpc('conciliar_pagaleve')
-        const linha = Array.isArray(data) ? data[0] : data
-        relatorio.pagaleveConciliacaoDeReserva = {
-          vendas: linha?.vendas ?? 0,
-          recebido: linha?.recebido ?? 0,
-        }
-      } catch (e2) {
-        relatorio.pagaleveConciliacaoDeReserva = { erro: mensagemDe(e2) }
-      }
-    }
-  } else {
-    relatorio.pagaleve = { pulado: 'PAGALEVE_CHAVE/PAGALEVE_SENHA não estão definidas' }
   }
 
   // Estorno PARCIAL não derruba a venda inteira.
