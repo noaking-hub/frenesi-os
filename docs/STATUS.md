@@ -108,11 +108,13 @@ Yampi e Mercado Pago).
 
 ## O que saiu do sistema (e por quê)
 
-Atendimento, Meu Assessor IA (5 telas), Kits e combos, Campanhas, E-mails e
-fluxos, Giftback e cashback, Rodízio de ofertas, Cupons de avaliação,
-Usuários e permissões, Dados da empresa, Notificações, Logs e auditoria —
-maquetes com números inventados. E o **DRE**, por decisão do operador: a
-plataforma não faz DRE.
+Atendimento, Kits e combos, Campanhas, E-mails e fluxos, Rodízio de ofertas,
+Cupons de avaliação, Usuários e permissões, Dados da empresa, Notificações —
+maquetes com números inventados. E o **DRE da plataforma**, por decisão do
+operador: a plataforma não faz DRE (o DRE gerencial do Financeiro é outro, e
+esse existe).
+
+Meu Assessor, Giftback e cashback voltaram: hoje leem dados reais.
 
 Eram especificações de produto com números inventados — úteis como maquete,
 perigosas como tela de decisão. O código de domínio (puro e testado) ficou;
@@ -122,7 +124,7 @@ se um módulo desses ganhar motor de verdade, a tela volta lendo dados reais.
 
 | Quando | O quê |
 |---|---|
-| Rotina de hora em hora (`/api/financeiro/sincronizar`, agendada em `netlify/functions/`) | Pedidos da Yampi → estoque aplicado na Shopify → extrato do Mercado Pago (espera o relatório ficar pronto) → varredura de ocorrências |
+| Rotina de hora em hora (`/api/financeiro/sincronizar`, agendada em `netlify/functions/`) | Pedidos da Yampi → **Pagaleve** (busca vendas novas, agenda parcelas, casa pelo `checkout_id` da transação e concilia) → estoque aplicado na Shopify → extrato do Mercado Pago (espera o relatório ficar pronto) → varredura de ocorrências |
 | Ao abrir Pedidos | Sincroniza se a última leitura passou de 30 min |
 | Ao abrir Extrato | Atualiza se passou de 10 min |
 | Ao abrir Sincronia Shopify | Reimporta o catálogo se passou de 12 h |
