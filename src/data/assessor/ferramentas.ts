@@ -173,6 +173,18 @@ export const FERRAMENTAS: Ferramenta[] = [
         metadados: {
           alerta:
             'Faturado e recebido não fecham dia a dia por natureza: venda de segunda pode cair na quarta.',
+          // Este campo já produziu uma resposta falsa: o modelo viu recebido=0
+          // num dia com vendas, concluiu "não entrou dinheiro" e explicou o
+          // zero com prazos de gateway que ninguém tinha lido. O contrato passa
+          // a dizer o que o número mede e o que ele NÃO autoriza concluir.
+          sobreORecebido:
+            'O campo "recebido" mede as BAIXAS DE CAIXA lançadas naquela data. ' +
+            'Zero aqui NÃO significa que a venda não foi paga nem que o gateway ' +
+            'não creditou — significa apenas que não houve baixa registrada nesse ' +
+            'dia. Para saber quanto cada venda creditou, use vendas_do_periodo, ' +
+            'que traz o líquido e a tarifa por pedido. E NÃO explique um zero ' +
+            'daqui com prazo de repasse, calendário ou dia útil: esse prazo não ' +
+            'está em nenhuma ferramenta, e afirmá-lo é inventar.',
         },
       })
     },

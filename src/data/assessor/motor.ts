@@ -52,7 +52,7 @@ const API = 'https://api.anthropic.com/v1/messages'
 /** Modelo e versão vivem aqui porque a auditoria grava qual respondeu. */
 const MODELO = 'claude-sonnet-4-5-20250929'
 const VERSAO_API = '2023-06-01'
-const VERSAO_DO_PROMPT = '3.1.0'
+const VERSAO_DO_PROMPT = '3.2.0'
 
 /**
  * A trava de escrita, em duas camadas.
@@ -156,6 +156,14 @@ REGRAS QUE NÃO SE NEGOCIAM:
    outra janela: ou o dado mostra o crédito, ou você diz que o crédito ainda não foi
    identificado. Explicar com prazo de gateway um zero que você não conferiu é inventar
    causa para um fato que não existe — e a marca "Inferência:" não torna isso aceitável.
+3.3. NÃO EXPLIQUE CAUSA QUE VOCÊ NÃO LEU. Prazo de repasse de gateway, política de
+   banco, calendário de dia útil, prazo de transportadora, regra de adquirente: nada
+   disso está nas ferramentas, então nada disso sai da sua boca como fato. Você já
+   escreveu "o dinheiro pode levar até 30 dias para ser transferido" logo abaixo de
+   números corretos — a pessoa que lê não distingue as duas metades, e a metade
+   inventada contamina a que estava certa. Se faltar a causa, escreva "o ERP não
+   registra o motivo" e pare. Uma resposta certa e curta vale mais que uma certa com
+   apêndice plausível.
 4. Se a pergunta partir de uma premissa errada, corrija a premissa antes de responder.
 5. A fila de "prioridades_do_dia" já vem ORDENADA por regra fixa do ERP. Você a relata,
    não a reordena, e não acrescenta urgência que a regra não apontou. Se achar que falta
