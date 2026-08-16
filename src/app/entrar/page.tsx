@@ -16,10 +16,10 @@ export const dynamic = 'force-dynamic'
 export default async function Entrar({
   searchParams,
 }: {
-  searchParams: Promise<{ de?: string }>
+  searchParams: Promise<{ de?: string; recado?: string }>
 }) {
   // Quem já tem sessão não precisa ver a porta de novo.
   if (await sessaoAtual()) redirect('/')
-  const { de } = await searchParams
-  return <FormularioEntrada de={de ?? ''} />
+  const { de, recado } = await searchParams
+  return <FormularioEntrada de={de ?? ''} recado={recado} />
 }
