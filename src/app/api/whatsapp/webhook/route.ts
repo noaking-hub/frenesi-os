@@ -85,7 +85,10 @@ async function atender(m: MensagemRecebida) {
     texto,
   })
   if (!nova) {
-    if (respostaAnterior) await responderNoWhatsapp(m.from, respostaAnterior)
+    if (respostaAnterior) {
+      const reenvio = await responderNoWhatsapp(m.from, respostaAnterior)
+      if (!reenvio.ok) console.error('[whatsapp] reentrega não saiu:', reenvio.erro)
+    }
     return
   }
 
@@ -94,8 +97,13 @@ async function atender(m: MensagemRecebida) {
   if (!autorizado) {
     const recusa =
       'Não reconheço este número. O acesso ao Gerente da FRENESI é liberado individualmente.'
-    await responderNoWhatsapp(m.from, recusa)
-    await marcarRespondida(m.id, recusa, randomUUID(), 'numero nao autorizado')
+    const envio = await responderNoWhatsapp(m.from, recusa)
+    await marcarRespondida(
+      m.id,
+      recusa,
+      randomUUID(),
+      envio.ok ? 'numero nao autorizado' : `numero nao autorizado; ${envio.erro}`,
+    )
     return
   }
 
@@ -107,8 +115,8 @@ async function atender(m: MensagemRecebida) {
 
     if (comando) {
       const resposta = await executarComando(comando, ator, traceId)
-      await responderNoWhatsapp(m.from, resposta)
-      await marcarRespondida(m.id, resposta, traceId)
+      const envio = await responderNoWhatsapp(m.from, resposta)
+      await marcarRespondida(m.id, resposta, traceId, envio.erro)
       return
     }
 
@@ -139,15 +147,18 @@ async function atender(m: MensagemRecebida) {
             .join('\n')
         : '')
 
-    await responderNoWhatsapp(m.from, resposta)
-    await marcarRespondida(m.id, resposta, traceId)
+    // O envio é conferido: sem isto, uma entrega recusada pela Meta ficaria
+    // gravada como respondida e o sintoma visível seria um assistente mudo,
+    // com o banco jurando que tinha respondido.
+    const envio = await responderNoWhatsapp(m.from, resposta)
+    await marcarRespondida(m.id, resposta, traceId, envio.erro)
   } catch (e) {
     const erro = e instanceof Error ? e.message : String(e)
     // Falha vira mensagem clara, nunca silêncio. Do outro lado tem alguém
     // esperando, e "não respondeu" é indistinguível de "está pensando".
     const resposta = `Não consegui responder agora: ${erro}`
-    await responderNoWhatsapp(m.from, resposta)
-    await marcarRespondida(m.id, resposta, traceId, erro)
+    const envio = await responderNoWhatsapp(m.from, resposta)
+    await marcarRespondida(m.id, resposta, traceId, envio.ok ? erro : `${erro}; ${envio.erro}`)
   }
 }
 
