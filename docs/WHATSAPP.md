@@ -13,12 +13,37 @@ Tempo real: **40 a 60 minutos**, a maior parte esperando a Meta processar.
 
 ## O que você vai precisar em mãos
 
-- Um **número de celular que NÃO esteja em uso no WhatsApp** — nem no comum,
-  nem no Business. Este é o ponto que mais trava gente no meio do caminho: se
-  você usar o número da loja, ele **sai** do aplicativo e passa a existir só via
-  API. Um chip pré-pago novo resolve, ou um número virtual.
+- Um **número que NÃO esteja registrado no WhatsApp** — nem no comum, nem no
+  Business. Leia a seção abaixo antes de escolher: ela desfaz a confusão que
+  mais trava gente aqui.
 - Acesso ao painel da Netlify (para as variáveis).
 - CNPJ da FRENESI (para verificar o negócio, se a Meta pedir).
+
+### O aplicativo WhatsApp Business não entra nessa história
+
+A Cloud API **não usa aplicativo nenhum**. O número registrado nela passa a
+viver nos servidores da Meta e é acessado só por API — ele não aparece em
+celular, não tem tela, não tem conversa para abrir. É o contrário do que o nome
+sugere: você não instala o WhatsApp Business para usar a API; registrar o número
+na API é justamente o que **tira** o número de qualquer aplicativo.
+
+Então **não é preciso um celular dedicado**. É preciso apenas que o número
+receba, **uma única vez**, um SMS ou uma **ligação de voz** com o código de
+verificação. O chip pode ir em qualquer aparelho por dois minutos — inclusive
+num celular que já tenha WhatsApp de outro número, porque o código chega por
+SMS ou ligação, não pelo WhatsApp. Feito isso, o chip pode ficar guardado.
+
+Duas consequências práticas:
+
+- **Não use o número do atendimento.** Registrá-lo na API o remove do aplicativo
+  e o histórico de conversas se perde. Ele só volta ao app se for
+  *desregistrado* da API depois.
+- **Mantenha a linha ativa.** O número é a identidade da conta do WhatsApp
+  Business; perder o chip é perder o número.
+
+Cuidado com um limite fácil de queimar: a Meta aceita **10 tentativas de
+registro por número a cada 72 horas**. Passou disso, o número fica travado por
+três dias com o erro `133016`. Confira o número antes de pedir o código.
 
 ---
 
