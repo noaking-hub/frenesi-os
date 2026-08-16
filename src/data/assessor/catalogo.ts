@@ -3,6 +3,7 @@ import 'server-only'
 import { FERRAMENTAS as LEITURA, type Ferramenta } from './ferramentas'
 import { FERRAMENTAS_FINANCEIRAS } from './ferramentas-escrita'
 import { FERRAMENTAS_OPERACIONAIS } from './ferramentas-operacao'
+import { FERRAMENTAS_PEDIDOS } from './ferramentas-pedidos'
 
 /**
  * O catálogo completo, montado num lugar só.
@@ -19,6 +20,7 @@ import { FERRAMENTAS_OPERACIONAIS } from './ferramentas-operacao'
  */
 export const FERRAMENTAS: Ferramenta[] = [
   ...LEITURA,
+  ...FERRAMENTAS_PEDIDOS,
   ...FERRAMENTAS_FINANCEIRAS,
   ...FERRAMENTAS_OPERACIONAIS,
 ]
