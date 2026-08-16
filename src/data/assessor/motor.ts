@@ -23,6 +23,7 @@ import {
 import { catalogoParaModelo, FERRAMENTA_POR_NOME, FERRAMENTAS, type Ferramenta } from './catalogo'
 import type { ContextoDaExecucao } from './ferramentas'
 import { lerConfiguracaoDoGerente } from './politica'
+import { lerMemorias, memoriaParaPrompt } from './memoria'
 
 /**
  * O MOTOR do Gerente: pergunta → plano → ferramentas → resposta → auditoria.
@@ -118,7 +119,7 @@ export function atorDoErp(usuarioId: string | null, perfil = 'operador'): Ator {
  * importam: sem elas o assistente inventa número, e um número inventado num ERP
  * financeiro é pior do que nenhuma resposta.
  */
-function instrucoes(hoje: string, escrita: boolean): string {
+function instrucoes(hoje: string, escrita: boolean, memoria: string): string {
   return `Você é o Meu Assessor, o gerente de IA do ERP da FRENESI Perfumes — uma operação
 brasileira que vende decants (frações de perfumes importados) pela internet.
 
@@ -183,7 +184,7 @@ CONTEXTO DA OPERAÇÃO:
   não bate com nenhuma venda do dia, é quase sempre isto.
 - Estoque só considera perfume base com compra de frasco/lote registrada. Base sem
   compra não é "zerada": está fora do controle de estoque, e dizer que ela está crítica
-  seria alarme falso.`
+  seria alarme falso.${memoria}`
 }
 
 interface BlocoTexto {
@@ -315,6 +316,12 @@ async function perguntar(pedido: PedidoAoGerente): Promise<RespostaDoAssessor> {
   // vira tentativa, não gasta rodada e não vira insistência.
   const disponiveis = catalogoVisivel(FERRAMENTAS, politica)
 
+  // A memória entra no prompt, não nas ferramentas: preferência é contexto de
+  // COMO responder, e obrigar uma chamada de ferramenta para lê-la gastaria uma
+  // rodada em toda pergunta. Falhar aqui não derruba a resposta — o Gerente sem
+  // memória continua correto, só menos conveniente.
+  const memoria = memoriaParaPrompt(await lerMemorias(pedido.ator.usuarioId).catch(() => []))
+
   // O histórico entra truncado: conversa longa custa caro a cada rodada, e o
   // que importa para desambiguar "esses pedidos" são as últimas trocas.
   const mensagens: Mensagem[] = (pedido.historico ?? []).slice(-8).map((m) => ({
@@ -347,7 +354,7 @@ async function perguntar(pedido: PedidoAoGerente): Promise<RespostaDoAssessor> {
       {
         model: MODELO,
         max_tokens: 2000,
-        system: instrucoes(hoje, politica.escritaLiberada),
+        system: instrucoes(hoje, politica.escritaLiberada, memoria),
         tools: catalogoParaModelo(disponiveis),
         messages: mensagens,
       },

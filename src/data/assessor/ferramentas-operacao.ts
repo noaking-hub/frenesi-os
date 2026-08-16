@@ -6,6 +6,7 @@ import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { brl, simularCompraDeBase, simularImpactoNoCaixa, type RetornoDaFerramenta } from '@/domain'
 
 import { criarAcaoPendente, registrarExecutor, type PreviaDaAcao } from './acoes'
+import { apagarMemoria, gravarMemoria, lerMemorias } from './memoria'
 import type { Ferramenta } from './ferramentas'
 
 /**
@@ -353,9 +354,102 @@ const anotar: Ferramenta = {
   },
 }
 
+/**
+ * Memória — §9.
+ *
+ * Classe A e execução direta: guardar uma preferência é reversível, barato e
+ * sem efeito no dinheiro. Exigir prévia para "lembre que eu prefiro ver em 30
+ * dias" transformaria uma conveniência em burocracia.
+ *
+ * O que a ferramenta NÃO aceita é dado do negócio. A instrução é explícita na
+ * descrição porque é o erro que o modelo tenderia a cometer sozinho: memorizar
+ * "o caixa é R$ 15 mil" parece útil e é a pior coisa possível — vira número
+ * velho apresentado como atual na semana seguinte.
+ */
+const lembrar: Ferramenta = {
+  modo: 'WRITE',
+  risco: 'A',
+  permissoes: [],
+  timeoutMs: 10_000,
+  idempotente: true,
+  nome: 'lembrar',
+  versao: '1.0.0',
+  descricao:
+    'Guarda uma PREFERÊNCIA do usuário ("prefiro ver sempre 30 dias") ou uma DECISÃO que ele já ' +
+    'tomou ("não quero alerta de cobertura para amostras"). NUNCA guarde dado da operação — ' +
+    'saldo, estoque, preço e pedido são consultados na hora, e memorizá-los produziria número ' +
+    'velho apresentado como atual.',
+  parametros: {
+    type: 'object',
+    properties: {
+      tipo: { type: 'string', enum: ['preferencia', 'decisao'] },
+      chave: {
+        type: 'string',
+        description: 'Identificador curto e estável do assunto, para substituir em vez de acumular.',
+      },
+      valor: { type: 'string', description: 'A frase a lembrar, na primeira pessoa do usuário.' },
+    },
+    required: ['tipo', 'chave', 'valor'],
+  },
+  executar: async (args, ctx) => {
+    const valor = String(args.valor ?? '').trim()
+    if (valor.length < 4) return { resumo: 'Memória vazia demais para guardar.' }
+    await gravarMemoria({
+      usuarioId: ctx.ator.usuarioId,
+      tipo: String(args.tipo) as 'preferencia' | 'decisao',
+      chave: String(args.chave),
+      valor,
+      traceId: ctx.traceId,
+    })
+    return {
+      resumo: `Guardado: "${valor}". Some em Meu Assessor → Memória quando quiser apagar.`,
+      metadados: { reversivel: true },
+    } satisfies RetornoDaFerramenta
+  },
+}
+
+const listarMemoria: Ferramenta = {
+  modo: 'READ',
+  risco: 'A',
+  permissoes: [],
+  timeoutMs: 10_000,
+  idempotente: true,
+  nome: 'listar_memoria',
+  versao: '1.0.0',
+  descricao: 'O que você já guardou sobre este usuário: preferências e decisões aprovadas.',
+  parametros: { type: 'object', properties: {} },
+  executar: async (_args, ctx) => {
+    const m = await lerMemorias(ctx.ator.usuarioId)
+    return { resumo: `${m.length} memória(s) guardadas.`, itens: m } satisfies RetornoDaFerramenta
+  },
+}
+
+const esquecer: Ferramenta = {
+  modo: 'WRITE',
+  risco: 'A',
+  permissoes: [],
+  timeoutMs: 10_000,
+  idempotente: true,
+  nome: 'esquecer',
+  versao: '1.0.0',
+  descricao: 'Apaga uma memória pelo id. Apaga de verdade, não esconde.',
+  parametros: {
+    type: 'object',
+    properties: { id: { type: 'string', description: 'Id devolvido por listar_memoria.' } },
+    required: ['id'],
+  },
+  executar: async (args, ctx) => {
+    await apagarMemoria(String(args.id), ctx.ator.usuarioId)
+    return { resumo: 'Memória apagada.' } satisfies RetornoDaFerramenta
+  },
+}
+
 export const FERRAMENTAS_OPERACIONAIS: Ferramenta[] = [
   recomendarReposicao,
   listarSolicitacoes,
   criarSolicitacao,
   anotar,
+  lembrar,
+  listarMemoria,
+  esquecer,
 ]
