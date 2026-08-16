@@ -187,6 +187,14 @@ export const NAV: GrupoNav[] = [
         icone: 'recibo',
       },
       {
+        id: 'repasses',
+        label: 'Destino dos repasses',
+        href: '/financeiro/repasses',
+        pronta: true,
+        subtitulo: 'Para onde foi cada saque do gateway: conta própria ou despesa',
+        icone: 'transferir',
+      },
+      {
         id: 'fluxo',
         label: 'Fluxo de Caixa',
         href: '/financeiro/fluxo-de-caixa',

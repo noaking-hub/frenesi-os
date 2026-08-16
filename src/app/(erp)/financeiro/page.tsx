@@ -30,6 +30,7 @@ import { TileMarca, iconeDaCategoria } from '@/components/erp/Marcas'
 import { BarrasEixo, CORES_SERIE, Legenda, RoscaLegenda } from '@/components/erp/Visualizacoes'
 import { carregarVisaoFinanceira } from '@/data/financeiro'
 import { brl, competenciaPorExtenso, diaCurtoPt, plural } from '@/domain'
+
 import type { AlertaFinanceiro, LancamentoGerencial } from '@/domain'
 
 /**
@@ -152,12 +153,15 @@ export default async function DashboardFinanceiro({
         <Indicador
           icone="saida"
           tom="erro"
-          rotulo="Contas a pagar"
-          valor={brl(v.aPagar.valor)}
+          rotulo={`A pagar até ${diaCurtoPt(v.aPagarJanela.ate)}`}
+          valor={brl(v.aPagarJanela.valor)}
+          // O total em aberto vira nota, não manchete. Como manchete ele somava
+          // parcelas de financiamento até 2028 e anunciava R$ 19.317,80 de
+          // dívida ao lado do saldo de 30 dias — nada daquilo vencia no mês.
           nota={
             v.vencidos.qtd
-              ? `${plural(v.vencidos.qtd, 'compromisso vencido', 'compromissos vencidos')} · ${brl(v.vencidos.valor)}`
-              : plural(v.aPagar.qtd, 'compromisso em aberto', 'compromissos em aberto')
+              ? `${plural(v.vencidos.qtd, 'vencido', 'vencidos')} · ${brl(v.vencidos.valor)} · total em aberto ${brl(v.aPagar.valor)}`
+              : `${plural(v.aPagarJanela.qtd, 'compromisso na janela', 'compromissos na janela')} · total em aberto ${brl(v.aPagar.valor)}`
           }
           tomNota={v.vencidos.qtd ? 'erro' : 'neutro'}
           href="/financeiro/lancamentos?tipo=saida"

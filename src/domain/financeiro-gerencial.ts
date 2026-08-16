@@ -158,6 +158,54 @@ export interface LancamentoGerencial {
   observacao: string | null
   transferenciaId: string | null
   canceladoEm: string | null
+  /**
+   * O que a categoria deixa entrar em cada regime.
+   *
+   * Vêm da categoria, não do lançamento, e viajam junto porque é o que separa
+   * dinheiro de contabilidade: uma transferência entre contas próprias move
+   * caixa nas duas pontas e não é despesa em lugar nenhum. Sem estes dois
+   * campos aqui, cada tela tinha de reabrir `categorias_financeiras` para
+   * saber disso — e, quando não reabria, "Transferências" aparecia como a
+   * maior despesa do mês.
+   *
+   * Sem categoria, o padrão é `true` nos dois: um movimento não classificado
+   * é dinheiro de verdade que ainda não foi explicado, não dinheiro a ignorar.
+   */
+  impactaDre: boolean
+  impactaCaixa: boolean
+}
+
+/**
+ * É movimentação interna? (dinheiro trocando de bolso, não saindo dele)
+ *
+ * Duas marcas, porque as duas aparecem sozinhas na base: `transferenciaId`
+ * existe desde a importação do extrato, e a categoria `impactaCaixa = false`
+ * cobre o que foi classificado à mão sem par. Qualquer uma das duas basta
+ * para o lançamento não ser despesa nem receita.
+ */
+export function movimentacaoInterna(l: LancamentoGerencial): boolean {
+  return l.transferenciaId !== null || !l.impactaCaixa
+}
+
+/**
+ * A janela de "contas a pagar": o mesmo dia do mês seguinte.
+ *
+ * Trinta dias corridos parecem equivalentes e não são. As parcelas da
+ * operação caem todas no dia 16; em 16/08 uma janela de trinta dias termina
+ * em 15/09 e deixa a parcela de 16/09 de fora por um dia — o card anunciaria
+ * "R$ 0,00 a pagar" na véspera de uma parcela. Um mês à frente é o horizonte
+ * de quem paga mensalidade, e nunca perde a parcela seguinte.
+ *
+ * O `Math.min` com o último dia do mês de destino cuida do transbordo que o
+ * `setMonth(+1)` do JavaScript produz: 31/01 viraria 03/03; aqui vira 28/02,
+ * que é quando o boleto de fim de mês realmente vence.
+ */
+export function mesmoDiaNoProximoMes(dia: string): string {
+  const [ano, mes, d] = dia.split('-').map(Number)
+  const alvoAno = mes === 12 ? ano + 1 : ano
+  const alvoMes = mes === 12 ? 1 : mes + 1
+  const ultimoDia = new Date(Date.UTC(alvoAno, alvoMes, 0)).getUTCDate()
+  return `${alvoAno}-${String(alvoMes).padStart(2, '0')}-${String(Math.min(d, ultimoDia)).padStart(2, '0')}`
 }
 
 /** O que ainda falta movimentar. Nunca negativo. */
@@ -430,6 +478,8 @@ export function alertasFinanceiros(dados: {
   contasDesatualizadas: { nome: string; horas: number }[]
   chargebacksSemJustificativa: number
   competenciaAberta: string | null
+  /** Saques do gateway sem destino declarado — ver `carregarFilaDeDestino`. */
+  repassesSemDestino?: { quantidade: number; valor: number }
 }): AlertaFinanceiro[] {
   const alertas: AlertaFinanceiro[] = []
 
@@ -462,6 +512,21 @@ export function alertasFinanceiros(dados: {
       titulo: `${dados.conciliacaoPendente} ${dados.conciliacaoPendente === 1 ? 'venda exige' : 'vendas exigem'} decisão`,
       detalhe: 'Divergência de taxa, venda sem crédito ou estorno',
       href: '/financeiro/conciliacao',
+    })
+  }
+
+  // Antes de "sem categoria" porque é pior: o movimento sem categoria pelo
+  // menos aparece como despesa em algum lugar. O repasse sem destino não
+  // aparece em lugar nenhum — some da DRE e é neutro no caixa.
+  if (dados.repassesSemDestino && dados.repassesSemDestino.quantidade > 0) {
+    const { quantidade, valor } = dados.repassesSemDestino
+    alertas.push({
+      id: 'repasse-sem-destino',
+      severidade: 'atencao',
+      titulo: `${quantidade} ${quantidade === 1 ? 'repasse sem destino' : 'repasses sem destino'}`,
+      detalhe: `${brlSimples(valor)} saíram do gateway sem dizer para onde`,
+      href: '/financeiro/repasses',
+      valor,
     })
   }
 

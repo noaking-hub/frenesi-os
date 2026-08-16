@@ -6,7 +6,9 @@ import {
   coberturaDeCaixa,
   competenciaAnterior,
   diaDaOperacao,
+  mesmoDiaNoProximoMes,
   montarDreGerencial,
+  movimentacaoInterna,
   projetarCaixa,
   situacaoDe,
   saldoAberto,
@@ -144,7 +146,11 @@ interface LinhaLancamento {
   observacao: string | null
   transferencia_id: string | null
   cancelado_em: string | null
-  categorias_financeiras: { natureza_gerencial: string } | null
+  categorias_financeiras: {
+    natureza_gerencial: string
+    impacta_dre: boolean
+    impacta_caixa: boolean
+  } | null
   contas_bancarias: { nome: string } | null
 }
 
@@ -162,7 +168,7 @@ const CAMPOS_LANCAMENTO =
   'competencia, vence_em, baixado_em, valor, recebido, multa, juros, desconto, ' +
   'parcela, parcelas, recorrente, recorrencia, origem, documento, observacao, ' +
   'transferencia_id, cancelado_em, ' +
-  'categorias_financeiras!lancamentos_categoria_id_fkey(natureza_gerencial), ' +
+  'categorias_financeiras!lancamentos_categoria_id_fkey(natureza_gerencial, impacta_dre, impacta_caixa), ' +
   'contas_bancarias!lancamentos_conta_id_fkey(nome)'
 
 export async function lerLancamentos(opcoes?: {
@@ -218,6 +224,11 @@ export async function lerLancamentos(opcoes?: {
       observacao: l.observacao,
       transferenciaId: l.transferencia_id,
       canceladoEm: l.cancelado_em,
+      // Sem categoria, o lançamento conta nos dois regimes: é dinheiro que
+      // andou e ainda não foi explicado. Silenciá-lo por falta de cadastro
+      // seria premiar o que está por classificar.
+      impactaDre: l.categorias_financeiras?.impacta_dre ?? true,
+      impactaCaixa: l.categorias_financeiras?.impacta_caixa ?? true,
     }),
   )
 }
@@ -416,7 +427,12 @@ export async function carregarFluxo(dias = 30): Promise<PainelFluxo> {
   const futuros = linhas.filter((l) => !l.realizado)
   const projecao = projetarCaixa(saldoHoje, futuros)
 
-  const vivos = lancamentos.filter((l) => !l.canceladoEm && saldoAberto(l) > 0)
+  // Mesmo corte do RPC de fluxo: transferência não entra na projeção porque
+  // não muda o consolidado. Deixá-la aqui fazia o painel de compromissos
+  // listar saque de gateway como conta a pagar.
+  const vivos = lancamentos.filter(
+    (l) => !l.canceladoEm && saldoAberto(l) > 0 && !movimentacaoInterna(l),
+  )
   const porCategoria = new Map<string, { valor: number; tipo: 'entrada' | 'saida' }>()
   for (const l of vivos) {
     if (!l.venceEm || l.venceEm > ate) continue
@@ -447,6 +463,107 @@ export async function carregarFluxo(dias = 30): Promise<PainelFluxo> {
     cobertura: coberturaDeCaixa(saldoHoje, saidas30, projecao.dias.length),
     de,
     ate,
+    semBanco: false,
+  }
+}
+
+// ── Fila de destino dos repasses ───────────────────────────────────────────
+
+/**
+ * Saques do gateway que ainda não disseram para onde foram.
+ *
+ * "Transferência para conta bancária" é tudo o que o extrato do Mercado Pago
+ * escreve, tanto quando o dinheiro vai para o Inter quanto quando paga o
+ * anúncio da Meta. O ERP não tem como saber a diferença — e chutar foi o que
+ * produziu o pior número do módulo: R$ 1.205,49 de tráfego pago contados
+ * como movimento interno, invisíveis na DRE e neutros no caixa.
+ *
+ * Enquanto a resposta não vem, a linha fica marcada e sai das duas contas:
+ * não é despesa (pode ser transferência) e não é transferência completa
+ * (falta a perna de entrada). Só a decisão de quem operou resolve, e é isso
+ * que esta fila pede.
+ */
+export interface RepasseSemDestino {
+  id: string
+  descricao: string
+  valor: number
+  quando: string | null
+  contaId: string
+  conta: string
+}
+
+export interface FilaDeDestino {
+  itens: RepasseSemDestino[]
+  total: number
+  contas: ContaFinanceira[]
+  categorias: CategoriaGerencial[]
+  semBanco: boolean
+}
+
+/** Só o par (quantidade, valor) — para o card e o alerta, sem trazer as linhas. */
+async function resumoDaFilaDeDestino(): Promise<{ qtd: number; valor: number }> {
+  const { data } = await supabaseServer()
+    .from('lancamentos')
+    .select('valor')
+    .eq('aguarda_destino', true)
+    .is('cancelado_em', null)
+    .limit(2000)
+  const linhas = (data ?? []) as { valor: number | string }[]
+  return {
+    qtd: linhas.length,
+    valor: Math.round(linhas.reduce((a, l) => a + Number(l.valor), 0) * 100) / 100,
+  }
+}
+
+export async function carregarFilaDeDestino(): Promise<FilaDeDestino> {
+  const vazio: FilaDeDestino = {
+    itens: [],
+    total: 0,
+    contas: [],
+    categorias: [],
+    semBanco: false,
+  }
+  if (!supabaseConfigurado()) return { ...vazio, semBanco: true }
+
+  const [{ data }, contas, categorias] = await Promise.all([
+    supabaseServer()
+      .from('lancamentos')
+      .select('id, descricao, valor, baixado_em, conta_id, contas_bancarias!lancamentos_conta_id_fkey(nome)')
+      .eq('aguarda_destino', true)
+      .is('cancelado_em', null)
+      // O mais recente primeiro: é o que ainda está fresco na memória de quem
+      // fez o saque, e é onde a resposta sai mais barata.
+      .order('baixado_em', { ascending: false, nullsFirst: false })
+      .limit(500),
+    lerContas(),
+    lerCategorias(),
+  ])
+
+  const itens = ((data ?? []) as unknown as {
+    id: string
+    descricao: string
+    valor: number | string
+    baixado_em: string | null
+    conta_id: string | null
+    contas_bancarias: { nome: string } | null
+  }[]).map(
+    (l): RepasseSemDestino => ({
+      id: l.id,
+      descricao: l.descricao,
+      valor: Number(l.valor),
+      quando: l.baixado_em,
+      contaId: l.conta_id ?? '',
+      conta: l.contas_bancarias?.nome ?? l.conta_id ?? '—',
+    }),
+  )
+
+  return {
+    itens,
+    total: Math.round(itens.reduce((a, i) => a + i.valor, 0) * 100) / 100,
+    contas,
+    // Transferência não é despesa: oferecê-la na lista de categorias
+    // reintroduziria pela mão o chute que a fila existe para eliminar.
+    categorias: categorias.filter((c) => c.ativa && c.impactaCaixa && c.id !== 'transferencias'),
     semBanco: false,
   }
 }
@@ -865,9 +982,13 @@ export interface VisaoFinanceira {
   saldo7: number
   saldo30: number
   aReceber: { valor: number; qtd: number }
+  /** Tudo em aberto, inclusive parcelas de 2028 — o número do rodapé. */
   aPagar: { valor: number; qtd: number }
+  /** O que vence até `aPagarAte` — o número do card. */
+  aPagarJanela: { valor: number; qtd: number; ate: string }
   vencidos: { valor: number; qtd: number }
   pendenciasConciliacao: { qtd: number; valor: number }
+  repassesSemDestino: { qtd: number; valor: number }
   resultadoMes: number
   receitaLiquidaMes: number
   margemMes: number
@@ -891,8 +1012,10 @@ export async function carregarVisaoFinanceira(): Promise<VisaoFinanceira> {
     saldo30: 0,
     aReceber: { valor: 0, qtd: 0 },
     aPagar: { valor: 0, qtd: 0 },
+    aPagarJanela: { valor: 0, qtd: 0, ate: mesmoDiaNoProximoMes(HOJE()) },
     vencidos: { valor: 0, qtd: 0 },
     pendenciasConciliacao: { qtd: 0, valor: 0 },
+    repassesSemDestino: { qtd: 0, valor: 0 },
     resultadoMes: 0,
     receitaLiquidaMes: 0,
     margemMes: 0,
@@ -910,13 +1033,21 @@ export async function carregarVisaoFinanceira(): Promise<VisaoFinanceira> {
   const hoje = HOJE()
   const sb = supabaseServer()
 
-  const [contas, lancamentos, { data: dre }, { data: fluxo }, conciliacao, { count: semCategoria }] =
-    await Promise.all([
+  const [
+    contas,
+    lancamentos,
+    { data: dre },
+    { data: fluxo },
+    conciliacao,
+    semDestino,
+    { count: semCategoria },
+  ] = await Promise.all([
       lerContas(),
       lerLancamentos(),
       sb.rpc('dre_gerencial', { p_competencia: competencia }),
       sb.rpc('fluxo_de_caixa', { p_de: hoje, p_ate: iso(90) }),
       carregarConciliacao(),
+      resumoDaFilaDeDestino(),
       // Linhas do extrato que ainda não viraram caixa. A versão anterior
       // consultava uma coluna `categoria` que não existe nesta tabela: o
       // banco respondia 400, o erro era descartado junto com o resultado e o
@@ -941,10 +1072,30 @@ export async function carregarVisaoFinanceira(): Promise<VisaoFinanceira> {
   )
   const projecao = projetarCaixa(caixaHoje, dias)
 
-  const vivos = lancamentos.filter((l) => !l.canceladoEm && saldoAberto(l) > 0)
+  // Transferência em aberto não é obrigação: ninguém deve nada a si mesmo.
+  const vivos = lancamentos.filter(
+    (l) => !l.canceladoEm && saldoAberto(l) > 0 && !movimentacaoInterna(l),
+  )
   const aReceber = vivos.filter((l) => l.tipo === 'entrada')
   const aPagar = vivos.filter((l) => l.tipo === 'saida')
   const vencidos = vivos.filter((l) => situacaoDe(l, hoje) === 'vencido')
+
+  /**
+   * "Contas a pagar" passa a ser o que vence NA JANELA, com o total ao lado.
+   *
+   * O card mostrava R$ 19.317,80 — a soma de tudo que está em aberto, e
+   * "tudo" incluía parcelas de financiamento até abril de 2028. Ao lado de um
+   * "saldo projetado 30 dias", o número lido como dívida imediata assusta sem
+   * informar: nada daquilo vence este mês.
+   *
+   * A janela é o MESMO DIA DO MÊS SEGUINTE, não `hoje + 30`. As parcelas caem
+   * todas no dia 16; com trinta dias corridos, em 16/08 o horizonte morre em
+   * 15/09 e a parcela de 16/09 fica de fora por um dia — o card diria
+   * "R$ 0,00 a pagar" na véspera de uma parcela. Um mês à frente é como a
+   * operação pensa, e é o que faz a janela nunca perder a parcela seguinte.
+   */
+  const ateJanela = mesmoDiaNoProximoMes(hoje)
+  const naJanela = aPagar.filter((l) => l.venceEm && l.venceEm <= ateJanela)
 
   const somaAberto = (ls: LancamentoGerencial[]) => ls.reduce((a, l) => a + saldoAberto(l), 0)
 
@@ -952,10 +1103,24 @@ export async function carregarVisaoFinanceira(): Promise<VisaoFinanceira> {
   const linha = (nome: string) =>
     Number(((dre ?? []) as LinhaRpc[]).find((l) => l.linha === nome)?.valor ?? 0)
 
+  /**
+   * Composição de saídas: só o que É despesa.
+   *
+   * Transferência entre contas próprias saía aqui como categoria — e era a
+   * maior de todas: R$ 15.381,19 de R$ 20.957,04, 73% do gráfico, num mês em
+   * que a operação não gastou 15 mil com nada. Cada saque do gateway para o
+   * banco entrava como "gasto" e empurrava o gasto de verdade para o rodapé
+   * da rosca.
+   *
+   * O corte é o mesmo do fluxo de caixa (`impacta_caixa`) somado ao regime de
+   * competência (`impacta_dre`), e não uma lista de ids: categoria nova criada
+   * amanhã já nasce classificada certo.
+   */
   const saidasPorCategoria = new Map<string, number>()
   for (const l of lancamentos) {
     if (l.tipo !== 'saida' || l.canceladoEm) continue
     if (l.competencia.slice(0, 7) !== competencia) continue
+    if (movimentacaoInterna(l) || !l.impactaDre) continue
     const chave = l.categoria ?? SEM_CATEGORIA
     saidasPorCategoria.set(chave, (saidasPorCategoria.get(chave) ?? 0) + l.valor)
   }
@@ -975,11 +1140,13 @@ export async function carregarVisaoFinanceira(): Promise<VisaoFinanceira> {
     saldo30: pontoDoDia(29),
     aReceber: { valor: somaAberto(aReceber), qtd: aReceber.length },
     aPagar: { valor: somaAberto(aPagar), qtd: aPagar.length },
+    aPagarJanela: { valor: somaAberto(naJanela), qtd: naJanela.length, ate: ateJanela },
     vencidos: { valor: somaAberto(vencidos), qtd: vencidos.length },
     pendenciasConciliacao: {
       qtd: naFila,
       valor: Math.abs(conciliacao.diferencaTotal),
     },
+    repassesSemDestino: semDestino,
     resultadoMes: linha('= Resultado gerencial'),
     receitaLiquidaMes: linha('= Receita líquida'),
     margemMes: linha('= Margem de contribuição'),
@@ -1015,6 +1182,7 @@ export async function carregarVisaoFinanceira(): Promise<VisaoFinanceira> {
         .filter((c) => c.horas >= 24),
       chargebacksSemJustificativa: conciliacao.totais.chargeback.qtd,
       competenciaAberta: competencia,
+      repassesSemDestino: { quantidade: semDestino.qtd, valor: semDestino.valor },
     }),
     competencia,
     semBanco: false,

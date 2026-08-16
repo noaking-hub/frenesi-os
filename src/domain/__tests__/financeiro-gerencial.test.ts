@@ -11,7 +11,9 @@ import {
   divergenciaDeSaldo,
   ehSaida,
   impactaResultado,
+  mesmoDiaNoProximoMes,
   montarDreGerencial,
+  movimentacaoInterna,
   podeExcluirCategoria,
   projetarCaixa,
   saldoAberto,
@@ -54,6 +56,8 @@ function lancamento(over: Partial<LancamentoGerencial> = {}): LancamentoGerencia
     observacao: null,
     transferenciaId: null,
     canceladoEm: null,
+    impactaDre: true,
+    impactaCaixa: true,
     ...over,
   }
 }
@@ -359,6 +363,62 @@ describe('alertas', () => {
     })
     expect(a[0].id).toBe('caixa-negativo')
     expect(a[0].detalhe).toContain('20/08')
+  })
+
+  it('repasse sem destino vira alerta que abre a fila', () => {
+    const a = alertasFinanceiros({
+      ...semNada,
+      repassesSemDestino: { quantidade: 64, valor: 29909.49 },
+    })
+    expect(a[0].id).toBe('repasse-sem-destino')
+    expect(a[0].href).toBe('/financeiro/repasses')
+  })
+
+  it('fila de destino vazia não gera alerta', () => {
+    const a = alertasFinanceiros({ ...semNada, repassesSemDestino: { quantidade: 0, valor: 0 } })
+    expect(a).toEqual([])
+  })
+})
+
+/**
+ * Os dois cortes que separam dinheiro de contabilidade. Cada caso aqui é um
+ * número errado que o Financeiro já mostrou em produção.
+ */
+describe('movimentação interna', () => {
+  it('transferência com par não é despesa nem receita', () => {
+    expect(movimentacaoInterna(lancamento({ transferenciaId: 'transf-1' }))).toBe(true)
+  })
+
+  it('categoria que não impacta caixa também é interna, mesmo sem par', () => {
+    expect(movimentacaoInterna(lancamento({ transferenciaId: null, impactaCaixa: false }))).toBe(
+      true,
+    )
+  })
+
+  it('lançamento sem categoria continua contando — falta classificar, não ignorar', () => {
+    const l = lancamento({ categoriaId: null, categoria: null, transferenciaId: null })
+    expect(movimentacaoInterna(l)).toBe(false)
+  })
+
+  it('despesa comum não é interna', () => {
+    expect(movimentacaoInterna(lancamento())).toBe(false)
+  })
+})
+
+describe('janela de contas a pagar', () => {
+  it('não perde a parcela do mesmo dia do mês seguinte', () => {
+    // O caso real: parcelas todo dia 16. Com `hoje + 30` a janela morria em
+    // 15/09 e o card dizia "R$ 0,00 a pagar" na véspera da parcela.
+    expect(mesmoDiaNoProximoMes('2026-08-16')).toBe('2026-09-16')
+  })
+
+  it('ancora no último dia quando o mês seguinte é mais curto', () => {
+    expect(mesmoDiaNoProximoMes('2026-01-31')).toBe('2026-02-28')
+    expect(mesmoDiaNoProximoMes('2026-03-31')).toBe('2026-04-30')
+  })
+
+  it('vira o ano em dezembro', () => {
+    expect(mesmoDiaNoProximoMes('2026-12-16')).toBe('2027-01-16')
   })
 })
 

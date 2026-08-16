@@ -933,3 +933,66 @@ export async function informarSaldo(
   revalidarFinanceiro()
   return { ok: true }
 }
+
+// ── Destino dos repasses ───────────────────────────────────────────────────
+
+/**
+ * Diz para onde foi um saque do gateway.
+ *
+ * O extrato do Mercado Pago descreve todo saque como "Transferência para
+ * conta bancária", tanto o que cai no Inter quanto o que paga o anúncio da
+ * Meta. Quem sabe a diferença é quem operou — e enquanto ninguém diz, o
+ * lançamento fica marcado `aguarda_destino` e fora dos dois regimes.
+ *
+ * As duas respostas são exclusivas, e a exclusividade é imposta no banco:
+ * `resolver_destino_do_payout` recusa quando vêm as duas ou nenhuma. Aqui a
+ * checagem é repetida só para dar mensagem antes da ida ao servidor.
+ *
+ * O laço é sequencial de propósito. São no máximo algumas dezenas de linhas,
+ * e cada uma pode falhar por um motivo diferente (conta igual à origem,
+ * categoria removida no meio do caminho); disparar tudo em paralelo devolveria
+ * um erro só, sem dizer qual linha ficou para trás.
+ */
+export async function resolverDestinoDoRepasse(
+  ids: string[],
+  destino: { contaId?: string; categoriaId?: string },
+): Promise<Resposta<{ resolvidos: number; recusados: { id: string; erro: string }[] }>> {
+  const bloqueio = exigeSupabase('resolver o destino dos repasses')
+  if (bloqueio) return bloqueio
+
+  const conta = destino.contaId?.trim() || null
+  const categoria = destino.categoriaId?.trim() || null
+  if ((conta === null) === (categoria === null)) {
+    return { ok: false, erro: 'Escolha a conta de destino OU a categoria da despesa — uma só.' }
+  }
+  if (ids.length === 0) return { ok: false, erro: 'Nenhum repasse selecionado.' }
+
+  const sb = supabaseServer()
+  const recusados: { id: string; erro: string }[] = []
+  let resolvidos = 0
+
+  for (const id of ids) {
+    const { data, error } = await sb.rpc('resolver_destino_do_payout', {
+      p_id: id,
+      p_conta_destino: conta,
+      p_categoria_id: categoria,
+      p_operador: OPERADOR,
+    })
+    if (error) {
+      console.error('[financeiro] resolver_destino_do_payout falhou:', error)
+      recusados.push({ id, erro: error.message || 'Falha ao gravar o destino.' })
+      continue
+    }
+    const r = (data ?? {}) as { ok?: boolean; erro?: string }
+    if (r.ok) resolvidos++
+    else recusados.push({ id, erro: r.erro ?? 'O banco recusou sem dizer o motivo.' })
+  }
+
+  revalidarFinanceiro()
+  revalidatePath('/financeiro/repasses')
+  // Sucesso parcial continua sendo sucesso: dez linhas resolvidas e uma
+  // recusada não podem virar "falhou" e fazer a tela desfazer o que deu certo.
+  return resolvidos > 0
+    ? { ok: true, resolvidos, recusados }
+    : { ok: false, erro: recusados[0]?.erro ?? 'Nenhum repasse foi resolvido.' }
+}
