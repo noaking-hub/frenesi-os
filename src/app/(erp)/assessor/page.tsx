@@ -1,4 +1,5 @@
-import { assessorConfigurado } from '@/data/assessor/motor'
+import { CabecalhoPagina, Pilha } from '@/components/erp/ui'
+import { assessorConfigurado, escritaLiberada } from '@/data/assessor/motor'
 import { carregarCentralDoGerente } from '@/data/assessor/prioridades'
 import { conversaDoUsuario, lerMensagens, listarConversas } from '@/data/assessor/conversas'
 import { sessaoAtual } from '@/data/sessao'
@@ -7,6 +8,7 @@ import { Conversa, type MensagemNaTela } from './Conversa'
 import {
   BriefingExecutivo,
   IndicadorDeAtualizacao,
+  ModoDeOperacao,
   PrioridadesAgora,
   ResumoDoDia,
 } from './Central'
@@ -16,9 +18,9 @@ import {
  *
  * A ordem dos blocos é a do documento e não é decoração: indicador de
  * atualização, "Prioridades agora", briefing executivo, resumo do dia, e só
- * então a conversa. O escopo põe a conversa por último porque as três
- * primeiras perguntas do produto — o que está acontecendo, o que exige minha
- * atenção, o que você recomenda — não deveriam exigir que alguém digitasse.
+ * então a conversa. O escopo põe a conversa por último porque as três primeiras
+ * perguntas do produto — o que está acontecendo, o que exige minha atenção, o
+ * que você recomenda — não deveriam exigir que alguém digitasse.
  *
  * A tela é fina de propósito: lê e entrega. Toda a inteligência mora em
  * `src/data/assessor` e todo número mora nas funções que as outras telas já
@@ -54,12 +56,22 @@ export default async function TelaDoAssessor({
       }))
     : []
 
+  const temCritico = central.itens.some((i) => i.severidade === 'critico')
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
-      <IndicadorDeAtualizacao apuradoEm={central.apuradoEm} modulos={central.modulosConsultados} />
+    <Pilha gap={18}>
+      <CabecalhoPagina
+        trilha="Meu Assessor"
+        titulo="Central do Gerente"
+        subtitulo="O que exige decisão agora, o que mudou desde ontem e o retrato do dia — lidos dos mesmos números das telas do ERP."
+        icone="faisca"
+        acao={<IndicadorDeAtualizacao apuradoEm={central.apuradoEm} modulos={central.modulosConsultados} />}
+      />
+
       <PrioridadesAgora itens={central.itens} resumo={central.resumo} />
       <BriefingExecutivo briefing={central.briefing} />
       <ResumoDoDia e={central.executivo} />
+
       <Conversa
         key={id ?? 'nova'}
         conversaId={id}
@@ -70,7 +82,11 @@ export default async function TelaDoAssessor({
           atualizadaEm: x.atualizadaEm,
         }))}
         configurado={assessorConfigurado()}
+        temCritico={temCritico}
+        temEstoqueCritico={central.executivo.estoque.criticos > 0}
       />
-    </div>
+
+      <ModoDeOperacao escrita={escritaLiberada()} />
+    </Pilha>
   )
 }

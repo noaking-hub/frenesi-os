@@ -127,6 +127,12 @@ export const ROTULO_DA_FERRAMENTA: Record<string, string> = {
   estoque_e_cobertura: 'Estoque e cobertura',
   prioridades_do_dia: 'Prioridades do dia',
   extrato_recente: 'Extrato recente',
+  fluxo_de_caixa: 'Fluxo de caixa',
+  dre_do_mes: 'DRE do mês',
+  ranking_de_produtos: 'Ranking de produtos',
+  fila_de_envase: 'Fila de envase',
+  simular_compra_de_base: 'Cenário: compra de base',
+  simular_impacto_no_caixa: 'Cenário: impacto no caixa',
 }
 
 export function rotuloDaFerramenta(nome: string): string {

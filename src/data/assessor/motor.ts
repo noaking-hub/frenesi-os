@@ -1,44 +1,86 @@
 import 'server-only'
 
-import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
+import { randomUUID } from 'node:crypto'
 
-import { catalogoParaModelo, FERRAMENTA_POR_NOME } from './ferramentas'
+import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
+import {
+  AVISO_DE_PARADA,
+  caberNoLimite,
+  catalogoVisivel,
+  decidir,
+  envelopar,
+  excedeu,
+  LIMITES_PADRAO,
+  REGRA_DE_DADOS_NAO_CONFIAVEIS,
+  saneadoEmProfundidade,
+  type Ator,
+  type CanalDoGerente,
+  type ContextoDaPolitica,
+  type Limites,
+  type MotivoDeParada,
+} from '@/domain'
+
+import { catalogoParaModelo, FERRAMENTA_POR_NOME, FERRAMENTAS, type Ferramenta } from './ferramentas'
 
 /**
- * O motor do Assessor: pergunta → ferramentas → resposta.
+ * O MOTOR do Gerente: pergunta → plano → ferramentas → resposta → auditoria.
  *
- * O laço é simples e é de propósito: o modelo pede ferramentas, o ERP executa
- * as que reconhece, devolve o resultado, e repete até o modelo parar de pedir.
- * Nenhuma etapa aceita nome de ferramenta que não esteja no catálogo — se o
- * modelo inventar uma, o laço devolve erro no lugar do resultado, e ele
- * corrige. É essa recusa que impede "endpoint genérico capaz de executar
- * operação arbitrária", que o escopo proíbe na seção 10.4.
+ * A forma do laço não mudou desde a Fase 1 e não deve mudar: o modelo pede
+ * ferramentas, o ERP executa as que reconhece, devolve o resultado, repete. O
+ * que mudou é tudo o que existe AO REDOR do laço, e é onde estava a fragilidade.
  *
- * Fase 1 é SÓ LEITURA. Não há ferramenta de escrita registrada, então não há
- * caminho para gravar nada — a proibição não depende de o modelo se comportar.
+ * Antes, três coisas moravam só na boa vontade do modelo: o que ele pode
+ * executar, quanto pode gastar e se o dado que ele lê pode mandar nele. As três
+ * viraram código. A política decide antes de qualquer chamada, o orçamento
+ * interrompe quando estoura e o resultado de ferramenta viaja envelopado como
+ * conteúdo, nunca como instrução.
+ *
+ * E a auditoria deixou de ser responsabilidade de quem chama. `executarInteracao`
+ * é o único caminho: ele abre o trace, executa, e fecha a auditoria no `finally`
+ * — inclusive quando dá erro, que é justamente quando registrar importa mais.
  */
 
 const API = 'https://api.anthropic.com/v1/messages'
 /** Modelo e versão vivem aqui porque a auditoria grava qual respondeu. */
 const MODELO = 'claude-sonnet-4-5-20250929'
 const VERSAO_API = '2023-06-01'
+const VERSAO_DO_PROMPT = '3.0.0'
 
-/** Teto de idas ao modelo. Existe para uma pergunta não virar um laço caro. */
-const MAX_RODADAS = 6
+/**
+ * A trava arquitetural da Fase 1.
+ *
+ * O escopo é explícito: o bloqueio de escrita não pode depender do system
+ * prompt. Depende desta variável — enquanto ela não estiver ligada, o Policy
+ * Engine nega toda ferramenta WRITE antes de o modelo sequer vê-la no catálogo.
+ * Hoje não há WRITE registrada; quando houver, continuará desligada até alguém
+ * decidir o contrário de forma consciente, no painel da Netlify.
+ */
+export function escritaLiberada(): boolean {
+  return process.env.GERENTE_ESCRITA === 'ligada'
+}
 
 export interface FerramentaUsada {
   nome: string
+  versao: string
+  modo: string
   argumentos: Record<string, unknown>
   ms: number
+  bytes?: number
   erro?: string
+  /** Motivo do Policy Engine quando a chamada foi barrada antes de executar. */
+  bloqueio?: string
 }
 
 export interface RespostaDoAssessor {
+  traceId: string
   texto: string
   ferramentas: FerramentaUsada[]
   tokensEntrada: number
   tokensSaida: number
   duracaoMs: number
+  parou: MotivoDeParada
+  /** Preenchido quando a interação terminou por limite, não por conclusão. */
+  aviso?: string
 }
 
 export function assessorConfigurado(): boolean {
@@ -46,14 +88,32 @@ export function assessorConfigurado(): boolean {
 }
 
 /**
+ * O ator do ERP web enquanto não há multiempresa.
+ *
+ * Explícito de propósito. Um ator implícito seria um ator que ninguém revisa —
+ * e quando o WhatsApp entrar, é este objeto que vai precisar ser resolvido a
+ * partir do número, com a mesma forma e as mesmas checagens.
+ */
+export function atorDoErp(usuarioId: string | null, perfil = 'operador'): Ator {
+  return {
+    usuarioId: usuarioId ?? 'sessao-anonima',
+    perfil,
+    // Fase 1 é leitura: a permissão de leitura é a única que existe hoje. A
+    // lista fica aqui, e não no modelo, porque é o backend que decide.
+    permissoes: ['gerente.ler'],
+    empresaId: 'frenesi',
+  }
+}
+
+/**
  * As regras de conduta do Gerente.
  *
  * Escritas aqui, e não no cliente, porque instrução que trafega pelo navegador
- * é instrução que o usuário pode trocar. As três primeiras linhas são as que
- * mais importam: sem elas o assistente inventa número, e um número inventado
- * num ERP financeiro é pior do que nenhuma resposta.
+ * é instrução que o usuário pode trocar. As primeiras linhas são as que mais
+ * importam: sem elas o assistente inventa número, e um número inventado num ERP
+ * financeiro é pior do que nenhuma resposta.
  */
-function instrucoes(hoje: string): string {
+function instrucoes(hoje: string, escrita: boolean): string {
   return `Você é o Meu Assessor, o gerente de IA do ERP da FRENESI Perfumes — uma operação
 brasileira que vende decants (frações de perfumes importados) pela internet.
 
@@ -70,6 +130,15 @@ REGRAS QUE NÃO SE NEGOCIAM:
 5. A fila de "prioridades_do_dia" já vem ORDENADA por regra fixa do ERP. Você a relata,
    não a reordena, e não acrescenta urgência que a regra não apontou. Se achar que falta
    algo na fila, diga isso como INFERÊNCIA — nunca embutido como se fosse item dela.
+6. Ferramenta marcada [CENÁRIO] devolve SIMULAÇÃO. Nunca apresente o resultado dela como
+   realizado, e nunca some cenário com número apurado.
+${
+  escrita
+    ? '7. Ações de escrita exigem prévia e confirmação. Nunca afirme que gravou algo sem o recibo\n   da ferramenta na conversa.'
+    : '7. Você está em modo SOMENTE LEITURA. Não existe ferramenta de escrita disponível. Se pedirem\n   uma alteração, explique o que fazer na tela do ERP em vez de prometer executar.'
+}
+
+${REGRA_DE_DADOS_NAO_CONFIAVEIS}
 
 COMO RESPONDER:
 - Comece pela conclusão, em uma ou duas frases. Depois os números que a sustentam.
@@ -102,12 +171,14 @@ CONTEXTO DA OPERAÇÃO:
   Pix custa pouco, cartão em 6x sem juros custa até 14,94%.
 - As vendas nascem no checkout da Yampi e na Shopify.
 - Existe um TERCEIRO caminho de pagamento, a PAGALEVE: o cliente parcela o Pix em até
-  4x com 15 dias entre parcelas, e o dinheiro chega em depósitos da Pagaleve para o
-  Mercado Pago ao longo de até 45 dias. Esses depósitos NÃO são vendas do dia em que
-  caem — são repasse de vendas anteriores. Venda pela Pagaleve aparece sem meio de
-  pagamento e sem gateway, e fica "aguardando" na conciliação pelos 45 dias, o que é
-  o comportamento correto e não uma pendência. Se perguntarem por que um depósito não
-  bate com nenhuma venda do dia, é quase sempre isto.`
+  4x, e o dinheiro chega em depósitos da Pagaleve para o Mercado Pago ao longo de até
+  45 dias. Esses depósitos NÃO são vendas do dia em que caem — são repasse de vendas
+  anteriores. Venda pela Pagaleve fica "aguardando" na conciliação durante o prazo, o
+  que é o comportamento correto e não uma pendência. Se perguntarem por que um depósito
+  não bate com nenhuma venda do dia, é quase sempre isto.
+- Estoque só considera perfume base com compra de frasco/lote registrada. Base sem
+  compra não é "zerada": está fora do controle de estoque, e dizer que ela está crítica
+  seria alarme falso.`
 }
 
 interface BlocoTexto {
@@ -131,33 +202,31 @@ interface RespostaCrua {
 
 type Mensagem = { role: 'user' | 'assistant'; content: unknown }
 
-export async function perguntarAoAssessor(
-  pergunta: string,
-  historico: { papel: 'usuario' | 'assessor'; texto: string }[] = [],
-): Promise<RespostaDoAssessor> {
-  const chave = process.env.ANTHROPIC_API_KEY
-  if (!chave) throw new Error('ANTHROPIC_API_KEY não está definida nas variáveis do site.')
+export interface PedidoAoGerente {
+  pergunta: string
+  historico?: { papel: 'usuario' | 'assessor'; texto: string }[]
+  ator: Ator
+  canal: CanalDoGerente
+  traceId?: string
+  limites?: Partial<Limites>
+}
 
-  const comecou = Date.now()
-  const hoje = new Intl.DateTimeFormat('pt-BR', {
-    timeZone: 'America/Sao_Paulo',
-    dateStyle: 'full',
-  }).format(new Date())
-
-  // O histórico entra truncado: conversa longa custa caro a cada rodada, e o
-  // que importa para desambiguar "esses pedidos" são as últimas trocas.
-  const mensagens: Mensagem[] = historico.slice(-8).map((m) => ({
-    role: m.papel === 'usuario' ? 'user' : 'assistant',
-    content: m.texto,
-  }))
-  mensagens.push({ role: 'user', content: pergunta })
-
-  const usadas: FerramentaUsada[] = []
-  let tokensEntrada = 0
-  let tokensSaida = 0
-  let texto = ''
-
-  for (let rodada = 0; rodada < MAX_RODADAS; rodada++) {
+/**
+ * Uma chamada ao modelo com prazo.
+ *
+ * Sem `AbortController`, um provedor lento segura a função serverless até a
+ * plataforma matá-la — e aí não há resposta, não há erro tratado e não há
+ * auditoria. Com ele, o estouro vira exceção nossa, dentro do nosso `try`, e a
+ * interação termina dizendo o que aconteceu.
+ */
+async function chamarModelo(
+  corpo: unknown,
+  chave: string,
+  timeoutMs: number,
+): Promise<RespostaCrua> {
+  const controle = new AbortController()
+  const alarme = setTimeout(() => controle.abort(), timeoutMs)
+  try {
     const r = await fetch(API, {
       method: 'POST',
       headers: {
@@ -165,70 +234,191 @@ export async function perguntarAoAssessor(
         'x-api-key': chave,
         'anthropic-version': VERSAO_API,
       },
-      body: JSON.stringify({
+      body: JSON.stringify(corpo),
+      signal: controle.signal,
+    })
+    const json = (await r.json()) as RespostaCrua
+    if (!r.ok) throw new Error(json.error?.message ?? `A API respondeu ${r.status}.`)
+    return json
+  } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') {
+      throw new Error(`O modelo não respondeu em ${Math.round(timeoutMs / 1000)}s.`)
+    }
+    throw e
+  } finally {
+    clearTimeout(alarme)
+  }
+}
+
+/**
+ * Uma ferramenta com prazo próprio.
+ *
+ * O timeout é por contrato, e não global, porque as ferramentas não custam o
+ * mesmo: ler o saldo de três contas não é a mesma coisa que montar a Central
+ * inteira. Um teto único ou estrangularia a segunda ou seria frouxo demais para
+ * a primeira.
+ */
+async function executarComPrazo(f: Ferramenta, args: Record<string, unknown>): Promise<unknown> {
+  let alarme: ReturnType<typeof setTimeout> | undefined
+  const prazo = new Promise<never>((_, rejeitar) => {
+    alarme = setTimeout(
+      () => rejeitar(new Error(`A consulta passou de ${Math.round(f.timeoutMs / 1000)}s.`)),
+      f.timeoutMs,
+    )
+  })
+  try {
+    return await Promise.race([f.executar(args ?? {}), prazo])
+  } finally {
+    if (alarme) clearTimeout(alarme)
+  }
+}
+
+async function perguntar(pedido: PedidoAoGerente): Promise<RespostaDoAssessor> {
+  const chave = process.env.ANTHROPIC_API_KEY
+  if (!chave) throw new Error('ANTHROPIC_API_KEY não está definida nas variáveis do site.')
+
+  const limites: Limites = { ...LIMITES_PADRAO, ...pedido.limites }
+  const traceId = pedido.traceId ?? randomUUID()
+  const comecou = Date.now()
+  const hoje = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    dateStyle: 'full',
+  }).format(new Date())
+
+  const politica: ContextoDaPolitica = {
+    ator: pedido.ator,
+    canal: pedido.canal,
+    escritaLiberada: escritaLiberada(),
+  }
+
+  // O catálogo é filtrado ANTES de o modelo vê-lo. O que ele não enxerga não
+  // vira tentativa, não gasta rodada e não vira insistência.
+  const disponiveis = catalogoVisivel(FERRAMENTAS, politica)
+
+  // O histórico entra truncado: conversa longa custa caro a cada rodada, e o
+  // que importa para desambiguar "esses pedidos" são as últimas trocas.
+  const mensagens: Mensagem[] = (pedido.historico ?? []).slice(-8).map((m) => ({
+    role: m.papel === 'usuario' ? 'user' : 'assistant',
+    content: m.texto,
+  }))
+  mensagens.push({ role: 'user', content: pedido.pergunta })
+
+  const usadas: FerramentaUsada[] = []
+  let tokensEntrada = 0
+  let tokensSaida = 0
+  let texto = ''
+  let parou: MotivoDeParada = 'concluiu'
+
+  for (let rodada = 0; ; rodada++) {
+    if (rodada >= limites.maxRodadas) {
+      parou = 'rodadas'
+      break
+    }
+    const estouro = excedeu(
+      { toolCalls: usadas.length, tokens: tokensEntrada + tokensSaida, decorridoMs: Date.now() - comecou },
+      limites,
+    )
+    if (estouro) {
+      parou = estouro
+      break
+    }
+
+    const json = await chamarModelo(
+      {
         model: MODELO,
         max_tokens: 2000,
-        system: instrucoes(hoje),
-        tools: catalogoParaModelo(),
+        system: instrucoes(hoje, politica.escritaLiberada),
+        tools: catalogoParaModelo(disponiveis),
         messages: mensagens,
-      }),
-    })
-
-    const json = (await r.json()) as RespostaCrua
-    if (!r.ok) {
-      throw new Error(json.error?.message ?? `A API respondeu ${r.status}.`)
-    }
+      },
+      chave,
+      limites.timeoutDoModeloMs,
+    )
 
     tokensEntrada += json.usage?.input_tokens ?? 0
     tokensSaida += json.usage?.output_tokens ?? 0
 
     const blocos = json.content ?? []
-    texto = blocos
+    const falado = blocos
       .filter((b): b is BlocoTexto => b.type === 'text')
       .map((b) => b.text)
       .join('\n')
       .trim()
+    // Só substitui se a rodada trouxe texto: uma rodada que só pede ferramentas
+    // não pode apagar a conclusão que a anterior já tinha escrito.
+    if (falado) texto = falado
 
     const pedidos = blocos.filter((b): b is BlocoFerramenta => b.type === 'tool_use')
     if (pedidos.length === 0) break
 
     mensagens.push({ role: 'assistant', content: blocos })
 
-    // Cada ferramenta roda no ERP, com o resultado devolvido ao modelo como
-    // CONTEÚDO — nunca como instrução. É a defesa contra o dado do banco
-    // conter texto que tente mandar no assistente (seção 11 do escopo).
+    // Leitura e simulação em paralelo — são independentes e não mudam estado.
+    // Escrita jamais entraria aqui: o escopo (§8) manda executá-la em série, e
+    // hoje ela nem chega a este ponto, porque a política a nega antes.
     const resultados = await Promise.all(
       pedidos.map(async (p) => {
         const inicio = Date.now()
         const ferramenta = FERRAMENTA_POR_NOME.get(p.name)
+
         if (!ferramenta) {
-          usadas.push({ nome: p.name, argumentos: p.input, ms: 0, erro: 'ferramenta inexistente' })
-          return {
-            type: 'tool_result' as const,
-            tool_use_id: p.id,
-            is_error: true,
-            content: `A ferramenta "${p.name}" não existe. Use apenas as do catálogo.`,
-          }
+          usadas.push({
+            nome: p.name,
+            versao: '—',
+            modo: '—',
+            argumentos: p.input,
+            ms: 0,
+            erro: 'ferramenta inexistente',
+          })
+          return recusa(p.id, `A ferramenta "${p.name}" não existe. Use apenas as do catálogo.`)
         }
+
+        // A política decide de novo aqui, e não só na filtragem do catálogo.
+        // Filtrar é conveniência; esta é a trava. Sem ela, bastaria o modelo
+        // chamar pelo nome uma ferramenta que não lhe foi oferecida.
+        const decisao = decidir(ferramenta, politica)
+        if (decisao.veredito !== 'executa') {
+          usadas.push({
+            nome: ferramenta.nome,
+            versao: ferramenta.versao,
+            modo: ferramenta.modo,
+            argumentos: p.input,
+            ms: 0,
+            bloqueio: decisao.motivo,
+          })
+          return recusa(p.id, `Recusado pelo ERP: ${decisao.motivo}`)
+        }
+
         try {
-          const dados = await ferramenta.executar(p.input ?? {})
-          usadas.push({ nome: p.name, argumentos: p.input, ms: Date.now() - inicio })
-          return {
-            type: 'tool_result' as const,
-            tool_use_id: p.id,
-            content: JSON.stringify(dados),
-          }
+          const dados = await executarComPrazo(ferramenta, p.input)
+          // Sanear ANTES de serializar: o que sai daqui é conteúdo de terceiro,
+          // e vai viajar envelopado justamente por isso.
+          const corpo = caberNoLimite(
+            JSON.stringify(saneadoEmProfundidade(dados)),
+            limites.maxBytesToolResult,
+          )
+          usadas.push({
+            nome: ferramenta.nome,
+            versao: ferramenta.versao,
+            modo: ferramenta.modo,
+            argumentos: p.input,
+            ms: Date.now() - inicio,
+            bytes: corpo.length,
+          })
+          return { type: 'tool_result' as const, tool_use_id: p.id, content: envelopar(corpo) }
         } catch (e) {
           const erro = e instanceof Error ? e.message : String(e)
-          usadas.push({ nome: p.name, argumentos: p.input, ms: Date.now() - inicio, erro })
+          usadas.push({
+            nome: ferramenta.nome,
+            versao: ferramenta.versao,
+            modo: ferramenta.modo,
+            argumentos: p.input,
+            ms: Date.now() - inicio,
+            erro,
+          })
           // Falha de ferramenta volta como falha, não como silêncio: o modelo
           // precisa poder dizer "não consegui ler X" em vez de inventar X.
-          return {
-            type: 'tool_result' as const,
-            tool_use_id: p.id,
-            is_error: true,
-            content: `Falha ao ler: ${erro}`,
-          }
+          return recusa(p.id, `Falha ao ler: ${erro}`)
         }
       }),
     )
@@ -236,37 +426,105 @@ export async function perguntarAoAssessor(
     mensagens.push({ role: 'user', content: resultados })
   }
 
+  const aviso = AVISO_DE_PARADA[parou] || undefined
   return {
-    texto: texto || 'Não consegui montar uma resposta com os dados disponíveis.',
+    traceId,
+    // Parada por limite não pode se passar por resposta completa. O aviso vai
+    // no corpo porque é ali que quem lê está olhando.
+    texto: (texto || 'Não consegui montar uma resposta com os dados disponíveis.') + (aviso ? `\n\n_${aviso}_` : ''),
     ferramentas: usadas,
     tokensEntrada,
     tokensSaida,
     duracaoMs: Date.now() - comecou,
+    parou,
+    aviso,
   }
 }
 
-/** Grava a interação inteira. Sem isto, o Assessor não deveria estar no ar. */
+function recusa(id: string, mensagem: string) {
+  return { type: 'tool_result' as const, tool_use_id: id, is_error: true, content: mensagem }
+}
+
+/**
+ * O ÚNICO caminho para falar com o Gerente.
+ *
+ * O escopo (§11) é direto: "a auditoria não pode depender de um chamador
+ * externo lembrar de executá-la". Aqui ela não depende — o `finally` grava
+ * sempre, com sucesso ou com erro, e o erro é justamente o caso em que alguém
+ * esqueceria.
+ *
+ * O `traceId` nasce antes da primeira chamada e acompanha tudo: resposta,
+ * auditoria e, quando houver, ação pendente e mutação.
+ */
+export async function executarInteracao(pedido: PedidoAoGerente & { conversaId: string | null }) {
+  const traceId = pedido.traceId ?? randomUUID()
+  const comecou = Date.now()
+  let resposta: RespostaDoAssessor | null = null
+  let erro: string | null = null
+
+  try {
+    resposta = await perguntar({ ...pedido, traceId })
+    return resposta
+  } catch (e) {
+    erro = e instanceof Error ? e.message : String(e)
+    throw e
+  } finally {
+    await auditar({
+      traceId,
+      conversaId: pedido.conversaId,
+      ator: pedido.ator,
+      canal: pedido.canal,
+      pergunta: pedido.pergunta,
+      resposta: resposta?.texto ?? null,
+      ferramentas: resposta?.ferramentas ?? [],
+      tokensEntrada: resposta?.tokensEntrada,
+      tokensSaida: resposta?.tokensSaida,
+      duracaoMs: resposta?.duracaoMs ?? Date.now() - comecou,
+      parou: resposta?.parou ?? 'cancelado',
+      erro: erro ?? undefined,
+    }).catch(() => {
+      // Auditoria que falha não pode derrubar a resposta do usuário. Ela é
+      // obrigatória, não fatal — e a falha em gravar aparece no log do servidor.
+    })
+  }
+}
+
+/** Grava a interação inteira. Sem isto, o Gerente não deveria estar no ar. */
 export async function auditar(dados: {
+  traceId: string
   conversaId: string | null
-  usuarioId: string | null
+  ator: Ator
+  canal: CanalDoGerente
   pergunta: string
   resposta: string | null
   ferramentas: FerramentaUsada[]
   tokensEntrada?: number
   tokensSaida?: number
   duracaoMs?: number
+  parou?: MotivoDeParada
   erro?: string
 }) {
   if (!supabaseConfigurado()) return
   await supabaseServer()
     .from('assessor_auditoria')
     .insert({
+      trace_id: dados.traceId,
       conversa_id: dados.conversaId,
-      usuario_id: dados.usuarioId,
+      usuario_id: null,
+      ator: {
+        usuarioId: dados.ator.usuarioId,
+        perfil: dados.ator.perfil,
+        permissoes: dados.ator.permissoes,
+        empresaId: dados.ator.empresaId,
+      },
+      canal: dados.canal,
       pergunta: dados.pergunta,
       resposta: dados.resposta,
       ferramentas: dados.ferramentas,
       modelo: MODELO,
+      versao_do_prompt: VERSAO_DO_PROMPT,
+      escrita_liberada: escritaLiberada(),
+      parou_por: dados.parou ?? null,
       tokens_entrada: dados.tokensEntrada ?? null,
       tokens_saida: dados.tokensSaida ?? null,
       duracao_ms: dados.duracaoMs ?? null,

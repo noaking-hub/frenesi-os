@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import { NextResponse } from 'next/server'
 
 import {
@@ -6,11 +8,12 @@ import {
   gravarMensagem,
   lerMensagens,
 } from '@/data/assessor/conversas'
-import { assessorConfigurado, auditar, perguntarAoAssessor } from '@/data/assessor/motor'
+import { assessorConfigurado, atorDoErp, executarInteracao } from '@/data/assessor/motor'
 import { sessaoAtual } from '@/data/sessao'
+import { atorValido } from '@/domain'
 
 /**
- * A pergunta ao Assessor.
+ * A pergunta ao Gerente, pelo canal ERP.
  *
  * Rota, e não Server Action, pelo mesmo motivo do extrato: o Next enfileira
  * Server Actions por aba e segura a navegação enquanto uma está no ar. Uma
@@ -20,6 +23,11 @@ import { sessaoAtual } from '@/data/sessao'
  * A ordem das etapas é deliberada: grava a pergunta ANTES de chamar o modelo.
  * Se a chamada falhar, a pergunta continua na conversa com o erro logo abaixo —
  * em vez de sumir e deixar o usuário achando que não digitou nada.
+ *
+ * Esta rota é um ADAPTADOR, e o escopo §24 explica por quê: quando o WhatsApp
+ * entrar, ele terá o seu próprio adaptador e chamará o MESMO motor, com o mesmo
+ * ator e as mesmas políticas. O que muda entre canais é a entrada e a saída —
+ * nunca a decisão.
  */
 
 export const maxDuration = 300
@@ -44,6 +52,12 @@ export async function POST(req: Request) {
 
   const usuario = await sessaoAtual()
   const usuarioId = usuario?.id ?? null
+  const ator = atorDoErp(usuarioId, usuario?.papel ?? 'operador')
+  // O motor exige ator inteiro; se um dia a montagem mudar e vier quebrada, é
+  // melhor recusar aqui do que executar sem escopo de empresa.
+  if (!atorValido(ator)) {
+    return NextResponse.json({ erro: 'Não consegui identificar o usuário com segurança.' }, { status: 403 })
+  }
 
   let conversaId = corpo.conversaId ?? null
   // Id que veio do navegador é conferido: sem isto, adivinhar um uuid daria
@@ -56,42 +70,48 @@ export async function POST(req: Request) {
   const anteriores = await lerMensagens(conversaId)
   await gravarMensagem({ conversaId, papel: 'usuario', texto: pergunta })
 
+  const traceId = randomUUID()
+
   try {
-    const r = await perguntarAoAssessor(
+    // `executarInteracao` já audita no `finally`, com sucesso ou com erro. Esta
+    // rota não chama `auditar` — chamar seria duplicar a linha, e depender de a
+    // rota lembrar é exatamente o que o escopo §11 proíbe.
+    const r = await executarInteracao({
       pergunta,
-      anteriores.map((m) => ({ papel: m.papel, texto: m.texto })),
-    )
-    await gravarMensagem({
+      historico: anteriores.map((m) => ({ papel: m.papel, texto: m.texto })),
+      ator,
+      canal: 'erp',
+      traceId,
       conversaId,
-      papel: 'assessor',
-      texto: r.texto,
-      ferramentas: r.ferramentas.map((f) => ({ nome: f.nome, ms: f.ms, erro: f.erro })),
     })
-    await auditar({
-      conversaId,
-      usuarioId,
-      pergunta,
-      resposta: r.texto,
-      ferramentas: r.ferramentas,
-      tokensEntrada: r.tokensEntrada,
-      tokensSaida: r.tokensSaida,
-      duracaoMs: r.duracaoMs,
-    })
+
+    const ferramentas = r.ferramentas.map((f) => ({
+      nome: f.nome,
+      modo: f.modo,
+      ms: f.ms,
+      erro: f.erro,
+      bloqueio: f.bloqueio,
+    }))
+
+    await gravarMensagem({ conversaId, papel: 'assessor', texto: r.texto, ferramentas })
     return NextResponse.json({
       conversaId,
+      traceId: r.traceId,
       texto: r.texto,
-      ferramentas: r.ferramentas.map((f) => ({ nome: f.nome, ms: f.ms, erro: f.erro })),
+      ferramentas,
+      parou: r.parou,
+      aviso: r.aviso,
+      duracaoMs: r.duracaoMs,
     })
   } catch (e) {
     const erro = e instanceof Error ? e.message : String(e)
-    // A falha entra na conversa como mensagem do Assessor. Erro que só aparece
+    // A falha entra na conversa como mensagem do Gerente. Erro que só aparece
     // num toast some no primeiro clique e ninguém consegue relatar depois.
     await gravarMensagem({
       conversaId,
       papel: 'assessor',
       texto: `Não consegui responder: ${erro}`,
     })
-    await auditar({ conversaId, usuarioId, pergunta, resposta: null, ferramentas: [], erro })
-    return NextResponse.json({ conversaId, erro }, { status: 502 })
+    return NextResponse.json({ conversaId, traceId, erro }, { status: 502 })
   }
 }

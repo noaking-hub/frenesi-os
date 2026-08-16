@@ -454,5 +454,36 @@ export async function importarPagaleve(
   relatorio.conciliadas = fechamento?.vendas ?? 0
   relatorio.recebido = fechamento?.recebido ?? 0
 
+  // A execução deixa marca, e a marca é o que faltava.
+  //
+  // Quando a guarda das datas funciona como deve, uma rodada correta não muda
+  // uma linha sequer: as parcelas já têm data informada e nada é sobrescrito.
+  // O efeito colateral é que "rodou e preservou tudo" e "não rodou" deixam o
+  // banco IDÊNTICO — e foi exatamente nisso que eu travei ao tentar conferir se
+  // a rotina horária estava alcançando a Pagaleve. Sem esta linha, a única
+  // forma de saber é o silêncio, que não distingue as duas coisas.
+  await supabaseServer()
+    .from('sincronizacoes')
+    .insert({
+      origem: 'pagaleve',
+      tipo: 'vendas',
+      perfumes: 0,
+      variantes: 0,
+      ignorados: relatorio.transacoes.orfas as number,
+      detalhes: {
+        vendasLidas: relatorio.transacoes.lidas,
+        casadas: relatorio.transacoes.casadas,
+        porIdentificador: relatorio.transacoes.porIdentificador,
+        porValorEData: relatorio.transacoes.porValorEData,
+        repassesGravados: relatorio.gravados,
+        parcelasGravadas: relatorio.parcelasGravadas,
+        datasInformadasPreservadas: relatorio.parcelasProtegidas,
+        parcelasVinculadas: relatorio.parcelasVinculadas,
+        vendasConciliadas: relatorio.conciliadas,
+        recebido: relatorio.recebido,
+        aReceberTotal: (relatorio.cronograma as { aReceberTotal?: number }).aReceberTotal,
+      },
+    })
+
   return relatorio
 }
