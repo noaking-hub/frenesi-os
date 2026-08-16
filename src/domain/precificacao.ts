@@ -308,6 +308,16 @@ export function desvioAds(
 
 export interface CustoPorMeio {
   meio: string
+  /** Quem processou. Meio igual em gateways diferentes custa diferente. */
+  gateway: string
+  /**
+   * Se o gateway ainda está em uso.
+   *
+   * Existe porque o dado real ensinou: Pix custava 0,70% na Pagar.me e custa
+   * 0,99% no Mercado Pago. Uma média que soma os dois precifica com a tarifa
+   * de um contrato encerrado — e subestima o custo de toda venda futura.
+   */
+  vigente: boolean
   vendas: number
   bruto: number
   tarifa: number
@@ -319,6 +329,8 @@ export interface CustoPorMeio {
 
 export interface CustoDeReceber {
   meios: CustoPorMeio[]
+  /** O que já não vale para precificar, mas serve para comparar. */
+  historico: CustoPorMeio[]
   bruto: number
   tarifa: number
   /** A média PONDERADA — é este o número que entra no preço. */
@@ -338,21 +350,36 @@ export interface CustoDeReceber {
  * mês que precisa caber no preço.
  */
 export function custoDeReceber(meios: CustoPorMeio[]): CustoDeReceber {
-  const bruto = meios.reduce((a, m) => a + m.bruto, 0)
-  const tarifa = meios.reduce((a, m) => a + m.tarifa, 0)
+  // SÓ O GATEWAY VIGENTE ENTRA NO PREÇO.
+  //
+  // O histórico continua na lista, para comparar contrato antigo com novo,
+  // mas fora da conta. Misturar não é conservador nem otimista: é errado nos
+  // dois sentidos, porque descreve uma média de vendas que não vão se repetir.
+  const emUso = meios.filter((m) => m.vigente)
+  const base = emUso.length > 0 ? emUso : meios
+
+  const bruto = base.reduce((a, m) => a + m.bruto, 0)
+  const tarifa = base.reduce((a, m) => a + m.tarifa, 0)
+  // Recalcula a fatia dentro do que está em uso: a fatia que veio do banco é
+  // sobre o total, e um meio com 8% do histórico pode ser 20% do presente.
+  const comFatia = base.map((m) => ({
+    ...m,
+    fatia: bruto > 0 ? Math.round((m.bruto / bruto) * 1000) / 10 : 0,
+  }))
   // Um meio com fatia mínima distorce a leitura: dois pagamentos num meio
   // caro fariam "o mais caro" apontar para algo que não move o resultado.
-  const relevantes = meios.filter((m) => m.fatia >= 1)
+  const relevantes = comFatia.filter((m) => m.fatia >= 1)
   const porPreco = [...relevantes].sort((a, b) => b.pct - a.pct)
 
   return {
-    meios,
+    meios: comFatia,
+    historico: meios.filter((m) => !m.vigente),
     bruto,
     tarifa,
     pct: bruto > 0 ? Math.round((tarifa / bruto) * 10000) / 100 : 0,
     maisCaro: porPreco[0] ?? null,
     maisBarato: porPreco[porPreco.length - 1] ?? null,
-    vendas: meios.reduce((a, m) => a + m.vendas, 0),
+    vendas: base.reduce((a, m) => a + m.vendas, 0),
   }
 }
 

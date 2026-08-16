@@ -307,6 +307,8 @@ export async function custoPorMeio(): Promise<CustoPorMeio[]> {
 
   return (data ?? []).map((m) => ({
     meio: m.meio as string,
+    gateway: (m.gateway ?? 'Outro') as string,
+    vigente: Boolean(m.vigente),
     vendas: Number(m.vendas),
     bruto: Number(m.bruto),
     tarifa: Number(m.tarifa),

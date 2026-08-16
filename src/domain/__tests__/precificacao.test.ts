@@ -14,10 +14,10 @@ import type { CustoPorMeio } from '..'
 describe('custo real de receber', () => {
   // Recorte real de 30 dias: o Pix domina o faturamento, o 6x domina a tarifa.
   const MEIOS: CustoPorMeio[] = [
-    { meio: 'Pix', vendas: 124, bruto: 27274.81, tarifa: 131.17, pct: 0.48, fatia: 69.2 },
-    { meio: 'Cartão de crédito 6x', vendas: 25, bruto: 5877.48, tarifa: 878.12, pct: 14.94, fatia: 14.9 },
-    { meio: 'Saldo Mercado Pago', vendas: 18, bruto: 1638.44, tarifa: 28.84, pct: 1.76, fatia: 4.2 },
-    { meio: 'Cartão de crédito 3x', vendas: 5, bruto: 876.63, tarifa: 84.14, pct: 9.6, fatia: 2.2 },
+    { meio: 'Pix', gateway: 'Mercado Pago', vigente: true, vendas: 124, bruto: 27274.81, tarifa: 131.17, pct: 0.48, fatia: 69.2 },
+    { meio: 'Cartão de crédito 6x', gateway: 'Mercado Pago', vigente: true, vendas: 25, bruto: 5877.48, tarifa: 878.12, pct: 14.94, fatia: 14.9 },
+    { meio: 'Saldo Mercado Pago', gateway: 'Mercado Pago', vigente: true, vendas: 18, bruto: 1638.44, tarifa: 28.84, pct: 1.76, fatia: 4.2 },
+    { meio: 'Cartão de crédito 3x', gateway: 'Mercado Pago', vigente: true, vendas: 5, bruto: 876.63, tarifa: 84.14, pct: 9.6, fatia: 2.2 },
   ]
 
   it('pondera pelo valor, não pela quantidade de vendas', () => {
@@ -26,6 +26,59 @@ describe('custo real de receber', () => {
     const r = custoDeReceber(MEIOS)
     expect(r.pct).toBeCloseTo(3.14, 1)
     expect(r.bruto).toBeCloseTo(35667.36, 2)
+  })
+
+  it('a tarifa do gateway ENCERRADO não entra no preço', () => {
+    // O caso real que motivou isto: Pix custava 0,70% na Pagar.me e custa
+    // 0,99% no Mercado Pago. Somar os dois precifica com um contrato que não
+    // existe mais — e o volume histórico é grande o bastante para dominar a
+    // média, puxando o custo para baixo justamente onde ele subiu.
+    const comHistorico: CustoPorMeio[] = [
+      ...MEIOS,
+      {
+        meio: 'Pix',
+        gateway: 'Pagar.me',
+        vigente: false,
+        vendas: 228,
+        bruto: 27631.81,
+        tarifa: 193.48,
+        pct: 0.7,
+        fatia: 36.6,
+      },
+    ]
+    const so = custoDeReceber(MEIOS)
+    const com = custoDeReceber(comHistorico)
+    expect(com.pct).toBe(so.pct)
+    expect(com.bruto).toBe(so.bruto)
+    expect(com.historico.map((m) => m.gateway)).toEqual(['Pagar.me'])
+  })
+
+  it('a fatia é recalculada dentro do que está em uso', () => {
+    // A fatia que vem do banco é sobre o total, histórico incluído. Um meio
+    // com 8% de todo o período pode ser 20% do presente, e é o presente que
+    // decide onde mexer.
+    const r = custoDeReceber([
+      ...MEIOS,
+      {
+        meio: 'Pix',
+        gateway: 'Pagar.me',
+        vigente: false,
+        vendas: 228,
+        bruto: 27631.81,
+        tarifa: 193.48,
+        pct: 0.7,
+        fatia: 36.6,
+      },
+    ])
+    const soma = r.meios.reduce((a, m) => a + m.fatia, 0)
+    expect(soma).toBeCloseTo(100, 0)
+  })
+
+  it('sem nenhum gateway vigente, usa o que houver em vez de zerar', () => {
+    // Operação recém-migrada pode não ter venda no gateway novo ainda. Devolver
+    // 0% de tarifa faria o preço nascer sem custo de recebimento nenhum.
+    const sohistorico = MEIOS.map((m) => ({ ...m, vigente: false }))
+    expect(custoDeReceber(sohistorico).pct).toBeGreaterThan(0)
   })
 
   it('aponta o meio mais caro e o mais barato com peso relevante', () => {
@@ -39,7 +92,7 @@ describe('custo real de receber', () => {
     // da operação: eles não movem o resultado do mês.
     const r = custoDeReceber([
       ...MEIOS,
-      { meio: 'Boleto exótico', vendas: 2, bruto: 90, tarifa: 40, pct: 44.4, fatia: 0.2 },
+      { meio: 'Boleto exótico', gateway: 'Mercado Pago', vigente: true, vendas: 2, bruto: 90, tarifa: 40, pct: 44.4, fatia: 0.2 },
     ])
     expect(r.maisCaro?.meio).toBe('Cartão de crédito 6x')
   })

@@ -161,7 +161,7 @@ export function CustoDeReceber({
               </span>
               {r.meios.map((m) => (
                 <div
-                  key={m.meio}
+                  key={`${m.meio}@${m.gateway}`}
                   style={{
                     display: 'grid',
                     gridTemplateColumns: 'minmax(0,1fr) 70px 84px 84px',
@@ -172,8 +172,17 @@ export function CustoDeReceber({
                     background: 'rgba(255,255,255,.02)',
                   }}
                 >
-                  <span className="font-sans" style={{ fontSize: 11.5, color: 'var(--color-corrente)' }}>
+                  <span
+                    className="font-sans"
+                    style={{ fontSize: 11.5, color: 'var(--color-corrente)', minWidth: 0 }}
+                  >
                     {m.meio}
+                    {/* O gateway ao lado do meio não é detalhe: o mesmo Pix
+                        custa 0,70% num intermediador e 0,99% no outro, e sem
+                        o nome ao lado os dois números parecem contradição. */}
+                    <span style={{ color: 'var(--color-terciario)', fontSize: 10 }}>
+                      {` · ${m.gateway}`}
+                    </span>
                   </span>
                   <span className="font-mono" style={{ fontSize: 11, color: COR.atencao, textAlign: 'right' }}>
                     {pct(m.pct, 2)}
@@ -183,6 +192,50 @@ export function CustoDeReceber({
                   </span>
                   <span className="font-mono" style={{ fontSize: 11, color: 'rgba(242,237,227,.5)', textAlign: 'right' }}>
                     {`${pct(m.fatia, 1)} das vendas`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {aberto && r.historico.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 4 }}>
+              <span
+                className="font-sans"
+                style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+              >
+                Fora do cálculo — gateway encerrado. Fica visível para comparar contrato antigo com
+                o novo, mas não entra no preço: precificar com a tarifa de quem não processa mais
+                subestima o custo de toda venda futura.
+              </span>
+              {r.historico.map((m) => (
+                <div
+                  key={`${m.meio}@${m.gateway}`}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(0,1fr) 70px 84px 84px',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '6px 10px',
+                    borderRadius: 8,
+                    background: 'rgba(255,255,255,.012)',
+                    opacity: 0.62,
+                  }}
+                >
+                  <span className="font-sans" style={{ fontSize: 11.5, color: 'var(--color-corrente)' }}>
+                    {m.meio}
+                    <span style={{ color: 'var(--color-terciario)', fontSize: 10 }}>
+                      {` · ${m.gateway}`}
+                    </span>
+                  </span>
+                  <span className="font-mono" style={{ fontSize: 11, color: 'rgba(242,237,227,.5)', textAlign: 'right' }}>
+                    {pct(m.pct, 2)}
+                  </span>
+                  <span className="font-mono" style={{ fontSize: 11, color: 'rgba(242,237,227,.4)', textAlign: 'right' }}>
+                    {brl(m.tarifa)}
+                  </span>
+                  <span className="font-mono" style={{ fontSize: 11, color: 'rgba(242,237,227,.4)', textAlign: 'right' }}>
+                    {`${m.vendas} vendas`}
                   </span>
                 </div>
               ))}

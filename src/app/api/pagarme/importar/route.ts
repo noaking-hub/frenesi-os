@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
+import { normalizarMeio } from '@/domain'
 
 /**
  * Importação ÚNICA do histórico da Pagar.me (gateway usado até 22/07/2026).
@@ -318,7 +319,7 @@ export async function POST(req: Request) {
         pago: reais(pago),
         tarifa: reais(tarifa),
         liquido,
-        meio: c.payment_method ?? null,
+        meio: normalizarMeio(c.payment_method),
         parcelas: c.last_transaction?.installments ?? null,
         adquirente: c.last_transaction?.acquirer_name ?? null,
         pedido_pagarme: c.order?.code ?? null,
@@ -351,7 +352,7 @@ export async function POST(req: Request) {
       interno: false,
       bruto: {
         banco: m.movement_object?.bank_account?.bank ?? null,
-        meio: m.movement_object?.type ?? null,
+        meio: normalizarMeio(m.movement_object?.type),
         situacao: m.movement_object?.status ?? null,
       },
     }))

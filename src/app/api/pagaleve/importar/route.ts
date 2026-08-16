@@ -8,7 +8,7 @@ import {
   type TransacaoPagaleve,
 } from '@/data/pagaleve'
 import { supabaseConfigurado, supabaseServer, tudoDe } from '@/data/supabase'
-import { diaDaOperacao } from '@/domain'
+import { diaDaOperacao, normalizarMeio } from '@/domain'
 
 /**
  * Importação das vendas e repasses da Pagaleve.
@@ -222,7 +222,7 @@ export async function POST(req: Request) {
   const linhas = casados.map((c) => ({
     pedido_id: c.pedidoId!,
     origem: 'pagaleve',
-    meio: 'Pix parcelado (Pagaleve)',
+    meio: normalizarMeio('Pagaleve'),
     gateway_id: c.checkoutId,
     bruto_gateway: c.bruto,
     taxa_real: c.tarifa,

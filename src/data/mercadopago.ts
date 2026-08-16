@@ -9,6 +9,7 @@ import {
   normalizarPagamentoMp,
   recortarJanela,
   relatorioServe,
+  normalizarMeio,
 } from '@/domain'
 import type {
   CasamentoPagamento,
@@ -447,7 +448,7 @@ export async function sincronizarMercadoPago(de: string, ate: string): Promise<R
       taxa_real: p.tarifa,
       // O meio mora no repasse porque é dele que sai o custo real de
       // receber, agora que o extrato vem das liberações.
-      meio: p.meio,
+      meio: normalizarMeio(p.meio),
     })
   }
 
