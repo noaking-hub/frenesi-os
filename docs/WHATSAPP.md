@@ -27,12 +27,18 @@ Tempo real: **40 a 60 minutos**, a maior parte esperando a Meta processar.
 1. Vá em **developers.facebook.com** e entre com a conta do Facebook que
    administra a página da FRENESI.
 2. **Meus Apps** → **Criar app**.
-3. Em "Qual caso de uso?", escolha **Outro** → **Empresa**.
-4. Nome do app: `FRENESI OS`. E-mail de contato: o seu.
-5. Criado o app, na lista de produtos procure **WhatsApp** e clique em
-   **Configurar**.
-6. Ele vai pedir uma **conta empresarial (Business Portfolio)**. Se a FRENESI já
-   tiver uma, selecione. Se não, crie na hora — nome, CNPJ, e-mail.
+3. **Detalhes do app**: nome `FRENESI OS`, e-mail de contato o seu.
+4. **Casos de uso**: marque **"Conectar-se com clientes pelo WhatsApp"**. Só
+   esse. Marcar mais de um pode até ser recusado — alguns casos de uso não se
+   combinam no mesmo app, e a própria tela avisa.
+5. **Empresa**: selecione o portfólio empresarial da FRENESI. O WhatsApp exige
+   um, então conectar agora poupa uma volta depois. Não precisa estar verificado
+   para testar; a verificação só entra quando o app for para produção com acesso
+   a dados de terceiros.
+6. **Requisitos** e **Visão geral**: são telas de leitura. Confira e crie o app
+   (a Meta costuma pedir sua senha do Facebook aqui).
+7. Criado, o WhatsApp já aparece no menu lateral — o caso de uso o adicionou
+   sozinho. Vá em **WhatsApp → Configuração da API**.
 
 ## Passo 2 — Pegar o número e o Phone ID
 
