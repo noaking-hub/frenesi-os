@@ -435,3 +435,49 @@ export function confirmacaoConfere(acao: AcaoPendente, parametros: Record<string
 export function assinar(parametros: Record<string, unknown>): string {
   return estavel(parametros)
 }
+
+/**
+ * A pergunta é conversa fiada, ou pede dado da operação?
+ *
+ * Existe por causa de um defeito medido, e o defeito é instrutivo: depois que
+ * o WhatsApp ganhou histórico, o Gerente parou de consultar o ERP. Ele via nas
+ * mensagens anteriores números que ele mesmo tinha dito — "5 vendas, R$
+ * 763,27" — e concluía que já sabia. Perguntado o líquido recebido, reciclou o
+ * "recebido no dia" de outra pergunta, viu zero, e explicou o zero com prazo
+ * de gateway. Afirmou a um lojista que não tinha entrado dinheiro num dia em
+ * que entraram R$ 669,73.
+ *
+ * Três versões da regra no system prompt não seguraram, e não era para segurar:
+ * "consulte antes de afirmar" compete com a economia de não consultar, e o
+ * modelo sempre encontra uma leitura em que já consultou. Por isso a trava
+ * passou a ser CÓDIGO — o motor recusa a resposta sem ferramenta e manda
+ * refazer.
+ *
+ * Esta função existe só para não cobrar consulta de "bom dia". Ela é
+ * deliberadamente ESTREITA: na dúvida, devolve false e a consulta é exigida.
+ * Errar para o lado de consultar custa segundos; errar para o outro custa a
+ * confiança no número.
+ */
+const CONVERSA_FIADA =
+  /^(oi+|ol[áa]|e a[íi]|bom dia|boa tarde|boa noite|tudo bem\??|obrigad[oa]|valeu|vlw|blz|ok|okay|certo|entendi|beleza|show|perfeito|legal|tchau|at[ée] mais|abra[çc]o|bom trabalho|isso|isso mesmo|sim|n[ãa]o|👍|🙏|❤️)[\s!.,]*$/i
+
+export function pedeDadoDaOperacao(pergunta: string): boolean {
+  const texto = pergunta.trim()
+  if (texto.length === 0) return false
+  return !CONVERSA_FIADA.test(texto)
+}
+
+/**
+ * O empurrão que o motor devolve quando a resposta veio sem consulta nenhuma.
+ *
+ * Escrito como ordem, não como pedido: quem chegou aqui já ignorou a regra do
+ * system prompt uma vez, e repetir a mesma frase mais educada não muda nada.
+ */
+export const EXIJA_CONSULTA =
+  'PARE. Você respondeu sem chamar nenhuma ferramenta nesta interação.\n' +
+  'Números ditos em mensagens anteriores NÃO valem como fonte: eles podem ' +
+  'estar velhos, ou terem sido apurados para outra pergunta.\n' +
+  'Chame agora as ferramentas necessárias e responda de novo a partir do que ' +
+  'elas devolverem. Se nenhuma ferramenta do catálogo responder a esta ' +
+  'pergunta, diga exatamente isso — sem estimar e sem explicar a ausência do ' +
+  'dado com prazos, calendário ou suposição sobre o gateway.'

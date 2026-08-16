@@ -10,6 +10,8 @@ import {
   decidir,
   envelopar,
   excedeu,
+  EXIJA_CONSULTA,
+  pedeDadoDaOperacao,
   LIMITES_PADRAO,
   nomeDoArquivo,
   paraCsv,
@@ -353,6 +355,9 @@ async function perguntar(pedido: PedidoAoGerente): Promise<RespostaDoAssessor> {
   mensagens.push({ role: 'user', content: pedido.pergunta })
 
   const usadas: FerramentaUsada[] = []
+  // Quantas vezes já mandamos o modelo voltar e consultar. Uma só: insistir
+  // além disso vira laço caro sem mudar o desfecho.
+  let empurroesDados = 0
   let tokensEntrada = 0
   let tokensSaida = 0
   let texto = ''
@@ -398,7 +403,29 @@ async function perguntar(pedido: PedidoAoGerente): Promise<RespostaDoAssessor> {
     if (falado) texto = falado
 
     const pedidos = blocos.filter((b): b is BlocoFerramenta => b.type === 'tool_use')
-    if (pedidos.length === 0) break
+    if (pedidos.length === 0) {
+      /**
+       * A TRAVA CONTRA RESPONDER DE MEMÓRIA.
+       *
+       * Se a interação inteira terminou sem UMA chamada de ferramenta e a
+       * pergunta pedia dado da operação, a resposta não vale: ela só pode ter
+       * saído do histórico da conversa ou do nada. Nos dois casos é um número
+       * sem fonte, apresentado com a mesma segurança de um número apurado.
+       *
+       * Isto é código, e não mais uma linha no system prompt, porque três
+       * versões da regra escrita não seguraram. "Consulte antes de afirmar"
+       * compete com a economia de não consultar, e o modelo sempre acha uma
+       * leitura em que já consultou. Aqui não há leitura possível: sem
+       * ferramenta na lista, volta e refaz.
+       */
+      if (usadas.length === 0 && empurroesDados === 0 && pedeDadoDaOperacao(pedido.pergunta)) {
+        empurroesDados++
+        mensagens.push({ role: 'assistant', content: blocos })
+        mensagens.push({ role: 'user', content: EXIJA_CONSULTA })
+        continue
+      }
+      break
+    }
 
     mensagens.push({ role: 'assistant', content: blocos })
 
