@@ -11,8 +11,11 @@ import {
   envelopar,
   excedeu,
   LIMITES_PADRAO,
+  nomeDoArquivo,
+  paraCsv,
   REGRA_DE_DADOS_NAO_CONFIAVEIS,
   saneadoEmProfundidade,
+  tabelaDoResultado,
   type Ator,
   type CanalDoGerente,
   type ContextoDaPolitica,
@@ -75,6 +78,14 @@ export interface FerramentaUsada {
   erro?: string
   /** Motivo do Policy Engine quando a chamada foi barrada antes de executar. */
   bloqueio?: string
+  /**
+   * Quantas linhas o resultado tinha, quando ele era tabular (§4.5).
+   *
+   * Quem decide se dá para exportar é o dado, não a interface: o campo só
+   * aparece quando existe tabela de verdade, e é por isso que o botão "Baixar
+   * CSV" nunca é oferecido para uma resposta que não vira planilha.
+   */
+  linhas?: number
 }
 
 export interface RespostaDoAssessor {
@@ -444,6 +455,11 @@ async function perguntar(pedido: PedidoAoGerente): Promise<RespostaDoAssessor> {
             JSON.stringify(saneadoEmProfundidade(dados)),
             limites.maxBytesToolResult,
           )
+          // Só marcamos como exportável o que REALMENTE virou tabela, e só na
+          // leitura de verdade: uma prévia descreve o que aconteceria, e baixar
+          // "o que aconteceria" como planilha seria entregar um relatório de
+          // fatos que ainda não existem.
+          const tabela = soPreve ? null : tabelaDoResultado(dados)
           usadas.push({
             nome: ferramenta.nome,
             versao: ferramenta.versao,
@@ -451,6 +467,7 @@ async function perguntar(pedido: PedidoAoGerente): Promise<RespostaDoAssessor> {
             argumentos: p.input,
             ms: Date.now() - inicio,
             bytes: corpo.length,
+            ...(tabela ? { linhas: tabela.linhas.length } : null),
             ...(soPreve ? { bloqueio: `Prévia: ${decisao.motivo}` } : null),
           })
           return { type: 'tool_result' as const, tool_use_id: p.id, content: envelopar(corpo) }
@@ -534,6 +551,92 @@ export async function executarInteracao(pedido: PedidoAoGerente & { conversaId: 
       // Auditoria que falha não pode derrubar a resposta do usuário. Ela é
       // obrigatória, não fatal — e a falha em gravar aparece no log do servidor.
     })
+  }
+}
+
+/**
+ * O relatório exportável — §4.5.
+ *
+ * Não há relatório guardado em lugar nenhum: a exportação REEXECUTA a mesma
+ * ferramenta, com os mesmos argumentos, e transforma o resultado em planilha. É
+ * mais lento do que servir um arquivo salvo, e é o único jeito honesto — um CSV
+ * congelado no momento da conversa viraria, uma hora depois, um número velho
+ * baixado com nome de relatório atual.
+ *
+ * Nenhum modelo participa. O caminho é ferramenta → tabela → CSV, e a política
+ * decide de novo aqui: exportar é ler, então só ferramenta de leitura passa. Se
+ * fosse pelo nome recebido do navegador, bastaria trocar a string por uma
+ * ferramenta de escrita para executá-la sem confirmação nenhuma.
+ */
+export async function exportarRelatorio(pedido: {
+  ferramenta: string
+  argumentos: Record<string, unknown>
+  ator: Ator
+  canal: CanalDoGerente
+  traceId?: string
+}): Promise<{ csv: string; arquivo: string; linhas: number; omitidas: string[] }> {
+  const traceId = pedido.traceId ?? randomUUID()
+  const comecou = Date.now()
+  const ferramenta = FERRAMENTA_POR_NOME.get(pedido.ferramenta)
+  if (!ferramenta) throw new Error(`A ferramenta "${pedido.ferramenta}" não existe.`)
+  if (ferramenta.modo !== 'READ') {
+    throw new Error('Só relatório de leitura pode ser exportado.')
+  }
+
+  const politica: ContextoDaPolitica = {
+    ator: pedido.ator,
+    canal: pedido.canal,
+    escritaLiberada: await escritaLiberada(),
+  }
+  const decisao = decidir(ferramenta, politica)
+  if (decisao.veredito !== 'executa') throw new Error(`Recusado pelo ERP: ${decisao.motivo}`)
+
+  const contexto: ContextoDaExecucao = {
+    ator: pedido.ator,
+    canal: pedido.canal,
+    traceId,
+    conversaId: null,
+  }
+
+  let erro: string | null = null
+  try {
+    const dados = await executarComPrazo(ferramenta, pedido.argumentos ?? {}, contexto)
+    const tabela = tabelaDoResultado(dados)
+    if (!tabela) throw new Error('Esta resposta não é uma tabela — não há o que exportar.')
+    return {
+      csv: paraCsv(tabela),
+      arquivo: nomeDoArquivo(ferramenta.nome, new Date().toISOString().slice(0, 10)),
+      linhas: tabela.linhas.length,
+      omitidas: tabela.omitidas,
+    }
+  } catch (e) {
+    erro = e instanceof Error ? e.message : String(e)
+    throw e
+  } finally {
+    // Exportar é levar dado do ERP para fora dele. Fica na mesma auditoria das
+    // perguntas, com o mesmo formato, porque "quem baixou o quê" é exatamente o
+    // tipo de pergunta que só se faz depois — quando não dá mais para instrumentar.
+    await auditar({
+      traceId,
+      conversaId: null,
+      ator: pedido.ator,
+      canal: pedido.canal,
+      pergunta: `[exportar CSV] ${pedido.ferramenta}`,
+      resposta: null,
+      ferramentas: [
+        {
+          nome: ferramenta.nome,
+          versao: ferramenta.versao,
+          modo: ferramenta.modo,
+          argumentos: pedido.argumentos ?? {},
+          ms: Date.now() - comecou,
+          ...(erro ? { erro } : null),
+        },
+      ],
+      duracaoMs: Date.now() - comecou,
+      parou: erro ? 'cancelado' : 'concluiu',
+      erro: erro ?? undefined,
+    }).catch(() => {})
   }
 }
 

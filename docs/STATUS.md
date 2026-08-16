@@ -126,6 +126,8 @@ Meu Assessor, Giftback e cashback voltaram: hoje leem dados reais.
 | 4 · Escrita operacional | No ar, mesma trava. Recomendação de reposição e solicitação interna de compra. Pagamento bancário é classe D e não existe como ferramenta. |
 | 5 · WhatsApp | Código pronto, **inativo**: falta `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_ID` e `WHATSAPP_VERIFY_TOKEN`, e cadastrar os números autorizados. |
 | 6 · Vigília proativa | No ar, roda de hora em hora. |
+| 7 · Assistente contextual | No ar em toda tela do ERP (botão flutuante ou `Ctrl+J`). A tela em que você está vai como contexto, visível num chip e removível com um clique. |
+| 8 · Relatórios exportáveis | No ar. Toda consulta que virou tabela ganha "baixar CSV"; o arquivo é gerado relendo o dado na hora do clique, e o download entra na auditoria como qualquer outra leitura. |
 
 Interruptor de emergência: `GERENTE_ESCRITA=desligada` força modo leitura sem
 esperar build, e vence a configuração da tela.

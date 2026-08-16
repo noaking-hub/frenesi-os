@@ -85,12 +85,16 @@ export async function POST(req: Request) {
       conversaId,
     })
 
+    // `argumentos` e `linhas` seguem junto por causa da exportação (§4.5): é o
+    // par que permite ao botão "baixar CSV" reexecutar exatamente a consulta
+    // que produziu a tabela, hoje e depois de recarregar a página.
     const ferramentas = r.ferramentas.map((f) => ({
       nome: f.nome,
       modo: f.modo,
       ms: f.ms,
       erro: f.erro,
       bloqueio: f.bloqueio,
+      ...(f.linhas ? { linhas: f.linhas, argumentos: f.argumentos } : null),
     }))
 
     await gravarMensagem({ conversaId, papel: 'assessor', texto: r.texto, ferramentas })

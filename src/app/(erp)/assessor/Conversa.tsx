@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+import { BaixarCsv } from '@/components/erp/BaixarCsv'
 import {
   CONTORNO,
   Etiqueta,
@@ -46,7 +47,16 @@ export interface MensagemNaTela {
   id: number
   papel: 'usuario' | 'assessor'
   texto: string
-  ferramentas?: { nome: string; modo?: string; ms?: number; erro?: string; bloqueio?: string }[]
+  ferramentas?: {
+    nome: string
+    modo?: string
+    ms?: number
+    erro?: string
+    bloqueio?: string
+    /** Preenchidos só quando o resultado virou tabela — é o que liga o CSV (§4.5). */
+    argumentos?: Record<string, unknown>
+    linhas?: number
+  }[]
 }
 
 interface ConversaResumo {
@@ -400,7 +410,12 @@ function Fala({ m }: { m: MensagemNaTela }) {
         {blocos.map((b, i) => (
           <BlocoDaResposta key={i} b={b} />
         ))}
-        {m.ferramentas && m.ferramentas.length > 0 && <ComoChegueiNisso f={m.ferramentas} />}
+        {m.ferramentas && m.ferramentas.length > 0 && (
+          <>
+            <BaixarCsv ferramentas={m.ferramentas} />
+            <ComoChegueiNisso f={m.ferramentas} />
+          </>
+        )}
       </div>
     </div>
   )

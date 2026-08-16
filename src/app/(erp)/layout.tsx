@@ -1,3 +1,4 @@
+import { AssistenteContextual } from '@/components/erp/AssistenteContextual'
 import { Sidebar } from '@/components/erp/Sidebar'
 import { Topbar } from '@/components/erp/Topbar'
 import { carregarDashboard } from '@/data/consultas'
@@ -27,6 +28,13 @@ export default async function ErpLayout({ children }: { children: React.ReactNod
           {children}
         </div>
       </main>
+      {/*
+        O Gerente acompanha o ERP inteiro (§3.2). Fica no layout e não em cada
+        página porque a pergunta que ele responde nasce olhando QUALQUER tela —
+        e um assistente que só existe onde alguém lembrou de montá-lo é um
+        assistente que a pessoa aprende a não procurar.
+      */}
+      <AssistenteContextual />
     </div>
   )
 }

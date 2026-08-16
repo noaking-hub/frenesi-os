@@ -18,11 +18,29 @@ import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 
 export type Papel = 'usuario' | 'assessor'
 
+/**
+ * O rastro de cada consulta que sustentou a resposta.
+ *
+ * `argumentos` e `linhas` ficam guardados junto por causa da exportação (§4.5):
+ * ao reabrir a conversa amanhã, o botão "baixar CSV" precisa saber QUAL consulta
+ * exportar e com quais parâmetros. Sem isso, o botão só existiria enquanto a
+ * aba não fosse recarregada — e um relatório que some no F5 não é relatório.
+ */
+export interface FerramentaNaMensagem {
+  nome: string
+  modo?: string
+  ms: number
+  erro?: string
+  bloqueio?: string
+  argumentos?: Record<string, unknown>
+  linhas?: number
+}
+
 export interface Mensagem {
   id: number
   papel: Papel
   texto: string
-  ferramentas: { nome: string; ms: number; erro?: string }[]
+  ferramentas: FerramentaNaMensagem[]
   criadaEm: string
 }
 
@@ -120,7 +138,7 @@ export async function gravarMensagem(dados: {
   conversaId: string
   papel: Papel
   texto: string
-  ferramentas?: { nome: string; ms: number; erro?: string }[]
+  ferramentas?: FerramentaNaMensagem[]
 }): Promise<void> {
   await supabaseServer().from('assessor_mensagens').insert({
     conversa_id: dados.conversaId,
