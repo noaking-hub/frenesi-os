@@ -33,6 +33,17 @@ const BASE = process.env.PAGALEVE_BASE ?? 'https://api.pagaleve.com.br'
  */
 const REGIOES = ['sa-east-1', 'us-east-1', 'us-east-2', 'us-west-2']
 
+/** Caminhos de autenticação plausíveis, para a troca de chave por token. */
+const CAMINHOS_DE_AUTENTICACAO = [
+  '/authentication',
+  '/auth',
+  '/v1/authentication',
+  '/v1/auth',
+  '/token',
+  '/sessions',
+  '/merchant/authentication',
+]
+
 /** Onde vendas e repasses costumam morar numa API de intermediário. */
 const CAMINHOS = [
   '/checkouts',
@@ -145,12 +156,102 @@ async function pedir(
   }
 }
 
+/**
+ * Lê a documentação pública da Pagaleve pela função, não pelo meu ambiente.
+ *
+ * `docs.pagaleve.com.br` é inalcançável de onde este código é escrito, mas a
+ * função no Netlify tem saída livre. Em vez de adivinhar o caminho de
+ * autenticação por tentativa — o que custaria um deploy por hipótese — ela
+ * busca a referência e extrai os caminhos que a própria Pagaleve documenta.
+ *
+ * É leitura de página pública, e o que sai daqui são só rotas.
+ */
+async function caminhosDocumentados(): Promise<{ achados: string[]; erro?: string }> {
+  const paginas = [
+    'https://docs.pagaleve.com.br/reference/pagaleve-api',
+    'https://docs.pagaleve.com.br/reference/authenticationcontroller_doauthentication',
+    'https://docs.pagaleve.com.br/reference/integration-flow',
+  ]
+  const achados = new Set<string>()
+  const erros: string[] = []
+
+  for (const pagina of paginas) {
+    try {
+      const r = await fetch(pagina, { headers: { 'user-agent': 'FRENESI-ERP/1.0' } })
+      if (!r.ok) {
+        erros.push(`${pagina} → ${r.status}`)
+        continue
+      }
+      const html = await r.text()
+      // URLs completas de API e caminhos citados junto de um verbo HTTP: as
+      // duas formas em que uma referência escreve endpoint.
+      for (const m of html.matchAll(/https?:\/\/[a-z0-9.-]*pagaleve[a-z0-9.-]*\/[a-z0-9/_{}-]+/gi)) {
+        achados.add(m[0])
+      }
+      for (const m of html.matchAll(/"(POST|GET|PUT)"[^"]{0,40}"(\/[a-z0-9/_{}-]{2,60})"/gi)) {
+        achados.add(`${m[1]} ${m[2]}`)
+      }
+    } catch (e) {
+      erros.push(`${pagina} → ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+  return { achados: [...achados].slice(0, 60), erro: erros.length ? erros.join(' · ') : undefined }
+}
+
+/**
+ * Tenta o formato de chave de API do próprio API Gateway.
+ *
+ * O SigV4 foi descartado pelo dado: `us-east-1` respondeu "The security token
+ * included in the request is invalid", que é o erro para Access Key ID
+ * inexistente no IAM — a chave da Pagaleve não é credencial AWS. Sobra a outra
+ * porta do gateway, o cabeçalho `x-api-key`, provavelmente trocando a chave
+ * por um Bearer de 60 minutos, como a referência descreve.
+ */
+async function comChaveDeApi(caminho: string, metodo: string, corpo: string): Promise<Tentativa> {
+  const c = credenciais()
+  if (!c) return { alvo: caminho, status: null, erro: 'sem credencial' }
+  try {
+    const r = await fetch(`${BASE}${caminho}`, {
+      method: metodo,
+      headers: {
+        'x-api-key': c.chave,
+        'content-type': 'application/json',
+        // A senha viaja nos dois lugares plausíveis: há API que a espera como
+        // cabeçalho irmão da chave, e há API que a espera no corpo.
+        'x-api-secret': c.senha,
+      },
+      body: corpo || undefined,
+    })
+    const texto = await r.text()
+    let json: unknown = null
+    try {
+      json = JSON.parse(texto)
+    } catch {
+      /* não-JSON */
+    }
+    return {
+      alvo: `${metodo} ${caminho} [x-api-key]`,
+      status: r.status,
+      chaves: json ? chavesDe(json) : undefined,
+      amostra: resumo(texto),
+    }
+  } catch (e) {
+    return {
+      alvo: `${metodo} ${caminho} [x-api-key]`,
+      status: null,
+      erro: e instanceof Error ? e.message : String(e),
+    }
+  }
+}
+
 export interface Sondagem {
   base: string
   credencial: string
   regiaoDescoberta: string | null
   regioes: Tentativa[]
   caminhos: Tentativa[]
+  documentacao: { achados: string[]; erro?: string }
+  chaveDeApi: Tentativa[]
 }
 
 /**
@@ -169,27 +270,31 @@ export async function sondar(): Promise<Sondagem> {
     regiaoDescoberta: null,
     regioes: [],
     caminhos: [],
+    documentacao: { achados: [] },
+    chaveDeApi: [],
   }
   if (!pagaleveConfigurada()) return saida
 
-  for (const region of REGIOES) {
-    const t = await pedir('/', region)
-    saida.regioes.push(t)
-    const amostra = t.amostra ?? ''
-    const regiaoErrada = /scoped to a valid region|Credential should be scoped/i.test(amostra)
-    const assinaturaErrada = /SignatureDoesNotMatch|not match any credential/i.test(amostra)
-    if (!regiaoErrada && !assinaturaErrada) {
-      saida.regiaoDescoberta = region
-      break
-    }
+  // A referência primeiro: ela pode entregar o caminho de graça, e aí nenhuma
+  // das varreduras abaixo precisa adivinhar.
+  saida.documentacao = await caminhosDocumentados()
+
+  // O SigV4 já foi descartado pelo dado da rodada anterior, mas a checagem de
+  // região fica: é ela que prova que a conclusão continua valendo, em vez de
+  // eu confiar na memória de um diagnóstico antigo.
+  const t = await pedir('/', 'us-east-1')
+  saida.regioes.push(t)
+  if (!/scoped to a valid region/i.test(t.amostra ?? '')) saida.regiaoDescoberta = 'us-east-1'
+
+  const corpo = JSON.stringify({
+    api_key: process.env.PAGALEVE_CHAVE,
+    api_secret: process.env.PAGALEVE_SENHA,
+  })
+  for (const caminho of CAMINHOS_DE_AUTENTICACAO) {
+    saida.chaveDeApi.push(await comChaveDeApi(caminho, 'POST', corpo))
   }
-
-  // Sem região aceita não adianta varrer caminho: todo caminho responderia o
-  // mesmo erro de assinatura, e a varredura só gastaria requisição.
-  if (!saida.regiaoDescoberta) return saida
-
   for (const caminho of CAMINHOS) {
-    saida.caminhos.push(await pedir(caminho, saida.regiaoDescoberta))
+    saida.chaveDeApi.push(await comChaveDeApi(caminho, 'GET', ''))
   }
   return saida
 }
