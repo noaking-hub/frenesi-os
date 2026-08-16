@@ -199,7 +199,12 @@ function Grupo({
   alternar: () => void
   recolhida?: boolean
 }) {
-  const temSubs = Boolean(grupo.telas?.length)
+  // Tela oculta continua existindo e continua marcando o grupo como ativo —
+  // ela só não ocupa uma linha do menu. `grupoAberto` olha a lista inteira de
+  // propósito: abrir o Extrato pelo card da Visão tem de acender "Financeiro"
+  // na barra, senão o operador perde a noção de onde está.
+  const visiveis = grupo.telas?.filter((t) => !t.oculta) ?? []
+  const temSubs = visiveis.length > 0
   const ativo = grupo.href
     ? rotaAtiva(pathname, grupo.href)
     : grupoAberto(pathname, grupo)
@@ -289,7 +294,7 @@ function Grupo({
             borderLeft: '1px solid rgba(239,209,140,.16)',
           }}
         >
-          {grupo.telas!.map((tela) => {
+          {visiveis.map((tela) => {
             const telaAtiva = rotaAtiva(pathname, tela.href)
             return (
               <Link

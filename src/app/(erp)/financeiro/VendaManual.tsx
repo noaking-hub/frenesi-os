@@ -7,10 +7,16 @@ import { BotaoSecundario, Rotulo, TituloSecao } from '@/components/erp/primitivo
 import { COR } from '@/components/erp/tokens'
 import { brl, parseNum, plural, volume } from '@/domain'
 
-import { registrarVendaManual, type ItemVendaManual } from './actions'
+import { registrarVendaManual, type ItemVendaManual } from '../pedidos/actions'
 
 /**
  * Venda manual — a venda de balcão, WhatsApp ou Instagram lançada à mão.
+ *
+ * Mora no Financeiro, e não em Pedidos, porque é lá que ela é lembrada: quem
+ * fecha uma venda no WhatsApp vai ao Financeiro registrar o dinheiro, não à
+ * lista de pedidos da loja. Ela também substitui o lançamento manual solto na
+ * categoria "Vendas fora da loja" — eram dois jeitos de anotar o mesmo fato, e
+ * o jeito solto não baixava estoque nem entrava na conciliação.
  *
  * Sem esta tela, a venda que não passa pelo checkout some duas vezes: o
  * perfume sai do frasco sem sair do saldo (e a reposição chega tarde) e o

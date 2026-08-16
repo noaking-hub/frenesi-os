@@ -990,6 +990,14 @@ export interface VisaoFinanceira {
   pendenciasConciliacao: { qtd: number; valor: number }
   repassesSemDestino: { qtd: number; valor: number }
   resultadoMes: number
+  /**
+   * O mesmo resultado no mês anterior.
+   *
+   * Um lucro solto não diz nada — R$ 3.000 é ótimo depois de R$ 1.000 e péssimo
+   * depois de R$ 9.000. É a comparação que transforma o número numa informação,
+   * e é o que evita ter de abrir a DRE só para saber se o mês está melhor.
+   */
+  resultadoMesAnterior: number
   receitaLiquidaMes: number
   margemMes: number
   projecao: ProjecaoDeCaixa
@@ -1017,6 +1025,7 @@ export async function carregarVisaoFinanceira(): Promise<VisaoFinanceira> {
     pendenciasConciliacao: { qtd: 0, valor: 0 },
     repassesSemDestino: { qtd: 0, valor: 0 },
     resultadoMes: 0,
+    resultadoMesAnterior: 0,
     receitaLiquidaMes: 0,
     margemMes: 0,
     projecao: projetarCaixa(0, []),
@@ -1037,6 +1046,7 @@ export async function carregarVisaoFinanceira(): Promise<VisaoFinanceira> {
     contas,
     lancamentos,
     { data: dre },
+    { data: dreAnterior },
     { data: fluxo },
     conciliacao,
     semDestino,
@@ -1045,6 +1055,7 @@ export async function carregarVisaoFinanceira(): Promise<VisaoFinanceira> {
       lerContas(),
       lerLancamentos(),
       sb.rpc('dre_gerencial', { p_competencia: competencia }),
+      sb.rpc('dre_gerencial', { p_competencia: competenciaAnterior(competencia) }),
       sb.rpc('fluxo_de_caixa', { p_de: hoje, p_ate: iso(90) }),
       carregarConciliacao(),
       resumoDaFilaDeDestino(),
@@ -1102,6 +1113,8 @@ export async function carregarVisaoFinanceira(): Promise<VisaoFinanceira> {
   type LinhaRpc = { linha: string; valor: string }
   const linha = (nome: string) =>
     Number(((dre ?? []) as LinhaRpc[]).find((l) => l.linha === nome)?.valor ?? 0)
+  const linhaAnterior = (nome: string) =>
+    Number(((dreAnterior ?? []) as LinhaRpc[]).find((l) => l.linha === nome)?.valor ?? 0)
 
   /**
    * Composição de saídas: só o que É despesa.
@@ -1148,6 +1161,7 @@ export async function carregarVisaoFinanceira(): Promise<VisaoFinanceira> {
     },
     repassesSemDestino: semDestino,
     resultadoMes: linha('= Resultado gerencial'),
+    resultadoMesAnterior: linhaAnterior('= Resultado gerencial'),
     receitaLiquidaMes: linha('= Receita líquida'),
     margemMes: linha('= Margem de contribuição'),
     projecao,

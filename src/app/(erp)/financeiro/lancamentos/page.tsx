@@ -37,6 +37,8 @@ import {
 import type { LancamentoGerencial, SituacaoLancamento } from '@/domain'
 
 import { AcoesGerenciais, NovoCompromisso } from '../Compromissos'
+import { dadosDaVendaManual } from '../dados-da-venda-manual'
+import { VendaManual } from '../VendaManual'
 import { ProvedorDeListas } from '../ListasDoFormulario'
 import { BarraDeFiltros } from './Filtros'
 
@@ -81,7 +83,7 @@ interface Busca {
 
 export default async function Lancamentos({ searchParams }: { searchParams: Promise<Busca> }) {
   const filtro = await searchParams
-  const p = await carregarLancamentos()
+  const [p, venda] = await Promise.all([carregarLancamentos(), dadosDaVendaManual()])
 
   if (p.semBanco) {
     return (
@@ -460,13 +462,21 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
           <>
             <Painel padding="14px 15px 15px">
               <Pilha gap={9}>
+                {/* Primeiro botão da coluna, e de propósito: venda de balcão,
+                    WhatsApp ou Instagram é o ÚNICO dinheiro que o ERP não
+                    descobre sozinho. Mercado Pago e Pagaleve chegam pelo
+                    extrato; esta aqui só existe se alguém digitar. */}
+                <VendaManual
+                  bases={venda.bases}
+                  contas={venda.contas}
+                  tamanhos={venda.tamanhos}
+                />
                 <NovoCompromisso
                   contas={p.contas}
                   categorias={p.categorias}
                   centros={p.centrosCusto}
                 />
-                <AcaoPainel href="/financeiro/extrato">Importar do extrato</AcaoPainel>
-                <AcaoPainel href="/financeiro/conciliacao">Conciliar recebimentos</AcaoPainel>
+                <AcaoPainel href="/financeiro/extrato">Conferir o extrato</AcaoPainel>
               </Pilha>
             </Painel>
 

@@ -22,6 +22,21 @@ export interface Tela {
   titulo?: string
   subtitulo?: string
   icone?: string
+  /**
+   * Existe, funciona, mas não aparece no menu.
+   *
+   * É diferente de não existir. Estas telas provam de onde veio cada número —
+   * o extrato bruto, a conciliação venda a venda, o plano de categorias — e
+   * são justamente o que se abre quando um valor parece errado. O que elas não
+   * são é trabalho diário: 630 das 631 linhas do extrato viram lançamento
+   * sozinhas, e 552 dos 630 repasses conciliam sem ninguém tocar. Um menu que
+   * as lista todo dia sugere uma tarefa que não existe.
+   *
+   * Continuam com título e subtítulo aqui porque `localizar` usa esta lista
+   * para montar o cabeçalho. Removê-las de vez faria a página abrir escrito
+   * "Módulo" no topo — tela órfã, com cara de defeito.
+   */
+  oculta?: boolean
 }
 
 export interface GrupoNav {
@@ -167,6 +182,7 @@ export const NAV: GrupoNav[] = [
         pronta: true,
         subtitulo: 'Saldo por conta bancária, carteira e caixa operacional',
         icone: 'banco',
+        oculta: true,
       },
       {
         id: 'extrato',
@@ -176,6 +192,7 @@ export const NAV: GrupoNav[] = [
         titulo: 'Extrato Inteligente',
         subtitulo: 'Importação, leitura e classificação dos movimentos bancários',
         icone: 'faisca',
+        oculta: true,
       },
       {
         id: 'conciliacao',
@@ -185,6 +202,7 @@ export const NAV: GrupoNav[] = [
         titulo: 'Conciliação Bancária',
         subtitulo: 'Cada venda contra o extrato e as tarifas reais',
         icone: 'recibo',
+        oculta: true,
       },
       {
         id: 'repasses',
@@ -201,6 +219,7 @@ export const NAV: GrupoNav[] = [
         pronta: true,
         subtitulo: 'Realizado, comprometido e projetado',
         icone: 'linha',
+        oculta: true,
       },
       {
         id: 'dre',
@@ -209,6 +228,7 @@ export const NAV: GrupoNav[] = [
         pronta: true,
         subtitulo: 'Resultado por competência e por regime gerencial',
         icone: 'balanca',
+        oculta: true,
       },
       {
         id: 'categorias',
@@ -217,6 +237,7 @@ export const NAV: GrupoNav[] = [
         pronta: true,
         subtitulo: 'Plano de contas gerencial do Financeiro',
         icone: 'etiqueta',
+        oculta: true,
       },
     ],
   },

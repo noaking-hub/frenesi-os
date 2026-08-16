@@ -24,12 +24,13 @@ import {
   TabelaUi,
   Vazio,
   type ColunaUi,
+  type NomeIcone,
   type TomUi,
 } from '@/components/erp/ui'
 import { TileMarca, iconeDaCategoria } from '@/components/erp/Marcas'
 import { BarrasEixo, CORES_SERIE, Legenda, RoscaLegenda } from '@/components/erp/Visualizacoes'
 import { carregarVisaoFinanceira } from '@/data/financeiro'
-import { brl, competenciaPorExtenso, diaCurtoPt, plural } from '@/domain'
+import { brl, competenciaAnterior, competenciaPorExtenso, diaCurtoPt, plural } from '@/domain'
 
 import type { AlertaFinanceiro, LancamentoGerencial } from '@/domain'
 
@@ -50,6 +51,53 @@ const TOM_ALERTA: Record<AlertaFinanceiro['severidade'], TomUi> = {
   atencao: 'atencao',
   informativo: 'info',
 }
+
+/**
+ * As telas de conferência, descritas pela PERGUNTA que respondem.
+ *
+ * "Extrato" não diz nada a quem está com um número estranho na mão; "de onde
+ * veio cada crédito" diz. Como elas saíram do menu, o nome delas deixou de ser
+ * uma lembrança diária — então o rótulo precisa carregar sozinho o motivo de
+ * alguém clicar.
+ */
+const ORIGEM_DOS_NUMEROS: { href: string; rotulo: string; responde: string; icone: NomeIcone }[] = [
+  {
+    href: '/financeiro/extrato',
+    rotulo: 'Extrato',
+    responde: 'Cada linha crua do Mercado Pago e da Pagaleve, antes de virar lançamento',
+    icone: 'faisca',
+  },
+  {
+    href: '/financeiro/conciliacao',
+    rotulo: 'Conciliação',
+    responde: 'Venda a venda: o que o gateway prometeu, o que creditou e a tarifa real',
+    icone: 'recibo',
+  },
+  {
+    href: '/financeiro/contas',
+    rotulo: 'Contas e caixas',
+    responde: 'Saldo de cada conta e de onde ele vem — integração, extrato ou digitado',
+    icone: 'banco',
+  },
+  {
+    href: '/financeiro/fluxo-de-caixa',
+    rotulo: 'Fluxo de caixa',
+    responde: 'A projeção dia a dia e o compromisso que puxa o saldo para baixo',
+    icone: 'linha',
+  },
+  {
+    href: '/financeiro/dre',
+    rotulo: 'DRE gerencial',
+    responde: 'O resultado mês a mês, com seis meses de evolução',
+    icone: 'balanca',
+  },
+  {
+    href: '/financeiro/categorias',
+    rotulo: 'Categorias',
+    responde: 'O plano de contas e as regras que classificam sozinhas',
+    icone: 'etiqueta',
+  },
+]
 
 export default async function DashboardFinanceiro({
   searchParams,
@@ -385,6 +433,20 @@ export default async function DashboardFinanceiro({
               destaque
             />
           </Pilha>
+          {/* Um lucro solto não informa: R$ 3.000 é ótimo depois de mil e
+              péssimo depois de nove mil. É a comparação que responde "o mês
+              está melhor?" sem precisar abrir a DRE inteira. */}
+          <LinhaValor
+            rotulo={`Mês anterior · ${competenciaPorExtenso(competenciaAnterior(v.competencia))}`}
+            valor={brl(v.resultadoMesAnterior)}
+            tom={
+              v.resultadoMesAnterior === 0
+                ? 'neutro'
+                : v.resultadoMes >= v.resultadoMesAnterior
+                  ? 'ok'
+                  : 'atencao'
+            }
+          />
           <span
             className="font-sans"
             style={{
@@ -491,6 +553,70 @@ export default async function DashboardFinanceiro({
         ) : (
           <Vazio icone="banco" texto="Nenhuma conta cadastrada." />
         )}
+      </Painel>
+
+      {/*
+        As telas que saíram do menu continuam aqui, nomeadas pelo que provam.
+
+        Elas não são trabalho diário — 630 das 631 linhas do extrato viram
+        lançamento sozinhas, 552 dos 630 repasses conciliam sem ninguém tocar.
+        Mas são exatamente o que se abre quando um número parece errado, e uma
+        tela que existe sem caminho até ela é pior do que uma que não existe:
+        some do menu, some da memória, e o número fica sem como ser conferido.
+      */}
+      <Painel
+        titulo="Conferir a origem dos números"
+        icone="busca"
+        nota="Fora do menu porque rodam sozinhas — abra quando algo não fechar"
+      >
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(232px, 1fr))',
+            gap: 10,
+          }}
+        >
+          {ORIGEM_DOS_NUMEROS.map((t) => (
+            <Link
+              key={t.href}
+              href={t.href}
+              className="hover:brightness-125"
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 10,
+                padding: '11px 13px',
+                border: '1px solid rgba(255,255,255,.06)',
+                borderRadius: 11,
+                background: 'rgba(255,255,255,.015)',
+                textDecoration: 'none',
+              }}
+            >
+              <span style={{ color: TINTA.ouro, paddingTop: 1, flex: 'none' }}>
+                <Ico n={t.icone} tamanho={15} />
+              </span>
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+                <span
+                  className="font-sans"
+                  style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-tinta)' }}
+                >
+                  {t.rotulo}
+                </span>
+                <span
+                  className="font-sans"
+                  style={{
+                    fontSize: 10.5,
+                    lineHeight: 1.45,
+                    color: 'rgba(242,237,227,.42)',
+                    textWrap: 'pretty',
+                  }}
+                >
+                  {t.responde}
+                </span>
+              </span>
+            </Link>
+          ))}
+        </div>
       </Painel>
     </Pilha>
   )
