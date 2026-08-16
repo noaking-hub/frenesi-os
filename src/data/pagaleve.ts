@@ -129,6 +129,82 @@ export async function pedirNaPagaleve(
   return chamar(await autenticar(true))
 }
 
+// ── Leitura ────────────────────────────────────────────────────────────────
+
+/** Uma venda pela Pagaleve. Valores em CENTAVOS, como a API devolve. */
+export interface TransacaoPagaleve {
+  checkout_id: string
+  order_reference: string
+  order_amount: number
+  current_amount: number
+  refunded_amount: number
+  total_fee_amount: number
+  merchant_service_fee: number
+  merchant_transaction_fee: number
+  order_purchase_date: string
+  timestamp: string
+}
+
+/** Um repasse da Pagaleve para a conta. `final_amount` negativo é saída de lá. */
+export interface TransferenciaPagaleve {
+  id: string
+  transaction_type: string
+  type: string
+  amount: number
+  final_amount: number
+  total_fee_amount: number
+  transferred_date: string
+  status: string
+  accumulated_days: string[]
+}
+
+interface Pagina<T> {
+  items?: T[]
+  total_count?: number
+}
+
+/**
+ * Percorre uma listagem até o fim.
+ *
+ * A paginação não está documentada em lugar que eu alcance, então o laço
+ * confia no `total_count` que a própria resposta traz e para quando a página
+ * vem vazia — o que também protege caso os parâmetros sejam ignorados: sem a
+ * parada por página vazia, um `limit` desconhecido viraria laço infinito
+ * relendo a primeira página.
+ */
+async function listar<T>(caminho: string, teto = 40): Promise<{ itens: T[]; total: number }> {
+  const itens: T[] = []
+  let total = 0
+
+  for (let pagina = 0; pagina < teto; pagina++) {
+    const juncao = caminho.includes('?') ? '&' : '?'
+    const r = await pedirNaPagaleve(`${caminho}${juncao}limit=100&offset=${pagina * 100}`)
+    if (!r.ok) {
+      throw new Error(`${caminho} respondeu ${r.status}: ${(await r.text()).slice(0, 300)}`)
+    }
+    const json = (await r.json()) as Pagina<T>
+    const lote = json.items ?? []
+    total = json.total_count ?? total
+    if (lote.length === 0) break
+    itens.push(...lote)
+    if (itens.length >= total && total > 0) break
+  }
+  return { itens, total }
+}
+
+export function listarTransacoes() {
+  return listar<TransacaoPagaleve>('/v1/transactions')
+}
+
+export function listarTransferencias() {
+  return listar<TransferenciaPagaleve>('/v1/transfers')
+}
+
+/** Centavos para reais, que é a unidade de todo o resto do ERP. */
+export function emReais(centavos: number): number {
+  return Math.round(centavos) / 100
+}
+
 // ── Sondagem ───────────────────────────────────────────────────────────────
 
 interface Tentativa {
