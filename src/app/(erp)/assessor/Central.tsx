@@ -114,6 +114,7 @@ export function PrioridadesAgora({ itens, resumo }: { itens: Prioridade[]; resum
       rodape={{
         nota:
           'Fila ordenada por regra fixa do ERP — severidade, depois impacto. A IA relata esta ordem; não a reordena.',
+        link: { href: '/assessor/auditoria', texto: 'Auditoria e uso' },
       }}
     >
       {itens.length === 0 ? (
