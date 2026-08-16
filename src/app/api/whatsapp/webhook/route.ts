@@ -6,6 +6,7 @@ import { cancelarAcao, confirmarAcao, lerAcoesPendentes } from '@/data/assessor/
 import { escritaLiberada, executarInteracao } from '@/data/assessor/motor'
 import {
   atorDoWhatsapp,
+  historicoDoTelefone,
   marcarRespondida,
   registrarMensagem,
   resolverIdentidade,
@@ -142,6 +143,10 @@ async function atender(m: MensagemRecebida) {
 
     const r = await executarInteracao({
       pergunta: texto,
+      // O histórico é lido AQUI e não dentro do motor: o motor não sabe o que é
+      // telefone, e não deveria saber. O adaptador traduz — é o que mantém os
+      // dois canais no mesmo cérebro sem contaminá-lo com o formato de cada um.
+      historico: await historicoDoTelefone(m.from),
       ator,
       canal: 'whatsapp',
       traceId,

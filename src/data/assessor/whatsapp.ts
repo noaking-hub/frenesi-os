@@ -106,6 +106,45 @@ export async function registrarMensagem(dados: {
   return { nova: false, respostaAnterior: data?.resposta ? String(data.resposta) : null }
 }
 
+/**
+ * O que já foi dito neste número — §3.3, conversa com memória.
+ *
+ * Sem isto, cada mensagem do WhatsApp nascia órfã, e o efeito era exatamente o
+ * que um assistente burro parece: "detalhe essas vendas" virava "quais vendas?",
+ * e um "1" respondendo a uma lista chegava sem a lista. O canal do ERP sempre
+ * passou histórico; o do WhatsApp nunca passou, e a diferença não estava em
+ * lugar nenhum — nem no código, nem na tela.
+ *
+ * O corte de 6 horas é deliberado. Conversa de ontem não é contexto de hoje: um
+ * "e o mês passado?" pendurado num assunto de anteontem produz resposta sobre a
+ * coisa errada, que é pior do que perguntar de novo.
+ */
+export async function historicoDoTelefone(
+  telefone: string,
+  limite = 6,
+): Promise<{ papel: 'usuario' | 'assessor'; texto: string }[]> {
+  if (!supabaseConfigurado()) return []
+  const desde = new Date(Date.now() - 6 * 60 * 60_000).toISOString()
+  const { data, error } = await supabaseServer()
+    .from('gerente_whatsapp_mensagens')
+    .select('texto, resposta, recebida_em')
+    .eq('telefone', normalizarTelefone(telefone))
+    .not('resposta', 'is', null)
+    .gte('recebida_em', desde)
+    .order('recebida_em', { ascending: false })
+    .limit(limite)
+  // Histórico é conveniência, não correção: falhar em lê-lo devolve uma
+  // resposta sem contexto, nunca um erro para quem perguntou.
+  if (error || !data) return []
+
+  return data
+    .reverse()
+    .flatMap((m) => [
+      { papel: 'usuario' as const, texto: String(m.texto) },
+      { papel: 'assessor' as const, texto: String(m.resposta) },
+    ])
+}
+
 export async function marcarRespondida(id: string, resposta: string, traceId: string, erro?: string) {
   if (!supabaseConfigurado()) return
   await supabaseServer()
