@@ -67,6 +67,11 @@ export function AssistenteContextual() {
   const [pergunta, setPergunta] = useState('')
   const [falas, setFalas] = useState<Fala[]>([])
   const [pensando, setPensando] = useState(false)
+  // A conversa do painel é UMA só enquanto ele estiver aberto. Sem guardar o
+  // id, cada pergunta abria uma conversa nova: o histórico do ERP virava uma
+  // pilha de conversas de duas mensagens, e o painel não lembrava do que tinha
+  // acabado de responder — o mesmo esquecimento que o WhatsApp tinha.
+  const [conversaId, setConversaId] = useState<string | null>(null)
   const campo = useRef<HTMLTextAreaElement>(null)
   const fim = useRef<HTMLDivElement>(null)
 
@@ -112,9 +117,15 @@ export function AssistenteContextual() {
       const r = await fetch('/api/assessor', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ pergunta: comContexto }),
+        body: JSON.stringify({ pergunta: comContexto, conversaId }),
       })
-      const d = (await r.json()) as { texto?: string; erro?: string; ferramentas?: Fala['ferramentas'] }
+      const d = (await r.json()) as {
+        texto?: string
+        erro?: string
+        conversaId?: string
+        ferramentas?: Fala['ferramentas']
+      }
+      if (d.conversaId) setConversaId(d.conversaId)
       setFalas((f) => [
         ...f,
         {

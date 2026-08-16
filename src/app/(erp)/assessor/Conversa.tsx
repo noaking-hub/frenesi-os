@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
 
 import { BaixarCsv } from '@/components/erp/BaixarCsv'
 import {
@@ -103,12 +102,15 @@ export function Conversa({
   temCritico: boolean
   temEstoqueCritico: boolean
 }) {
-  const router = useRouter()
   const [mensagens, setMensagens] = useState<MensagemNaTela[]>(inicial)
   const [pergunta, setPergunta] = useState('')
   const [pensando, setPensando] = useState(false)
   const [id, setId] = useState(conversaId)
   const [busca, setBusca] = useState('')
+  // A lista lateral vira estado, e não prop direta, porque a conversa nova
+  // precisa aparecer nela sem passar por um novo render do servidor — que é
+  // justamente o que remontava esta tela e apagava tudo.
+  const [listaDeConversas, setListaDeConversas] = useState(conversas)
   const fim = useRef<HTMLDivElement>(null)
   const campo = useRef<HTMLTextAreaElement>(null)
 
@@ -120,9 +122,9 @@ export function Conversa({
 
   const filtradas = useMemo(() => {
     const q = busca.trim().toLowerCase()
-    if (!q) return conversas
-    return conversas.filter((c) => c.titulo.toLowerCase().includes(q))
-  }, [busca, conversas])
+    if (!q) return listaDeConversas
+    return listaDeConversas.filter((c) => c.titulo.toLowerCase().includes(q))
+  }, [busca, listaDeConversas])
 
   async function enviar(texto: string) {
     const limpo = texto.trim()
@@ -148,8 +150,30 @@ export function Conversa({
       }
       if (dados.conversaId && dados.conversaId !== id) {
         setId(dados.conversaId)
-        // Sem isto a conversa nova não entra na lista lateral até um F5.
-        router.replace(`/assessor?c=${dados.conversaId}`, { scroll: false })
+        // `history.replaceState`, e NÃO `router.replace`. A diferença não é de
+        // estilo: `router.replace` re-renderiza a página no servidor, o `key`
+        // desta conversa muda de "nova" para o id, e o React DESMONTA a tela
+        // inteira. Quem estivesse escrevendo a próxima pergunta enquanto a
+        // primeira resposta chegava via o texto sumir sozinho — foi o defeito
+        // relatado, e nada na tela indicava a causa.
+        //
+        // Assim a URL passa a apontar para a conversa (recarregar e
+        // compartilhar continuam funcionando) sem custar um render novo.
+        window.history.replaceState(null, '', `/assessor?c=${dados.conversaId}`)
+        // E a conversa entra na lista lateral aqui mesmo, que era a razão de
+        // existir do `router.replace`.
+        setListaDeConversas((atual) =>
+          atual.some((c) => c.id === dados.conversaId!)
+            ? atual
+            : [
+                {
+                  id: dados.conversaId!,
+                  titulo: limpo.length > 60 ? `${limpo.slice(0, 60)}…` : limpo,
+                  atualizadaEm: new Date().toISOString(),
+                },
+                ...atual,
+              ],
+        )
       }
       setMensagens((m) => [
         ...m,
@@ -274,7 +298,7 @@ export function Conversa({
         atual={id}
         busca={busca}
         aoBuscar={setBusca}
-        total={conversas.length}
+        total={listaDeConversas.length}
       />
     </div>
   )

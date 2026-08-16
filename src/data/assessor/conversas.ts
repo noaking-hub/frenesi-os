@@ -99,7 +99,13 @@ export async function lerMensagens(conversaId: string): Promise<Mensagem[]> {
  * navegável — "Nova conversa" repetido oito vezes não é uma lista, é um monte.
  */
 function tituloDe(pergunta: string): string {
-  const limpo = pergunta.replace(/\s+/g, ' ').trim()
+  // O painel lateral manda a tela como prefixo entre colchetes na primeira
+  // linha. Ele precisa estar na PERGUNTA — é o que faz o contexto aparecer na
+  // auditoria — e não pode estar no TÍTULO: a lista lateral virava oito linhas
+  // de `[Estou na tela "Conciliação" (/financeiro/con…`, todas iguais, sem
+  // distinguir uma conversa da outra.
+  const semContexto = pergunta.replace(/^\s*\[[^\]]*\]\s*/, '')
+  const limpo = (semContexto || pergunta).replace(/\s+/g, ' ').trim()
   return limpo.length <= 60 ? limpo || 'Nova conversa' : `${limpo.slice(0, 57)}…`
 }
 
