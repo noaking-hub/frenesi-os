@@ -42,17 +42,44 @@ Tempo real: **40 a 60 minutos**, a maior parte esperando a Meta processar.
 
 ## Passo 2 — Pegar o número e o Phone ID
 
-Na tela **WhatsApp → Configuração da API**:
+Na **Etapa 1. Experimente**, a Meta entrega um **número de teste** pronto. Vale
+começar por ele: não precisa de chip, não tira número nenhum do aplicativo, e
+tudo o que for configurado agora continua valendo depois.
 
-1. A Meta oferece um **número de teste** já pronto. Ele serve para você ver a
-   coisa funcionando hoje, mas só envia para até 5 números cadastrados à mão e
-   expira. Use-o para testar, e depois troque.
-2. Para o número definitivo: **Adicionar número de telefone** → informe o número
-   novo → escolha verificação por SMS ou ligação → digite o código.
-3. Anote os dois valores que aparecem no alto da tela:
-   - **Identificação do número de telefone** → é o `WHATSAPP_PHONE_ID`
-     (um número comprido, tipo `123456789012345`).
-   - **Identificação da conta do WhatsApp Business** → guarde, pode ser pedida.
+Anote os dois valores que aparecem ali:
+
+- **Phone Number ID** → é o `WHATSAPP_PHONE_ID`.
+- **Identificação da conta do WhatsApp Business** (WABA) → guarde, pode ser
+  pedida.
+
+### O que o número de teste tem de diferente
+
+**Ele só entrega mensagem para até 5 números cadastrados à mão.** Essa é a
+limitação que importa para nós, e ela morde de um jeito não óbvio: o Gerente
+não inicia conversa, ele RESPONDE — e a resposta é uma mensagem de saída para o
+seu celular. Se o seu número não estiver na lista de destinatários, a sua
+pergunta chega ao ERP, a resposta é processada, e a entrega falha com o erro
+`131030`. Parece que o Gerente ficou mudo; na verdade foi a Meta que barrou.
+
+Então, antes de testar: no seletor **Destinatário**, cadastre o seu número.
+
+O **"Gerar token"** dessa tela produz um token de **24 horas**. Não vale a pena
+usá-lo nem para o teste — amanhã ele morre no meio de uma conversa e o sintoma
+não aponta para a causa. Faça o token permanente do Passo 3 e use-o desde já.
+
+### Trocar para o número definitivo depois
+
+Quando o chip definitivo chegar: **Etapa 2. Configuração da produção** →
+adicionar número → verificar por SMS.
+
+A troca mexe em **uma variável só**: o `WHATSAPP_PHONE_ID` passa a ser o do
+número novo, e um deploy resolve. Continuam valendo sem tocar em nada:
+
+- o `WHATSAPP_TOKEN`, se for o permanente do usuário do sistema;
+- o webhook e o `WHATSAPP_VERIFY_TOKEN`;
+- a tabela `gerente_whatsapp_autorizados` — ela guarda **o seu número pessoal**,
+  o de quem conversa com o Gerente, e não o número da empresa. Trocar o número
+  do negócio não mexe em quem tem permissão.
 
 ## Passo 3 — Gerar o token permanente
 
