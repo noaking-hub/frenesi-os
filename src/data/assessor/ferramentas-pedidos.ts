@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { carregarPedidos } from '@/data/consultas'
-import { carregarDre, carregarLancamentos } from '@/data/financeiro'
+import { carregarConciliacao, carregarDre, carregarLancamentos } from '@/data/financeiro'
 import { janelasDe, PERIODOS, type Periodo } from '@/data/painel'
 import { carregarPerfisClientes } from '@/data/perfis-clientes'
 import { diaDaOperacao, paginar } from '@/domain'
@@ -83,7 +83,14 @@ export const FERRAMENTAS_PEDIDOS: Ferramenta[] = [
     executar: async (args) => {
       const janela = janelaDe(args)
       const limite = Math.min(120, Math.max(1, Number(args.limite ?? 40) || 40))
-      const todos = await carregarPedidos()
+      // A conciliação entra JUNTO porque "quanto eu recebi disso" é a pergunta
+      // que vem logo depois de "quanto vendi", e sem ela a resposta anterior
+      // era um R$ 0,00 inventado: o único número de recebimento à mão media
+      // outra coisa (baixas de caixa no dia), e o modelo preencheu o buraco com
+      // uma explicação plausível sobre prazo de gateway. Faltava o dado, não
+      // juízo.
+      const [todos, conciliacao] = await Promise.all([carregarPedidos(), carregarConciliacao()])
+      const repassePorPedido = new Map(conciliacao.vendas.map((v) => [v.pedidoId, v]))
 
       const doPeriodo = todos
         .filter((p) => {
@@ -95,6 +102,12 @@ export const FERRAMENTAS_PEDIDOS: Ferramenta[] = [
         .sort((a, b) => b.pedido.compradoEm.localeCompare(a.pedido.compradoEm))
 
       const total = doPeriodo.reduce((s, p) => s + p.pedido.valor, 0)
+      const repasses = doPeriodo
+        .map((p) => repassePorPedido.get(p.pedido.id))
+        .filter((v): v is NonNullable<typeof v> => Boolean(v))
+      const liquidoRecebido = repasses.reduce((s, v) => s + (v.liquidoRecebido ?? 0), 0)
+      const taxasReais = repasses.reduce((s, v) => s + (v.taxaReal ?? 0), 0)
+      const semCredito = repasses.filter((v) => v.liquidoRecebido === null).length
 
       return paginar(
         doPeriodo.map(({ pedido, logistica }) => ({
@@ -112,6 +125,14 @@ export const FERRAMENTAS_PEDIDOS: Ferramenta[] = [
           rastreio: pedido.rastreio,
           itens: itensEmTexto(pedido.itens),
           pecas: pedido.itens.length,
+          // O lado do dinheiro, por venda: como foi pago, quanto o gateway
+          // cobrou e quanto sobrou. `liquidoRecebido: null` significa que o
+          // crédito ainda não foi identificado — e null é diferente de zero.
+          meioDePagamento: repassePorPedido.get(pedido.id)?.meio ?? null,
+          taxaCobrada: repassePorPedido.get(pedido.id)?.taxaReal ?? null,
+          liquidoRecebido: repassePorPedido.get(pedido.id)?.liquidoRecebido ?? null,
+          creditadoEm: repassePorPedido.get(pedido.id)?.recebidoEm ?? null,
+          situacaoDoCredito: repassePorPedido.get(pedido.id)?.status ?? 'sem repasse registrado',
         })),
         limite,
         {
@@ -119,12 +140,24 @@ export const FERRAMENTAS_PEDIDOS: Ferramenta[] = [
             doPeriodo.length === 0
               ? `Nenhuma venda em ${janela.rotulo}.`
               : `${doPeriodo.length} venda(s) em ${janela.rotulo}, somando R$ ${total.toFixed(2)}.`,
-          totais: { pedidos: doPeriodo.length, valorTotal: total },
+          totais: {
+            pedidos: doPeriodo.length,
+            valorTotal: total,
+            liquidoRecebido,
+            taxasCobradas: taxasReais,
+            vendasSemCreditoIdentificado: semCredito,
+          },
           metadados: {
             janela,
             aviso:
               'Uma venda pode ter itens de vários perfumes; "pecas" conta os itens do pedido, ' +
               'não a quantidade de frascos por item.',
+            sobreOLiquido:
+              'liquidoRecebido é o que o gateway CREDITOU por esta venda, já sem a tarifa. ' +
+              'Não confunda com o "recebido" do resumo do período, que mede as baixas de ' +
+              'caixa NO DIA e por isso pode ser zero num dia em que houve venda. ' +
+              'Quando liquidoRecebido vem null, o crédito ainda não foi identificado — ' +
+              'null é diferente de zero, e responder "não recebi nada" nesse caso é errado.',
           },
         },
       )
