@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
-import { supabaseDaSessao } from '@/data/sessao'
+import { createServerClient, type CookieOptions } from '@supabase/ssr'
+
+import { noErp } from '@/data/enderecos'
 
 /**
  * O clique no link do e-mail de redefinição.
@@ -14,9 +16,23 @@ import { supabaseDaSessao } from '@/data/sessao'
  * Server Component não é possível. E `GET`, porque quem chama é o clique num
  * e-mail.
  *
+ * DUAS COISAS AQUI PARECEM DETALHE E SÃO O CONSERTO DE UM BUG REAL.
+ *
+ * A primeira: o destino é montado com `noErp()`, a partir do domínio público,
+ * e nunca com `req.nextUrl`. Dentro da função da Netlify, `req.nextUrl`
+ * devolve a URL imutável do deploy — `https://6a81...--erp-frenesi.netlify.app`.
+ * O cookie era gravado para `erp.frenesiperfumes.com.br`, o navegador ia para o
+ * host do deploy, e lá o cookie não existia: a pessoa clicava no link de
+ * redefinir senha e caía numa tela pedindo a senha que ela tinha esquecido.
+ *
+ * A segunda: o cookie é escrito DIRETO na resposta que vai ser devolvida, e
+ * não pelo cliente compartilhado da sessão — aquele engole falha de escrita num
+ * `catch` vazio, porque em Server Component escrever cookie é proibido mesmo.
+ * Num handler que existe justamente para gravar sessão, silêncio na escrita é o
+ * pior comportamento possível.
+ *
  * O token viaja na URL — é assim que todo link de e-mail funciona — e por isso
- * ele é de uso único e some da barra de endereços no redirecionamento logo
- * abaixo: o histórico do navegador não guarda um token ainda válido.
+ * ele é de uso único e some da barra de endereços no redirecionamento.
  */
 
 export const dynamic = 'force-dynamic'
@@ -27,25 +43,36 @@ export async function GET(req: NextRequest) {
   const tipo = p.get('tipo') ?? p.get('type') ?? 'recovery'
   const proximo = p.get('proximo') ?? '/redefinir-senha'
 
-  const falhou = (motivo: string) => {
-    const url = req.nextUrl.clone()
-    url.pathname = '/entrar'
-    url.search = ''
-    url.searchParams.set('recado', motivo)
-    return NextResponse.redirect(url)
-  }
+  const falhou = (motivo: string) =>
+    NextResponse.redirect(noErp(`/entrar?recado=${encodeURIComponent(motivo)}`))
 
   if (!tokenHash) return falhou('link-incompleto')
   if (tipo !== 'recovery') return falhou('link-invalido')
 
-  const sb = await supabaseDaSessao()
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const chave = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!url || !chave) return falhou('sem-autenticacao')
+
+  // A resposta é criada ANTES da verificação porque é nela que o cookie será
+  // gravado. Invertendo a ordem, o `setAll` não teria onde escrever.
+  const resposta = NextResponse.redirect(noErp(proximo))
+
+  const sb = createServerClient(url, chave, {
+    cookies: {
+      getAll: () => req.cookies.getAll(),
+      setAll: (novos: { name: string; value: string; options?: CookieOptions }[]) => {
+        for (const { name, value, options } of novos) resposta.cookies.set(name, value, options)
+      },
+    },
+  })
+
   const { error } = await sb.auth.verifyOtp({ type: 'recovery', token_hash: tokenHash })
   // Link vencido e link já usado chegam iguais aqui, e é o que a tela diz: o
   // caminho é o mesmo nos dois casos — pedir outro.
-  if (error) return falhou('link-vencido')
+  if (error) {
+    console.error('[auth/confirmar] verifyOtp recusou:', error.message)
+    return falhou('link-vencido')
+  }
 
-  const destino = req.nextUrl.clone()
-  destino.search = ''
-  destino.pathname = proximo.startsWith('/') && !proximo.startsWith('//') ? proximo : '/redefinir-senha'
-  return NextResponse.redirect(destino)
+  return resposta
 }

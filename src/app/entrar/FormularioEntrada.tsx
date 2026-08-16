@@ -112,10 +112,6 @@ export function FormularioEntrada({ de, recado }: { de: string; recado?: string 
         <form action={acaoRecuperar} className="fr-cartao" key="recuperar">
           <div className="fr-fio" aria-hidden />
           <span className="fr-titulo font-sans">Recuperar acesso</span>
-          <span className="fr-explica font-sans">
-            Informe o e-mail da sua conta. Se ele tiver acesso ao ERP, mandamos um link para você
-            escolher uma senha nova — vale por uma hora e só funciona uma vez.
-          </span>
 
           <CampoDeEmail valor={email} aoMudar={setEmail} rotulo="E-mail da conta" />
 

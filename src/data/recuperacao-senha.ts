@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { entregar, emailConfigurado } from '@/data/email'
+import { urlDoErp } from '@/data/enderecos'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 
 /**
@@ -18,14 +19,6 @@ import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
  * mensagens por hora — exatamente o tipo de detalhe que só aparece no dia em
  * que alguém precisa entrar e o e-mail não chega.
  */
-
-/** O endereço do ERP. Configurável porque o domínio pode mudar; o padrão não. */
-export function urlDoErp(): string {
-  return (process.env.NEXT_PUBLIC_URL_DO_ERP?.trim() || 'https://erp.frenesiperfumes.com.br').replace(
-    /\/$/,
-    '',
-  )
-}
 
 export function recuperacaoConfigurada(): boolean {
   return supabaseConfigurado() && emailConfigurado()

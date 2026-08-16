@@ -20,6 +20,14 @@ const ABERTO = [
   // Tela de login e o retorno do OAuth do próprio ERP.
   '/entrar',
   '/api/auth',
+  // A escolha da senha nova. Aberta no middleware para que a PRÓPRIA TELA
+  // possa dizer o que houve quando não há sessão — "esse link já foi usado ou
+  // venceu, peça outro". Protegida aqui, o middleware devolvia um login pelado,
+  // sem explicação, para quem tinha acabado de clicar no link do e-mail: a
+  // pessoa era mandada de volta a digitar exatamente a senha que esqueceu.
+  // Não há o que vazar: a tela é só um formulário, e trocar a senha exige a
+  // sessão que o link de uso único criou.
+  '/redefinir-senha',
   // Portal do cliente: quem abre devolução não tem — nem deve ter — conta.
   '/devolucoes',
   // Webhooks e rotinas: autenticam por token próprio no cabeçalho, não por
