@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-import { comoEstaConfigurada, pagaleveConfigurada, sondar, type Fase } from '@/data/pagaleve'
+import { comoEstaConfigurada, pagaleveConfigurada, sondar } from '@/data/pagaleve'
 
 /**
  * Sondagem da API da Pagaleve.
@@ -42,8 +42,5 @@ export async function POST(req: Request) {
       { status: 503 },
     )
   }
-  // A fase vem de fora porque a sondagem inteira não cabe numa execução: a
-  // rodada que tentou tudo de uma vez devolveu 502, e 502 não é diagnóstico.
-  const corpo = (await req.json().catch(() => ({}))) as { fase?: Fase }
-  return NextResponse.json(await sondar(corpo.fase ?? 'tudo'))
+  return NextResponse.json(await sondar())
 }
