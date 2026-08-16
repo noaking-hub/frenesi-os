@@ -193,6 +193,8 @@ export interface RelatorioDaImportacao {
   conciliadas: number
   recebido?: number
   erro?: string
+  /** Falha ao registrar a rodada. Não impede a importação, mas não some. */
+  erroDoRegistro?: string
 }
 
 const soma = (xs: number[]) => Math.round(xs.reduce((a, b) => a + b, 0) * 100) / 100
@@ -462,7 +464,7 @@ export async function importarPagaleve(
   // banco IDÊNTICO — e foi exatamente nisso que eu travei ao tentar conferir se
   // a rotina horária estava alcançando a Pagaleve. Sem esta linha, a única
   // forma de saber é o silêncio, que não distingue as duas coisas.
-  await supabaseServer()
+  const { error: erroDoRegistro } = await supabaseServer()
     .from('sincronizacoes')
     .insert({
       origem: 'pagaleve',
@@ -484,6 +486,17 @@ export async function importarPagaleve(
         aReceberTotal: (relatorio.cronograma as { aReceberTotal?: number }).aReceberTotal,
       },
     })
+
+  // O erro do registro NÃO é fatal: a importação já aconteceu, e desfazê-la por
+  // causa do log seria trocar um problema pequeno por um grande. Mas ele também
+  // não pode passar calado — foi exatamente assim que a primeira versão falhou.
+  // O CHECK da tabela só aceitava 'shopify', 'yampi' e 'pulso'; o insert era
+  // recusado, o `await` não olhava o retorno, e a marca criada para acabar com
+  // o silêncio nasceu silenciosa. Agora ela aparece no relatório.
+  if (erroDoRegistro) {
+    relatorio.erroDoRegistro = erroDoRegistro.message
+    console.error('[pagaleve] não consegui registrar a rodada:', erroDoRegistro.message)
+  }
 
   return relatorio
 }
