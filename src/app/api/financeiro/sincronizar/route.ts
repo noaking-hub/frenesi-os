@@ -174,6 +174,48 @@ export async function POST(req: Request) {
     relatorio.pagaleve = { pulado: 'PAGALEVE_CHAVE/PAGALEVE_SENHA não estão definidas' }
   }
 
+  /**
+   * O extrato vira CAIXA — e esta chamada acontece DUAS VEZES na rotina, aqui e
+   * depois do Mercado Pago. Não é descuido.
+   *
+   * A etapa do Mercado Pago espera o relatório ficar pronto por até 150s, e a
+   * rotina morre por tempo antes de chegar ao fim com frequência. Tudo o que
+   * ficava atrás dela virava etapa fantasma: existia no código, aparecia na
+   * revisão, e não rodava. Foi o que aconteceu com a Pagaleve hoje de manhã, e
+   * era o que estava acontecendo aqui — cinco vendas com o crédito registrado
+   * no extrato e nenhuma delas virando caixa. O ERP mostrava R$ 0,00 recebido
+   * num dia em que entraram R$ 669,73, e o Gerente, lendo esse zero,
+   * respondia ao dono da loja que não havia entrado dinheiro.
+   *
+   * Rodando ANTES, as linhas que a rodada anterior importou viram caixa mesmo
+   * que esta rodada morra no meio. A conversão é idempotente (`on conflict do
+   * nothing`), então a segunda chamada não duplica nada — ela só alcança o que
+   * o Mercado Pago acabou de trazer.
+   */
+  try {
+    const { data, error } = await supabaseServer().rpc('converter_extrato_em_caixa')
+    if (error) throw error
+    const linha = Array.isArray(data) ? data[0] : data
+    relatorio.extratoEmCaixaAntes = {
+      criados: linha?.criados ?? 0,
+      total: linha?.total_convertidos ?? 0,
+    }
+  } catch (e) {
+    relatorio.extratoEmCaixaAntes = { erro: mensagemDe(e) }
+  }
+
+  try {
+    const { data, error } = await supabaseServer().rpc('conciliar_repasses_pelo_extrato')
+    if (error) throw error
+    const linha = Array.isArray(data) ? data[0] : data
+    relatorio.repassesConciliadosAntes = {
+      preenchidos: linha?.preenchidos ?? 0,
+      aindaSemCredito: linha?.ainda_sem_credito ?? 0,
+    }
+  } catch (e) {
+    relatorio.repassesConciliadosAntes = { erro: mensagemDe(e) }
+  }
+
   // Entrega local logo depois dos pedidos, e ANTES das etapas lentas: a
   // Netlify corta a função por tempo, e os carimbos mostram a corrente
   // morrendo no meio a cada duas ou três rodadas. A operação marca "entregue"
