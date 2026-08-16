@@ -4,7 +4,7 @@ import { carregarPedidos } from '@/data/consultas'
 import { carregarDre, carregarLancamentos } from '@/data/financeiro'
 import { janelasDe, PERIODOS, type Periodo } from '@/data/painel'
 import { carregarPerfisClientes } from '@/data/perfis-clientes'
-import { paginar } from '@/domain'
+import { diaDaOperacao, paginar } from '@/domain'
 
 import type { Ferramenta } from './ferramentas'
 
@@ -53,14 +53,6 @@ function janelaDe(args: Record<string, unknown>): { de: string; ate: string; rot
   return { de: atual.de, ate: atual.ate, rotulo: atual.rotulo }
 }
 
-/** O dia da venda, no fuso da operação. Comparar ISO cru erraria por 3 horas. */
-function diaDaVenda(data: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Sao_Paulo',
-    dateStyle: 'short',
-  }).format(new Date(data))
-}
-
 function itensEmTexto(itens: { perfume: string; marca: string; variante: number | null }[]): string {
   return itens
     .map((i) => `${i.perfume}${i.variante ? ` ${i.variante}ml` : ''}`)
@@ -95,17 +87,19 @@ export const FERRAMENTAS_PEDIDOS: Ferramenta[] = [
 
       const doPeriodo = todos
         .filter((p) => {
-          const dia = diaDaVenda(p.pedido.data)
-          return dia >= janela.de && dia <= janela.ate
+          const dia = diaDaOperacao(p.pedido.compradoEm)
+          // Data ilegível fica de FORA e não vira "hoje": um pedido sem data
+          // confiável contado no dia errado desloca o faturamento do dia.
+          return dia !== '' && dia >= janela.de && dia <= janela.ate
         })
-        .sort((a, b) => b.pedido.data.localeCompare(a.pedido.data))
+        .sort((a, b) => b.pedido.compradoEm.localeCompare(a.pedido.compradoEm))
 
       const total = doPeriodo.reduce((s, p) => s + p.pedido.valor, 0)
 
       return paginar(
         doPeriodo.map(({ pedido, logistica }) => ({
           pedido: pedido.id,
-          quando: diaDaVenda(pedido.data),
+          quando: diaDaOperacao(pedido.compradoEm),
           cliente: pedido.cliente,
           cidade: pedido.destino,
           valor: pedido.valor,
@@ -166,7 +160,7 @@ export const FERRAMENTAS_PEDIDOS: Ferramenta[] = [
           itens: achados.slice(0, 10).map((p) => ({
             pedido: p.pedido.id,
             cliente: p.pedido.cliente,
-            quando: diaDaVenda(p.pedido.data),
+            quando: diaDaOperacao(p.pedido.compradoEm),
             valor: p.pedido.valor,
           })),
         }
@@ -174,10 +168,10 @@ export const FERRAMENTAS_PEDIDOS: Ferramenta[] = [
 
       const { pedido, logistica, devolucao } = achados[0]
       return {
-        resumo: `Pedido ${pedido.id} — ${pedido.cliente}, R$ ${pedido.valor.toFixed(2)} em ${diaDaVenda(pedido.data)}.`,
+        resumo: `Pedido ${pedido.id} — ${pedido.cliente}, R$ ${pedido.valor.toFixed(2)} em ${diaDaOperacao(pedido.compradoEm)}.`,
         pedido: {
           numero: pedido.id,
-          quando: diaDaVenda(pedido.data),
+          quando: diaDaOperacao(pedido.compradoEm),
           canal: pedido.canal,
           cliente: pedido.cliente,
           email: pedido.email,
@@ -269,7 +263,7 @@ export const FERRAMENTAS_PEDIDOS: Ferramenta[] = [
         },
         itens: c.compras.slice(0, 20).map((compra) => ({
           pedido: compra.pedidoId,
-          quando: diaDaVenda(compra.quando),
+          quando: diaDaOperacao(compra.quando),
           valor: compra.valor,
           itens: compra.itens.join(', '),
         })),
