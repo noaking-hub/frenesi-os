@@ -444,9 +444,24 @@ export function ModoDeOperacao({ escrita }: { escrita: boolean }) {
         style={{ fontSize: 11.5, lineHeight: 1.55, color: 'rgba(242,237,227,.68)', textWrap: 'pretty' }}
       >
         {escrita
-          ? 'O Gerente pode executar ações registradas, sempre com prévia, confirmação e registro em auditoria.'
-          : 'O Gerente consulta, cruza e recomenda — não altera nenhum registro. A trava é arquitetural: não existe ferramenta de escrita disponível para ele, e a política do ERP recusaria a chamada mesmo que existisse.'}
+          ? 'O Gerente pode executar ações registradas — sempre com prévia, confirmação e auditoria. Ajuste o nível de autonomia em Configurações.'
+          : 'O Gerente consulta, cruza e recomenda — não altera nenhum registro. A trava é arquitetural: nenhuma ferramenta de escrita é sequer oferecida a ele. Para liberar, vá em Configurações.'}
       </span>
+      <a
+        href="/assessor/configuracoes"
+        className="font-sans hover:brightness-125"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 7,
+          fontSize: 11.5,
+          fontWeight: 600,
+          color: TINTA[escrita ? 'atencao' : 'info'],
+        }}
+      >
+        <Ico n="ajustes" tamanho={13} />
+        Configurações do Gerente
+      </a>
     </Destaque>
   )
 }

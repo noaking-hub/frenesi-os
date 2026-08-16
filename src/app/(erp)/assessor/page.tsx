@@ -2,8 +2,10 @@ import { CabecalhoPagina, Pilha } from '@/components/erp/ui'
 import { assessorConfigurado, escritaLiberada } from '@/data/assessor/motor'
 import { carregarCentralDoGerente } from '@/data/assessor/prioridades'
 import { conversaDoUsuario, lerMensagens, listarConversas } from '@/data/assessor/conversas'
+import { lerAcoesPendentes } from '@/data/assessor/acoes'
 import { sessaoAtual } from '@/data/sessao'
 
+import { AcoesPendentes, type AcaoNaTela } from './AcoesPendentes'
 import { Conversa, type MensagemNaTela } from './Conversa'
 import {
   BriefingExecutivo,
@@ -57,6 +59,18 @@ export default async function TelaDoAssessor({
     : []
 
   const temCritico = central.itens.some((i) => i.severidade === 'critico')
+  const escrita = await escritaLiberada()
+
+  // As ações pendentes ficam ACIMA da conversa: elas são o que exige decisão
+  // agora, e enterrá-las no fim do histórico faria uma aprovação esperando
+  // resposta parecer conversa antiga.
+  const pendentes: AcaoNaTela[] = (await lerAcoesPendentes(id)).map((a) => ({
+    id: a.id,
+    ferramenta: a.ferramenta,
+    risco: a.risco,
+    validaAte: a.validaAte,
+    previa: a.previa,
+  }))
 
   return (
     <Pilha gap={18}>
@@ -72,6 +86,8 @@ export default async function TelaDoAssessor({
       <BriefingExecutivo briefing={central.briefing} />
       <ResumoDoDia e={central.executivo} />
 
+      <AcoesPendentes acoes={pendentes} conversaId={id} escritaLiberada={escrita} />
+
       <Conversa
         key={id ?? 'nova'}
         conversaId={id}
@@ -86,7 +102,7 @@ export default async function TelaDoAssessor({
         temEstoqueCritico={central.executivo.estoque.criticos > 0}
       />
 
-      <ModoDeOperacao escrita={escritaLiberada()} />
+      <ModoDeOperacao escrita={escrita} />
     </Pilha>
   )
 }

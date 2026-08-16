@@ -20,7 +20,9 @@ import {
   type MotivoDeParada,
 } from '@/domain'
 
-import { catalogoParaModelo, FERRAMENTA_POR_NOME, FERRAMENTAS, type Ferramenta } from './ferramentas'
+import { catalogoParaModelo, FERRAMENTA_POR_NOME, FERRAMENTAS, type Ferramenta } from './catalogo'
+import type { ContextoDaExecucao } from './ferramentas'
+import { lerConfiguracaoDoGerente } from './politica'
 
 /**
  * O MOTOR do Gerente: pergunta → plano → ferramentas → resposta → auditoria.
@@ -47,16 +49,19 @@ const VERSAO_API = '2023-06-01'
 const VERSAO_DO_PROMPT = '3.0.0'
 
 /**
- * A trava arquitetural da Fase 1.
+ * A trava de escrita, em duas camadas.
  *
- * O escopo é explícito: o bloqueio de escrita não pode depender do system
- * prompt. Depende desta variável — enquanto ela não estiver ligada, o Policy
- * Engine nega toda ferramenta WRITE antes de o modelo sequer vê-la no catálogo.
- * Hoje não há WRITE registrada; quando houver, continuará desligada até alguém
- * decidir o contrário de forma consciente, no painel da Netlify.
+ * O escopo é explícito: o bloqueio não pode depender do system prompt. Ele
+ * depende do Policy Engine, que recebe este booleano e nega toda ferramenta
+ * WRITE antes de o modelo sequer vê-la no catálogo.
+ *
+ * Quem responde é a configuração da tela — porque ligar autonomia é decisão de
+ * operação, e uma decisão que exige deploy é uma decisão que ninguém revê. Por
+ * cima dela existe `GERENTE_ESCRITA = 'desligada'`, o interruptor de
+ * emergência: força leitura sem esperar build.
  */
-export function escritaLiberada(): boolean {
-  return process.env.GERENTE_ESCRITA === 'ligada'
+export async function escritaLiberada(): Promise<boolean> {
+  return (await lerConfiguracaoDoGerente()).escritaLiberada
 }
 
 export interface FerramentaUsada {
@@ -209,6 +214,8 @@ export interface PedidoAoGerente {
   canal: CanalDoGerente
   traceId?: string
   limites?: Partial<Limites>
+  /** A conversa em que a interação acontece. Ações pendentes nascem presas a ela. */
+  conversaId?: string | null
 }
 
 /**
@@ -258,7 +265,12 @@ async function chamarModelo(
  * inteira. Um teto único ou estrangularia a segunda ou seria frouxo demais para
  * a primeira.
  */
-async function executarComPrazo(f: Ferramenta, args: Record<string, unknown>): Promise<unknown> {
+async function executarComPrazo(
+  f: Ferramenta,
+  args: Record<string, unknown>,
+  ctx: ContextoDaExecucao,
+  previa = false,
+): Promise<unknown> {
   let alarme: ReturnType<typeof setTimeout> | undefined
   const prazo = new Promise<never>((_, rejeitar) => {
     alarme = setTimeout(
@@ -267,7 +279,8 @@ async function executarComPrazo(f: Ferramenta, args: Record<string, unknown>): P
     )
   })
   try {
-    return await Promise.race([f.executar(args ?? {}), prazo])
+    const trabalho = previa && f.prever ? f.prever(args ?? {}, ctx) : f.executar(args ?? {}, ctx)
+    return await Promise.race([trabalho, prazo])
   } finally {
     if (alarme) clearTimeout(alarme)
   }
@@ -288,7 +301,14 @@ async function perguntar(pedido: PedidoAoGerente): Promise<RespostaDoAssessor> {
   const politica: ContextoDaPolitica = {
     ator: pedido.ator,
     canal: pedido.canal,
-    escritaLiberada: escritaLiberada(),
+    escritaLiberada: await escritaLiberada(),
+  }
+
+  const contexto: ContextoDaExecucao = {
+    ator: pedido.ator,
+    canal: pedido.canal,
+    traceId,
+    conversaId: pedido.conversaId ?? null,
   }
 
   // O catálogo é filtrado ANTES de o modelo vê-lo. O que ele não enxerga não
@@ -377,7 +397,8 @@ async function perguntar(pedido: PedidoAoGerente): Promise<RespostaDoAssessor> {
         // Filtrar é conveniência; esta é a trava. Sem ela, bastaria o modelo
         // chamar pelo nome uma ferramenta que não lhe foi oferecida.
         const decisao = decidir(ferramenta, politica)
-        if (decisao.veredito !== 'executa') {
+
+        if (decisao.veredito === 'negado') {
           usadas.push({
             nome: ferramenta.nome,
             versao: ferramenta.versao,
@@ -389,8 +410,27 @@ async function perguntar(pedido: PedidoAoGerente): Promise<RespostaDoAssessor> {
           return recusa(p.id, `Recusado pelo ERP: ${decisao.motivo}`)
         }
 
+        // Ação que exige confirmação NÃO executa: ela prevê. A prévia resolve
+        // os registros de verdade, cria a ação pendente assinada e devolve ao
+        // modelo um texto que descreve o que ACONTECERIA. É a separação que
+        // impede o assistente de dizer "classifiquei" antes de alguém aprovar.
+        const soPreve = decisao.veredito !== 'executa'
+        if (soPreve && !ferramenta.prever) {
+          usadas.push({
+            nome: ferramenta.nome,
+            versao: ferramenta.versao,
+            modo: ferramenta.modo,
+            argumentos: p.input,
+            ms: 0,
+            bloqueio: `${decisao.motivo} (e esta ferramenta não sabe montar prévia)`,
+          })
+          return recusa(p.id, `Recusado pelo ERP: ${decisao.motivo}`)
+        }
+
         try {
-          const dados = await executarComPrazo(ferramenta, p.input)
+          const dados = soPreve
+            ? await executarComPrazo(ferramenta, p.input, contexto, true)
+            : await executarComPrazo(ferramenta, p.input, contexto)
           // Sanear ANTES de serializar: o que sai daqui é conteúdo de terceiro,
           // e vai viajar envelopado justamente por isso.
           const corpo = caberNoLimite(
@@ -404,6 +444,7 @@ async function perguntar(pedido: PedidoAoGerente): Promise<RespostaDoAssessor> {
             argumentos: p.input,
             ms: Date.now() - inicio,
             bytes: corpo.length,
+            ...(soPreve ? { bloqueio: `Prévia: ${decisao.motivo}` } : null),
           })
           return { type: 'tool_result' as const, tool_use_id: p.id, content: envelopar(corpo) }
         } catch (e) {
@@ -502,6 +543,7 @@ export async function auditar(dados: {
   tokensSaida?: number
   duracaoMs?: number
   parou?: MotivoDeParada
+  escritaLiberada?: boolean
   erro?: string
 }) {
   if (!supabaseConfigurado()) return
@@ -523,7 +565,7 @@ export async function auditar(dados: {
       ferramentas: dados.ferramentas,
       modelo: MODELO,
       versao_do_prompt: VERSAO_DO_PROMPT,
-      escrita_liberada: escritaLiberada(),
+      escrita_liberada: dados.escritaLiberada ?? null,
       parou_por: dados.parou ?? null,
       tokens_entrada: dados.tokensEntrada ?? null,
       tokens_saida: dados.tokensSaida ?? null,

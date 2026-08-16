@@ -16,6 +16,8 @@ import {
   paginar,
   simularCompraDeBase,
   simularImpactoNoCaixa,
+  type Ator,
+  type CanalDoGerente,
   type ContratoDaFerramenta,
   type RetornoDaFerramenta,
 } from '@/domain'
@@ -42,9 +44,39 @@ import {
  * recusa enquanto `GERENTE_ESCRITA` não estiver ligada.
  */
 
+/**
+ * Quem está executando. READ e SIMULATE ignoram; WRITE não sobrevive sem.
+ *
+ * Passar o contexto por parâmetro, e não por variável de módulo, é o que
+ * permite o mesmo catálogo servir ERP e WhatsApp no mesmo processo sem que uma
+ * requisição enxergue o ator da outra.
+ */
+export interface ContextoDaExecucao {
+  ator: Ator
+  canal: CanalDoGerente
+  traceId: string
+  conversaId: string | null
+}
+
 /** Contrato + execução. O contrato é domínio puro; a execução mora aqui. */
 export interface Ferramenta extends ContratoDaFerramenta {
-  executar: (args: Record<string, unknown>) => Promise<RetornoDaFerramenta | unknown>
+  executar: (
+    args: Record<string, unknown>,
+    ctx: ContextoDaExecucao,
+  ) => Promise<RetornoDaFerramenta | unknown>
+  /**
+   * A PRÉVIA de uma ferramenta de escrita (§8.1 e §9).
+   *
+   * Quando a política responde "exige confirmação", o motor chama isto em vez
+   * de `executar`. A prévia resolve os registros, calcula o impacto, cria a
+   * ação pendente assinada e devolve ao modelo um resumo do que ACONTECERIA —
+   * jamais um resultado. É a separação que impede o assistente de dizer
+   * "classifiquei 23 lançamentos" antes de alguém ter aprovado.
+   */
+  prever?: (
+    args: Record<string, unknown>,
+    ctx: ContextoDaExecucao,
+  ) => Promise<RetornoDaFerramenta>
 }
 
 const PERIODO_VALIDO = PERIODOS.map((p) => p.id)

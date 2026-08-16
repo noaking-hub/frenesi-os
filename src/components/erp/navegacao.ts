@@ -49,11 +49,33 @@ export const NAV: GrupoNav[] = [
   {
     id: 'ia',
     label: 'Meu Assessor',
-    href: '/assessor',
-    pronta: true,
-    titulo: 'Meu Assessor',
-    subtitulo: 'O gerente de IA que lê o ERP e responde com os números de lá',
-    icone: 'ia',
+    telas: [
+      {
+        id: 'central',
+        label: 'Central do Gerente',
+        href: '/assessor',
+        pronta: true,
+        titulo: 'Central do Gerente',
+        subtitulo: 'O gerente de IA que lê o ERP e responde com os números de lá',
+        icone: 'ia',
+      },
+      {
+        id: 'auditoria-ia',
+        label: 'Auditoria e uso',
+        href: '/assessor/auditoria',
+        pronta: true,
+        subtitulo: 'Custo, latência, falhas e o registro de cada interação',
+        icone: 'escudo',
+      },
+      {
+        id: 'config-ia',
+        label: 'Configurações',
+        href: '/assessor/configuracoes',
+        pronta: true,
+        subtitulo: 'Quanto o Gerente pode fazer sozinho, e a partir de que confiança',
+        icone: 'ajustes',
+      },
+    ],
   },
   {
     id: 'pedidos',
