@@ -6,6 +6,8 @@ import { codigosDoMelhorEnvio, melhorEnvioConectado, rastrearNoMelhorEnvio } fro
 import { atualizarExtratoEsperando, mercadoPagoConfigurado } from '@/data/mercadopago'
 import { baixarEstoqueDosFaturados } from '@/data/baixa-estoque'
 import { enviarAvisosDePedido } from '@/data/notificacoes'
+import { pagaleveConfigurada } from '@/data/pagaleve'
+import { importarPagaleve } from '@/data/pagaleve-importacao'
 import {
   aplicarEstoqueCalculado,
   importarEntregasLocaisDaShopify,
@@ -51,6 +53,17 @@ const JANELA_DIAS = 35
  * dias de pedido todo dia seria reler o mesmo mês 35 vezes.
  */
 const JANELA_PEDIDOS_DIAS = 10
+
+/**
+ * Quanto histórico de pedido a Pagaleve pode alcançar quando precisa recorrer
+ * ao casamento por valor e data.
+ *
+ * Maior que a janela de pedidos porque a venda parcelada continua viva por até
+ * dois meses, e menor que tudo porque a API só devolve o mês corrente — pedido
+ * de abril nunca teria par ali. Na rodada normal esta janela nem é lida: o
+ * checkout vem no identificador da transação e o casamento é pela chave.
+ */
+const JANELA_PAGALEVE_DIAS = 90
 
 function autorizado(req: Request): boolean {
   const esperado = process.env.CRON_SEGREDO
@@ -275,21 +288,55 @@ export async function POST(req: Request) {
     relatorio.semExtratoDispensadas = { erro: mensagemDe(e) }
   }
 
-  // A Pagaleve entra na conciliação como os outros intermediadores.
+  // A Pagaleve entra na conciliação como os outros intermediadores — e entra
+  // INTEIRA: busca as vendas novas na API, monta o cronograma de parcelas,
+  // liga ao pedido e só então concilia.
+  //
+  // Antes daqui só rodava a conciliação, sobre uma tabela que o operador
+  // enchia à mão com o relatório exportado do painel. Era automação pela
+  // metade, que é a pior espécie: a tela mostrava a Pagaleve em dia enquanto
+  // toda venda posterior ao último relatório estava fora da conta.
   //
   // Ela é o terceiro caminho de dinheiro da operação e o único que liquida em
-  // parcelas: uma venda vira caixa ao longo de até dois meses. `recebido` aqui
-  // é a soma das parcelas EFETIVAMENTE creditadas, nunca o valor da venda —
+  // parcelas: uma venda vira caixa ao longo de até dois meses. `recebido` é a
+  // soma das parcelas EFETIVAMENTE creditadas, nunca o valor da venda —
   // fingir que entrou tudo no dia da compra inventaria dinheiro que ainda não
   // chegou, e é justamente esse otimismo que fazia a conciliação acusar
   // pendência onde havia venda saudável amortizando no prazo.
-  try {
-    const { data, error } = await supabaseServer().rpc('conciliar_pagaleve')
-    if (error) throw error
-    const linha = Array.isArray(data) ? data[0] : data
-    relatorio.pagaleve = { vendas: linha?.vendas ?? 0, recebido: linha?.recebido ?? 0 }
-  } catch (e) {
-    relatorio.pagaleve = { erro: mensagemDe(e) }
+  if (pagaleveConfigurada()) {
+    try {
+      const p = await importarPagaleve({ gravar: true, janelaDePedidosDias: JANELA_PAGALEVE_DIAS })
+      relatorio.pagaleve = {
+        vendasLidas: (p.transacoes as { lidas?: number }).lidas ?? 0,
+        casadas: (p.transacoes as { casadas?: number }).casadas ?? 0,
+        porIdentificador: (p.transacoes as { porIdentificador?: number }).porIdentificador ?? 0,
+        porValorEData: (p.transacoes as { porValorEData?: number }).porValorEData ?? 0,
+        semPedido: (p.transacoes as { orfas?: number }).orfas ?? 0,
+        repassesGravados: p.gravados,
+        parcelasGravadas: p.parcelasGravadas,
+        datasInformadasPreservadas: p.parcelasProtegidas,
+        parcelasVinculadas: p.parcelasVinculadas,
+        vendas: p.conciliadas,
+        recebido: p.recebido ?? 0,
+      }
+    } catch (e) {
+      relatorio.pagaleve = { erro: mensagemDe(e) }
+      // A API caiu, mas as parcelas que já estão no banco continuam vencendo.
+      // Conciliar o que se tem é melhor que deixar a fila envelhecer por causa
+      // de um erro de rede em terceiro.
+      try {
+        const { data } = await supabaseServer().rpc('conciliar_pagaleve')
+        const linha = Array.isArray(data) ? data[0] : data
+        relatorio.pagaleveConciliacaoDeReserva = {
+          vendas: linha?.vendas ?? 0,
+          recebido: linha?.recebido ?? 0,
+        }
+      } catch (e2) {
+        relatorio.pagaleveConciliacaoDeReserva = { erro: mensagemDe(e2) }
+      }
+    }
+  } else {
+    relatorio.pagaleve = { pulado: 'PAGALEVE_CHAVE/PAGALEVE_SENHA não estão definidas' }
   }
 
   // Estorno PARCIAL não derruba a venda inteira.
