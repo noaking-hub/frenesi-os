@@ -172,32 +172,79 @@ interface Pagina<T> {
  * parada por página vazia, um `limit` desconhecido viraria laço infinito
  * relendo a primeira página.
  */
-async function listar<T>(caminho: string, teto = 40): Promise<{ itens: T[]; total: number }> {
-  const itens: T[] = []
+async function listar<T extends Record<string, unknown>>(
+  caminho: string,
+  chaveUnica: (item: T) => string,
+  teto = 40,
+): Promise<{ itens: T[]; total: number; paginacao: string; repetidos: number }> {
+  const vistos = new Map<string, T>()
   let total = 0
+  let repetidos = 0
 
-  for (let pagina = 0; pagina < teto; pagina++) {
-    const juncao = caminho.includes('?') ? '&' : '?'
-    const r = await pedirNaPagaleve(`${caminho}${juncao}limit=100&offset=${pagina * 100}`)
-    if (!r.ok) {
-      throw new Error(`${caminho} respondeu ${r.status}: ${(await r.text()).slice(0, 300)}`)
+  // A API ignorou `limit`/`offset`: a primeira rodada leu 30 registros para um
+  // `total_count` de 27, com os MESMOS checkout_id aparecendo duas vezes. Ou
+  // seja, a segunda página era a primeira de novo. Como o nome do parâmetro
+  // não está documentado em lugar que eu alcance, o laço tenta os dialetos
+  // usuais e para no primeiro que realmente avança.
+  const dialetos = [
+    (n: number) => `page=${n + 1}&size=100`,
+    (n: number) => `page=${n + 1}&per_page=100`,
+    (n: number) => `offset=${n * 100}&limit=100`,
+    () => '',
+  ]
+
+  let usado = 'nenhum'
+  for (const dialeto of dialetos) {
+    vistos.clear()
+    repetidos = 0
+    let avancou = true
+
+    for (let pagina = 0; pagina < teto && avancou; pagina++) {
+      const parametros = dialeto(pagina)
+      const juncao = caminho.includes('?') ? '&' : '?'
+      const r = await pedirNaPagaleve(`${caminho}${parametros ? juncao + parametros : ''}`)
+      if (!r.ok) {
+        throw new Error(`${caminho} respondeu ${r.status}: ${(await r.text()).slice(0, 300)}`)
+      }
+      const json = (await r.json()) as Pagina<T>
+      const lote = json.items ?? []
+      total = json.total_count ?? total
+      if (lote.length === 0) break
+
+      // Novidade é o que decide se a página avançou. Contar linhas não serve:
+      // uma página repetida tem o mesmo tamanho da original e enganaria o laço
+      // até o teto, relendo a mesma coisa quarenta vezes.
+      const antes = vistos.size
+      for (const item of lote) {
+        const chave = chaveUnica(item)
+        if (vistos.has(chave)) repetidos++
+        else vistos.set(chave, item)
+      }
+      avancou = vistos.size > antes
+      if (!parametros) break
+      if (total > 0 && vistos.size >= total) break
     }
-    const json = (await r.json()) as Pagina<T>
-    const lote = json.items ?? []
-    total = json.total_count ?? total
-    if (lote.length === 0) break
-    itens.push(...lote)
-    if (itens.length >= total && total > 0) break
+
+    usado = dialeto(0) || 'sem paginação'
+    // Chegou ao total anunciado: o dialeto serve, não precisa tentar os outros.
+    if (total > 0 && vistos.size >= total) break
   }
-  return { itens, total }
+
+  return { itens: [...vistos.values()], total, paginacao: usado, repetidos }
 }
 
 export function listarTransacoes() {
-  return listar<TransacaoPagaleve>('/v1/transactions')
+  // O checkout identifica a VENDA. Se a API devolver uma linha por parcela,
+  // elas colapsam aqui — e é a soma das parcelas, não uma delas, que vira
+  // caixa recebido.
+  return listar<TransacaoPagaleve & Record<string, unknown>>(
+    '/v1/transactions',
+    (t) => `${t.checkout_id}:${t.timestamp}`,
+  )
 }
 
 export function listarTransferencias() {
-  return listar<TransferenciaPagaleve>('/v1/transfers')
+  return listar<TransferenciaPagaleve & Record<string, unknown>>('/v1/transfers', (t) => t.id)
 }
 
 /** Centavos para reais, que é a unidade de todo o resto do ERP. */

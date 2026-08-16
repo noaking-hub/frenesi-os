@@ -131,6 +131,35 @@ export async function POST(req: Request) {
       .range(de, ate) as unknown as PromiseLike<{ data: PedidoCru[] | null; error: unknown }>,
   )
 
+  // Quantas LINHAS cada venda tem, e o que muda entre elas.
+  //
+  // Isto responde a pergunta que decide o modelo inteiro: `current_amount` é o
+  // acumulado recebido ou o valor de UMA parcela? A conta à mão já mostrou que
+  // é parcela — R$ 206,00 ÷ 4 − R$ 3,60 de tarifa dá exatamente os R$ 47,90
+  // que a API devolve, e R$ 168,18 ÷ 3 − R$ 2,25 dá os R$ 53,81. Se houver
+  // uma linha por parcela liberada, o recebido de verdade é a SOMA delas.
+  const porVenda = new Map<string, { linhas: number; parcelas: number[]; quando: string[] }>()
+  for (const t of transacoes.itens) {
+    const atual = porVenda.get(t.checkout_id) ?? { linhas: 0, parcelas: [], quando: [] }
+    atual.linhas += 1
+    atual.parcelas.push(emReais(t.current_amount))
+    atual.quando.push(t.timestamp)
+    porVenda.set(t.checkout_id, atual)
+  }
+  const estrutura = {
+    vendasDistintas: porVenda.size,
+    linhasPorVenda: Object.entries(
+      [...porVenda.values()].reduce<Record<string, number>>((acc, v) => {
+        acc[String(v.linhas)] = (acc[String(v.linhas)] ?? 0) + 1
+        return acc
+      }, {}),
+    ),
+    exemplosComMaisDeUmaLinha: [...porVenda.entries()]
+      .filter(([, v]) => v.linhas > 1)
+      .slice(0, 5)
+      .map(([id, v]) => ({ checkoutId: id, ...v })),
+  }
+
   const casamentos = casar(transacoes.itens, pedidos)
   const casados = casamentos.filter((c) => c.pedidoId)
   const orfas = casamentos.filter((c) => !c.pedidoId)
@@ -138,9 +167,12 @@ export async function POST(req: Request) {
   const soma = (xs: number[]) => Math.round(xs.reduce((a, b) => a + b, 0) * 100) / 100
   const relatorio = {
     ensaio: !gravar,
+    estrutura,
     transacoes: {
       lidas: transacoes.itens.length,
       totalDaApi: transacoes.total,
+      paginacao: transacoes.paginacao,
+      repetidosDescartados: transacoes.repetidos,
       casadas: casados.length,
       orfas: orfas.length,
       volumeBruto: soma(casamentos.map((c) => c.bruto)),
@@ -151,6 +183,7 @@ export async function POST(req: Request) {
     transferencias: {
       lidas: transferencias.itens.length,
       totalDaApi: transferencias.total,
+      paginacao: transferencias.paginacao,
       // `final_amount` negativo é saída do saldo da Pagaleve — ou seja, o
       // dinheiro que chegou na conta. O sinal invertido é o que torna a soma
       // comparável com o extrato.
@@ -172,6 +205,23 @@ export async function POST(req: Request) {
   }
 
   if (!gravar) return NextResponse.json(relatorio)
+
+  // Trava deliberada: enquanto `current_amount` for parcela e não acumulado, o
+  // que iria para `recebido` seria uma fração do caixa real. Melhor recusar a
+  // gravar do que gravar um número que parece certo.
+  if (estrutura.linhasPorVenda.length === 1 && estrutura.linhasPorVenda[0][0] === '1') {
+    return NextResponse.json(
+      {
+        ...relatorio,
+        erro:
+          'Cada venda tem UMA linha, então `current_amount` é o valor de uma parcela e não o ' +
+          'acumulado recebido. Gravar isso como `recebido` subestimaria o caixa. Falta a fonte ' +
+          'do que já foi liberado por venda — provavelmente os transfers, que trazem os dias ' +
+          'acumulados.',
+      },
+      { status: 409 },
+    )
+  }
 
   // A gravação preenche o repasse que a tela de Conciliação lê. `recebido` é
   // o que a Pagaleve JÁ liberou, não o valor da venda: fingir que entrou tudo
