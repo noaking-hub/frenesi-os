@@ -275,6 +275,23 @@ export async function POST(req: Request) {
     relatorio.semExtratoDispensadas = { erro: mensagemDe(e) }
   }
 
+  // A Pagaleve entra na conciliação como os outros intermediadores.
+  //
+  // Ela é o terceiro caminho de dinheiro da operação e o único que liquida em
+  // parcelas: uma venda vira caixa ao longo de até dois meses. `recebido` aqui
+  // é a soma das parcelas EFETIVAMENTE creditadas, nunca o valor da venda —
+  // fingir que entrou tudo no dia da compra inventaria dinheiro que ainda não
+  // chegou, e é justamente esse otimismo que fazia a conciliação acusar
+  // pendência onde havia venda saudável amortizando no prazo.
+  try {
+    const { data, error } = await supabaseServer().rpc('conciliar_pagaleve')
+    if (error) throw error
+    const linha = Array.isArray(data) ? data[0] : data
+    relatorio.pagaleve = { vendas: linha?.vendas ?? 0, recebido: linha?.recebido ?? 0 }
+  } catch (e) {
+    relatorio.pagaleve = { erro: mensagemDe(e) }
+  }
+
   // Estorno PARCIAL não derruba a venda inteira.
   //
   // A leitura da Yampi marcava como divergente qualquer pedido com estorno, e

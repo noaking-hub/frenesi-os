@@ -8,7 +8,7 @@ import {
   type TransacaoPagaleve,
 } from '@/data/pagaleve'
 import { supabaseConfigurado, supabaseServer, tudoDe } from '@/data/supabase'
-import { diaDaOperacao, normalizarMeio } from '@/domain'
+import { cronogramaDaVenda, diaDaOperacao, normalizarMeio } from '@/domain'
 
 /**
  * Importação das vendas e repasses da Pagaleve.
@@ -160,6 +160,18 @@ export async function POST(req: Request) {
       .map(([id, v]) => ({ checkoutId: id, ...v })),
   }
 
+  // O cronograma de cada venda: quando cada parcela cai. É o que transforma
+  // "a Pagaleve me deve" num número com data, em vez de uma promessa vaga.
+  const cronogramas = transacoes.itens.flatMap((t) => {
+    const parcelas = cronogramaDaVenda({
+      bruto: emReais(t.order_amount),
+      liquidoDaParcela: emReais(t.current_amount),
+      tarifaDaParcela: emReais(Math.abs(t.total_fee_amount)),
+      compradaEm: diaDaOperacao(t.order_purchase_date),
+    })
+    return parcelas.map((p) => ({ checkoutId: t.checkout_id, ...p }))
+  })
+
   const casamentos = casar(transacoes.itens, pedidos)
   const casados = casamentos.filter((c) => c.pedidoId)
   const orfas = casamentos.filter((c) => !c.pedidoId)
@@ -199,9 +211,26 @@ export async function POST(req: Request) {
         }, {}),
       ),
     },
+    cronograma: {
+      // Venda cujo número de parcelas não se deduz não gera cronograma
+      // inventado: ela aparece aqui como não deduzida, para ser olhada.
+      vendasComCronograma: new Set(cronogramas.map((c) => c.checkoutId)).size,
+      vendasSemCronograma:
+        new Set(transacoes.itens.map((t) => t.checkout_id)).size -
+        new Set(cronogramas.map((c) => c.checkoutId)).size,
+      parcelas: cronogramas.length,
+      aReceberTotal: soma(cronogramas.map((c) => c.liquido)),
+      porVencimento: Object.entries(
+        cronogramas.reduce<Record<string, number>>((acc, c) => {
+          acc[c.previstaPara] = Math.round(((acc[c.previstaPara] ?? 0) + c.liquido) * 100) / 100
+          return acc
+        }, {}),
+      ).sort(),
+    },
     amostraCasada: casados.slice(0, 8),
     amostraOrfa: orfas.slice(0, 8),
     gravados: 0,
+    parcelasGravadas: 0,
   }
 
   if (!gravar) return NextResponse.json(relatorio)
@@ -237,6 +266,33 @@ export async function POST(req: Request) {
       return NextResponse.json({ ...relatorio, erro: error.message }, { status: 500 })
     }
     relatorio.gravados += fatia.length
+  }
+
+  // O cronograma vai para a tabela própria, e não para lançamentos: parcela
+  // prevista não é caixa. Quem realiza é o repasse que aparece no extrato, e
+  // é `liquidada_em` que vai marcar isso quando a fonte estiver ligada.
+  const porCheckout = new Map(casados.map((c) => [c.checkoutId, c.pedidoId]))
+  const linhasDeParcela = cronogramas.map((c) => ({
+    checkout_id: c.checkoutId,
+    numero: c.numero,
+    de: c.de,
+    pedido_id: porCheckout.get(c.checkoutId) ?? null,
+    bruto: c.bruto,
+    tarifa: c.tarifa,
+    liquido: c.liquido,
+    prevista_para: c.previstaPara,
+    atualizada_em: new Date().toISOString(),
+  }))
+
+  for (let i = 0; i < linhasDeParcela.length; i += 200) {
+    const fatia = linhasDeParcela.slice(i, i + 200)
+    const { error } = await supabaseServer()
+      .from('pagaleve_parcelas')
+      .upsert(fatia, { onConflict: 'checkout_id,numero' })
+    if (error) {
+      return NextResponse.json({ ...relatorio, erro: error.message }, { status: 500 })
+    }
+    relatorio.parcelasGravadas += fatia.length
   }
 
   return NextResponse.json(relatorio)
