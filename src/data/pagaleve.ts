@@ -168,9 +168,8 @@ async function pedir(
  */
 async function caminhosDocumentados(): Promise<{ achados: string[]; erro?: string }> {
   const paginas = [
-    'https://docs.pagaleve.com.br/reference/pagaleve-api',
     'https://docs.pagaleve.com.br/reference/authenticationcontroller_doauthentication',
-    'https://docs.pagaleve.com.br/reference/integration-flow',
+    'https://docs.pagaleve.com.br/reference/pagaleve-api',
   ]
   const achados = new Set<string>()
   const erros: string[] = []
@@ -263,7 +262,9 @@ export interface Sondagem {
  * mensagem diz que a assinatura foi aceita — inclusive um 404, que é ótima
  * notícia, porque significa que só o caminho falta.
  */
-export async function sondar(): Promise<Sondagem> {
+export type Fase = 'tudo' | 'docs' | 'chaves' | 'assinatura'
+
+export async function sondar(fase: Fase = 'tudo'): Promise<Sondagem> {
   const saida: Sondagem = {
     base: BASE,
     credencial: comoEstaConfigurada(),
@@ -275,26 +276,34 @@ export async function sondar(): Promise<Sondagem> {
   }
   if (!pagaleveConfigurada()) return saida
 
-  // A referência primeiro: ela pode entregar o caminho de graça, e aí nenhuma
-  // das varreduras abaixo precisa adivinhar.
-  saida.documentacao = await caminhosDocumentados()
-
-  // O SigV4 já foi descartado pelo dado da rodada anterior, mas a checagem de
-  // região fica: é ela que prova que a conclusão continua valendo, em vez de
-  // eu confiar na memória de um diagnóstico antigo.
-  const t = await pedir('/', 'us-east-1')
-  saida.regioes.push(t)
-  if (!/scoped to a valid region/i.test(t.amostra ?? '')) saida.regiaoDescoberta = 'us-east-1'
-
-  const corpo = JSON.stringify({
-    api_key: process.env.PAGALEVE_CHAVE,
-    api_secret: process.env.PAGALEVE_SENHA,
-  })
-  for (const caminho of CAMINHOS_DE_AUTENTICACAO) {
-    saida.chaveDeApi.push(await comChaveDeApi(caminho, 'POST', corpo))
+  // Fatiado por fase, e não por gosto: a rodada anterior juntou vinte
+  // requisições com três páginas de documentação numa execução só e a função
+  // estourou o tempo, devolvendo 502 — que não é resultado nenhum. Cada fase
+  // agora cabe folgada no limite, e uma fase que falha não leva as outras.
+  if (fase === 'tudo' || fase === 'docs') {
+    saida.documentacao = await caminhosDocumentados()
   }
-  for (const caminho of CAMINHOS) {
-    saida.chaveDeApi.push(await comChaveDeApi(caminho, 'GET', ''))
+
+  if (fase === 'tudo' || fase === 'assinatura') {
+    // O SigV4 já foi descartado pelo dado, mas a checagem fica disponível: é
+    // ela que prova que a conclusão continua valendo, em vez de eu confiar na
+    // memória de um diagnóstico antigo.
+    const t = await pedir('/', 'us-east-1')
+    saida.regioes.push(t)
+    if (!/scoped to a valid region/i.test(t.amostra ?? '')) saida.regiaoDescoberta = 'us-east-1'
+  }
+
+  if (fase === 'tudo' || fase === 'chaves') {
+    const corpo = JSON.stringify({
+      api_key: process.env.PAGALEVE_CHAVE,
+      api_secret: process.env.PAGALEVE_SENHA,
+    })
+    for (const caminho of CAMINHOS_DE_AUTENTICACAO) {
+      saida.chaveDeApi.push(await comChaveDeApi(caminho, 'POST', corpo))
+    }
+    for (const caminho of CAMINHOS) {
+      saida.chaveDeApi.push(await comChaveDeApi(caminho, 'GET', ''))
+    }
   }
   return saida
 }

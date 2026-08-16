@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-import { comoEstaConfigurada, pagaleveConfigurada, sondar } from '@/data/pagaleve'
+import { comoEstaConfigurada, pagaleveConfigurada, sondar, type Fase } from '@/data/pagaleve'
 
 /**
  * Sondagem da API da Pagaleve.
@@ -18,7 +18,7 @@ import { comoEstaConfigurada, pagaleveConfigurada, sondar } from '@/data/pagalev
  * caracteres. Nome, CPF e valor de cliente não têm o que fazer num diagnóstico.
  */
 
-export const maxDuration = 60
+export const maxDuration = 300
 export const dynamic = 'force-dynamic'
 
 function autorizado(req: Request): boolean {
@@ -42,5 +42,8 @@ export async function POST(req: Request) {
       { status: 503 },
     )
   }
-  return NextResponse.json(await sondar())
+  // A fase vem de fora porque a sondagem inteira não cabe numa execução: a
+  // rodada que tentou tudo de uma vez devolveu 502, e 502 não é diagnóstico.
+  const corpo = (await req.json().catch(() => ({}))) as { fase?: Fase }
+  return NextResponse.json(await sondar(corpo.fase ?? 'tudo'))
 }
