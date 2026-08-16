@@ -116,6 +116,20 @@ esse existe).
 
 Meu Assessor, Giftback e cashback voltaram: hoje leem dados reais.
 
+## Meu Assessor — o que está ligado e o que depende de você
+
+| Fase | Estado |
+|---|---|
+| 1 · Leitura blindada | No ar. Policy Engine, orçamento de custo, envelope contra prompt injection, `trace_id` e auditoria obrigatória. |
+| 2 · Simulação | No ar. Compra de base e impacto no caixa, sempre marcados como cenário. |
+| 3 · Escrita financeira | No ar, **desligada por padrão**. Categorização com prévia, confirmação assinada, idempotência e desfazer. Liga em Meu Assessor → Configurações. |
+| 4 · Escrita operacional | No ar, mesma trava. Recomendação de reposição e solicitação interna de compra. Pagamento bancário é classe D e não existe como ferramenta. |
+| 5 · WhatsApp | Código pronto, **inativo**: falta `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_ID` e `WHATSAPP_VERIFY_TOKEN`, e cadastrar os números autorizados. |
+| 6 · Vigília proativa | No ar, roda de hora em hora. |
+
+Interruptor de emergência: `GERENTE_ESCRITA=desligada` força modo leitura sem
+esperar build, e vence a configuração da tela.
+
 Eram especificações de produto com números inventados — úteis como maquete,
 perigosas como tela de decisão. O código de domínio (puro e testado) ficou;
 se um módulo desses ganhar motor de verdade, a tela volta lendo dados reais.
@@ -125,6 +139,7 @@ se um módulo desses ganhar motor de verdade, a tela volta lendo dados reais.
 | Quando | O quê |
 |---|---|
 | Rotina de hora em hora (`/api/financeiro/sincronizar`, agendada em `netlify/functions/`) | Pedidos da Yampi → **Pagaleve** (busca vendas novas, agenda parcelas, casa pelo `checkout_id` da transação e concilia) → estoque aplicado na Shopify → extrato do Mercado Pago (espera o relatório ficar pronto) → varredura de ocorrências |
+| Vigília do Gerente, de hora em hora (`/api/assessor/vigilia`) | Recalcula a fila de prioridades e sincroniza alertas: o que é novo entra, o que repete tem a contagem atualizada, o que sumiu da fila é resolvido com data |
 | Ao abrir Pedidos | Sincroniza se a última leitura passou de 30 min |
 | Ao abrir Extrato | Atualiza se passou de 10 min |
 | Ao abrir Sincronia Shopify | Reimporta o catálogo se passou de 12 h |
