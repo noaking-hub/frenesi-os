@@ -306,6 +306,64 @@ export interface Sondagem {
   erroDeAutenticacao?: string
   camposDoToken?: string[]
   leitura: Tentativa[]
+  datas: Tentativa[]
+}
+
+/**
+ * Descobre o filtro de data.
+ *
+ * `/v1/transactions` devolve 10 registros e anuncia `total_count: 27` — ou
+ * seja, ela filtra por um período padrão (o mês corrente) e o resto do
+ * histórico está atrás de um parâmetro cujo nome não conheço. Junho e julho
+ * são justamente as vendas que faltam para fechar as 26 pendências.
+ *
+ * O teste é objetivo: pedir um intervalo que inclua junho e ver se o número
+ * de itens MUDA. Parâmetro ignorado devolve os mesmos 10; parâmetro aceito
+ * devolve mais. Não há como confundir os dois.
+ */
+const DIALETOS_DE_DATA = [
+  (de: string, ate: string) => `start_date=${de}&end_date=${ate}`,
+  (de: string, ate: string) => `from=${de}&to=${ate}`,
+  (de: string, ate: string) => `initial_date=${de}&final_date=${ate}`,
+  (de: string, ate: string) => `date_from=${de}&date_to=${ate}`,
+  (de: string, ate: string) => `start=${de}&end=${ate}`,
+  (de: string, ate: string) => `begin_date=${de}&end_date=${ate}`,
+  (de: string, ate: string) => `startDate=${de}&endDate=${ate}`,
+  (de: string, ate: string) => `created_after=${de}&created_before=${ate}`,
+]
+
+async function sondarDatas(de: string, ate: string): Promise<Tentativa[]> {
+  const saida: Tentativa[] = []
+  for (const dialeto of DIALETOS_DE_DATA) {
+    const parametros = dialeto(de, ate)
+    try {
+      const r = await pedirNaPagaleve(`/v1/transactions?${parametros}`)
+      const texto = await r.text()
+      let itens = 0
+      let total = 0
+      try {
+        const json = JSON.parse(texto) as Pagina<unknown>
+        itens = json.items?.length ?? 0
+        total = json.total_count ?? 0
+      } catch {
+        /* não-JSON */
+      }
+      saida.push({
+        alvo: parametros,
+        status: r.status,
+        // O que interessa não é o corpo, é a contagem: ela sozinha responde
+        // se o parâmetro foi aceito ou ignorado.
+        amostra: `itens=${itens} total=${total}`,
+      })
+    } catch (e) {
+      saida.push({
+        alvo: parametros,
+        status: null,
+        erro: e instanceof Error ? e.message : String(e),
+      })
+    }
+  }
+  return saida
 }
 
 /**
@@ -321,6 +379,7 @@ export async function sondar(): Promise<Sondagem> {
     credencial: comoEstaConfigurada(),
     autenticou: false,
     leitura: [],
+    datas: [],
   }
   if (!pagaleveConfigurada()) return saida
 
@@ -331,6 +390,10 @@ export async function sondar(): Promise<Sondagem> {
     saida.erroDeAutenticacao = e instanceof Error ? e.message : String(e)
     return saida
   }
+
+  // Junho é o mês da venda mais antiga sem crédito; se o filtro funcionar, é
+  // ele que traz o resto das 26.
+  saida.datas = await sondarDatas('2026-06-01', '2026-08-31')
 
   for (const caminho of CAMINHOS) {
     try {
