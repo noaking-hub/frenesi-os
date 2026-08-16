@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  descricaoDoRecebido,
   interpretarComando,
+  recadoParaTipoNaoSuportado,
   normalizarTelefone,
   paraTextoDeWhatsapp,
 } from '../whatsapp-gerente'
@@ -70,5 +72,25 @@ describe('telefone', () => {
   it('reduz formatações diferentes ao mesmo número', () => {
     expect(normalizarTelefone('+55 (62) 99261-7792')).toBe('5562992617792')
     expect(normalizarTelefone('5562992617792')).toBe('5562992617792')
+  })
+})
+
+describe('mensagem que não é texto', () => {
+  it('nomeia o que chegou, em português e por extenso', () => {
+    expect(descricaoDoRecebido('audio')).toBe('um áudio')
+    expect(descricaoDoRecebido('IMAGE')).toBe('uma imagem')
+    expect(descricaoDoRecebido('location')).toBe('uma localização')
+  })
+
+  it('não trava em tipo desconhecido — a Meta inventa tipos novos', () => {
+    expect(descricaoDoRecebido('holograma')).toBe('uma mensagem que não é texto')
+    expect(descricaoDoRecebido(undefined)).toBe('uma mensagem que não é texto')
+  })
+
+  it('o recado diz o que fazer, não só o que falta', () => {
+    const r = recadoParaTipoNaoSuportado('audio')
+    expect(r).toContain('um áudio')
+    expect(r).toContain('só leio texto')
+    expect(r).toContain('Escreva a pergunta')
   })
 })

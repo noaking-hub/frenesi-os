@@ -11,7 +11,13 @@ import {
   resolverIdentidade,
   responderNoWhatsapp,
 } from '@/data/assessor/whatsapp'
-import { interpretarComando, paraTextoDeWhatsapp, type ComandoDoWhatsapp } from '@/domain'
+import {
+  descricaoDoRecebido,
+  interpretarComando,
+  paraTextoDeWhatsapp,
+  recadoParaTipoNaoSuportado,
+  type ComandoDoWhatsapp,
+} from '@/domain'
 
 /**
  * O canal WhatsApp — §24 e §25 do escopo.
@@ -76,13 +82,17 @@ export async function POST(req: Request) {
 
 async function atender(m: MensagemRecebida) {
   const texto = (m.text?.body ?? '').trim()
-  if (!texto) return
 
   // 1. Idempotência ANTES de tudo. Reentrega não custa consulta nem execução.
+  //
+  // Áudio, imagem e afins entram no registro TAMBÉM. Antes, mensagem sem texto
+  // era descartada aqui mesmo, antes de qualquer gravação: quem mandava um
+  // áudio não recebia nada e não ficava rastro nenhum de que tinha mandado.
+  // Uma limitação que ninguém anuncia é indistinguível de um sistema quebrado.
   const { nova, respostaAnterior } = await registrarMensagem({
     id: m.id,
     telefone: m.from,
-    texto,
+    texto: texto || `[${descricaoDoRecebido(m.type)}]`,
   })
   if (!nova) {
     if (respostaAnterior) {
@@ -104,6 +114,16 @@ async function atender(m: MensagemRecebida) {
       randomUUID(),
       envio.ok ? 'numero nao autorizado' : `numero nao autorizado; ${envio.erro}`,
     )
+    return
+  }
+
+  // 3. O que o Gerente ainda não sabe ler é respondido, não engolido. Vem
+  // depois da identidade de propósito: número desconhecido não descobre nem
+  // que existe alguém do outro lado.
+  if (!texto) {
+    const recado = recadoParaTipoNaoSuportado(m.type)
+    const envio = await responderNoWhatsapp(m.from, recado)
+    await marcarRespondida(m.id, recado, randomUUID(), envio.erro ?? `tipo nao suportado: ${m.type ?? '?'}`)
     return
   }
 

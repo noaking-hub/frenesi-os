@@ -53,3 +53,46 @@ export function interpretarComando(texto: string): ComandoDoWhatsapp | null {
 export function normalizarTelefone(bruto: string): string {
   return bruto.replace(/\D/g, '')
 }
+
+/**
+ * O que veio, quando não veio texto.
+ *
+ * O Gerente lê texto e só texto. O problema não é essa limitação — é o que o
+ * código fazia com ela: mensagem sem `text.body` era DESCARTADA antes de
+ * qualquer registro. Quem mandava um áudio não recebia nada, não ficava
+ * gravado nada, e não havia sequer uma linha de log. Do lado de fora, um
+ * assistente que ignora a pessoa; do lado de dentro, nem sinal de que a
+ * mensagem existiu.
+ *
+ * Dizer "não entendo áudio ainda" é uma limitação. Não dizer nada é um defeito.
+ */
+const NOMES_DO_TIPO: Record<string, string> = {
+  audio: 'um áudio',
+  voice: 'um áudio',
+  image: 'uma imagem',
+  video: 'um vídeo',
+  document: 'um documento',
+  sticker: 'uma figurinha',
+  location: 'uma localização',
+  contacts: 'um contato',
+  reaction: 'uma reação',
+  order: 'um pedido',
+  unsupported: 'uma mensagem de tipo não suportado',
+}
+
+export function descricaoDoRecebido(tipo: string | undefined): string {
+  return NOMES_DO_TIPO[(tipo ?? '').toLowerCase()] ?? 'uma mensagem que não é texto'
+}
+
+/**
+ * O recado para o que ele ainda não sabe ler.
+ *
+ * Curto, sem pedido de desculpas e com a saída no fim: quem está com o celular
+ * na mão quer saber o que fazer agora, não por que o sistema não faz.
+ */
+export function recadoParaTipoNaoSuportado(tipo: string | undefined): string {
+  return (
+    `Recebi ${descricaoDoRecebido(tipo)}, mas por enquanto eu só leio texto. ` +
+    'Escreva a pergunta que eu respondo na hora.'
+  )
+}
