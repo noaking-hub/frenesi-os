@@ -43,7 +43,13 @@ import { ProvedorDeListas } from '../ListasDoFormulario'
 import { BarraDeFiltros } from './Filtros'
 
 /**
- * Lançamentos — contas a pagar e a receber da operação.
+ * Lançamentos — o extrato consolidado de todas as contas.
+ *
+ * A tela nasceu como fila de contas a pagar e a receber, e é isso que ela
+ * ainda faz no painel lateral. A LISTA, porém, responde outra pergunta — a que
+ * se faz todo dia: o que entrou e o que saiu, em qual conta, quando. Por isso
+ * ela é cronológica e decrescente, e por isso a data que manda é
+ * `ocorridoEm`, a única que todo lançamento tem.
  *
  * A tela não guarda "status": ele é derivado de `situacaoDe` a cada leitura.
  * Uma coluna gravada faria a conta vencer à meia-noite sem ninguém tocar nela
@@ -74,7 +80,7 @@ interface Busca {
   q?: string
   /** 'sem' lista o que está SEM vencimento — o que a projeção de caixa não enxerga. */
   venc?: string
-  /** Janela de vencimento, AAAA-MM-DD inclusivos. */
+  /** Janela do dia do movimento, AAAA-MM-DD inclusivos. */
   de?: string
   ate?: string
   /** 'sim' | 'nao' — o mockup separa o que se repete todo mês do avulso. */
@@ -122,10 +128,12 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       if (filtro.venc === 'sem' && l.venceEm) return false
       if (filtro.conta && l.contaId !== filtro.conta) return false
       if (filtro.centro && l.centroCusto !== filtro.centro) return false
-      // O período filtra por VENCIMENTO: é a data que decide o que entra na
-      // fila de trabalho. Título sem vencimento fica fora da janela.
-      if (filtro.de && (!l.venceEm || l.venceEm < filtro.de)) return false
-      if (filtro.ate && (!l.venceEm || l.venceEm > filtro.ate)) return false
+      // O período filtra pelo DIA DO MOVIMENTO, não pelo vencimento. Filtrar
+      // por vencimento descartava 1.223 das 1.244 linhas — tudo que já
+      // aconteceu não tem vencimento, e a janela devolvia só as parcelas do
+      // financiamento.
+      if (filtro.de && l.ocorridoEm < filtro.de) return false
+      if (filtro.ate && l.ocorridoEm > filtro.ate) return false
       if (filtro.recorrente === 'sim' && !l.recorrente) return false
       if (filtro.recorrente === 'nao' && l.recorrente) return false
       if (busca) {
@@ -134,13 +142,27 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       }
       return true
     })
+    /*
+     * Do mais recente para o mais antigo — a ordem de um extrato.
+     *
+     * A ordem anterior era a de uma FILA DE TRABALHO: vencido primeiro,
+     * liquidado por último. Numa base em que 1.219 de 1.244 lançamentos já
+     * foram baixados, isso empurrava todo o dinheiro que se moveu para depois
+     * das 21 parcelas em aberto — e o teto de linhas cortava o resto. Quem
+     * abria a tela via uma parede de "Sicredi - KGIRO FAMPE" e concluía, com
+     * razão, que o ERP não estava mostrando as entradas e saídas.
+     *
+     * Pior: o desempate era `venceEm ?? '9999'`, e como quase ninguém tem
+     * vencimento, quase todos empatavam — o pouco que aparecia vinha em ordem
+     * arbitrária, sem ser cronológica nem nada.
+     *
+     * O que exige decisão continua acessível pelo filtro de situação e pelo
+     * painel "Próximos vencimentos" ao lado. A lista principal responde a
+     * outra pergunta, que é a que se faz todo dia: o que entrou e o que saiu.
+     */
     .sort((a, b) => {
-      // Vencido primeiro, liquidado por último: a ordem da tela é a ordem em
-      // que o dinheiro precisa de decisão.
-      const peso = (s: SituacaoLancamento) => (s === 'vencido' ? 0 : s === 'liquidado' ? 2 : 1)
-      const d = peso(a.situacao) - peso(b.situacao)
-      if (d !== 0) return d
-      return (a.l.venceEm ?? '9999').localeCompare(b.l.venceEm ?? '9999')
+      const d = b.l.ocorridoEm.localeCompare(a.l.ocorridoEm)
+      return d !== 0 ? d : b.l.id.localeCompare(a.l.id)
     })
 
   /**
@@ -155,6 +177,28 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
   const TETO_LINHAS = 250
   const listadas = visiveis.slice(0, TETO_LINHAS)
   const ocultas = visiveis.length - listadas.length
+
+  /*
+   * Os três primeiros indicadores passam a responder sobre MOVIMENTO, e sobre
+   * o recorte que está na tela.
+   *
+   * "A pagar hoje", "A receber hoje" e "Vencidos" mostravam R$ 0,00 os três ao
+   * mesmo tempo — verdade inútil numa operação que recebe à vista e não tem
+   * boleto vencido. Enquanto isso, os R$ 669,73 que entraram e os R$ 2.171,38
+   * que saíram no dia não apareciam em lugar nenhum da tela.
+   *
+   * Movido é o que já foi baixado: previsão somada com realizado daria um
+   * número que não existe em conta nenhuma.
+   */
+  const movidos = visiveis.filter((x) => x.l.baixadoEm)
+  const entrou = movidos
+    .filter((x) => x.l.tipo === 'entrada')
+    .reduce((a, x) => a + x.l.recebido, 0)
+  const saiu = movidos.filter((x) => x.l.tipo === 'saida').reduce((a, x) => a + x.l.recebido, 0)
+  const periodoNaTela =
+    filtro.de || filtro.ate
+      ? `${filtro.de ? diaCurtoPt(filtro.de) : 'início'} a ${filtro.ate ? diaCurtoPt(filtro.ate) : 'hoje'}`
+      : 'todo o histórico'
 
   const abertos = visiveis.filter((x) => x.situacao !== 'liquidado' && x.situacao !== 'cancelado')
   const somaAberto = (ls: { l: LancamentoGerencial }[]) => ls.reduce((a, x) => a + saldoAberto(x.l), 0)
@@ -208,16 +252,19 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
 
   const colunas: ColunaUi<{ l: LancamentoGerencial; situacao: SituacaoLancamento }>[] = [
     {
-      chave: 'venc',
-      titulo: 'Vencimento',
-      largura: '92px',
+      chave: 'data',
+      titulo: 'Data',
+      largura: '96px',
+      // O dia do MOVIMENTO, com a legenda dizendo qual dia é esse. A coluna
+      // mostrava o vencimento e escrevia "—" em 1.223 das 1.244 linhas: uma
+      // coluna de data que quase nunca tem data.
       render: ({ l, situacao }) => (
         <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           <Num tamanho={11.5} tom={situacao === 'vencido' ? 'erro' : undefined}>
-            {l.venceEm ? diaCurtoPt(l.venceEm) : '—'}
+            {diaCurtoPt(l.ocorridoEm)}
           </Num>
           <span className="font-sans" style={{ fontSize: 9.5, color: 'rgba(242,237,227,.34)' }}>
-            {`comp. ${l.competencia.slice(0, 7)}`}
+            {l.baixadoEm ? 'baixado' : l.venceEm ? `vence ${diaCurtoPt(l.venceEm)}` : 'previsto'}
           </span>
         </span>
       ),
@@ -392,41 +439,33 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
 
       <GradeIndicadores>
         <Indicador
-          icone="saida"
-          tom="erro"
-          rotulo="A pagar hoje"
-          valor={brl(p.aPagarHoje.valor)}
-          nota={
-            p.aPagarHoje.qtd
-              ? plural(p.aPagarHoje.qtd, 'lançamento vence hoje', 'lançamentos vencem hoje')
-              : 'Nada vence hoje'
-          }
-          tomNota={p.aPagarHoje.qtd ? 'atencao' : 'ok'}
-        />
-        <Indicador
           icone="entrada"
           tom="ok"
-          rotulo="A receber hoje"
-          valor={brl(p.aReceberHoje.valor)}
-          nota={
-            p.aReceberHoje.qtd
-              ? plural(p.aReceberHoje.qtd, 'recebimento previsto', 'recebimentos previstos')
-              : 'Nenhum recebimento hoje'
-          }
-          tomNota="ok"
+          rotulo="Entrou"
+          valor={brl(entrou)}
+          tomValor="ok"
+          nota={`${periodoNaTela} · ${plural(movidos.filter((x) => x.l.tipo === 'entrada').length, 'movimento', 'movimentos')}`}
         />
         <Indicador
-          icone="alerta"
+          icone="saida"
           tom="erro"
-          rotulo="Vencidos"
-          valor={brl(p.vencidos.valor)}
-          tomValor={p.vencidos.qtd ? 'erro' : undefined}
+          rotulo="Saiu"
+          valor={brl(saiu)}
+          tomValor="erro"
+          nota={`${periodoNaTela} · ${plural(movidos.filter((x) => x.l.tipo === 'saida').length, 'movimento', 'movimentos')}`}
+        />
+        <Indicador
+          icone="balanca"
+          tom={entrou - saiu >= 0 ? 'ok' : 'erro'}
+          rotulo="Resultado do período"
+          valor={brl(entrou - saiu)}
+          tomValor={entrou - saiu >= 0 ? 'ok' : 'erro'}
           nota={
             p.vencidos.qtd
-              ? `${plural(p.vencidos.qtd, 'obrigação em atraso', 'obrigações em atraso')} · multa e juros correndo`
-              : 'Nada em atraso'
+              ? `${plural(p.vencidos.qtd, 'obrigação vencida', 'obrigações vencidas')} · ${brl(p.vencidos.valor)}`
+              : 'Entrou menos saiu, já baixado'
           }
-          tomNota={p.vencidos.qtd ? 'erro' : 'ok'}
+          tomNota={p.vencidos.qtd ? 'erro' : 'neutro'}
         />
         <Indicador
           icone="repetir"

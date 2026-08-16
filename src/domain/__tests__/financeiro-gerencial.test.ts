@@ -40,6 +40,7 @@ function lancamento(over: Partial<LancamentoGerencial> = {}): LancamentoGerencia
     contaId: 'sicoob',
     conta: 'Sicoob',
     competencia: '2026-08-01',
+    ocorridoEm: '2026-08-10',
     venceEm: '2026-08-10',
     baixadoEm: null,
     valor: 1000,

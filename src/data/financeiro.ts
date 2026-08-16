@@ -130,6 +130,7 @@ interface LinhaLancamento {
   // Nulo no banco também, ainda que hoje toda linha tenha conta.
   conta_id: string | null
   competencia: string
+  ocorrido_em: string
   vence_em: string | null
   baixado_em: string | null
   valor: number | string
@@ -165,7 +166,7 @@ interface LinhaLancamento {
  */
 const CAMPOS_LANCAMENTO =
   'id, descricao, favorecido, tipo, categoria, categoria_id, centro_custo, conta_id, ' +
-  'competencia, vence_em, baixado_em, valor, recebido, multa, juros, desconto, ' +
+  'competencia, ocorrido_em, vence_em, baixado_em, valor, recebido, multa, juros, desconto, ' +
   'parcela, parcelas, recorrente, recorrencia, origem, documento, observacao, ' +
   'transferencia_id, cancelado_em, ' +
   'categorias_financeiras!lancamentos_categoria_id_fkey(natureza_gerencial, impacta_dre, impacta_caixa), ' +
@@ -186,7 +187,10 @@ export async function lerLancamentos(opcoes?: {
     if (opcoes?.de) q = q.gte('competencia', opcoes.de)
     if (opcoes?.ate) q = q.lte('competencia', opcoes.ate)
     return q
-      .order('vence_em', { ascending: true, nullsFirst: false })
+      // Do mais recente para o mais antigo. Ordenar por `vence_em` empurrava
+      // 1.223 das 1.244 linhas para o fim da consulta — todas as que já
+      // aconteceram, que são justamente as que a tela precisa mostrar.
+      .order('ocorrido_em', { ascending: false })
       .range(deIdx, ateIdx) as unknown as PromiseLike<{
       data: LinhaLancamento[] | null
       error: unknown
@@ -208,6 +212,9 @@ export async function lerLancamentos(opcoes?: {
       contaId: l.conta_id ?? '',
       conta: l.contas_bancarias?.nome ?? l.conta_id ?? '—',
       competencia: l.competencia,
+      // O banco preenche `ocorrido_em` em toda linha; o coalesce é rede de
+      // segurança para lançamento antigo criado antes da coluna existir.
+      ocorridoEm: l.ocorrido_em ?? l.baixado_em ?? l.vence_em ?? l.competencia,
       venceEm: l.vence_em,
       baixadoEm: l.baixado_em,
       valor: Number(l.valor),

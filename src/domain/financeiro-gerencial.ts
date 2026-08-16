@@ -140,6 +140,16 @@ export interface LancamentoGerencial {
   conta: string
   /** Data do fato econômico — a DRE usa esta. */
   competencia: string
+  /**
+   * O dia em que o dinheiro se moveu — ou vai se mover.
+   *
+   * É a única data que TODO lançamento tem. `venceEm` só existe para
+   * compromisso agendado (21 de 1.244 na base real) e `baixadoEm` só depois da
+   * baixa; ordenar ou filtrar por qualquer uma das duas joga fora quase tudo.
+   * Uma lista de "o que entrou e saiu" precisa de uma data que nunca falte, e
+   * esta é ela.
+   */
+  ocorridoEm: string
   /** Data esperada da baixa — a projeção usa esta. */
   venceEm: string | null
   /** Data efetiva da baixa — o caixa usa esta. */

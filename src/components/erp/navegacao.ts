@@ -172,7 +172,7 @@ export const NAV: GrupoNav[] = [
         label: 'Lançamentos',
         href: '/financeiro/lancamentos',
         pronta: true,
-        subtitulo: 'Contas a pagar e a receber da operação',
+        subtitulo: 'Tudo o que entrou e saiu, em todas as contas',
         icone: 'recibo',
       },
       {

@@ -104,9 +104,11 @@ export function BarraDeFiltros({
           gap: 11,
         }}
       >
-        {/* Período por vencimento: é a data que decide o que aparece na fila
+        {/* Período pelo DIA DO MOVIMENTO. Antes filtrava por vencimento, e
+            como quase nada tem vencimento, escolher qualquer data esvaziava a
+            tela — o filtro parecia quebrado e na verdade estava obedecendo.
             de hoje, e o mockup a coloca como primeiro filtro da barra. */}
-        <Campo rotulo="Vencimento de">
+        <Campo rotulo="Movimento de">
           <input
             type="date"
             value={params.get('de') ?? ''}
