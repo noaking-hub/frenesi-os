@@ -20,14 +20,6 @@ const ABERTO = [
   // Tela de login e o retorno do OAuth do próprio ERP.
   '/entrar',
   '/api/auth',
-  // A escolha da senha nova. Aberta no middleware para que a PRÓPRIA TELA
-  // possa dizer o que houve quando não há sessão — "esse link já foi usado ou
-  // venceu, peça outro". Protegida aqui, o middleware devolvia um login pelado,
-  // sem explicação, para quem tinha acabado de clicar no link do e-mail: a
-  // pessoa era mandada de volta a digitar exatamente a senha que esqueceu.
-  // Não há o que vazar: a tela é só um formulário, e trocar a senha exige a
-  // sessão que o link de uso único criou.
-  '/redefinir-senha',
   // Portal do cliente: quem abre devolução não tem — nem deve ter — conta.
   '/devolucoes',
   // Webhooks e rotinas: autenticam por token próprio no cabeçalho, não por
@@ -110,9 +102,26 @@ export async function middleware(req: NextRequest) {
   if (!user) {
     const destino = req.nextUrl.clone()
     destino.pathname = '/entrar'
-    // Guarda para onde a pessoa ia: depois de entrar, ela continua o que
-    // estava fazendo em vez de cair no Dashboard e ter que navegar de novo.
-    destino.searchParams.set('de', `${pathname}${req.nextUrl.search}`)
+    destino.search = ''
+    // Quem chega em /redefinir-senha sem sessão veio de um link de e-mail que
+    // não valeu. Mandá-lo para o login com "de=/redefinir-senha" seria pedir
+    // justamente a senha que ele esqueceu, sem dizer o que houve. O recado é
+    // outro, e é o único útil aqui: peça outro link.
+    //
+    // A rota fica PROTEGIDA de propósito, e não aberta. Aberta, o middleware
+    // devolveria cedo e ninguém renovaria o token — e a renovação só pode
+    // acontecer aqui, no único ponto do caminho que grava cookie. Uma sessão de
+    // recuperação vencida seria renovada pelo Server Component, que não pode
+    // gravar: o Supabase rotacionaria o refresh token do lado dele, o navegador
+    // ficaria com o token já queimado, e ao enviar o formulário a pessoa leria
+    // "o link expirou" logo depois de a tela ter aberto normalmente.
+    if (pathname === '/redefinir-senha') {
+      destino.searchParams.set('recado', 'link-vencido')
+    } else {
+      // Guarda para onde a pessoa ia: depois de entrar, ela continua o que
+      // estava fazendo em vez de cair no Dashboard e ter que navegar de novo.
+      destino.searchParams.set('de', `${pathname}${req.nextUrl.search}`)
+    }
     return NextResponse.redirect(destino)
   }
 

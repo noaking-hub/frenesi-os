@@ -33,6 +33,25 @@ export function autenticacaoConfigurada(): boolean {
 }
 
 /**
+ * O erro que o Next lança quando alguém tenta gravar cookie na renderização.
+ *
+ * Conferido pelo código estável (`E1180`), com a mensagem como reserva: o
+ * código está fixado na própria classe do Next, e a mensagem existe para o dia
+ * em que ele mudar de nome. Errar essa distinção para o lado permissivo traria
+ * de volta o silêncio; para o lado restritivo, derrubaria telas que hoje
+ * funcionam.
+ */
+function ehCookieSomenteLeitura(e: unknown): boolean {
+  if (typeof e !== 'object' || e === null) return false
+  const erro = e as { __NEXT_ERROR_CODE?: string; message?: string; name?: string }
+  return (
+    erro.__NEXT_ERROR_CODE === 'E1180' ||
+    erro.name === 'ReadonlyRequestCookiesError' ||
+    Boolean(erro.message?.includes('Cookies can only be modified'))
+  )
+}
+
+/**
  * Cliente ligado aos cookies desta requisição.
  *
  * Server Component não pode escrever cookie — e o Supabase tenta, ao renovar o
@@ -50,8 +69,20 @@ export async function supabaseDaSessao() {
         setAll: (novos: { name: string; value: string; options?: CookieOptions }[]) => {
           try {
             for (const { name, value, options } of novos) jar.set(name, value, options)
-          } catch {
-            /* Server Component: o middleware já renovou. */
+          } catch (e) {
+            // Só UM erro é esperado aqui: o Next proibindo escrita de cookie
+            // durante a renderização de um Server Component. Esse é o caso
+            // legítimo — quem renova ali é o middleware, que roda antes.
+            //
+            // Qualquer outro motivo é falha de verdade, e engoli-la produz o
+            // pior desfecho possível: `signInWithPassword` devolve sucesso, a
+            // ação responde "entrou", e o usuário continua deslogado sem que
+            // exista uma linha de log explicando. O catch cego que estava aqui
+            // era um convite a esse tipo de investigação de horas.
+            if (!ehCookieSomenteLeitura(e)) {
+              console.error('[sessao] falha ao gravar o cookie de sessão:', e)
+              throw e
+            }
           }
         },
       },
