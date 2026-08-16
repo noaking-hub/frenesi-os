@@ -36,6 +36,14 @@ const ABERTO = [
   '/api/diagnostico',
   '/api/pagarme',
   '/api/pagaleve',
+  // A vigília do Gerente é agendada e autentica por CRON_SEGREDO. Só ELA, e
+  // não `/api/assessor` inteiro: a conversa e a confirmação de ações são
+  // chamadas pelo navegador e continuam exigindo sessão. Abrir o prefixo todo
+  // deixaria qualquer um perguntar o saldo do caixa sem estar logado.
+  '/api/assessor/vigilia',
+  // Webhook do WhatsApp: a Meta chama sem cookie e a rota valida por token
+  // próprio, resolve identidade pelo número autorizado e recusa desconhecido.
+  '/api/whatsapp',
 ]
 
 /** Os períodos do Dashboard. Lista fechada: cookie não escolhe consulta. */
