@@ -392,14 +392,29 @@ export async function carregarFluxo(dias = 30): Promise<PainelFluxo> {
     }),
   )
 
-  // A projeção começa do saldo de HOJE, não do início da série: os dias
-  // passados aparecem no gráfico como contexto, mas o dinheiro que existe já
-  // é o resultado deles.
-  const passados = linhas.filter((l) => l.realizado)
-  const saldoInicial =
-    saldoHoje - passados.reduce((a, d) => a + d.entradas - d.saidas, 0)
-
-  const projecao = projetarCaixa(saldoInicial, linhas)
+  /**
+   * A projeção parte do saldo REAL das contas e olha só para frente.
+   *
+   * A versão anterior tentava reconstruir o saldo de quinze dias atrás
+   * subtraindo do saldo de hoje o movimento dos dias já realizados. É um erro
+   * de categoria, e ele produzia um número visível: saldo de partida
+   * −R$ 3.313,69, "risco de caixa Alto" e "negativa em 0 dias" numa operação
+   * com R$ 14.804,06 em conta — enquanto o Dashboard, na mesma hora, dizia
+   * "caixa sustentado".
+   *
+   * São dois defeitos somados. O primeiro é conceitual: `saldoDisponivel` não
+   * é função do intervalo. Para o Inter e o Sicoob ele é `saldo_informado`,
+   * digitado à mão e congelado; para o Mercado Pago é o acumulado da conta
+   * inteira. Subtrair o fluxo de dezesseis dias de um estoque congelado não
+   * devolve o saldo de dezesseis dias atrás — devolve um resíduo aritmético.
+   * O segundo é que o passado JÁ ESTÁ no saldo: reprojetá-lo conta o mesmo
+   * dinheiro duas vezes.
+   *
+   * O dia de hoje também fica de fora (`realizado` é `dia <= current_date`), e
+   * é o certo: o que foi baixado hoje já está no saldo das contas.
+   */
+  const futuros = linhas.filter((l) => !l.realizado)
+  const projecao = projetarCaixa(saldoHoje, futuros)
 
   const vivos = lancamentos.filter((l) => !l.canceladoEm && saldoAberto(l) > 0)
   const porCategoria = new Map<string, { valor: number; tipo: 'entrada' | 'saida' }>()
@@ -413,7 +428,11 @@ export async function carregarFluxo(dias = 30): Promise<PainelFluxo> {
     porCategoria.set(chave, atual)
   }
 
-  const saidas30 = projecao.dias.reduce((a, d) => a + d.saidas, 0)
+  // O ritmo de saída vem do REALIZADO das contas, não da projeção. A projeção
+  // só tem o que está agendado, e uma operação que paga tudo à vista tem
+  // agenda vazia — o que faria a cobertura dizer "infinita" justamente para
+  // quem gasta sem programar.
+  const saidas30 = contas.reduce((a, c) => a + (c.saidas30d ?? 0), 0)
 
   return {
     projecao,
