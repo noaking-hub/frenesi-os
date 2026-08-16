@@ -53,7 +53,7 @@ interface Casamento {
   checkoutId: string
   pedidoId: string | null
   bruto: number
-  recebidoAteAgora: number
+  valorDaParcela: number
   estornado: number
   tarifa: number
   compradoEm: string
@@ -93,7 +93,7 @@ function casar(transacoes: TransacaoPagaleve[], pedidos: PedidoCru[]): Casamento
       checkoutId: t.checkout_id,
       pedidoId: melhor?.id ?? null,
       bruto: emReais(t.order_amount),
-      recebidoAteAgora: emReais(t.current_amount),
+      valorDaParcela: emReais(t.current_amount),
       estornado: emReais(t.refunded_amount),
       // A tarifa vem negativa da API; aqui ela vira custo positivo, que é como
       // o resto do ERP fala de tarifa.
@@ -176,7 +176,7 @@ export async function POST(req: Request) {
       casadas: casados.length,
       orfas: orfas.length,
       volumeBruto: soma(casamentos.map((c) => c.bruto)),
-      recebidoAteAgora: soma(casamentos.map((c) => c.recebidoAteAgora)),
+      somaDasParcelas: soma(casamentos.map((c) => c.valorDaParcela)),
       tarifas: soma(casamentos.map((c) => c.tarifa)),
       estornado: soma(casamentos.map((c) => c.estornado)),
     },
@@ -206,44 +206,37 @@ export async function POST(req: Request) {
 
   if (!gravar) return NextResponse.json(relatorio)
 
-  // Trava deliberada: enquanto `current_amount` for parcela e não acumulado, o
-  // que iria para `recebido` seria uma fração do caixa real. Melhor recusar a
-  // gravar do que gravar um número que parece certo.
-  if (estrutura.linhasPorVenda.length === 1 && estrutura.linhasPorVenda[0][0] === '1') {
-    return NextResponse.json(
-      {
-        ...relatorio,
-        erro:
-          'Cada venda tem UMA linha, então `current_amount` é o valor de uma parcela e não o ' +
-          'acumulado recebido. Gravar isso como `recebido` subestimaria o caixa. Falta a fonte ' +
-          'do que já foi liberado por venda — provavelmente os transfers, que trazem os dias ' +
-          'acumulados.',
-      },
-      { status: 409 },
-    )
-  }
-
-  // A gravação preenche o repasse que a tela de Conciliação lê. `recebido` é
-  // o que a Pagaleve JÁ liberou, não o valor da venda: fingir que entrou tudo
-  // no dia da compra seria inventar caixa que ainda não existe.
+  // O QUE SE GRAVA É O QUE ESTÁ PROVADO, E SÓ ISSO.
+  //
+  // Bruto, tarifa e identidade do checkout são fato: o volume conferiu ao
+  // centavo com o painel da Pagaleve (R$ 1.470,92 em agosto) e as dez vendas
+  // casaram com pedidos do ERP.
+  //
+  // `recebido` fica de fora. Cada venda tem uma linha só, e `current_amount`
+  // nela é o valor líquido de UMA parcela — não o acumulado. Gravá-lo como
+  // recebido faria cada venda entrar valendo um terço ou um quarto do que
+  // entrou de verdade no caixa; e preencher com o bruto seria pior ainda,
+  // inventando dinheiro que só chega em 45 dias. Sem a fonte do liberado por
+  // venda, o campo continua vazio — e vazio é honesto, porque a Conciliação
+  // já sabe tratar venda da Pagaleve como "aguardando" durante o prazo.
   const linhas = casados.map((c) => ({
     pedido_id: c.pedidoId!,
     origem: 'pagaleve',
     meio: 'Pix parcelado (Pagaleve)',
     gateway_id: c.checkoutId,
     bruto_gateway: c.bruto,
-    recebido: c.recebidoAteAgora,
     taxa_real: c.tarifa,
   }))
 
   for (let i = 0; i < linhas.length; i += 200) {
+    const fatia = linhas.slice(i, i + 200)
     const { error } = await supabaseServer()
       .from('repasses')
-      .upsert(linhas.slice(i, i + 200), { onConflict: 'pedido_id' })
+      .upsert(fatia, { onConflict: 'pedido_id' })
     if (error) {
       return NextResponse.json({ ...relatorio, erro: error.message }, { status: 500 })
     }
-    relatorio.gravados += linhas.slice(i, i + 200).length
+    relatorio.gravados += fatia.length
   }
 
   return NextResponse.json(relatorio)
