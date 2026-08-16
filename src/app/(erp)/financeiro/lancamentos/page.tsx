@@ -133,7 +133,7 @@ interface Busca {
   /** Janela do dia do movimento, AAAA-MM-DD inclusivos. */
   de?: string
   ate?: string
-  /** Atalho de janela: '7' | '30' | 'mes' | 'tudo'. Sem nada, vale '7'. */
+  /** Atalho de janela: 'hoje' | '7' | '30' | 'mes' | 'tudo'. Sem nada, vale 'hoje'. */
   periodo?: string
   /** Página da lista, 1-based. */
   pagina?: string
@@ -159,18 +159,18 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
   }
 
   /**
-   * A janela padrão é de 7 DIAS, e não "todo o histórico".
+   * A janela padrão é HOJE, e não "todo o histórico".
    *
    * Abrir a tela carregava 1.244 lançamentos e desenhava 250 — segundos de
-   * espera para responder uma pergunta que quase sempre é sobre esta semana.
+   * espera para responder uma pergunta que quase sempre é sobre o dia.
    * Quem precisa do histórico inteiro pede: o atalho "Tudo" está a um clique,
    * e o rodapé sempre diz qual janela está valendo.
    *
    * Data digitada à mão vence o atalho — quem escolheu 01/06 quer 01/06.
    */
-  const atalho = ['7', '30', 'mes', 'tudo'].includes(filtro.periodo ?? '')
-    ? (filtro.periodo as '7' | '30' | 'mes' | 'tudo')
-    : '7'
+  const atalho = ['hoje', '7', '30', 'mes', 'tudo'].includes(filtro.periodo ?? '')
+    ? (filtro.periodo as 'hoje' | '7' | '30' | 'mes' | 'tudo')
+    : 'hoje'
   const temDataManual = Boolean(filtro.de || filtro.ate)
   const janela = temDataManual
     ? { de: filtro.de ?? '', ate: filtro.ate ?? '' }
@@ -178,7 +178,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       ? { de: '', ate: '' }
       : atalho === 'mes'
         ? { de: `${p.hoje.slice(0, 7)}-01`, ate: p.hoje }
-        : { de: recuar(p.hoje, atalho === '30' ? 29 : 6), ate: p.hoje }
+        : { de: recuar(p.hoje, atalho === '30' ? 29 : atalho === '7' ? 6 : 0), ate: p.hoje }
 
   const comSituacao = p.lancamentos.map((l) => ({ l, situacao: situacaoDe(l, p.hoje) }))
   const busca = (filtro.q ?? '').trim().toLowerCase()
@@ -369,23 +369,31 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
             >
               {l.descricao}
             </span>
+          </span>
+          {/* As etiquetas moram na SEGUNDA linha, junto do favorecido.
+              Na primeira, elas ficavam lado a lado com o texto e no topo da
+              célula — enquanto a etiqueta de Tipo, na coluna vizinha, é
+              centralizada na altura da linha. As duas quase se alinhavam, e
+              quase-alinhado lê pior do que deliberadamente diferente. */}
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
             {l.parcela && l.parcelas && (
               <Chip tom="info" contorno>{`${l.parcela}/${l.parcelas}`}</Chip>
             )}
             {l.recorrente && <Chip tom="roxo" contorno>{l.recorrencia ?? 'Recorrente'}</Chip>}
             {l.transferenciaId && <Chip tom="neutro" contorno>Transferência</Chip>}
-          </span>
-          <span
-            className="font-sans"
-            style={{
-              fontSize: 10,
-              color: 'rgba(242,237,227,.36)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {[l.favorecido, l.documento && `doc. ${l.documento}`].filter(Boolean).join(' · ') || '—'}
+            <span
+              className="font-sans"
+              style={{
+                minWidth: 0,
+                fontSize: 10,
+                color: 'rgba(242,237,227,.36)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {[l.favorecido, l.documento && `doc. ${l.documento}`].filter(Boolean).join(' · ') || '—'}
+            </span>
           </span>
         </span>
       ),
@@ -393,7 +401,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
     {
       chave: 'tipo',
       titulo: 'Tipo',
-      largura: '96px',
+      largura: '92px',
       render: ({ l }) => (
         <Chip tom={l.tipo === 'entrada' ? 'ok' : 'erro'} contorno>
           {l.tipo === 'entrada' ? '↑ A receber' : '↓ A pagar'}
@@ -449,7 +457,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
     {
       chave: 'valor',
       titulo: 'Valor',
-      largura: '138px',
+      largura: '124px',
       alinhamento: 'right',
       render: ({ l }) => {
         const falta = saldoAberto(l)
@@ -483,7 +491,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
     {
       chave: 'status',
       titulo: 'Status',
-      largura: '100px',
+      largura: '92px',
       render: ({ situacao }) => (
         <Chip tom={TOM_SITUACAO[situacao]}>{ROTULO_SITUACAO_LANCAMENTO[situacao]}</Chip>
       ),
@@ -491,7 +499,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
     {
       chave: 'origem',
       titulo: 'Origem',
-      largura: '104px',
+      largura: '86px',
       // "Extrato Mercado Pago" não cabe e saía cortado no meio da palavra. A
       // conta já está na coluna ao lado, então o que esta coluna informa é a
       // procedência: veio do extrato do banco ou foi digitado à mão. O nome
@@ -507,7 +515,9 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
     {
       chave: 'acoes',
       titulo: 'Ações',
-      largura: '156px',
+      // 156px sobravam: os botões ocupam pouco mais de 120 e o resto virava um
+      // vão entre Origem e Ações que fazia as duas colunas parecerem soltas.
+      largura: '124px',
       alinhamento: 'right',
       render: ({ l, situacao }) => <AcoesGerenciais lancamento={l} situacao={situacao} />,
     },

@@ -200,8 +200,11 @@ export function CashbackCliente({
     let lidos = 0
     let comSaldoLidos = 0
     try {
+      // O teto de rodadas subiu junto com a diminuição da fatia: cada
+      // chamada agora faz menos trabalho, então são precisas mais delas para
+      // percorrer as ~29 páginas de clientes.
       let rodadas = 0
-      while (pagina !== null && rodadas < 60) {
+      while (pagina !== null && rodadas < 300) {
         rodadas++
         setProgresso(`Atualizando saldos… ${lidos} carteiras lidas`)
         const resposta = await fetch('/api/crm/cashback', {
@@ -209,9 +212,21 @@ export function CashbackCliente({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ pagina }),
         })
-        const r = (await resposta.json()) as
-          | { ok: true; proximaPagina: number | null; lidos: number; comSaldo: number }
-          | { ok: false; erro: string }
+        // A resposta é lida como TEXTO antes de virar JSON. Quando a
+        // plataforma encerra a função, ela devolve HTML — e `resposta.json()`
+        // estourava com "Unexpected token '<'", uma mensagem que não diz nada
+        // a quem está olhando a tela.
+        const cru = await resposta.text()
+        let r: { ok: true; proximaPagina: number | null; lidos: number; comSaldo: number } | { ok: false; erro: string }
+        try {
+          r = JSON.parse(cru)
+        } catch {
+          setAviso({
+            tom: 'erro',
+            texto: `A atualização foi interrompida pelo servidor depois de ${lidos} carteiras. O que já foi lido está salvo — clique de novo para continuar de onde parou.`,
+          })
+          return
+        }
         if (!r.ok) {
           setAviso({ tom: 'erro', texto: r.erro })
           return

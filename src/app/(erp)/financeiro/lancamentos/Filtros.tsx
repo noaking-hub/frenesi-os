@@ -82,7 +82,7 @@ export function BarraDeFiltros({
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
   }
 
-  const periodoAtivo = params.get('de') || params.get('ate') ? '' : (params.get('periodo') ?? '7')
+  const periodoAtivo = params.get('de') || params.get('ate') ? '' : (params.get('periodo') ?? 'hoje')
 
   const ativos = [
     'situacao',
@@ -117,6 +117,7 @@ export function BarraDeFiltros({
         <Etiqueta>Período</Etiqueta>
         {(
           [
+            ['hoje', 'Hoje'],
             ['7', '7 dias'],
             ['30', '30 dias'],
             ['mes', 'Este mês'],
