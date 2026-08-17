@@ -9,6 +9,8 @@ import type { Tom } from '@/components/erp/tokens'
 import type { LinhaLogNotificacao } from '@/data/notificacoes'
 import type { LinhaDescadastro } from '@/data/descadastro'
 
+import { Modal } from '@/components/erp/Modal'
+
 import { reenviarAviso } from './acoes'
 
 /**
@@ -58,6 +60,7 @@ export function NotificacoesCliente({
   const params = useSearchParams()
   const [aviso, setAviso] = useState<{ tom: 'ok' | 'erro'; texto: string } | null>(null)
   const [pendente, iniciar] = useTransition()
+  const [aberto, setAberto] = useState<LinhaLogNotificacao | null>(null)
 
   const trocar = (chave: string, valor: string) => {
     const novo = new URLSearchParams(params.toString())
@@ -186,8 +189,25 @@ export function NotificacoesCliente({
             <TituloSecao tamanho={14.5}>O que o ERP escreveu para o cliente</TituloSecao>
           </div>
           {log.map((l) => (
+            /* Clicável só quando há corpo guardado. Linha dispensada não tem
+               e-mail para mostrar, e um clique que abre modal vazio ensina o
+               operador a não clicar — inclusive nas que têm. */
             <div
               key={l.chave}
+              role={l.corpoHtml ? 'button' : undefined}
+              tabIndex={l.corpoHtml ? 0 : undefined}
+              onClick={l.corpoHtml ? () => setAberto(l) : undefined}
+              onKeyDown={
+                l.corpoHtml
+                  ? (e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setAberto(l)
+                      }
+                    }
+                  : undefined
+              }
+              className={l.corpoHtml ? 'hover:bg-white/[.02]' : undefined}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -195,6 +215,7 @@ export function NotificacoesCliente({
                 padding: '11px 18px',
                 borderTop: '1px solid var(--color-borda-sutil)',
                 flexWrap: 'wrap',
+                cursor: l.corpoHtml ? 'pointer' : 'default',
               }}
             >
               <span
@@ -226,10 +247,20 @@ export function NotificacoesCliente({
                   </span>
                 ) : null}
               </span>
+              {l.corpoHtml ? (
+                <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>
+                  ver e-mail
+                </span>
+              ) : null}
               {l.estado === 'falhou' ? (
-                <BotaoSecundario altura={28} onClick={() => reenviar(l.chave)} desabilitado={pendente}>
-                  Reenviar
-                </BotaoSecundario>
+                /* O `stopPropagation` fica no invólucro porque o botão do kit
+                   não recebe o evento — e sem ele o clique em "Reenviar" sobe
+                   para a linha e abre o modal por cima do reenvio. */
+                <span onClick={(e) => e.stopPropagation()}>
+                  <BotaoSecundario altura={28} onClick={() => reenviar(l.chave)} desabilitado={pendente}>
+                    Reenviar
+                  </BotaoSecundario>
+                </span>
               ) : null}
             </div>
           ))}
@@ -294,6 +325,45 @@ export function NotificacoesCliente({
           ))
         )}
       </section>
+
+      {aberto?.corpoHtml && (
+        <Modal titulo="E-mail enviado" largura={780} aoFechar={() => setAberto(null)}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <span className="font-sans" style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-corrente)' }}>
+                {aberto.assunto}
+              </span>
+              <span className="font-sans" style={{ fontSize: 11, color: 'var(--color-terciario)' }}>
+                Para {aberto.destinatario}
+                {aberto.concluidoEm ? ` · ${quando(aberto.concluidoEm)}` : ''}
+                {aberto.pedidoId ? ` · ${aberto.pedidoId}` : ''}
+              </span>
+            </div>
+            {/* `sandbox` sem `allow-scripts`: o corpo é HTML que já foi para a
+                caixa do cliente, mas exibi-lo aqui não pode dar a ele o direito
+                de rodar nada dentro do ERP. `srcDoc` isola do resto da página,
+                e sem isso o CSS do e-mail (que usa `body {}`) repintaria a tela
+                inteira. */}
+            <iframe
+              srcDoc={aberto.corpoHtml}
+              title={aberto.assunto}
+              sandbox=""
+              style={{
+                width: '100%',
+                height: '62vh',
+                border: '1px solid rgba(255,255,255,.08)',
+                borderRadius: 10,
+                background: '#EDE6DA',
+              }}
+            />
+            <span className="font-sans" style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
+              Esta é a cópia exata do que foi entregue, guardada no momento do envio — e não o modelo
+              de hoje redesenhado. Se o texto do modelo mudou depois, o que está aqui continua sendo
+              o que o cliente leu.
+            </span>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }

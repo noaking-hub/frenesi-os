@@ -336,10 +336,19 @@ export async function enviarAvisosDePedido(opcoes?: {
     // já reservada, o aviso viraria "falhou" sem ninguém ter errado nada.
     if (indice > 0) await pausa(600)
     try {
-      const r = await comRetentativa(() => entregar(mensagemDoAviso(aviso, pedido, modelo, null)))
+      const mensagem = mensagemDoAviso(aviso, pedido, modelo, null)
+      const r = await comRetentativa(() => entregar(mensagem))
       await sb
         .from('notificacoes_enviadas')
-        .update({ estado: 'enviado', provedor_id: r.id, concluido_em: new Date().toISOString() })
+        .update({
+          estado: 'enviado',
+          provedor_id: r.id,
+          concluido_em: new Date().toISOString(),
+          // O corpo é guardado, não redesenhado depois: o modelo é editável, e
+          // redesenhar mostraria o texto de hoje com os dados de ontem — o
+          // oposto do que se procura ao abrir esta tela.
+          corpo_html: mensagem.html,
+        })
         .eq('chave', aviso.chave)
       resultado.enviados++
     } catch (e) {
@@ -511,7 +520,12 @@ async function avisarDevolucao(
       const r = await entregar({ para: email, assunto: mensagem.assunto, html: mensagem.html })
       await sb
         .from('notificacoes_enviadas')
-        .update({ estado: 'enviado', provedor_id: r.id, concluido_em: new Date().toISOString() })
+        .update({
+          estado: 'enviado',
+          provedor_id: r.id,
+          concluido_em: new Date().toISOString(),
+          corpo_html: mensagem.html,
+        })
         .eq('chave', chave)
     } catch (e) {
       await sb
@@ -654,7 +668,12 @@ export async function avisarDevolucaoConcluida(protocolo: string): Promise<void>
       const r = await entregar({ para: email, assunto: mensagem.assunto, html: mensagem.html, anexos })
       await sb
         .from('notificacoes_enviadas')
-        .update({ estado: 'enviado', provedor_id: r.id, concluido_em: new Date().toISOString() })
+        .update({
+          estado: 'enviado',
+          provedor_id: r.id,
+          concluido_em: new Date().toISOString(),
+          corpo_html: mensagem.html,
+        })
         .eq('chave', chave)
     } catch (e) {
       await sb
@@ -708,6 +727,8 @@ export interface LinhaLogNotificacao {
   motivo: string
   criadoEm: string
   concluidoEm: string | null
+  /** O HTML entregue. Nulo em dispensado (não houve e-mail) e no que venceu a retenção de um ano. */
+  corpoHtml: string | null
 }
 
 /**
@@ -727,7 +748,7 @@ export async function lerLogDeNotificacoes(filtros?: {
 
   let consulta = supabaseServer()
     .from('notificacoes_enviadas')
-    .select('chave, pedido_id, evento, destinatario, assunto, estado, motivo, criado_em, concluido_em')
+    .select('chave, pedido_id, evento, destinatario, assunto, estado, motivo, criado_em, concluido_em, corpo_html')
     .order('criado_em', { ascending: false })
     .limit(filtros?.limite ?? 300)
   if (filtros?.estado) consulta = consulta.eq('estado', filtros.estado)
@@ -749,6 +770,7 @@ export async function lerLogDeNotificacoes(filtros?: {
     motivo: string
     criado_em: string
     concluido_em: string | null
+    corpo_html: string | null
   }[]).map((l) => ({
     chave: l.chave,
     pedidoId: l.pedido_id,
@@ -760,6 +782,7 @@ export async function lerLogDeNotificacoes(filtros?: {
     motivo: l.motivo,
     criadoEm: l.criado_em,
     concluidoEm: l.concluido_em,
+    corpoHtml: l.corpo_html,
   }))
 }
 
