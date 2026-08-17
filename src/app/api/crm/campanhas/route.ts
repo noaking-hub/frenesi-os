@@ -5,8 +5,13 @@ import { rodarCampanhas } from '@/data/campanhas'
 /**
  * A rodada automática das campanhas de relacionamento.
  *
- * Chamada pelo pg_cron a cada hora. O segredo é o mesmo das outras rotinas —
- * a rota é pública na internet, e sem ele qualquer um dispararia e-mail em
+ * Chamada pelo pg_cron a cada hora, com `Authorization: Bearer $CRON_SEGREDO`
+ * — a MESMA forma das outras rotinas agendadas. A primeira versão desta rota
+ * inventou um header próprio (`x-cron-segredo`) e tomou 401 do próprio
+ * agendador: convenção divergente não falha na revisão, falha em produção, e
+ * neste caso falharia calada num 401 que o pg_net registra sem alarde.
+ *
+ * A rota é pública na internet; sem o segredo qualquer um dispararia e-mail em
  * nome da marca.
  *
  * `?dispensar=1` roda a CARGA INICIAL: percorre os mesmos candidatos e carimba
@@ -20,9 +25,13 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 26
 
 export async function POST(pedido: Request) {
-  const segredo = process.env.CRON_SEGREDO
-  if (segredo && pedido.headers.get('x-cron-segredo') !== segredo) {
-    return NextResponse.json({ ok: false, erro: 'não autorizado' }, { status: 401 })
+  const esperado = process.env.CRON_SEGREDO
+  const enviado = pedido.headers.get('authorization')?.replace(/^Bearer\s+/i, '')
+  if (esperado && enviado !== esperado) {
+    return NextResponse.json(
+      { ok: false, erro: 'Não autorizado. Mande CRON_SEGREDO em Authorization: Bearer.' },
+      { status: 401 },
+    )
   }
 
   const url = new URL(pedido.url)
