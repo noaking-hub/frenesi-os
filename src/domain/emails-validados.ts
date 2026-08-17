@@ -454,7 +454,7 @@ export const HTML_VALIDADO_CASHBACK = `<!DOCTYPE html>
                         <div style="padding-top:18px;">
                           <span style="display:inline-block; font-family:Georgia,'Times New Roman',serif; font-size:38px; line-height:46px; mso-line-height-rule:exactly; color:#EFD18C; background-color:#241F18; border:2px solid #B08D4B; border-radius:10px; padding:18px 40px;">{saldo}</span>
                         </div>
-                        <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#6B6355; padding-top:16px;">V&aacute;lido at&eacute; <strong style="color:#5E4A1E;">{validade}</strong> &nbsp;&middot;&nbsp; o desconto entra sozinho no checkout</div>
+                        <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#6B6355; padding-top:16px;">V&aacute;lido at&eacute; <strong style="color:#5E4A1E;">{validade}</strong> &nbsp;&middot;&nbsp; selecione seu saldo na finaliza&ccedil;&atilde;o da compra</div>
                       </td>
                     </tr>
                   </table>

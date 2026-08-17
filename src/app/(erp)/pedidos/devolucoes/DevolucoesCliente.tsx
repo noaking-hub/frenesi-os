@@ -1701,7 +1701,11 @@ function ModalConclusao({
 }) {
   const [resolucao, setResolucao] = useState(RESOLUCOES[0])
   const [valor, setValor] = useState(d.valor.toFixed(2).replace('.', ','))
-  const [forma, setForma] = useState<'pix' | 'estorno-cartao'>('pix')
+  // Sem escolha prévia: o reembolso sai pelo MESMO meio do pagamento, e quem
+  // sabe qual foi é quem está concluindo. Vinha com 'pix' marcado, e um campo
+  // já preenchido não é lido — bastava não olhar para registrar Pix num
+  // estorno de cartão, e o e-mail ao cliente repetia a informação errada.
+  const [forma, setForma] = useState<'' | 'pix' | 'estorno-cartao'>('')
   const [trocaPedido, setTrocaPedido] = useState('')
   const [comprovante, setComprovante] = useState<File | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
@@ -1715,6 +1719,12 @@ function ModalConclusao({
       const n = Number(valor.replace(/\./g, '').replace(',', '.'))
       if (!Number.isFinite(n) || n <= 0) {
         setAviso('Informe o valor reembolsado.')
+        return
+      }
+      if (!forma) {
+        setAviso(
+          'Escolha a forma do reembolso. Ela é sempre a mesma do pagamento: cartão volta por estorno no cartão, Pix volta por Pix.',
+        )
         return
       }
       if (!comprovante) {
@@ -1817,7 +1827,12 @@ function ModalConclusao({
                 style={{ ...campoTexto, width: 120, textAlign: 'right' }}
               />
             </label>
-            <CaixaSeletor rotulo="Forma" valor={forma} aoMudar={(v) => setForma(v as typeof forma)}>
+            <CaixaSeletor
+              rotulo="Forma (a mesma do pagamento)"
+              valor={forma}
+              aoMudar={(v) => setForma(v as typeof forma)}
+            >
+              <option value="">Selecione…</option>
               <option value="pix">Pix</option>
               <option value="estorno-cartao">Estorno no cartão</option>
             </CaixaSeletor>

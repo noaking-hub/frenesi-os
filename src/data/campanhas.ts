@@ -53,6 +53,16 @@ export interface ResultadoCampanha {
 const POR_RODADA = 25
 
 /**
+ * Quanto tempo a rodada inteira pode gastar.
+ *
+ * A Netlify corta em ~26s e o pg_net desiste em 30s. Quando isso acontecia, a
+ * rotina morria no meio de um envio: e-mails saíam, mas ninguém sabia quais,
+ * porque a resposta nunca chegava. Vinte segundos deixam margem para fechar as
+ * contas e responder.
+ */
+const PRAZO_DA_RODADA_MS = 20_000
+
+/**
  * Reserva a vaga de um fato. Devolve false quando alguém já a tinha.
  *
  * É a mesma mecânica dos avisos de pedido: `ignoreDuplicates` faz o banco
@@ -100,10 +110,12 @@ async function reservar(
  */
 async function reservarEmLote(
   linhas: { chave: string; evento: string; destinatario: string; motivo: string }[],
-): Promise<number> {
-  if (linhas.length === 0) return 0
+  estado: 'dispensado' | 'enviando' = 'dispensado',
+  assunto = '(não enviado)',
+): Promise<string[]> {
+  if (linhas.length === 0) return []
   const agora = new Date().toISOString()
-  let gravadas = 0
+  const ganhas: string[] = []
   // Em blocos, porque um INSERT com milhares de linhas vira um corpo grande
   // demais para o PostgREST — e o erro dele seria um 413 mudo.
   for (let i = 0; i < linhas.length; i += 200) {
@@ -112,17 +124,39 @@ async function reservarEmLote(
       .upsert(
         linhas.slice(i, i + 200).map((l) => ({
           ...l,
-          assunto: '(não enviado)',
-          estado: 'dispensado',
-          concluido_em: agora,
+          assunto,
+          estado,
+          ...(estado === 'dispensado' ? { concluido_em: agora } : {}),
         })),
         { onConflict: 'chave', ignoreDuplicates: true },
       )
       .select('chave')
     if (error) throw new Error(error.message)
-    gravadas += (data ?? []).length
+    for (const linha of data ?? []) ganhas.push(String(linha.chave))
   }
-  return gravadas
+  return ganhas
+}
+
+/**
+ * Devolve a vaga: apaga a reserva de quem NÃO recebeu nada.
+ *
+ * Só é chamada em cima de carrinhos que não chegaram a virar e-mail — o prazo
+ * da rodada acabou antes, ou a chamada inteira falhou. Sem isto a linha ficaria
+ * presa em "enviando" para sempre, e a chave reservada impediria a rodada
+ * seguinte de tentar de novo: o cliente nunca receberia, e o log diria que o
+ * envio estava em andamento desde ontem.
+ */
+async function liberar(chaves: string[]) {
+  if (chaves.length === 0) return
+  await supabaseServer().from('notificacoes_enviadas').delete().in('chave', chaves)
+}
+
+/** Fecha a vaga sem envio e sem erro: ninguém recebeu, e tudo bem. */
+async function dispensar(chave: string, motivo: string) {
+  await supabaseServer()
+    .from('notificacoes_enviadas')
+    .update({ estado: 'dispensado', motivo: motivo.slice(0, 300), concluido_em: new Date().toISOString() })
+    .eq('chave', chave)
 }
 
 async function concluir(chave: string, ok: boolean, motivo = '', corpo?: string) {
@@ -176,12 +210,17 @@ async function toquesPorCarrinho(): Promise<Map<string, number>> {
   return mapa
 }
 
-async function rodarCarrinho(regra: RegraDeEnvio, apenasDispensar: boolean): Promise<ResultadoCampanha> {
+async function rodarCarrinho(
+  regra: RegraDeEnvio,
+  apenasDispensar: boolean,
+  prazoFinal: number,
+): Promise<ResultadoCampanha> {
   const r = vazio('carrinho')
   const [leitura, jaEnviados] = await Promise.all([lerCarrinhosYampi(), toquesPorCarrinho()])
   const agora = Date.now()
   const janelaMs = (regra.janelaMaxDias ?? 7) * 86_400_000
   const paraDispensar: { chave: string; evento: string; destinatario: string; motivo: string }[] = []
+  const aEnviar: { id: string; email: string; chave: string; comCupom: boolean }[] = []
 
   for (const c of leitura.carrinhos) {
     // Sem data de abandono não há como saber qual toque ele merece — e chutar
@@ -208,38 +247,108 @@ async function rodarCarrinho(regra: RegraDeEnvio, apenasDispensar: boolean): Pro
       })
       continue
     }
-    if (r.enviados >= POR_RODADA) break
-    if (!(await reservar(chave, 'carrinho_recuperacao', c.email, 'Recuperação de carrinho'))) continue
+    if (aEnviar.length < POR_RODADA) aEnviar.push({ id: c.id, email: c.email, chave, comCupom: Boolean(toque?.cupom) })
+  }
 
+  if (apenasDispensar) {
+    r.dispensados = (await reservarEmLote(paraDispensar)).length
+    return r
+  }
+
+  // Reserva as vagas de uma vez; o banco devolve só as que ESTA rodada ganhou.
+  const minhas = new Set(
+    await reservarEmLote(
+      aEnviar.map((a) => ({
+        chave: a.chave,
+        evento: 'carrinho_recuperacao',
+        destinatario: a.email,
+        motivo: '',
+      })),
+      'enviando',
+      'Recuperação de carrinho',
+    ),
+  )
+  const meus = aEnviar.filter((a) => minhas.has(a.chave))
+  const porChave = new Map(meus.map((a) => [a.id, a.chave]))
+
+  // Os dois grupos existem porque `enviarEmailsCarrinho` recebe UM cupom para a
+  // lista inteira, e só o terceiro toque leva desconto.
+  for (const comCupom of [false, true]) {
+    const grupo = meus.filter((a) => a.comCupom === comCupom)
+    if (grupo.length === 0) continue
+    const restante = prazoFinal - Date.now()
+    if (restante <= 2_000) {
+      // Sem tempo para este grupo: as vagas voltam para a rodada seguinte, em
+      // vez de ficarem presas em "enviando" para sempre. Nada foi enviado
+      // para eles, então liberar não duplica nada.
+      await liberar(grupo.map((a) => a.chave))
+      r.falhas.push(`${grupo.length} carrinho(s) ficaram para a próxima rodada: o tempo desta acabou`)
+      continue
+    }
+
+    let envio
     try {
-      const envio = await enviarEmailsCarrinho(
-        [c.id],
-        toque.cupom && regra.cupomPct
+      envio = await enviarEmailsCarrinho(
+        grupo.map((a) => a.id),
+        comCupom && regra.cupomPct
           ? { tipo: 'unico', pct: regra.cupomPct, validadeDias: regra.cupomValidadeDias ?? 7 }
           : null,
         // `forcar` porque a vaga já foi reservada AQUI: a trava de 7 dias da
         // função é para o envio manual em massa, e negaria o 2º e 3º toque.
         true,
+        restante,
       )
-      // `enviados` da recuperação é a LISTA de quem recebeu, não uma
-      // contagem — confundir os dois faria toda rodada parecer bem-sucedida.
-      const ok = envio.ok && envio.resultado.enviados.length > 0
-      await concluir(chave, ok, ok ? '' : 'a função de envio não confirmou a entrega')
-      if (ok) r.enviados++
-      else r.falhas.push(`${c.id}: sem confirmação`)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      await concluir(chave, false, msg)
-      r.falhas.push(`${c.id}: ${msg}`)
+      await liberar(grupo.map((a) => a.chave))
+      r.falhas.push(`grupo ${comCupom ? 'com' : 'sem'} cupom: ${msg}`)
+      continue
+    }
+
+    if (!envio.ok) {
+      await liberar(grupo.map((a) => a.chave))
+      r.falhas.push(envio.erro)
+      continue
+    }
+
+    const res = envio.resultado
+    for (const id of res.idsEnviados) {
+      const chave = porChave.get(id)
+      if (chave) await concluir(chave, true)
+      r.enviados++
+    }
+    for (const f of res.falhas) {
+      const chave = f.id ? porChave.get(f.id) : undefined
+      if (chave) await concluir(chave, false, f.erro)
+      r.falhas.push(`${f.quem}: ${f.erro}`)
+    }
+    // O carrinho sumiu da Yampi entre a leitura e o envio — quase sempre
+    // porque virou pedido. A vaga fica gravada como dispensada: reabri-la só
+    // faria a rodada seguinte procurar de novo o que não existe mais.
+    for (const id of res.naoEncontrados) {
+      const chave = porChave.get(id)
+      if (chave) await dispensar(chave, 'o carrinho não estava mais na lista da Yampi — provavelmente virou pedido')
+    }
+    // Descadastrado e já-contatado não são falha nem entrega: ninguém recebeu,
+    // e o motivo é legítimo. A vaga volta a ficar livre só quando o prazo não
+    // alcançou o carrinho; o resto fica registrado como dispensado.
+    const decididos = new Set([...res.idsEnviados, ...res.naoEncontrados, ...res.falhas.map((f) => f.id)])
+    for (const a of grupo) {
+      if (decididos.has(a.id)) continue
+      if (res.naoProcessados.includes(a.id)) await liberar([a.chave])
+      else await dispensar(a.chave, 'o envio pulou este carrinho (descadastrado, sem e-mail ou já contatado)')
     }
   }
-  r.dispensados = await reservarEmLote(paraDispensar)
   return r
 }
 
 // ── Aniversário ─────────────────────────────────────────────────────────────
 
-async function rodarAniversario(regra: RegraDeEnvio, apenasDispensar: boolean): Promise<ResultadoCampanha> {
+async function rodarAniversario(
+  regra: RegraDeEnvio,
+  apenasDispensar: boolean,
+  prazoFinal: number,
+): Promise<ResultadoCampanha> {
   const r = vazio('aniversario')
   const { lista } = await aniversariantes()
   const hoje = hojeEmSaoPaulo()
@@ -265,7 +374,10 @@ async function rodarAniversario(regra: RegraDeEnvio, apenasDispensar: boolean): 
         'aniversário já havia passado quando a rotina automática foi ligada')) r.dispensados++
       continue
     }
-    if (r.enviados >= POR_RODADA) break
+    // O prazo é conferido ANTES de reservar: reservar e ser interrompido no
+    // envio deixaria a linha presa em "enviando", e a chave reservada faria a
+    // rodada seguinte pular o presente — o cliente perderia o aniversário dele.
+    if (r.enviados >= POR_RODADA || Date.now() > prazoFinal) break
     if (!(await reservar(chave, 'aniversario_giftback', p.email, 'Feliz aniversário'))) continue
 
     try {
@@ -289,7 +401,11 @@ async function rodarAniversario(regra: RegraDeEnvio, apenasDispensar: boolean): 
 
 // ── Cashback vencendo ───────────────────────────────────────────────────────
 
-async function rodarCashback(regra: RegraDeEnvio, apenasDispensar: boolean): Promise<ResultadoCampanha> {
+async function rodarCashback(
+  regra: RegraDeEnvio,
+  apenasDispensar: boolean,
+  prazoFinal: number,
+): Promise<ResultadoCampanha> {
   const r = vazio('cashback')
   const { carteiras } = await carteirasYampi()
   const hoje = hojeEmSaoPaulo()
@@ -312,7 +428,7 @@ async function rodarCashback(regra: RegraDeEnvio, apenasDispensar: boolean): Pro
         'saldo já estava perto de vencer quando a rotina automática foi ligada')) r.dispensados++
       continue
     }
-    if (r.enviados >= POR_RODADA) break
+    if (r.enviados >= POR_RODADA || Date.now() > prazoFinal) break
     if (!(await reservar(chave, 'cashback_expirando', c.email, 'Seu cashback está perto de expirar'))) continue
 
     try {
@@ -345,6 +461,7 @@ export async function rodarCampanhas(opcoes?: {
   const apenasDispensar = Boolean(opcoes?.apenasDispensar)
   const regras = await lerRegrasDeEnvio()
   const saida: ResultadoCampanha[] = []
+  const prazoFinal = Date.now() + PRAZO_DA_RODADA_MS
 
   for (const regra of regras) {
     if (opcoes?.somente && regra.campanha !== opcoes.somente) continue
@@ -356,9 +473,9 @@ export async function rodarCampanhas(opcoes?: {
     }
     const comecou = Date.now()
     try {
-      if (regra.campanha === 'carrinho') saida.push(await rodarCarrinho(regra, apenasDispensar))
-      if (regra.campanha === 'aniversario') saida.push(await rodarAniversario(regra, apenasDispensar))
-      if (regra.campanha === 'cashback') saida.push(await rodarCashback(regra, apenasDispensar))
+      if (regra.campanha === 'carrinho') saida.push(await rodarCarrinho(regra, apenasDispensar, prazoFinal))
+      if (regra.campanha === 'aniversario') saida.push(await rodarAniversario(regra, apenasDispensar, prazoFinal))
+      if (regra.campanha === 'cashback') saida.push(await rodarCashback(regra, apenasDispensar, prazoFinal))
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       console.error(`[campanhas] ${regra.campanha} falhou:`, msg)

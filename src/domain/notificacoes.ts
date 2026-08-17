@@ -299,7 +299,24 @@ export function emailDevolucaoConcluida(
   modelo: ModeloEmailRecuperacao = MODELO_DEVOLUCAO_CONCLUIDA_PADRAO,
 ): { assunto: string; html: string } {
   const nome = d.nome?.trim().split(/\s+/)[0] || 'Olá'
-  const forma = d.reembolsoForma === 'pix' ? 'Pix' : 'estorno no cartão'
+  /**
+   * Por onde o dinheiro voltou.
+   *
+   * O reembolso sai SEMPRE pelo mesmo meio do pagamento: quem pagou no cartão
+   * recebe estorno no cartão, quem pagou por Pix recebe Pix. O ERP não escolhe
+   * isso, ele registra o que foi feito.
+   *
+   * Sem forma registrada o e-mail não chuta. Antes chutava: `=== 'pix' ? ... :
+   * 'estorno no cartão'` fazia o campo vazio virar a afirmação de que houve
+   * estorno no cartão — e afirmar o meio errado num e-mail de reembolso é
+   * mandar o cliente procurar o dinheiro no lugar em que ele não está.
+   */
+  const forma =
+    d.reembolsoForma === 'pix'
+      ? 'Pix'
+      : d.reembolsoForma === 'estorno-cartao'
+        ? 'estorno no cartão'
+        : null
   const reembolso = d.reembolsoValor !== null
 
   const destaque = reembolso
@@ -308,12 +325,16 @@ export function emailDevolucaoConcluida(
       ? `Pedido ${d.trocaPedidoId}`
       : d.protocolo
   const corpo = reembolso
-    ? `O reembolso foi efetuado por ${forma}.${d.temComprovante ? ' O comprovante segue anexo a este e-mail.' : ''}`
+    ? `${
+        forma
+          ? `O reembolso foi efetuado por ${forma}, o mesmo meio usado no pagamento.`
+          : 'O reembolso foi efetuado pelo mesmo meio usado no pagamento.'
+      }${d.temComprovante ? ' O comprovante segue anexo a este e-mail.' : ''}`
     : d.trocaPedidoId
       ? 'Um novo pedido foi gerado para a sua troca — ele segue o fluxo normal de produção e envio da loja.'
       : 'Nossa equipe entra em contato com os detalhes da resolução.'
   const nota = reembolso
-    ? `Efetuado${d.reembolsoData ? ` em ${d.reembolsoData}` : ''} · ${forma}`
+    ? `Efetuado${d.reembolsoData ? ` em ${d.reembolsoData}` : ''}${forma ? ` · ${forma}` : ''}`
     : d.trocaPedidoId
       ? 'Número do novo pedido do reenvio'
       : 'Guarde o protocolo para o atendimento'

@@ -23,12 +23,28 @@ export type CupomEnvio =
 export interface ResultadoRecuperacao {
   /** E-mails que saíram, pelo nome (ou e-mail) de quem recebeu. */
   enviados: string[]
+  /**
+   * Os MESMOS envios, pelo id do carrinho.
+   *
+   * `enviados` é para a tela, e por isso traz nome de gente. A rotina
+   * automática precisa fechar a conta com o log dela, cuja chave é o id — e
+   * casar pelo nome erraria no dia em que dois clientes se chamassem igual.
+   */
+  idsEnviados: string[]
   /** Pulados por terem cancelado a inscrição — o pedido deles vale. */
   descadastrados: number
   /** Carrinhos pulados por já terem recebido e-mail nos últimos 7 dias. */
   jaContatados: number
   semEmail: number
-  falhas: { quem: string; erro: string }[]
+  /**
+   * Ids pedidos que a Yampi não listou mais.
+   *
+   * Quase sempre é o melhor desfecho possível: o carrinho virou pedido entre a
+   * leitura e o envio. Antes isto era um `continue` mudo, e quem chamou via
+   * "nenhum e-mail saiu" sem nenhuma explicação.
+   */
+  naoEncontrados: string[]
+  falhas: { quem: string; erro: string; id?: string }[]
   /**
    * Carrinhos que o prazo desta rodada não alcançou. Um lote de centenas
    * não cabe numa execução só no servidor — a tela chama de novo com esta
@@ -102,9 +118,11 @@ export async function enviarEmailsCarrinho(
 
   const resultado: ResultadoRecuperacao = {
     enviados: [],
+    idsEnviados: [],
     descadastrados: 0,
     jaContatados: 0,
     semEmail: 0,
+    naoEncontrados: [],
     falhas: [],
     naoProcessados: [],
   }
@@ -124,7 +142,10 @@ export async function enviarEmailsCarrinho(
     }
     const id = unicos[i]
     const carrinho = carrinhos.find((c) => c.id === id)
-    if (!carrinho) continue
+    if (!carrinho) {
+      resultado.naoEncontrados.push(id)
+      continue
+    }
     if (!carrinho.email) {
       resultado.semEmail++
       continue
@@ -175,6 +196,7 @@ export async function enviarEmailsCarrinho(
             continue
           }
           resultado.falhas.push({
+            id,
             quem: carrinho.cliente ?? carrinho.email,
             erro: `cupom único não criado na Yampi (${msg}) — e-mail não enviado`,
           })
@@ -206,6 +228,7 @@ export async function enviarEmailsCarrinho(
     try {
       await entregar({ para: carrinho.email, assunto, html: htmlFinal, descadastrar: saida })
       resultado.enviados.push(carrinho.cliente ?? carrinho.email)
+      resultado.idsEnviados.push(id)
       if (sb) {
         await sb.from('recuperacoes_carrinho').insert({
           carrinho_id: id,
@@ -216,6 +239,7 @@ export async function enviarEmailsCarrinho(
       }
     } catch (e) {
       resultado.falhas.push({
+        id,
         quem: carrinho.cliente ?? carrinho.email,
         erro: e instanceof Error ? e.message : String(e),
       })

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import { apenasOAtual, avisosDe, emailEntregue, emailEnvio, paginaDeRastreio } from '..'
+import {
+  apenasOAtual,
+  avisosDe,
+  emailDevolucaoConcluida,
+  emailEntregue,
+  emailEnvio,
+  paginaDeRastreio,
+} from '..'
 import type { PedidoNotificavel } from '..'
 
 const pedido = (p: Partial<PedidoNotificavel> = {}): PedidoNotificavel => ({
@@ -174,5 +181,39 @@ describe('e-mail de entrega', () => {
     for (const chave of ['{nome}', '{pedido}', '{transportadora}', '{link}', '{codigo}']) {
       expect(html).not.toContain(chave)
     }
+  })
+})
+
+describe('e-mail de devolução concluída', () => {
+  const base = {
+    nome: 'Ana Paula',
+    protocolo: 'K7QM-4XT9',
+    resolucao: 'Reembolso integral',
+    reembolsoValor: 189.8,
+    reembolsoData: '14/08/2026',
+    temComprovante: true,
+    trocaPedidoId: null,
+  }
+
+  it('diz o meio pelo qual o dinheiro voltou, e que é o mesmo do pagamento', () => {
+    // A regra da casa: o reembolso sai SEMPRE pelo meio em que a compra foi
+    // paga. Cartão volta por estorno no cartão; Pix volta por Pix.
+    const pix = emailDevolucaoConcluida({ ...base, reembolsoForma: 'pix' }).html
+    expect(pix).toContain('efetuado por Pix, o mesmo meio usado no pagamento')
+
+    const cartao = emailDevolucaoConcluida({ ...base, reembolsoForma: 'estorno-cartao' }).html
+    expect(cartao).toContain('efetuado por estorno no cartão, o mesmo meio usado no pagamento')
+    // "Pix" solto no documento não serve como asserção: o cabeçalho do Outlook
+    // traz <o:PixelsPerInch>. O que não pode aparecer é a FRASE.
+    expect(cartao).not.toContain('por Pix')
+  })
+
+  it('sem forma registrada, não inventa uma', () => {
+    // Antes o campo vazio virava "estorno no cartão" — e afirmar o meio errado
+    // manda o cliente procurar o dinheiro onde ele não está.
+    const { html } = emailDevolucaoConcluida({ ...base, reembolsoForma: null })
+    expect(html).toContain('efetuado pelo mesmo meio usado no pagamento')
+    expect(html).not.toContain('estorno no cartão')
+    expect(html).not.toContain('por Pix')
   })
 })
