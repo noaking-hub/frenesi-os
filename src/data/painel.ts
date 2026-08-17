@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { diaDaOperacao, saldoAberto, situacaoDe } from '@/domain'
+import { diaDaOperacao, saldoAberto, situacaoDe, hojeEmSaoPaulo } from '@/domain'
 import type { LancamentoGerencial } from '@/domain'
 
 import { lerContas, lerLancamentos } from './financeiro'
@@ -204,7 +204,7 @@ export async function carregarPainelPrincipal(
   periodo: Periodo = '30d',
   livre?: { de?: string; ate?: string },
 ): Promise<PainelPrincipal> {
-  const hoje = new Date().toISOString().slice(0, 10)
+  const hoje = hojeEmSaoPaulo()
   const personalizado =
     livre?.de && livre?.ate && DATA_ISO.test(livre.de) && DATA_ISO.test(livre.ate) &&
     livre.de <= livre.ate && livre.ate <= hoje

@@ -5,7 +5,7 @@ import { useMemo, useState, useTransition, type ReactNode } from 'react'
 import { Modal } from '@/components/erp/Modal'
 import { BotaoSecundario, Rotulo, TituloSecao } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
-import { brl, parseNum, plural, volume } from '@/domain'
+import { brl, parseNum, plural, volume, hojeEmSaoPaulo } from '@/domain'
 
 import { registrarVendaManual, type ItemVendaManual } from '../pedidos/actions'
 
@@ -65,7 +65,7 @@ const CAMPO = {
   width: '100%',
 } as const
 
-const hoje = () => new Date().toISOString().slice(0, 10)
+const hoje = () => hojeEmSaoPaulo()
 
 interface Linha {
   /** Chave estável: remover a linha do meio não pode remontar as de baixo. */

@@ -24,6 +24,7 @@ import {
   type SituacaoLancamento,
   type StatusVenda,
   type VendaConciliada,
+  hojeEmSaoPaulo,
 } from '@/domain'
 
 import { supabaseConfigurado, supabaseServer, tudoDe } from './supabase'
@@ -40,7 +41,7 @@ import { supabaseConfigurado, supabaseServer, tudoDe } from './supabase'
  * estado vazio explicado.
  */
 
-const HOJE = () => new Date().toISOString().slice(0, 10)
+const HOJE = () => hojeEmSaoPaulo()
 
 /**
  * Prazo de repasse da Pagaleve, o intermediário de Pix parcelado.
@@ -51,8 +52,18 @@ const HOJE = () => new Date().toISOString().slice(0, 10)
  */
 const PRAZO_PAGALEVE_DIAS = 45
 
+/**
+ * N dias à frente (ou atrás) de HOJE, no calendário de São Paulo.
+ *
+ * Somar milissegundos sobre `Date.now()` e cortar o ISO herda o mesmo erro de
+ * fuso do `HOJE()`: das 21h à meia-noite, "hoje + 30" devolvia 31 dias.
+ * Ancorar no meio-dia da data local mantém a conta longe das bordas de
+ * horário de verão também.
+ */
 function iso(dias: number): string {
-  return new Date(Date.now() + dias * 86_400_000).toISOString().slice(0, 10)
+  const base = new Date(`${hojeEmSaoPaulo()}T12:00:00Z`)
+  base.setUTCDate(base.getUTCDate() + dias)
+  return base.toISOString().slice(0, 10)
 }
 
 // ── Contas ─────────────────────────────────────────────────────────────────

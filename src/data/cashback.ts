@@ -10,6 +10,7 @@ import {
   type MetricasCashback,
   type MovimentoGravado,
   type Periodo,
+  hojeEmSaoPaulo,
 } from '@/domain'
 
 import { supabaseConfigurado, supabaseServer } from './supabase'
@@ -111,7 +112,7 @@ export async function sincronizarCashbackYampi(
   const inicio = Date.now()
   let lidos = 0
   let comSaldo = 0
-  const hoje = new Date().toISOString().slice(0, 10)
+  const hoje = hojeEmSaoPaulo()
 
   for (let pagina = Math.max(1, paginaInicial); ; pagina++) {
     const r = await chamarYampi<{
@@ -382,7 +383,7 @@ export async function extratoCashbackYampi(customerId: string): Promise<{
 }> {
   const r = await chamarYampi<unknown>(`/pricing/wallet/statement/${encodeURIComponent(customerId)}`)
   const lista = movimentosDe(r)
-  const hoje = new Date().toISOString().slice(0, 10)
+  const hoje = hojeEmSaoPaulo()
 
   const movimentos = lista.map((m) => {
     const tipoCru = campo(m, ['transaction_type', 'type', 'operation', 'kind'])

@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { OPERADOR } from '@/data/operador'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import type { NaturezaGerencial } from '@/domain'
+import { hojeEmSaoPaulo } from '@/domain'
 
 /**
  * Ações do Financeiro gerencial.
@@ -107,7 +108,7 @@ export async function criarCompromisso(
   }
 
   const id = `LC-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
-  const hoje = new Date().toISOString().slice(0, 10)
+  const hoje = hojeEmSaoPaulo()
   const venceEm = dados.venceEm || `${dados.competencia}-01`
 
   const { error } = await sb.from('lancamentos').insert({
@@ -488,7 +489,7 @@ export async function registrarTransferencia(dados: {
     p_conta_origem: dados.contaOrigem,
     p_conta_destino: dados.contaDestino,
     p_valor: dados.valor,
-    p_data: dados.data || new Date().toISOString().slice(0, 10),
+    p_data: dados.data || hojeEmSaoPaulo(),
     p_descricao: dados.descricao.trim() || 'Transferência entre contas',
     p_operador: OPERADOR,
   })

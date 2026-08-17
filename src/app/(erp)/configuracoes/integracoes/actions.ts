@@ -4,6 +4,7 @@ import { diagnosticarMercadoPago } from '@/data/mercadopago'
 import { mensagemDe, escoposDoToken } from '@/data/shopify'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { diagnosticarYampi } from '@/data/yampi'
+import { hojeEmSaoPaulo } from '@/domain'
 
 export type Resposta<T = object> = ({ ok: true } & T) | { ok: false; erro: string }
 
@@ -69,7 +70,7 @@ export async function testarIntegracao(id: string): Promise<Resposta<{ linhas: s
       }
 
       case 'mercadopago': {
-        const ate = new Date().toISOString().slice(0, 10)
+        const ate = hojeEmSaoPaulo()
         const de = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10)
         const d = await diagnosticarMercadoPago(de, ate)
         return { ok: true, linhas: [...d.passos, ...d.amostra] }

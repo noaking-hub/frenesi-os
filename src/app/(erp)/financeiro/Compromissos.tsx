@@ -6,7 +6,7 @@ import { Ico, type NomeIcone } from '@/components/erp/IconesUi'
 import { Modal } from '@/components/erp/Modal'
 import { BotaoOuro, BotaoSecundario, Rotulo, TituloSecao } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
-import { brl, diaCurtoPt, parseNum, ROTULO_NATUREZA, saldoAberto } from '@/domain'
+import { brl, diaCurtoPt, parseNum, ROTULO_NATUREZA, saldoAberto, hojeEmSaoPaulo } from '@/domain'
 import type {
   CategoriaGerencial,
   ContaFinanceira,
@@ -56,7 +56,7 @@ const CADENCIAS = [
   { valor: 'anual', rotulo: 'Todo ano' },
 ]
 
-const hoje = () => new Date().toISOString().slice(0, 10)
+const hoje = () => hojeEmSaoPaulo()
 const mesAtual = () => hoje().slice(0, 7)
 
 function Campo({ rotulo, children, dica }: { rotulo: string; children: ReactNode; dica?: string }) {

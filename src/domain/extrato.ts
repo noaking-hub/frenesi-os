@@ -77,6 +77,24 @@ export function dataEmSaoPaulo(iso: string): string | null {
   return new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(t)
 }
 
+/**
+ * O dia de HOJE no calendário de São Paulo — a única definição de "hoje" que
+ * o ERP deve usar.
+ *
+ * `new Date().toISOString().slice(0, 10)` devolve o dia em UTC, e o Brasil
+ * está três horas atrás. Das 21h à meia-noite, todo dia, o ERP passava a
+ * responder pelo dia seguinte: às 21h34 de 16/08 o Dashboard já dizia
+ * "Hoje · 17/08", com faturamento zerado e queda de 100% contra ontem —
+ * porque o dia que ele mostrava ainda não tinha começado.
+ *
+ * O servidor da Netlify roda em UTC, então isto não é preciosismo de
+ * formatação: é a diferença entre fechar o dia certo e fechar o dia errado
+ * em toda venda feita à noite.
+ */
+export function hojeEmSaoPaulo(): string {
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date())
+}
+
 /** Distância em dias entre duas datas AAAA-MM-DD. */
 function distanciaEmDias(a: string, b: string): number {
   const ms = Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)

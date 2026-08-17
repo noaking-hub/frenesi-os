@@ -6,7 +6,7 @@ import { Ico, type NomeIcone } from '@/components/erp/IconesUi'
 import { Modal } from '@/components/erp/Modal'
 import { BotaoOuro, TituloSecao } from '@/components/erp/primitivos'
 import { BORDA, COR, FUNDO } from '@/components/erp/tokens'
-import { brl, parseNum } from '@/domain'
+import { brl, parseNum, hojeEmSaoPaulo } from '@/domain'
 import type { ContaFinanceira } from '@/domain'
 
 import {
@@ -91,7 +91,7 @@ export function Transferir({ contas, atalho }: { contas: ContaFinanceira[]; atal
   const [origem, setOrigem] = useState(contas[0]?.id ?? '')
   const [destino, setDestino] = useState(contas[1]?.id ?? '')
   const [valor, setValor] = useState('')
-  const [data, setData] = useState(new Date().toISOString().slice(0, 10))
+  const [data, setData] = useState(hojeEmSaoPaulo())
   const [descricao, setDescricao] = useState('')
   const [erro, setErro] = useState<string | null>(null)
   const [pendente, iniciar] = useTransition()
