@@ -1171,10 +1171,28 @@ function DialogoParcelar({
    * de listas — sobra a primeira, que continua verdadeira.
    */
   const avisoDeSaldo: string[] = []
-  if (efeito && devolveDinheiro) {
-    avisoDeSaldo.push(
-      `O ERP tem ${brl(lancamento.recebido)} marcados como ${movimentados} neste lançamento e passa a ter ${brl(recebidoAgora)} — ${brl(lancamento.recebido - recebidoAgora)} a menos, que é o dinheiro que ainda não entrou.`,
-    )
+  /*
+   * A guarda pergunta se o SALDO se mexe, não se o dinheiro desceu.
+   *
+   * Ela era `devolveDinheiro` sozinho, e isso abria um buraco silencioso.
+   * Parcelar com K = N e data retroativa não muda o total recebido — a
+   * diferença dá exatamente zero — mas muda a DATA da baixa, e data é metade
+   * do que decide o saldo: `saldos_das_contas` só soma o que foi baixado
+   * DEPOIS de `saldo_informado_para`. Medido num gêmeo descartável de
+   * LC-00021 (saída de R$ 965,89 baixada em 16/08 no Rafael PF, saldo
+   * informado para 15/08): parcelar em 2x com as duas recebidas em 10/08
+   * fazia a despesa deixar de ser descontada e o saldo EXIBIDO subir
+   * R$ 965,89 — sem uma palavra no diálogo, e com o botão dizendo
+   * "Criar 2 parcelas, 2 recebidas".
+   *
+   * `mexeEmSaldo` já existia e era consultado só DENTRO deste if, ou seja,
+   * nunca chegava a proteger o caso em que a diferença é zero.
+   */
+  if (efeito && (devolveDinheiro || mexeEmSaldo)) {
+    if (devolveDinheiro)
+      avisoDeSaldo.push(
+        `O ERP tem ${brl(lancamento.recebido)} marcados como ${movimentados} neste lançamento e passa a ter ${brl(recebidoAgora)} — ${brl(lancamento.recebido - recebidoAgora)} a menos, que é o dinheiro que ainda não entrou.`,
+      )
     if (conta && mexeEmSaldo) {
       const calculadoDepois = conta.saldoCalculado + efeito.variacaoNoCalculado
       avisoDeSaldo.push(
@@ -1182,7 +1200,7 @@ function DialogoParcelar({
       )
       avisoDeSaldo.push(
         efeito.variacaoNoDisponivel === 0 && conta.saldoInformadoPara
-          ? `O saldo exibido em Contas e Caixas (${brl(conta.saldoDisponivel)}) NÃO muda: ele foi informado à mão para ${diaPt(conta.saldoInformadoPara)} e só soma baixas posteriores a essa data. Quem cai é o número da conferência, "${ROTULO_ORIGEM_SALDO.calculado}".`
+          ? `O saldo exibido em Contas e Caixas (${brl(conta.saldoDisponivel)}) NÃO muda: ele foi informado à mão para ${diaPt(conta.saldoInformadoPara)} e só soma baixas posteriores a essa data. Quem ${efeito.variacaoNoCalculado > 0 ? 'sobe' : 'cai'} é o número da conferência, "${ROTULO_ORIGEM_SALDO.calculado}".`
           : `O saldo exibido de ${conta.nome} vai de ${brl(conta.saldoDisponivel)} para ${brl(conta.saldoDisponivel + efeito.variacaoNoDisponivel)}.`,
       )
     } else if (conta) {
@@ -1311,7 +1329,7 @@ function DialogoParcelar({
               >
                 <span className="font-sans" style={{ fontSize: 11.5, fontWeight: 600, color: COR.atencao }}>
                   {mexeEmSaldo
-                    ? `O saldo ${conta ? `de ${conta.nome} ` : ''}muda com este parcelamento`
+                    ? `O saldo ${conta ? `de ${conta.nome} ` : ''}${(efeito?.variacaoNoCalculado ?? 0) > 0 || (efeito?.variacaoNoDisponivel ?? 0) > 0 ? 'SOBE' : 'cai'} com este parcelamento`
                     : 'Este parcelamento desmarca dinheiro que já estava fora dos saldos'}
                 </span>
                 {avisoDeSaldo.map((frase) => (
@@ -1327,9 +1345,19 @@ function DialogoParcelar({
                   className="font-sans"
                   style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
                 >
-                  {mexeEmSaldo
-                    ? 'A queda é o conserto, não um efeito colateral: esse dinheiro não tinha entrado. Ele volta ao saldo quando a parcela em aberto for baixada.'
-                    : 'O conserto é no lançamento, não no caixa: o dinheiro entra no saldo no dia em que a parcela for baixada com data.'}
+                  {/* A narrativa segue o SINAL. Ela era fixa em "a queda é o
+                      conserto" e aparecia inclusive quando o saldo SUBIA —
+                      números certos, história invertida, que é o jeito mais
+                      rápido de queimar a confiança nos números que a prévia
+                      acerta. Subir merece frase de alerta, não de conforto:
+                      dinheiro que aparece no caixa por causa de uma data
+                      escolhida na tela é a coisa que mais precisa de um
+                      segundo olhar antes do clique. */}
+                  {!mexeEmSaldo
+                    ? 'O conserto é no lançamento, não no caixa: o dinheiro entra no saldo no dia em que a parcela for baixada com data.'
+                    : (efeito?.variacaoNoCalculado ?? 0) > 0 || (efeito?.variacaoNoDisponivel ?? 0) > 0
+                      ? 'O saldo SOBE porque as datas de baixa que você escolheu passam a contar para a conta. Confira se esse dinheiro entrou mesmo nesses dias — o extrato do banco é quem decide, não esta tela.'
+                      : 'A queda é o conserto, não um efeito colateral: esse dinheiro não tinha entrado. Ele volta ao saldo quando a parcela em aberto for baixada.'}
                 </span>
               </div>
             )}

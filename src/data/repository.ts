@@ -772,6 +772,12 @@ const repositorioSupabase: Repositorio = {
   },
 
   async lancamentos() {
+    // Cancelado NÃO é pendente. Sem este filtro o pai cancelado de um
+    // parcelamento continuava contado no card "Contas a pagar e vencidas" do
+    // Dashboard e no sino de alertas do topo — medido: LC-00015, o pai do
+    // parcelamento 3x do 212 Vip Black, inflando a contagem sozinho. Com o
+    // parcelamento de lançamento parcialmente recebido, que passou a ser
+    // possível, o pai cancelado levaria junto um saldo em aberto fantasma.
     const { data, error } = await supabaseServer()
       .from('lancamentos')
       .select(
@@ -782,6 +788,7 @@ const repositorioSupabase: Repositorio = {
           // ambíguo e a consulta inteira volta como erro.
           'contas_bancarias!lancamentos_conta_id_fkey(nome)',
       )
+      .is('cancelado_em', null)
       .order('ocorrido_em', { ascending: false })
       .limit(500)
     if (error) throw error

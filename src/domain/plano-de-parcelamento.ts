@@ -258,6 +258,18 @@ export function efeitoDoParcelamento(entrada: {
       100,
     // A mesma tolerância de meio centavo que o `raise exception` do banco usa:
     // recusar por 1e-9 de ponto flutuante seria recusar o parcelamento exato.
-    inventaDinheiro: depois > antes + 0.5,
+    /*
+     * O teto é o que está no CAIXA, não o que está na coluna `recebido`.
+     *
+     * Espelha a trava do banco, e pelo mesmo motivo dela: lançamento com
+     * `recebido > 0` e sem `baixado_em` é dinheiro que nenhuma view de saldo
+     * soma. Dar-lhe uma data faz o caixa subir com a soma de `recebido`
+     * intacta — provado em produção com as três linhas de baixa parcial do
+     * Sicoob. Pai sem baixa tem teto zero: nenhuma filha nasce baixada.
+     *
+     * A prévia precisa saber disto ANTES do clique, senão o operador recebe a
+     * recusa do Postgres traduzida de plpgsql dentro de um catch genérico.
+     */
+    inventaDinheiro: depois > (entrada.baixadoEmAntes ? antes : 0) + 0.5,
   }
 }

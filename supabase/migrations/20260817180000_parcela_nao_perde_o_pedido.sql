@@ -158,11 +158,39 @@ begin
   -- esta função (R$ 216,00 marcados como recebidos, R$ 108,00 recebidos de
   -- verdade). O saldo calculado da conta CAI, e essa queda é o conserto — quem
   -- chama precisa avisar o operador com o número antes de confirmar.
-  if v_recebido_novo > v_pai.recebido + 0.005 then
+  --
+  -- O TETO É O QUE ESTÁ NO CAIXA, NÃO O QUE ESTÁ NA COLUNA.
+  --
+  -- `v_pai.recebido` sozinho é teto frouxo, e o furo foi provado em produção:
+  -- lançamento com `recebido > 0` e `baixado_em` NULO é dinheiro que NENHUMA
+  -- view de saldo soma — `saldos_das_contas` exige `baixado_em is not null`.
+  -- Parcelar um desses com uma parcela "já recebida" dá uma DATA àquele
+  -- dinheiro, e ele aparece no caixa pela primeira vez. A soma de `recebido`
+  -- não muda em nada, o invariante antigo passava liso, e o saldo subia.
+  --
+  -- Medido em clones descartáveis das três linhas reais que estão nessa
+  -- situação (LC-00013, LC-00014, LC-00018 — R$ 1.019,00 de baixa parcial no
+  -- Sicoob, cicatriz de `registrar_recebimento`): parcelar o clone de LC-00018
+  -- em 2x com a primeira "recebida" deixava `recebido` idêntico, 150,00 antes e
+  -- depois, e subia R$ 150,00 no saldo calculado. Com data posterior ao saldo
+  -- informado, subia também no saldo EXIBIDO — o número do dashboard.
+  --
+  -- Pai sem baixa, portanto, tem teto ZERO: nenhuma filha nasce baixada. Quem
+  -- precisar parcelar uma dessas linhas dá a baixa primeiro, com a data em que
+  -- o dinheiro entrou de verdade, e aí parcela. É uma etapa a mais, e ela
+  -- existe porque a alternativa é o ERP decidir sozinho quando um dinheiro sem
+  -- data entrou na conta.
+  if v_recebido_novo > (case when v_pai.baixado_em is null then 0 else v_pai.recebido end) + 0.005 then
+    if v_pai.baixado_em is null then
+      raise exception
+        'este lançamento tem R$ % marcados como recebidos mas nenhuma data de baixa, então esse dinheiro não está em nenhum saldo. Dê a baixa com a data real antes de parcelar, senão o parcelamento faria o caixa subir R$ %',
+        replace(to_char(v_pai.recebido, 'FM999999990.00'), '.', ','),
+        replace(to_char(v_recebido_novo, 'FM999999990.00'), '.', ',');
+    end if;
     raise exception
       'este parcelamento marcaria R$ % como recebido, mas o lançamento só tem R$ % recebidos',
-      to_char(v_recebido_novo, 'FM999999990.00'),
-      to_char(v_pai.recebido, 'FM999999990.00');
+      replace(to_char(v_recebido_novo, 'FM999999990.00'), '.', ','),
+      replace(to_char(v_pai.recebido, 'FM999999990.00'), '.', ',');
   end if;
 
   -- O pai é cancelado, não apagado: sem ele o histórico perderia a origem das

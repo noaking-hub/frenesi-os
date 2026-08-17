@@ -328,4 +328,59 @@ describe('efeitoDoParcelamento — o número que a tela mostra antes do clique',
     expect(e.diferenca).toBe(0)
     expect(e.inventaDinheiro).toBe(false)
   })
+
+  /*
+   * O furo que a verificação adversarial encontrou, virado em teste.
+   *
+   * `recebido > 0` com `baixado_em` nulo é dinheiro que NENHUMA view de saldo
+   * soma. O invariante antigo comparava só a coluna `recebido`, então marcar
+   * uma parcela como recebida mantinha a soma idêntica, passava liso — e dava
+   * uma DATA àquele dinheiro, que aparecia no caixa pela primeira vez.
+   *
+   * Provado em produção com clones descartáveis das três linhas reais nessa
+   * situação (LC-00013, LC-00014, LC-00018 — R$ 1.019,00 de baixa parcial no
+   * Sicoob): o clone de LC-00018 subia R$ 150,00 no saldo calculado com o
+   * `recebido` intacto em R$ 150,00 antes e depois.
+   */
+  it('recusa marcar parcela como recebida quando o pai não tem data de baixa', () => {
+    const efeito = efeitoDoParcelamento({
+      tipo: 'entrada',
+      movimentadoAntes: 150,
+      baixadoEmAntes: null,
+      movimentadoDepois: 150,
+      baixadoEmDepois: '2026-08-16',
+      saldoInformadoPara: null,
+    })
+    // O total recebido não muda — e é justamente por isso que o invariante
+    // antigo deixava passar.
+    expect(efeito.diferenca).toBe(0)
+    expect(efeito.inventaDinheiro).toBe(true)
+  })
+
+  it('deixa passar quando o pai tem baixa: aí o dinheiro já estava no caixa', () => {
+    const efeito = efeitoDoParcelamento({
+      tipo: 'entrada',
+      movimentadoAntes: 216,
+      baixadoEmAntes: '2026-08-12',
+      movimentadoDepois: 108,
+      baixadoEmDepois: '2026-08-12',
+      saldoInformadoPara: null,
+    })
+    expect(efeito.inventaDinheiro).toBe(false)
+    expect(efeito.variacaoNoCalculado).toBe(-108)
+  })
+
+  it('pai sem baixa e nenhuma parcela recebida continua sendo caso legítimo', () => {
+    // K = 0 não dá data a nada, então não há caixa a inventar.
+    const efeito = efeitoDoParcelamento({
+      tipo: 'entrada',
+      movimentadoAntes: 669,
+      baixadoEmAntes: null,
+      movimentadoDepois: 0,
+      baixadoEmDepois: null,
+      saldoInformadoPara: null,
+    })
+    expect(efeito.inventaDinheiro).toBe(false)
+    expect(efeito.variacaoNoCalculado).toBe(0)
+  })
 })
