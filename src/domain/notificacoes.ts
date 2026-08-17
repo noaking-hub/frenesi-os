@@ -7,6 +7,7 @@ import {
   HTML_VALIDADO_PAGAMENTO,
   HTML_VALIDADO_ENVIO,
 } from './emails-validados'
+import { brl } from './format'
 import type { ModeloEmailRecuperacao } from './recuperacao'
 
 /**
@@ -413,18 +414,137 @@ export function emailDevolucaoAprovada(
  * que o alimentava. Dado calculado para texto que não existe mais é peso que
  * ninguém revisa: a próxima pessoa a ler acharia que serve para alguma coisa.
  */
+export interface ItemComprado {
+  descricao: string
+  quantidade: number
+  preco: number
+  /** Miniatura do catálogo. 98% dos itens têm; o resto sai só com o nome. */
+  imagem: string | null
+}
+
+export interface CashbackGanho {
+  valor: number
+  /** dd/MM/aaaa — a data importa mais que o valor: é ela que traz de volta. */
+  validade: string
+}
+
+/**
+ * Uma linha do resumo: miniatura, nome, quantidade × unitário e o subtotal.
+ */
+function linhaDoItem(i: ItemComprado): string {
+  const miniatura = i.imagem
+    ? `<img src="${escapa(i.imagem)}" width="64" height="64" alt="" style="display:block; width:64px; height:64px; border:1px solid #E4DAC5; border-radius:8px; background-color:#FFFDF9;" />`
+    : ''
+  return `<tr>
+  <td valign="top" width="64" style="width:64px; padding:0 14px 16px 0;">${miniatura}</td>
+  <td valign="top" align="left" style="padding:0 10px 16px 0;">
+    <div style="font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:20px; mso-line-height-rule:exactly; color:#241F18;">${escapa(i.descricao)}</div>
+    <div style="font-family:Arial,Helvetica,sans-serif; font-size:12px; line-height:18px; mso-line-height-rule:exactly; color:#8A6A2F; padding-top:4px;">${i.quantidade} &times; ${escapa(brl(i.preco))}</div>
+  </td>
+  <td valign="top" align="right" style="font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:20px; mso-line-height-rule:exactly; color:#241F18; white-space:nowrap; padding:0 0 16px 0;">${escapa(brl(i.preco * i.quantidade))}</td>
+</tr>`
+}
+
+function linhaDaConta(rotulo: string, valor: string, cor = '#6B6355'): string {
+  return `<tr>
+  <td colspan="2" align="left" style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:22px; mso-line-height-rule:exactly; color:${cor}; padding:3px 0;">${rotulo}</td>
+  <td align="right" style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:22px; mso-line-height-rule:exactly; color:${cor}; white-space:nowrap; padding:3px 0;">${valor}</td>
+</tr>`
+}
+
+/**
+ * O resumo da compra, quando há itens para mostrar.
+ *
+ * O DESCONTO é derivado, e é ele que faz a conta fechar: `subtotal + frete −
+ * total`. O ERP não guarda o desconto do checkout (cupom, cashback usado), e
+ * por isso a soma dos itens não bate com o total em 520 dos 640 pedidos pagos
+ * — sempre para MENOS, nunca para mais, o que é justamente a assinatura de um
+ * abatimento. Deduzi-lo é o que permite mostrar preço por item sem entregar ao
+ * cliente um comprovante que erra a própria conta.
+ *
+ * Centavo negativo por arredondamento não vira linha: abaixo de um centavo, a
+ * diferença é ruído, não desconto.
+ */
+function resumoDaCompra(itens: ItemComprado[], frete: number, total: number): string {
+  const subtotal = itens.reduce((a, i) => a + i.preco * i.quantidade, 0)
+  const desconto = Math.round((subtotal + frete - total) * 100) / 100
+
+  const contas = [
+    linhaDaConta('Subtotal', escapa(brl(subtotal))),
+    desconto > 0.009 ? linhaDaConta('Desconto', `&minus; ${escapa(brl(desconto))}`, '#8A6A2F') : '',
+    // Frete grátis aparece em vez de sumir: é argumento de venda, e esconder
+    // seria jogar fora um ponto que a loja já ganhou.
+    frete > 0 ? linhaDaConta('Frete', escapa(brl(frete))) : linhaDaConta('Frete', 'gr&aacute;tis', '#8A6A2F'),
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  return `<div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#8A6A2F; padding-bottom:22px;">RESUMO DA COMPRA</div>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;">
+${itens.map(linhaDoItem).join('\n')}
+<tr><td colspan="3" style="border-top:1px solid #E4DAC5; font-size:0; line-height:0; padding-top:6px;">&nbsp;</td></tr>
+${contas}
+</table>`
+}
+
+/** O quadro que existia antes dos itens: rótulo, número do pedido e valor. */
+function quadroSimples(pedido: string): string {
+  return `<div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#8A6A2F;">PAGAMENTO APROVADO</div>
+<div style="font-family:Georgia,'Times New Roman',serif; font-size:26px; line-height:34px; mso-line-height-rule:exactly; color:#241F18; padding-top:14px;">Pedido ${escapa(pedido)}</div>`
+}
+
+/**
+ * O bloco do cashback ganho na compra.
+ *
+ * Só existe quando o crédito foi LIDO na carteira do cliente. Calcular 10% do
+ * pedido acertaria em 452 dos 452 créditos de hoje e mentiria no dia da
+ * primeira promoção com outra taxa — e um valor errado aqui é o cliente
+ * conferindo a conta dele e achando a marca em falta.
+ */
+function blocoDeCashback(c: CashbackGanho): string {
+  return `<tr>
+  <td align="center" class="pad" style="padding:14px 32px 0 32px;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="598" class="win" style="width:598px; border:1px solid #D8C49B; border-radius:12px; background-color:#FAF6EE;">
+      <tr>
+        <td align="center" style="padding:24px 30px 26px 30px;">
+          <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#8A6A2F;">VOC&Ecirc; GANHOU DE VOLTA</div>
+          <div style="font-family:Georgia,'Times New Roman',serif; font-size:34px; line-height:42px; mso-line-height-rule:exactly; color:#8A6A2F; padding-top:12px;">${escapa(brl(c.valor))}</div>
+          <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:21px; mso-line-height-rule:exactly; color:#6B6355; padding-top:12px;">de cashback, para usar at&eacute; <strong style="color:#5E4A1E;">${escapa(c.validade)}</strong><br />selecione seu saldo na finaliza&ccedil;&atilde;o da compra</div>
+        </td>
+      </tr>
+    </table>
+  </td>
+</tr>
+`
+}
+
 export function emailPagamento(d: {
   nome: string | null
   pedido: string
-  total: string
+  /** Em reais. Quem formata é quem desenha. */
+  total: number
+  itens?: ItemComprado[]
+  frete?: number | null
+  /** Lido da carteira na hora do envio; ausente, o bloco não aparece. */
+  cashback?: CashbackGanho | null
 }): { assunto: string; html: string } {
   const nome = d.nome?.trim().split(/\s+/)[0] || 'Olá'
-  const html = HTML_VALIDADO_PAGAMENTO.split('{nome}')
+  const itens = d.itens ?? []
+
+  const html = HTML_VALIDADO_PAGAMENTO.split('{resumo}')
+    .join(
+      itens.length > 0
+        ? resumoDaCompra(itens, Number(d.frete ?? 0), d.total)
+        : quadroSimples(d.pedido),
+    )
+    .split('{cashback}')
+    .join(d.cashback ? blocoDeCashback(d.cashback) : '')
+    .split('{nome}')
     .join(escapa(nome))
     .split('{pedido}')
     .join(escapa(d.pedido))
     .split('{total}')
-    .join(escapa(d.total))
+    .join(escapa(brl(d.total)))
     .split('{link}')
     .join(CONTA_DO_CLIENTE)
 

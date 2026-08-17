@@ -11,7 +11,7 @@ import { emailPagamento } from '../notificacoes'
  * conclui que o e-mail é falso.
  */
 describe('e-mail de pagamento confirmado', () => {
-  const base = { nome: 'Icaro Moreno', pedido: 'YP-1234', total: 'R$ 216,00' }
+  const base = { nome: 'Icaro Moreno', pedido: 'YP-1234', total: 216 }
 
   it('não deixa nenhum placeholder por preencher, exceto o do site', () => {
     // `{site}` sobrevive de propósito: quem o resolve é `entregar()`, uma vez
@@ -79,5 +79,63 @@ describe('e-mail de pagamento confirmado', () => {
     // A troca para fundo claro já foi desfeita uma vez por um teste esquecido.
     const { html } = emailPagamento(base)
     expect(html).toContain('background-color:#EDE6DA')
+  })
+})
+
+describe('resumo da compra na confirmação', () => {
+  const itens = [
+    { descricao: '1 Million Masculino (Decant) 3ml', quantidade: 2, preco: 27, imagem: 'https://cdn/x.png' },
+    { descricao: 'Prada Paradoxe (Decant) 3ml', quantidade: 1, preco: 52, imagem: null },
+  ]
+  const base = { nome: 'Ana', pedido: 'YP-9', itens, frete: 18.9 }
+
+  it('a conta fecha: subtotal − desconto + frete = total', () => {
+    // Em 520 dos 640 pedidos pagos a soma dos itens não bate com o total,
+    // porque o desconto do checkout não é gravado. Ele é DEDUZIDO aqui — e é
+    // o que permite mostrar preço por item sem entregar ao cliente um
+    // comprovante que erra a própria conta.
+    const { html } = emailPagamento({ ...base, total: 88.9 })
+    expect(html).toContain('R$ 106,00') // subtotal: 2×27 + 52
+    expect(html).toContain('&minus; R$ 36,00') // desconto deduzido
+    expect(html).toContain('R$ 18,90') // frete
+    expect(html).toContain('R$ 88,90') // total
+  })
+
+  it('sem desconto, a linha não aparece', () => {
+    const { html } = emailPagamento({ ...base, total: 124.9 })
+    expect(html).not.toContain('Desconto')
+  })
+
+  it('frete zero vira "grátis", e não some', () => {
+    // Frete grátis é argumento de venda; esconder joga fora um ponto ganho.
+    const { html } = emailPagamento({ ...base, frete: 0, total: 106 })
+    expect(html).toContain('gr&aacute;tis')
+  })
+
+  it('item sem imagem não deixa <img> quebrada', () => {
+    const { html } = emailPagamento({ ...base, total: 124.9 })
+    expect(html).toContain('src="https://cdn/x.png"')
+    expect(html).not.toContain('src=""')
+    expect(html).not.toContain('src="null"')
+  })
+
+  it('sem itens, volta ao quadro antigo com o número do pedido', () => {
+    const { html } = emailPagamento({ nome: 'Ana', pedido: 'YP-9', total: 50 })
+    expect(html).toContain('PAGAMENTO APROVADO')
+    expect(html).toContain('Pedido YP-9')
+  })
+
+  it('o cashback só aparece quando foi lido', () => {
+    const sem = emailPagamento({ ...base, total: 124.9 }).html
+    expect(sem).not.toContain('VOC&Ecirc; GANHOU DE VOLTA')
+
+    const com = emailPagamento({
+      ...base,
+      total: 124.9,
+      cashback: { valor: 12.49, validade: '16/10/2026' },
+    }).html
+    expect(com).toContain('VOC&Ecirc; GANHOU DE VOLTA')
+    expect(com).toContain('R$ 12,49')
+    expect(com).toContain('16/10/2026')
   })
 })

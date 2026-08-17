@@ -803,9 +803,9 @@ export const HTML_VALIDADO_PAGAMENTO = `<!DOCTYPE html>
                   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="598" class="win" style="width:598px; border:1px solid #D8C49B; border-radius:12px; background-color:#FAF6EE;">
                     <tr>
                       <td align="center" style="padding:28px 30px 30px 30px;">
-                        <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#8A6A2F;">PAGAMENTO APROVADO</div>
-                        <div style="font-family:Georgia,'Times New Roman',serif; font-size:26px; line-height:34px; mso-line-height-rule:exactly; color:#241F18; padding-top:14px;">Pedido {pedido}</div>
-                        <div style="padding-top:18px;">
+                        {resumo}
+                        <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#8A6A2F; padding-top:24px;">TOTAL PAGO</div>
+                        <div style="padding-top:14px;">
                           <span class="cod" style="display:inline-block; font-family:Arial,Helvetica,sans-serif; font-size:31px; line-height:38px; mso-line-height-rule:exactly; font-weight:bold; color:#EFD18C; background-color:#241F18; border:2px solid #B08D4B; border-radius:10px; padding:18px 34px;">{total}</span>
                         </div>
                       </td>
@@ -813,6 +813,7 @@ export const HTML_VALIDADO_PAGAMENTO = `<!DOCTYPE html>
                   </table>
                 </td>
               </tr>
+{cashback}
               <tr>
                 <td align="center" class="pad" style="padding:10px 32px 0 32px;">
                   <div style="font-family:Georgia,serif; font-size:12px; line-height:12px; color:#8A6A2F;">&#9670;</div>

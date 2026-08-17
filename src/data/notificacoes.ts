@@ -12,12 +12,15 @@ import {
   emailEnvio,
   emailPagamento,
   brl,
+  type CashbackGanho,
+  type ItemComprado,
   identificarFrete,
   paginaDeRastreio,
   type AvisoPendente,
   type EventoNotificacao,
 } from '@/domain'
 
+import { extratoCashbackYampi } from './cashback'
 import { emailConfigurado, entregar } from './email'
 import { lerModeloEmail } from './modelo-email'
 import { supabaseConfigurado, supabaseServer } from './supabase'
@@ -295,7 +298,7 @@ export async function enviarAvisosDePedido(opcoes?: {
     const r: ResultadoAvisos = { ...vazio, candidatos: amostra.length }
     for (const { aviso, pedido } of amostra) {
       try {
-        await entregar(mensagemDoAviso(aviso, pedido, modelo, teste))
+        await entregar(await mensagemDoAviso(aviso, pedido, modelo, teste))
         r.enviados++
       } catch (e) {
         r.falhas.push({ pedido: aviso.pedidoId, erro: e instanceof Error ? e.message : String(e) })
@@ -334,7 +337,7 @@ export async function enviarAvisosDePedido(opcoes?: {
     // já reservada, o aviso viraria "falhou" sem ninguém ter errado nada.
     if (indice > 0) await pausa(600)
     try {
-      const mensagem = mensagemDoAviso(aviso, pedido, modelo, null)
+      const mensagem = await mensagemDoAviso(aviso, pedido, modelo, null)
       const r = await comRetentativa(() => entregar(mensagem))
       await sb
         .from('notificacoes_enviadas')
@@ -366,6 +369,93 @@ export async function enviarAvisosDePedido(opcoes?: {
 }
 
 /**
+ * Os itens da compra, com a miniatura do catálogo, e o frete pago.
+ *
+ * A imagem vem do perfume-base — 1.419 dos 1.449 itens já têm uma. Os 30 sem
+ * base são kits e lançamentos manuais: a linha sai só com o nome, e nada
+ * quebra.
+ */
+async function resumoDaCompra(
+  pedidoId: string,
+): Promise<{ itens: ItemComprado[]; frete: number }> {
+  const sb = supabaseServer()
+  const [{ data: itens }, { data: cabecalho }] = await Promise.all([
+    sb
+      .from('pedido_itens')
+      .select('descricao, quantidade, preco, perfumes_base(imagem_url)')
+      .eq('pedido_id', pedidoId),
+    sb.from('pedidos').select('frete').eq('id', pedidoId).maybeSingle(),
+  ])
+
+  return {
+    itens: ((itens ?? []) as unknown as {
+      descricao: string
+      quantidade: number
+      preco: number | string
+      perfumes_base: { imagem_url: string | null } | null
+    }[]).map((i) => ({
+      descricao: i.descricao,
+      quantidade: Number(i.quantidade) || 1,
+      preco: Number(i.preco) || 0,
+      imagem: i.perfumes_base?.imagem_url ?? null,
+    })),
+    frete: Number((cabecalho as { frete: number | null } | null)?.frete ?? 0),
+  }
+}
+
+/**
+ * O cashback que ESTA compra gerou, lido da carteira do cliente.
+ *
+ * Lido, nunca calculado. A taxa é 10% em 452 de 452 créditos conferidos, e
+ * multiplicar o pedido por 0,1 acertaria em todos eles — até a primeira
+ * promoção com outra taxa, quando o e-mail passaria a afirmar um valor que a
+ * conta do cliente não tem. O crédito é localizado pelo NÚMERO DO PEDIDO
+ * dentro do extrato: casamento exato, sem inferência.
+ *
+ * Silêncio é o desfecho aceitável. Carteira ainda não espelhada, crédito que
+ * a Yampi não lançou até agora, Yampi fora do ar — em qualquer um deles o
+ * bloco não aparece e o resto do e-mail sai igual. Nunca um número chutado.
+ */
+async function cashbackDaCompra(
+  pedidoId: string,
+  email: string | null,
+): Promise<CashbackGanho | null> {
+  if (!email) return null
+  try {
+    const { data: carteira } = await supabaseServer()
+      .from('cashback_yampi')
+      .select('customer_id')
+      .eq('email', email.trim().toLowerCase())
+      .maybeSingle()
+    const customerId = (carteira as { customer_id: string } | null)?.customer_id
+    if (!customerId) return null
+
+    const numero = pedidoId.replace(/^YP-/, '')
+    const { movimentos } = await extratoCashbackYampi(customerId)
+    const credito = movimentos.find(
+      (m) => m.pedido === numero && m.vale && m.valor - m.usado > 0 && m.expiraEm,
+    )
+    if (!credito) return null
+
+    return {
+      valor: Math.round((credito.valor - credito.usado) * 100) / 100,
+      validade: dataBr(credito.expiraEm!),
+    }
+  } catch (e) {
+    // A falha da carteira não pode derrubar a confirmação de pagamento: o
+    // aviso do dinheiro que ENTROU vale mais que o bônus.
+    console.error('[avisos] cashback da compra não foi lido:', e)
+    return null
+  }
+}
+
+/** aaaa-mm-dd (ou ISO) para dd/MM/aaaa, sem tropeçar no fuso. */
+function dataBr(iso: string): string {
+  const [ano, mes, dia] = iso.slice(0, 10).split('-')
+  return `${dia}/${mes}/${ano}`
+}
+
+/**
  * A mensagem pronta para um aviso.
  *
  * O link do botão sai de `paginaDeRastreio`, que escolhe a casa certa pela
@@ -374,7 +464,7 @@ export async function enviarAvisosDePedido(opcoes?: {
  * nada. Quando a Frenet já devolveu a URL do objeto, ela tem precedência: é o
  * endereço que a própria transportadora publicou.
  */
-function mensagemDoAviso(
+async function mensagemDoAviso(
   aviso: AvisoPendente,
   pedido: LinhaPedidoAviso,
   modelo: ModeloEnvio,
@@ -388,7 +478,9 @@ function mensagemDoAviso(
       ? emailPagamento({
           nome: aviso.cliente,
           pedido: aviso.pedidoId,
-          total: brl(Number(pedido.valor ?? 0)),
+          total: Number(pedido.valor ?? 0),
+          ...(await resumoDaCompra(aviso.pedidoId)),
+          cashback: await cashbackDaCompra(aviso.pedidoId, aviso.email),
         })
       : aviso.evento === 'pedido_entregue'
       ? emailEntregue({ nome: aviso.cliente, pedido: aviso.pedidoId, transportadora: nome })
