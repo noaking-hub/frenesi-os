@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { OPERADOR } from '@/data/operador'
+import { operadorAtual } from '@/data/operador'
 import { sessaoAtual } from '@/data/sessao'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import type { NaturezaGerencial } from '@/domain'
@@ -143,7 +143,7 @@ export async function criarCompromisso(
     documento: dados.documento.trim() || null,
     observacao: dados.observacao.trim() || null,
     origem: 'Manual',
-    criado_por: OPERADOR,
+    criado_por: await operadorAtual(),
   })
   if (error) {
     console.error('[financeiro] criar compromisso falhou:', error)
@@ -252,7 +252,7 @@ async function registrarAuditoria(entrada: {
     acao: entrada.acao,
     valor_anterior: entrada.anterior,
     valor_novo: entrada.novo,
-    operador: OPERADOR,
+    operador: await operadorAtual(),
     justificativa: entrada.justificativa,
   })
   if (error) console.error('[financeiro] auditoria não registrada:', error)
@@ -504,7 +504,7 @@ export async function registrarTransferencia(dados: {
     p_valor: dados.valor,
     p_data: dados.data || hojeEmSaoPaulo(),
     p_descricao: dados.descricao.trim() || 'Transferência entre contas',
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
   })
   if (error) {
     console.error('[financeiro] registrar_transferencia falhou:', error)
@@ -625,7 +625,7 @@ export async function baixarComEncargos(dados: {
     p_id: dados.id,
     p_valor: dados.valor,
     p_quando: dados.data || null,
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
   })
   if (error) {
     console.error('[financeiro] registrar_recebimento falhou:', error)
@@ -807,7 +807,7 @@ export async function fecharCompetencia(
   const { error } = await supabaseServer().from('competencias_fechadas').upsert({
     competencia,
     fechada_em: new Date().toISOString(),
-    fechada_por: OPERADOR,
+    fechada_por: await operadorAtual(),
     // Reabrir e fechar de novo tem de zerar as marcas da reabertura anterior,
     // senão `competencia_esta_fechada` continua respondendo "aberta".
     reaberta_em: null,
@@ -842,7 +842,7 @@ export async function reabrirCompetencia(
     .from('competencias_fechadas')
     .update({
       reaberta_em: new Date().toISOString(),
-      reaberta_por: OPERADOR,
+      reaberta_por: await operadorAtual(),
       reabertura_motivo: motivo.trim(),
     })
     .eq('competencia', competencia)
@@ -1078,7 +1078,7 @@ export async function resolverDestinoDoRepasse(
       p_id: id,
       p_conta_destino: conta,
       p_categoria_id: categoria,
-      p_operador: OPERADOR,
+      p_operador: await operadorAtual(),
     })
     if (error) {
       console.error('[financeiro] resolver_destino_do_payout falhou:', error)

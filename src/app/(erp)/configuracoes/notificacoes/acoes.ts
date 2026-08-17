@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 
 import { reenfileirarAviso } from '@/data/notificacoes'
-import { OPERADOR } from '@/data/operador'
+import { operadorAtual } from '@/data/operador'
 import { salvarRegraDeEnvio } from '@/data/regras-de-envio'
 import { sessaoAtual } from '@/data/sessao'
 import type { RegraDeEnvio } from '@/domain'
@@ -43,7 +43,7 @@ export async function salvarRegra(
     return { ok: false, erro: 'Faça login no ERP para mudar as regras de envio.' }
   }
 
-  const r = await salvarRegraDeEnvio(regra, OPERADOR)
+  const r = await salvarRegraDeEnvio(regra, await operadorAtual())
   if (r.ok) revalidatePath('/configuracoes/notificacoes')
   return r
 }
