@@ -1,5 +1,7 @@
 import 'server-only'
 
+import { contraparteDe } from '@/domain'
+
 import {
   casarPagamento,
   dataEmSaoPaulo,
@@ -1190,7 +1192,17 @@ async function enriquecerContrapartes(limite = 90, prazoMs = 6_000): Promise<num
     if (!/^\d{6,}$/.test(id)) continue
     try {
       const pagamento = await chamar(`/v1/payments/${id}`)
-      const nome = nomeDaContraparte(pagamento)
+      // `contraparteDe` tira o nome da PRÓPRIA casa do texto. O Mercado Pago
+      // descreve o movimento com os dois lados juntos — `<pagou> | <recebeu>` —
+      // e a varredura de campos abaixo pegava o primeiro que casasse, que numa
+      // VENDA é a própria FRENESI: quem coleta o dinheiro é a loja. Resultado
+      // medido antes do conserto: 46 linhas com a razão social da casa no campo
+      // do outro lado, 43 delas vendas, R$ 4.726,05, onde o nome que importa é
+      // o do cliente.
+      const nome = contraparteDe(nomeDaContraparte(pagamento))
+      // Vazio segue sendo "não achei", e a linha continua elegível na próxima
+      // rodada — a consulta filtra `contraparte = ''`. É de propósito: nome da
+      // casa gravado como contraparte fecharia essa porta para sempre.
       if (!nome) continue
       const { error: erroGravar } = await sb
         .from('extrato_linhas')

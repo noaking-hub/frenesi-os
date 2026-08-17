@@ -1,5 +1,6 @@
 export * from './types'
 export * from './format'
+export * from './contraparte'
 export * from './fracionamento'
 export * from './precificacao'
 export * from './produtos'
