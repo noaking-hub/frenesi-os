@@ -60,7 +60,9 @@ export function GiftbackCliente({
   const [recorte, setRecorte] = useState<'30d' | 'todos'>('30d')
   const [busca, setBusca] = useState('')
   const [pct, setPct] = useState('15')
-  const [validade, setValidade] = useState('7')
+  // 30 dias é a regra do dono (Configurações → Notificações): tempo de sobra
+  // para decidir, sem a pressa que faz o cupom ser ignorado.
+  const [validade, setValidade] = useState('30')
   const [aviso, setAviso] = useState<{ tom: 'ok' | 'erro'; texto: string } | null>(null)
   const [agindoEm, setAgindoEm] = useState<string | null>(null)
   const [novoEmail, setNovoEmail] = useState('')
@@ -144,7 +146,7 @@ export function GiftbackCliente({
         email: a.email,
         nome: a.nome,
         pct: Math.round(parseNum(pct) || 15),
-        validadeDias: Math.round(parseNum(validade) || 7),
+        validadeDias: Math.round(parseNum(validade) || 30),
       })
       setAgindoEm(null)
       setAviso(

@@ -147,7 +147,7 @@ export async function enviarTeste(
           )
         : chave === 'giftback'
         ? emailGiftback(
-            { nome: 'Marina Fontes', cupom: { codigo: 'NIVER15-TESTE1', pct: 15 }, validadeDias: 7, lojaUrl: process.env.LOJA_URL ?? 'https://frenesiperfumes.com.br' },
+            { nome: 'Marina Fontes', cupom: { codigo: 'NIVER15-TESTE1', pct: 15 }, validadeDias: 30, lojaUrl: process.env.LOJA_URL ?? 'https://frenesiperfumes.com.br' },
             m,
           )
         : emailRecuperacao(

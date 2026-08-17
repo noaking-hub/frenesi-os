@@ -8,10 +8,12 @@ import {
   resumoDeNotificacoes,
 } from '@/data/notificacoes'
 import { emailConfigurado } from '@/data/email'
+import { lerRegrasDeEnvio } from '@/data/regras-de-envio'
 import { supabaseConfigurado } from '@/data/supabase'
 import { num } from '@/domain'
 
 import { NotificacoesCliente } from './NotificacoesCliente'
+import { RegrasDeEnvio } from './RegrasDeEnvio'
 
 export const dynamic = 'force-dynamic'
 
@@ -42,10 +44,11 @@ export default async function Notificacoes({
   }
 
   const sp = await searchParams
-  const [resumo, log, descadastrados] = await Promise.all([
+  const [resumo, log, descadastrados, regras] = await Promise.all([
     resumoDeNotificacoes(),
     lerLogDeNotificacoes({ estado: sp.estado ?? null, evento: sp.evento ?? null }),
     listarDescadastrados(),
+    lerRegrasDeEnvio(),
   ])
 
   const kpis: Kpi[] = [
@@ -89,6 +92,8 @@ export default async function Notificacoes({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <FaixaKpis kpis={kpis} />
+      <RegrasDeEnvio regras={regras} />
+
       <NotificacoesCliente
         log={log}
         descadastrados={descadastrados}

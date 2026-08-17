@@ -163,7 +163,7 @@ export function ModeloEmail({
         {
           nome: 'Marina Fontes',
           cupom: cupom ?? { codigo: 'NIVER15-A7K2MB', pct: 15 },
-          validadeDias: 7,
+          validadeDias: 30,
           lojaUrl: '#',
         },
         modelo,
