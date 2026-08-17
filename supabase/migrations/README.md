@@ -69,3 +69,19 @@ motivo diferente:
   `20260815_cancelamento_confirmado_pelo_dinheiro.sql` são reparo de dados que
   rodou por consulta direta. O efeito está no banco (`pedido_cancelado_de_verdade`
   existe), o registro ficou só aqui.
+
+## Um objeto que a conferência aponta e deve mesmo apontar
+
+`tmp_casados_antes` (308 linhas: `concorrente_id, titulo, base_id`) aparece
+como AUSENTE e vai continuar aparecendo. É a fotografia de como os
+concorrentes estavam mapeados ANTES do recasamento em massa — cópia de
+segurança feita à mão para poder desfazer, e o módulo de concorrentes saiu do
+ERP esperando reescrita (`20260814000044`).
+
+Não vale criar migration para uma tabela temporária, e não vale apagá-la
+enquanto a reescrita não acontecer: ela é o único registro do mapeamento
+anterior. Quando os concorrentes voltarem, ou ela vira dado de verdade ou é
+descartada com o resto — aí a conferência fica limpa de novo.
+
+Conferido em 17/08/2026: fora esta, **nenhum** objeto do banco está sem
+origem versionada.
