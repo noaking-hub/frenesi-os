@@ -6,6 +6,7 @@ import { COR, FUNDO, type Tom } from '@/components/erp/tokens'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { brl, num, pct, plural } from '@/domain'
 
+import { CatalogoDeRelatorios } from './CatalogoDeRelatorios'
 import { ExportarAbc } from './ExportarAbc'
 
 export const dynamic = 'force-dynamic'
@@ -325,6 +326,7 @@ export default async function Relatorios({
   if (itens.length === 0) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <CatalogoDeRelatorios />
         {filtros}
         <EstadoVazio
           titulo={periodo === 'tudo' ? 'Sem vendas importadas ainda' : 'Sem vendas nesse período'}
@@ -340,6 +342,10 @@ export default async function Relatorios({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* O catálogo primeiro: quem abre "Relatórios" quer escolher a pergunta,
+          e a visão de vendas abaixo é a resposta padrão — a que se olha todo
+          dia sem precisar escolher nada. */}
+      <CatalogoDeRelatorios />
       {filtros}
       <FaixaKpis kpis={kpis} />
 
