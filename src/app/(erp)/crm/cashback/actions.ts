@@ -8,6 +8,7 @@ import {
   registrarAvisoCashback,
   type MovimentoCashback,
 } from '@/data/cashback'
+import { conjuntoDescadastrado, linkDeDescadastro } from '@/data/descadastro'
 import { emailConfigurado, entregar } from '@/data/email'
 import { lerModeloEmail } from '@/data/modelo-email'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
@@ -41,6 +42,8 @@ export async function metricasCashbackDoPeriodo(
 export interface ResultadoAviso {
   enviados: number
   semEmail: number
+  /** Pulados por terem cancelado a inscrição. */
+  descadastrados: number
   falhas: { quem: string; erro: string }[]
 }
 
@@ -75,8 +78,11 @@ export async function enviarAvisoCashback(
   const modelo = await lerModeloEmail('cashback')
   const site = process.env.URL ?? process.env.LOJA_URL ?? ''
   const loja = process.env.LOJA_URL ?? 'https://frenesiperfumes.com.br'
-  const resultado: ResultadoAviso = { enviados: 0, semEmail: 0, falhas: [] }
+  const resultado: ResultadoAviso = { enviados: 0, semEmail: 0, descadastrados: 0, falhas: [] }
   const avisados: string[] = []
+  // Uma leitura só da lista de descadastro: consulta por destinatário seriam
+  // centenas de idas ao banco no meio de um envio em massa.
+  const fora = await conjuntoDescadastrado()
 
   for (const c of (data ?? []) as {
     customer_id: string
@@ -89,6 +95,10 @@ export async function enviarAvisoCashback(
       resultado.semEmail++
       continue
     }
+    if (fora.has(c.email.trim().toLowerCase())) {
+      resultado.descadastrados++
+      continue
+    }
     const { assunto, html } = emailCashback(
       {
         nome: c.nome,
@@ -98,8 +108,14 @@ export async function enviarAvisoCashback(
       },
       modelo,
     )
+    const saida = linkDeDescadastro(c.email, site)
     try {
-      await entregar({ para: c.email, assunto, html: aplicarSite(html, site) })
+      await entregar({
+        para: c.email,
+        assunto,
+        html: aplicarSite(html, site).split('{descadastrar}').join(saida),
+        descadastrar: saida,
+      })
       resultado.enviados++
       avisados.push(c.customer_id)
     } catch (e) {

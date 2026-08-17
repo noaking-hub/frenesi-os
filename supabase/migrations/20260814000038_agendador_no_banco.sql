@@ -64,6 +64,21 @@ select cron.schedule(
   )$$
 );
 
+-- Os avisos ao cliente, de dez em dez minutos. Rotina PRÓPRIA porque eles
+-- moravam no fim da sincronia horária, atrás de extrato, rastreio, conciliação
+-- e estoque — e essa corrente não cabe no tempo de função da Netlify. Quando
+-- estourava, o que ficava de fora era sempre a ponta: o e-mail do cliente, em
+-- silêncio. Continua desligada até AVISOS_DE_PEDIDO=1.
+select cron.schedule(
+  'avisar-clientes',
+  '*/10 * * * *',
+  $$select net.http_post(
+    url := 'https://erp.frenesiperfumes.com.br/api/pedidos/avisos',
+    headers := jsonb_build_object('Authorization', 'Bearer $CRON_SEGREDO'),
+    timeout_milliseconds := 30000
+  )$$
+);
+
 -- O histórico do agendador é sinal vital, não acervo: uma semana basta.
 select cron.schedule(
   'limpar-historico-do-agendador',

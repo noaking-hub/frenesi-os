@@ -204,7 +204,7 @@ export const HTML_VALIDADO_CARRINHO = `<!DOCTYPE html>
               <tr>
                 <td align="center" class="pad" style="padding:16px 40px 40px 40px;">
                   <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:18px; mso-line-height-rule:exactly; color:#8A8274;">Voc&ecirc; recebeu este e-mail porque iniciou uma compra em nossa loja.</div>
-                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:18px; mso-line-height-rule:exactly; padding-top:6px;"><a href="https://frenesiperfumes.com.br/descadastrar" style="color:#7A7263; text-decoration:underline;">Cancelar inscri&ccedil;&atilde;o</a></div>
+                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:18px; mso-line-height-rule:exactly; padding-top:6px;"><a href="{descadastrar}" style="color:#7A7263; text-decoration:underline;">Cancelar inscri&ccedil;&atilde;o</a></div>
                 </td>
               </tr>
 
@@ -365,7 +365,7 @@ export const HTML_VALIDADO_GIFT = `<!DOCTYPE html>
               <tr>
                 <td align="center" class="pad" style="padding:16px 40px 40px 40px;">
                   <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:18px; mso-line-height-rule:exactly; color:#8A8274;">Voc&ecirc; recebeu este e-mail porque faz parte da comunidade FRENESI.</div>
-                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:18px; mso-line-height-rule:exactly; padding-top:6px;"><a href="https://frenesiperfumes.com.br/descadastrar" style="color:#7A7263; text-decoration:underline;">Cancelar inscri&ccedil;&atilde;o</a></div>
+                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:18px; mso-line-height-rule:exactly; padding-top:6px;"><a href="{descadastrar}" style="color:#7A7263; text-decoration:underline;">Cancelar inscri&ccedil;&atilde;o</a></div>
                 </td>
               </tr>
 
@@ -526,7 +526,7 @@ export const HTML_VALIDADO_CASHBACK = `<!DOCTYPE html>
               <tr>
                 <td align="center" class="pad" style="padding:16px 40px 40px 40px;">
                   <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:18px; mso-line-height-rule:exactly; color:#8A8274;">Voc&ecirc; recebeu este e-mail porque faz parte da comunidade FRENESI.</div>
-                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:18px; mso-line-height-rule:exactly; padding-top:6px;"><a href="https://frenesiperfumes.com.br/descadastrar" style="color:#7A7263; text-decoration:underline;">Cancelar inscri&ccedil;&atilde;o</a></div>
+                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:18px; mso-line-height-rule:exactly; padding-top:6px;"><a href="{descadastrar}" style="color:#7A7263; text-decoration:underline;">Cancelar inscri&ccedil;&atilde;o</a></div>
                 </td>
               </tr>
 

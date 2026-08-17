@@ -22,6 +22,12 @@ const ABERTO = [
   '/api/auth',
   // Portal do cliente: quem abre devolução não tem — nem deve ter — conta.
   '/devolucoes',
+  // Descadastro de e-mail: a página e o endpoint de um clique do Gmail. Quem
+  // quer sair da lista não vai criar conta para isso, e o cliente de e-mail
+  // que chama o POST não tem cookie nenhum. O que autoriza é a assinatura do
+  // link, conferida na própria rota.
+  '/descadastrar',
+  '/api/descadastrar',
   // Webhooks e rotinas: autenticam por token próprio no cabeçalho, não por
   // sessão de navegador. Exigir cookie aqui quebraria as integrações — e a
   // quebra é MUDA: o agendador recebe o redirect para /entrar, a página de
@@ -68,6 +74,12 @@ export async function middleware(req: NextRequest) {
   // URL cai de volta no portal, não numa tela de login que não é para ele.
   const host = req.headers.get('host') ?? ''
   if (host.split(':')[0].startsWith('devolucoes.')) {
+    // O descadastro responde nos DOIS domínios: o link já saiu em e-mails
+    // apontando para um deles, e redirecionar para a raiz do portal deixaria
+    // quem clicou olhando um formulário de devolução sem entender por quê.
+    if (pathname.startsWith('/descadastrar') || pathname.startsWith('/api/descadastrar')) {
+      return NextResponse.next()
+    }
     if (pathname === '/' || pathname.startsWith('/devolucoes')) {
       const destino = req.nextUrl.clone()
       // O POST das server actions vai para a URL da página — na raiz do

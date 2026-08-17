@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 
+import { estaDescadastrado, linkDeDescadastro } from '@/data/descadastro'
 import { emailConfigurado, entregar } from '@/data/email'
 import { lerModeloEmail } from '@/data/modelo-email'
 import { gravarAniversario, importarAniversariosYampi, registrarGiftback } from '@/data/giftback'
@@ -81,6 +82,11 @@ export async function enviarPresente(dados: {
       naoAcumula: true,
       expiraEm,
     })
+    // Aniversário é marketing: quem cancelou a inscrição não recebe. Aqui é
+    // um envio por vez, então a consulta pontual basta.
+    if (await estaDescadastrado(dados.email)) {
+      return { ok: false, erro: 'Este cliente cancelou a inscrição nos e-mails da marca.' }
+    }
     const modelo = await lerModeloEmail('giftback')
     const { assunto, html } = emailGiftback(
       {
@@ -91,10 +97,13 @@ export async function enviarPresente(dados: {
       },
       modelo,
     )
+    const site = process.env.URL ?? process.env.LOJA_URL ?? ''
+    const saida = linkDeDescadastro(dados.email, site)
     await entregar({
       para: dados.email,
       assunto,
-      html: aplicarSite(html, process.env.URL ?? process.env.LOJA_URL ?? ''),
+      html: aplicarSite(html, site).split('{descadastrar}').join(saida),
+      descadastrar: saida,
     })
     await registrarGiftback({ email: dados.email, cupom: codigo, canal: 'email' })
   } catch (e) {

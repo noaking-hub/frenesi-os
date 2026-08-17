@@ -5,7 +5,6 @@ import { cotarPrazosDeEntrega, frenetConfigurada, varrerRastreiosFrenet } from '
 import { codigosDoMelhorEnvio, melhorEnvioConectado, rastrearNoMelhorEnvio } from '@/data/melhorenvio'
 import { atualizarExtratoEsperando, mercadoPagoConfigurado } from '@/data/mercadopago'
 import { baixarEstoqueDosFaturados } from '@/data/baixa-estoque'
-import { enviarAvisosDePedido } from '@/data/notificacoes'
 import { pagaleveConfigurada } from '@/data/pagaleve'
 import { importarPagaleve } from '@/data/pagaleve-importacao'
 import {
@@ -455,21 +454,14 @@ export async function POST(req: Request) {
     relatorio.shopifyEstoque = { pulado: 'credenciais da Shopify não estão definidas' }
   }
 
-  // Os avisos vêm DEPOIS do rastreio: a varredura acabou de confirmar
-  // entregas, e essas entram nesta mesma rodada em vez de esperar a próxima
-  // hora. Fica desligado até AVISOS_DE_PEDIDO=1 — rotina que escreve para
-  // cliente real não se liga sozinha num deploy.
-  try {
-    const a = await enviarAvisosDePedido()
-    relatorio.avisos = a.desligado
-      ? {
-          desligado: 'AVISOS_DE_PEDIDO não está ligado — nada foi enviado',
-          fatosRegistrados: a.candidatos,
-        }
-      : { candidatos: a.candidatos, enviados: a.enviados, falhas: a.falhas.length }
-  } catch (e) {
-    relatorio.avisos = { erro: mensagemDe(e) }
-  }
+  // Os avisos ao cliente SAÍRAM daqui.
+  //
+  // Eles ficavam no fim desta corrente — depois de extrato, rastreio,
+  // conciliação e estoque — e a corrente não cabe no tempo de função da
+  // Netlify. Quando estourava, o que sobrava de fora era sempre a ponta: o
+  // e-mail do cliente, e em silêncio, porque o corte de tempo acontece fora
+  // do `try` de cada etapa. Agora são rotina própria, em
+  // `/api/pedidos/avisos`, agendada de dez em dez minutos.
 
   try {
     const { data, error } = await supabaseServer().rpc('varrer_ocorrencias', {

@@ -2,6 +2,7 @@ import 'server-only'
 
 import {
   ASSUNTO,
+  ROTULO_EVENTO,
   avisosDe,
   emailDevolucaoAberta,
   emailDevolucaoAprovada,
@@ -53,6 +54,27 @@ import { supabaseConfigurado, supabaseServer } from './supabase'
 const EVENTOS_ATIVOS: EventoNotificacao[] = ['pedido_enviado', 'pedido_entregue']
 
 type ModeloEnvio = Parameters<typeof emailEnvio>[1]
+
+const pausa = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * Uma segunda chance quando o provedor diz "devagar".
+ *
+ * 429 não é erro do e-mail: é a fila andando rápido demais. Marcar o aviso
+ * como `falhou` nesse caso obrigaria alguém a reenviar à mão um e-mail que
+ * teria saído sozinho meio segundo depois. Só o 429 é repetido — endereço
+ * inválido ou domínio não verificado não melhoram com insistência.
+ */
+async function comRetentativa<T>(acao: () => Promise<T>): Promise<T> {
+  try {
+    return await acao()
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (!/429|too many|rate limit/i.test(msg)) throw e
+    await pausa(2_000)
+    return acao()
+  }
+}
 
 export function avisosDePedidoLigados(): boolean {
   return process.env.AVISOS_DE_PEDIDO?.trim() === '1'
@@ -144,10 +166,25 @@ export async function enviarAvisosDePedido(opcoes?: {
       rastreio: p.rastreio,
       notaFiscal: null,
     })) {
-      if (EVENTOS_ATIVOS.includes(aviso.evento)) pendentes.push({ aviso, pedido: p })
+      pendentes.push({ aviso, pedido: p })
     }
   }
   if (pendentes.length === 0) return { ...vazio, desligado }
+
+  /**
+   * O filtro de escopo vem DEPOIS de montar a lista, não antes.
+   *
+   * Antes, evento fora de `EVENTOS_ATIVOS` — "pedido pago", "nota emitida" —
+   * era descartado aqui e nunca chegava ao log. No dia em que a operação
+   * cobrisse esses eventos, a primeira rodada trataria meses de pedidos
+   * antigos como fatos novos e despejaria a enxurrada que a trava do
+   * "desligado" existe justamente para impedir.
+   *
+   * Agora eles entram no log como dispensados, com o motivo escrito. Ligar o
+   * evento passa a avisar só o que acontecer daí para frente.
+   */
+  const doEscopo = pendentes.filter((p) => EVENTOS_ATIVOS.includes(p.aviso.evento))
+  const foraDoEscopo = pendentes.filter((p) => !EVENTOS_ATIVOS.includes(p.aviso.evento))
 
   // ── Módulo desligado: o fato entra no log, o e-mail não sai ──────────────
   //
@@ -178,13 +215,33 @@ export async function enviarAvisosDePedido(opcoes?: {
     return { ...vazio, candidatos: (registradas ?? []).length, desligado: true }
   }
 
+  // Fato real, evento que o módulo ainda não cobre: entra no log como
+  // dispensado AGORA, para não virar enxurrada quando o evento for ligado.
+  if (foraDoEscopo.length && !teste) {
+    await sb.from('notificacoes_enviadas').upsert(
+      foraDoEscopo.map(({ aviso }) => ({
+        chave: aviso.chave,
+        pedido_id: aviso.pedidoId,
+        evento: aviso.evento,
+        destinatario: aviso.email,
+        assunto: '(não enviado)',
+        estado: 'dispensado',
+        motivo: 'evento ainda não coberto pelo módulo de avisos',
+        concluido_em: new Date().toISOString(),
+      })),
+      { onConflict: 'chave', ignoreDuplicates: true },
+    )
+  }
+
+  if (doEscopo.length === 0) return { ...vazio, desligado }
+
   // Uma leitura por rodada, não uma por e-mail: o modelo é o mesmo para todos.
   const modelo = (await lerModeloEmail('envio')) as ModeloEnvio
 
   // No teste nada é reservado: o ensaio não pode consumir o direito do cliente
   // de receber o aviso de verdade depois.
   if (teste) {
-    const amostra = pendentes.slice(0, Math.min(limite, 3))
+    const amostra = doEscopo.slice(0, Math.min(limite, 3))
     const r: ResultadoAvisos = { ...vazio, candidatos: amostra.length }
     for (const { aviso, pedido } of amostra) {
       try {
@@ -200,7 +257,7 @@ export async function enviarAvisosDePedido(opcoes?: {
   // Reserva em lote: a chave primária decide quem manda. `ignoreDuplicates`
   // devolve só as linhas que ESTA rodada conseguiu inserir — as demais já
   // estavam no log, seja como enviadas, dispensadas ou em curso.
-  const reserva = pendentes.slice(0, limite)
+  const reserva = doEscopo.slice(0, limite)
   const { data: ganhas, error: erroReserva } = await sb
     .from('notificacoes_enviadas')
     .upsert(
@@ -221,9 +278,13 @@ export async function enviarAvisosDePedido(opcoes?: {
   const fila = reserva.filter(({ aviso }) => minhas.has(aviso.chave))
   const resultado: ResultadoAvisos = { ...vazio, candidatos: fila.length }
 
-  for (const { aviso, pedido } of fila) {
+  for (const [indice, { aviso, pedido }] of fila.entries()) {
+    // Meio segundo entre envios: o limite do provedor é por segundo, e um
+    // lote de quarenta disparado de uma vez volta 429 no meio — com a linha
+    // já reservada, o aviso viraria "falhou" sem ninguém ter errado nada.
+    if (indice > 0) await pausa(600)
     try {
-      const r = await entregar(mensagemDoAviso(aviso, pedido, modelo, null))
+      const r = await comRetentativa(() => entregar(mensagemDoAviso(aviso, pedido, modelo, null)))
       await sb
         .from('notificacoes_enviadas')
         .update({ estado: 'enviado', provedor_id: r.id, concluido_em: new Date().toISOString() })
@@ -565,4 +626,142 @@ export async function avisarDevolucaoNovasFotos(protocolo: string, oQueFalta: st
         : null,
     `|${marca}`,
   )
+}
+
+// ── Log para a tela de Configurações → Notificações ─────────────────────────
+
+export interface LinhaLogNotificacao {
+  chave: string
+  pedidoId: string | null
+  evento: EventoNotificacao
+  rotulo: string
+  destinatario: string
+  assunto: string
+  estado: 'enviando' | 'enviado' | 'falhou' | 'dispensado'
+  motivo: string
+  criadoEm: string
+  concluidoEm: string | null
+}
+
+/**
+ * O registro de cada aviso — inclusive dos que NÃO saíram.
+ *
+ * Enquanto a Yampi mandava, "o cliente foi avisado?" se respondia lá. Assumindo
+ * o envio, a pergunta virou nossa, e sem esta lista a única resposta estaria na
+ * caixa de entrada do cliente. Dispensado e falhou aparecem junto com enviado
+ * de propósito: é a linha que não saiu que exige decisão.
+ */
+export async function lerLogDeNotificacoes(filtros?: {
+  estado?: string | null
+  evento?: string | null
+  limite?: number
+}): Promise<LinhaLogNotificacao[]> {
+  if (!supabaseConfigurado()) return []
+
+  let consulta = supabaseServer()
+    .from('notificacoes_enviadas')
+    .select('chave, pedido_id, evento, destinatario, assunto, estado, motivo, criado_em, concluido_em')
+    .order('criado_em', { ascending: false })
+    .limit(filtros?.limite ?? 300)
+  if (filtros?.estado) consulta = consulta.eq('estado', filtros.estado)
+  if (filtros?.evento) consulta = consulta.eq('evento', filtros.evento)
+
+  const { data, error } = await consulta
+  if (error) {
+    console.error('[notificacoes] não consegui ler o log:', error.message)
+    return []
+  }
+
+  return ((data ?? []) as {
+    chave: string
+    pedido_id: string | null
+    evento: string
+    destinatario: string
+    assunto: string
+    estado: string
+    motivo: string
+    criado_em: string
+    concluido_em: string | null
+  }[]).map((l) => ({
+    chave: l.chave,
+    pedidoId: l.pedido_id,
+    evento: l.evento as EventoNotificacao,
+    rotulo: ROTULO_EVENTO[l.evento as EventoNotificacao] ?? l.evento,
+    destinatario: l.destinatario,
+    assunto: l.assunto,
+    estado: l.estado as LinhaLogNotificacao['estado'],
+    motivo: l.motivo,
+    criadoEm: l.criado_em,
+    concluidoEm: l.concluido_em,
+  }))
+}
+
+export interface ResumoNotificacoes {
+  enviados: number
+  dispensados: number
+  falhas: number
+  emCurso: number
+}
+
+/** Os números dos últimos 30 dias, para os cartões do topo. */
+export async function resumoDeNotificacoes(): Promise<ResumoNotificacoes> {
+  const zero: ResumoNotificacoes = { enviados: 0, dispensados: 0, falhas: 0, emCurso: 0 }
+  if (!supabaseConfigurado()) return zero
+
+  const desde = new Date(Date.now() - 30 * 86_400_000).toISOString()
+  const { data, error } = await supabaseServer()
+    .from('notificacoes_enviadas')
+    .select('estado')
+    .gte('criado_em', desde)
+    .limit(5000)
+  if (error) return zero
+
+  const contagem = { ...zero }
+  for (const l of (data ?? []) as { estado: string }[]) {
+    if (l.estado === 'enviado') contagem.enviados++
+    else if (l.estado === 'dispensado') contagem.dispensados++
+    else if (l.estado === 'falhou') contagem.falhas++
+    else contagem.emCurso++
+  }
+  return contagem
+}
+
+/**
+ * Reenvia um aviso que falhou.
+ *
+ * Só o que FALHOU: reenviar um aviso já entregue manda o mesmo e-mail duas
+ * vezes, e a regra do módulo inteiro é um fato, um e-mail. Dispensado também
+ * não volta — ele foi dispensado por decisão (módulo desligado, evento fora do
+ * escopo), e ressuscitá-lo escreveria sobre um fato antigo.
+ *
+ * A linha é apagada para que a rodada seguinte a trate como fato novo: é o
+ * caminho que já sabe montar o e-mail, reservar a vaga e registrar o
+ * resultado, em vez de uma segunda implementação do mesmo envio.
+ */
+export async function reenfileirarAviso(
+  chave: string,
+): Promise<{ ok: true } | { ok: false; erro: string }> {
+  if (!supabaseConfigurado()) return { ok: false, erro: 'O Supabase precisa estar configurado.' }
+
+  const sb = supabaseServer()
+  const { data } = await sb
+    .from('notificacoes_enviadas')
+    .select('chave, estado')
+    .eq('chave', chave)
+    .maybeSingle()
+  const linha = data as { chave: string; estado: string } | null
+  if (!linha) return { ok: false, erro: 'Este aviso não está no log.' }
+  if (linha.estado !== 'falhou') {
+    return {
+      ok: false,
+      erro:
+        linha.estado === 'enviado'
+          ? 'Este aviso já foi entregue. Reenviar mandaria o mesmo e-mail duas vezes.'
+          : 'Só avisos que falharam voltam para a fila.',
+    }
+  }
+
+  const { error } = await sb.from('notificacoes_enviadas').delete().eq('chave', chave)
+  if (error) return { ok: false, erro: error.message }
+  return { ok: true }
 }

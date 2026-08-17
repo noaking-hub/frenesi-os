@@ -278,6 +278,7 @@ export function CashbackCliente({
         texto: [
           `${plural(x.enviados, 'aviso enviado', 'avisos enviados')}.`,
           x.semEmail ? `${x.semEmail} sem e-mail cadastrado.` : '',
+          x.descadastrados ? `${x.descadastrados} cancelaram a inscrição (pulados).` : '',
           ...x.falhas.slice(0, 3).map((f) => `${f.quem}: ${f.erro}`),
         ]
           .filter(Boolean)

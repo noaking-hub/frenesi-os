@@ -107,11 +107,13 @@ export function CarrinhosCliente({
     enviados: number
     jaContatados: number
     semEmail: number
+    descadastrados: number
     falhas: { quem: string; erro: string }[]
   }) => {
     const partes = [
       `${plural(r.enviados, 'e-mail enviado', 'e-mails enviados')}`,
       r.jaContatados ? `${r.jaContatados} já contatados nos últimos 7 dias (pulados)` : '',
+      r.descadastrados ? `${r.descadastrados} cancelaram a inscrição (pulados)` : '',
       r.semEmail ? `${r.semEmail} sem e-mail` : '',
     ].filter(Boolean)
     return r.falhas.length
@@ -136,6 +138,7 @@ export function CarrinhosCliente({
           enviados: r.resultado.enviados.length,
           jaContatados: r.resultado.jaContatados,
           semEmail: r.resultado.semEmail,
+          descadastrados: r.resultado.descadastrados,
           falhas: r.resultado.falhas,
         }),
       )
@@ -152,7 +155,13 @@ export function CarrinhosCliente({
     setAviso(null)
     setEnviandoMassa(true)
     const total = ids.length
-    const soma = { enviados: 0, jaContatados: 0, semEmail: 0, falhas: [] as { quem: string; erro: string }[] }
+    const soma = {
+      enviados: 0,
+      jaContatados: 0,
+      semEmail: 0,
+      descadastrados: 0,
+      falhas: [] as { quem: string; erro: string }[],
+    }
     let fila = ids
     try {
       let rodadas = 0
@@ -167,7 +176,17 @@ export function CarrinhosCliente({
           body: JSON.stringify({ ids: fila, cupom }),
         })
         const r = (await resposta.json()) as
-          | { ok: true; resultado: { enviados: string[]; jaContatados: number; semEmail: number; falhas: { quem: string; erro: string }[]; naoProcessados: string[] } }
+          | {
+              ok: true
+              resultado: {
+                enviados: string[]
+                jaContatados: number
+                semEmail: number
+                descadastrados: number
+                falhas: { quem: string; erro: string }[]
+                naoProcessados: string[]
+              }
+            }
           | { ok: false; erro: string }
         if (!r.ok) {
           setAviso({ tom: 'erro', texto: r.erro })
@@ -176,6 +195,7 @@ export function CarrinhosCliente({
         soma.enviados += r.resultado.enviados.length
         soma.jaContatados += r.resultado.jaContatados
         soma.semEmail += r.resultado.semEmail
+        soma.descadastrados += r.resultado.descadastrados ?? 0
         soma.falhas.push(...r.resultado.falhas)
         fila = r.resultado.naoProcessados ?? []
       }

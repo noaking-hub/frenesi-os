@@ -42,6 +42,16 @@ export interface Entrega {
   html: string
   /** Arquivos que seguem junto — o razão do mês para o escritório, por exemplo. */
   anexos?: Anexo[]
+  /**
+   * URL de descadastro, para os cabeçalhos `List-Unsubscribe`.
+   *
+   * Só em MARKETING. Gmail e Outlook mostram um "Cancelar inscrição" nativo ao
+   * lado do remetente quando o cabeçalho existe, e quem sai por ali não
+   * denuncia como spam — que é o que derruba a reputação do domínio e leva
+   * junto os avisos de pedido. O `List-Unsubscribe-Post` é o que faz esse
+   * botão funcionar com UM clique, sem abrir o navegador (RFC 8058).
+   */
+  descadastrar?: string
 }
 
 /**
@@ -69,6 +79,14 @@ export async function entregar(m: Entrega): Promise<{ id: string }> {
       subject: m.assunto,
       html: m.html,
       ...(responder ? { reply_to: responder } : {}),
+      ...(m.descadastrar
+        ? {
+            headers: {
+              'List-Unsubscribe': `<${m.descadastrar}>`,
+              'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+            },
+          }
+        : {}),
       ...(m.anexos?.length
         ? {
             attachments: m.anexos.map((a) => ({

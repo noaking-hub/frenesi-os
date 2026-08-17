@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 
+import { conjuntoDescadastrado, linkDeDescadastro } from '@/data/descadastro'
 import { emailConfigurado, entregar } from '@/data/email'
 import { lerModeloEmail } from '@/data/modelo-email'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
@@ -22,6 +23,8 @@ export type CupomEnvio =
 export interface ResultadoRecuperacao {
   /** E-mails que saíram, pelo nome (ou e-mail) de quem recebeu. */
   enviados: string[]
+  /** Pulados por terem cancelado a inscrição — o pedido deles vale. */
+  descadastrados: number
   /** Carrinhos pulados por já terem recebido e-mail nos últimos 7 dias. */
   jaContatados: number
   semEmail: number
@@ -99,6 +102,7 @@ export async function enviarEmailsCarrinho(
 
   const resultado: ResultadoRecuperacao = {
     enviados: [],
+    descadastrados: 0,
     jaContatados: 0,
     semEmail: 0,
     falhas: [],
@@ -107,6 +111,10 @@ export async function enviarEmailsCarrinho(
   const agora = Date.now()
   const inicio = Date.now()
   const modelo = await lerModeloEmail('carrinho')
+  // A lista de descadastro é lida UMA vez: uma consulta por destinatário
+  // seriam mil idas ao banco, e é justamente o envio em massa que não pode
+  // escapar do filtro.
+  const fora = await conjuntoDescadastrado()
 
   for (let i = 0; i < unicos.length; i++) {
     // O prazo desta rodada acabou: devolve o resto para a tela continuar.
@@ -119,6 +127,13 @@ export async function enviarEmailsCarrinho(
     if (!carrinho) continue
     if (!carrinho.email) {
       resultado.semEmail++
+      continue
+    }
+    if (fora.has(carrinho.email.trim().toLowerCase())) {
+      // Quem pediu para sair não recebe nem com "forçar reenvio": o botão
+      // existe para reenviar a quem não recebeu, não para furar o pedido de
+      // alguém que cancelou a inscrição.
+      resultado.descadastrados++
       continue
     }
     const ultimo = recentes.get(id)
@@ -184,10 +199,12 @@ export async function enviarEmailsCarrinho(
       modelo,
     )
     // {site} é a URL deste ERP no ar — é dela que saem os ícones de /marca.
-    const htmlFinal = aplicarSite(html, process.env.URL ?? process.env.LOJA_URL ?? '')
+    const site = process.env.URL ?? process.env.LOJA_URL ?? ''
+    const saida = linkDeDescadastro(carrinho.email, site)
+    const htmlFinal = aplicarSite(html, site).split('{descadastrar}').join(saida)
 
     try {
-      await entregar({ para: carrinho.email, assunto, html: htmlFinal })
+      await entregar({ para: carrinho.email, assunto, html: htmlFinal, descadastrar: saida })
       resultado.enviados.push(carrinho.cliente ?? carrinho.email)
       if (sb) {
         await sb.from('recuperacoes_carrinho').insert({
