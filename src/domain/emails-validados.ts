@@ -650,12 +650,6 @@ export const HTML_VALIDADO_ENVIO = `<!DOCTYPE html>
               </tr>
 
               <tr>
-                <td align="center" class="pad" style="padding:32px 50px 0 50px;">
-                  <div style="font-family:Georgia,'Times New Roman',serif; font-size:19px; line-height:26px; font-style:italic; mso-line-height-rule:exactly; color:#8A6A2F;">Fracionado do frasco original, lacrado e conferido.</div>
-                </td>
-              </tr>
-
-              <tr>
                 <td align="center" class="pad" style="padding:30px 46px 0 46px;">
                   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="570" class="win" style="width:570px; border-top:1px solid #E4DAC5;">
                     <tr>
