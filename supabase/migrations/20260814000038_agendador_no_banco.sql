@@ -31,12 +31,51 @@ select cron.schedule(
   )$$
 );
 
--- A manutenção completa, de hora em hora (minuto 2, fora do tique do pulso).
+-- A manutenção horária, em QUATRO etapas e não numa corrente só.
+--
+-- A rotina única morria de timeout em TODA rodada — o histórico do pg_net
+-- mostrava "Timeout of 30000 ms" hora após hora, sem exceção. Dezoito etapas
+-- em sequência não cabem nos ~26 segundos de função síncrona da Netlify, e o
+-- que ficava de fora era sempre a mesma ponta: rastreio, Melhor Envio,
+-- conciliação, estoque. Em silêncio, porque o corte de tempo acontece fora do
+-- `try` de cada etapa.
+--
+-- Minutos afastados de propósito: cada etapa tem a função inteira para si.
 select cron.schedule(
-  'sincronizar-financeiro',
+  'sincronizar-vendas',
   '2 * * * *',
   $$select net.http_post(
-    url := 'https://erp.frenesiperfumes.com.br/api/financeiro/sincronizar',
+    url := 'https://erp.frenesiperfumes.com.br/api/financeiro/sincronizar?etapa=vendas',
+    headers := jsonb_build_object('Authorization', 'Bearer $CRON_SEGREDO'),
+    timeout_milliseconds := 30000
+  )$$
+);
+
+select cron.schedule(
+  'sincronizar-logistica',
+  '17 * * * *',
+  $$select net.http_post(
+    url := 'https://erp.frenesiperfumes.com.br/api/financeiro/sincronizar?etapa=logistica',
+    headers := jsonb_build_object('Authorization', 'Bearer $CRON_SEGREDO'),
+    timeout_milliseconds := 30000
+  )$$
+);
+
+select cron.schedule(
+  'sincronizar-financeiro',
+  '32 * * * *',
+  $$select net.http_post(
+    url := 'https://erp.frenesiperfumes.com.br/api/financeiro/sincronizar?etapa=financeiro',
+    headers := jsonb_build_object('Authorization', 'Bearer $CRON_SEGREDO'),
+    timeout_milliseconds := 30000
+  )$$
+);
+
+select cron.schedule(
+  'sincronizar-operacao',
+  '47 * * * *',
+  $$select net.http_post(
+    url := 'https://erp.frenesiperfumes.com.br/api/financeiro/sincronizar?etapa=operacao',
     headers := jsonb_build_object('Authorization', 'Bearer $CRON_SEGREDO'),
     timeout_milliseconds := 30000
   )$$

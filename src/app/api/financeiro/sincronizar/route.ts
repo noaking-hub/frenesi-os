@@ -38,7 +38,9 @@ import { INICIO_DA_OPERACAO, dataEmSaoPaulo } from '@/domain'
  * chave e a conciliação só reescreve quando o valor mudou.
  */
 
-export const maxDuration = 300
+// 26 segundos é o teto real da função síncrona na Netlify. Declarar 300 era
+// uma promessa que só este código fazia — e que a plataforma cortava calada.
+export const maxDuration = 26
 export const dynamic = 'force-dynamic'
 
 const JANELA_DIAS = 35
@@ -98,6 +100,49 @@ export async function POST(req: Request) {
 
   const relatorio: Record<string, unknown> = { quando: agora.toISOString(), periodo: { de, ate } }
 
+  /**
+   * A corrente foi CORTADA em etapas — e isso não é organização, é conserto.
+   *
+   * `maxDuration = 300` sempre foi uma promessa que só este código fazia: a
+   * Netlify corta função síncrona perto de 26 segundos. Rodando as dezoito
+   * etapas de enfiada, TODA rodada horária morria no meio — o histórico do
+   * pg_net mostra "Timeout of 30000 ms" em cada uma delas, sem exceção. O que
+   * ficava de fora era sempre a mesma ponta: rastreio, Melhor Envio,
+   * conciliação, estoque. E em silêncio, porque o corte de tempo acontece
+   * FORA do `try` de cada etapa — nenhum erro aparecia em lugar nenhum.
+   *
+   * Agora cada grupo é uma chamada própria, agendada em minuto diferente:
+   *
+   *   ?etapa=vendas      pedidos da Yampi, Pagaleve, estorno parcial
+   *   ?etapa=logistica   entregas locais, rastreio, Melhor Envio, anulados
+   *   ?etapa=financeiro  Mercado Pago, extrato em caixa, repasses, ADS
+   *   ?etapa=operacao    baixa de estoque, rascunhos, Shopify, ocorrências
+   *
+   * Sem `etapa` roda tudo — que é o que o botão "Sincronizar agora" faz, com
+   * alguém olhando a tela e podendo clicar de novo.
+   */
+  const etapa = new URL(req.url).searchParams.get('etapa')
+  const inicio = Date.now()
+  const ORCAMENTO_MS = 20_000
+  const puladasPorTempo: string[] = []
+
+  type Grupo = 'vendas' | 'logistica' | 'financeiro' | 'operacao'
+
+  /** Este grupo pertence à rodada pedida? Sem efeito colateral. */
+  const naEtapa = (nome: Grupo) => !etapa || etapa === nome
+
+  function grupo(nome: Grupo): boolean {
+    if (!naEtapa(nome)) return false
+    // Mesmo dentro do grupo certo, uma etapa lenta não pode levar as
+    // seguintes junto: passado o orçamento, o resto é registrado como pulado
+    // em vez de morrer no corte da plataforma sem deixar rastro.
+    if (Date.now() - inicio > ORCAMENTO_MS) {
+      puladasPorTempo.push(nome)
+      return false
+    }
+    return true
+  }
+
   // Os pedidos vêm PRIMEIRO, e por um motivo estrutural: é da Yampi que sai o
   // id da transação, e é ele que liga o crédito do extrato à venda. Rodando
   // depois, a ligação só aconteceria no dia seguinte — e uma conciliação
@@ -105,7 +150,7 @@ export async function POST(req: Request) {
   //
   // A janela é curta porque aqui só interessa o que é novo; o histórico
   // completo é trabalho de importação manual, não de rotina.
-  if (yampiConfigurada()) {
+  if (grupo('vendas') && yampiConfigurada()) {
     try {
       const y = await importarPedidosYampi(JANELA_PEDIDOS_DIAS)
       relatorio.yampi = {
@@ -117,7 +162,7 @@ export async function POST(req: Request) {
     } catch (e) {
       relatorio.yampi = { erro: mensagemDe(e) }
     }
-  } else {
+  } else if (naEtapa('vendas')) {
     relatorio.yampi = { pulado: 'credenciais da Yampi não estão definidas' }
   }
 
@@ -137,7 +182,7 @@ export async function POST(req: Request) {
   // Vir antes da conciliação pelo extrato é seguro: aquela só preenche linha
   // com `recebido` nulo, e toda venda da Pagaleve sai daqui com `recebido`
   // escrito — nem que seja zero, quando ainda não houve crédito.
-  if (pagaleveConfigurada()) {
+  if (grupo('vendas') && pagaleveConfigurada()) {
     try {
       const p = await importarPagaleve({ gravar: true, janelaDePedidosDias: JANELA_PAGALEVE_DIAS })
       relatorio.pagaleve = {
@@ -169,7 +214,7 @@ export async function POST(req: Request) {
         relatorio.pagaleveConciliacaoDeReserva = { erro: mensagemDe(e2) }
       }
     }
-  } else {
+  } else if (naEtapa('vendas')) {
     relatorio.pagaleve = { pulado: 'PAGALEVE_CHAVE/PAGALEVE_SENHA não estão definidas' }
   }
 
@@ -191,7 +236,7 @@ export async function POST(req: Request) {
    * nothing`), então a segunda chamada não duplica nada — ela só alcança o que
    * o Mercado Pago acabou de trazer.
    */
-  try {
+  if (grupo('financeiro')) try {
     const { data, error } = await supabaseServer().rpc('converter_extrato_em_caixa')
     if (error) throw error
     const linha = Array.isArray(data) ? data[0] : data
@@ -203,7 +248,7 @@ export async function POST(req: Request) {
     relatorio.extratoEmCaixaAntes = { erro: mensagemDe(e) }
   }
 
-  try {
+  if (grupo('financeiro')) try {
     const { data, error } = await supabaseServer().rpc('conciliar_repasses_pelo_extrato')
     if (error) throw error
     const linha = Array.isArray(data) ? data[0] : data
@@ -220,7 +265,7 @@ export async function POST(req: Request) {
   // morrendo no meio a cada duas ou três rodadas. A operação marca "entregue"
   // na SHOPIFY quando o motoboy volta — esta etapa escuta, fecha o pedido e
   // baixa o estoque; deixá-la atrás da varredura era condená-la ao corte.
-  if (shopifyConfigurada()) {
+  if (grupo('logistica') && shopifyConfigurada()) {
     try {
       const el = await importarEntregasLocaisDaShopify()
       relatorio.entregasLocais = {
@@ -234,14 +279,14 @@ export async function POST(req: Request) {
     } catch (e) {
       relatorio.entregasLocais = { erro: mensagemDe(e) }
     }
-  } else {
+  } else if (naEtapa('logistica')) {
     relatorio.entregasLocais = { pulado: 'credenciais da Shopify não estão definidas' }
   }
 
   // Rastreio logo depois dos pedidos: a importação acabou de trazer códigos
   // novos, e eles entram nesta mesma rodada em vez de esperar a próxima hora.
   // É a rede de segurança do webhook — que se perde em queda, deploy ou 500.
-  if (frenetConfigurada()) {
+  if (grupo('logistica') && frenetConfigurada()) {
     try {
       // 15 por rodada, não 60: com o corte de tempo da Netlify, a varredura
       // grande morria no meio e NENHUM evento era gravado. 15 cabem — e
@@ -267,7 +312,7 @@ export async function POST(req: Request) {
     } catch (e) {
       relatorio.prazosDeEntrega = { erro: mensagemDe(e) }
     }
-  } else {
+  } else if (naEtapa('logistica')) {
     relatorio.rastreio = { pulado: 'FRENET_TOKEN não está definido' }
   }
 
@@ -276,7 +321,7 @@ export async function POST(req: Request) {
   // alguém clicar em "Sincronizar agora". O orçamento é curto de propósito —
   // a fila grande é trabalho do botão; aqui é só o gotejo do dia a dia, e as
   // etapas seguintes da corrente ainda precisam do tempo que sobra.
-  if (shopifyConfigurada()) {
+  if (grupo('logistica') && shopifyConfigurada()) {
     try {
       const esp = await sincronizarEnvios({ prazoMs: 6_000 })
       relatorio.espelhoEnvios = esp.ok
@@ -289,7 +334,7 @@ export async function POST(req: Request) {
 
   // Melhor Envio cobre os 22% que a Frenet não vê. Só roda depois de alguém
   // ter autorizado no navegador — sem token guardado não há o que consultar.
-  if (await melhorEnvioConectado()) {
+  if (grupo('logistica') && await melhorEnvioConectado()) {
     try {
       const r = await rastrearNoMelhorEnvio(await codigosDoMelhorEnvio(80))
       relatorio.rastreioMelhorEnvio = {
@@ -300,12 +345,12 @@ export async function POST(req: Request) {
     } catch (e) {
       relatorio.rastreioMelhorEnvio = { erro: mensagemDe(e) }
     }
-  } else {
+  } else if (naEtapa('logistica')) {
     relatorio.rastreioMelhorEnvio = { pulado: 'Melhor Envio ainda não foi conectado' }
   }
 
   // Venda anulada pela Shopify sai da receita nesta mesma rodada.
-  if (shopifyConfigurada()) {
+  if (grupo('logistica') && shopifyConfigurada()) {
     try {
       relatorio.anulados = await marcarAnuladosDaShopify()
     } catch (e) {
@@ -320,7 +365,7 @@ export async function POST(req: Request) {
   // olhando merece resposta imediata; aqui não há ninguém olhando, e esperar
   // três minutos é o que faz o extrato se manter em dia sem depender de
   // alguém abrir a tela e clicar.
-  if (mercadoPagoConfigurado()) {
+  if (grupo('financeiro') && mercadoPagoConfigurado()) {
     try {
       // Dez tentativas de 15s cabem folgadas nos 300s da rota, junto com a
       // importação de pedidos que vem antes.
@@ -328,7 +373,7 @@ export async function POST(req: Request) {
     } catch (e) {
       relatorio.mercadopago = { erro: mensagemDe(e) }
     }
-  } else {
+  } else if (naEtapa('financeiro')) {
     relatorio.mercadopago = { pulado: 'MERCADOPAGO_ACCESS_TOKEN não está definido' }
   }
 
@@ -336,7 +381,7 @@ export async function POST(req: Request) {
   // saldo da conta mas não existia como lançamento — e o gráfico de recebido,
   // a DRE por caixa e o fluxo, que leem lançamento, mostravam zero num mês em
   // que entraram centenas de vendas.
-  try {
+  if (grupo('financeiro')) try {
     const { data, error } = await supabaseServer().rpc('converter_extrato_em_caixa')
     if (error) throw error
     const linha = Array.isArray(data) ? data[0] : data
@@ -354,7 +399,7 @@ export async function POST(req: Request) {
   // lançamento gravado — 416 vendas e R$ 61 mil de fila falsa. Fila falsa faz
   // o operador parar de olhar a fila. Roda aqui, logo depois da conversão,
   // porque é a conversão que acabou de ligar as linhas novas ao pedido.
-  try {
+  if (grupo('financeiro')) try {
     const { data, error } = await supabaseServer().rpc('conciliar_repasses_pelo_extrato')
     if (error) throw error
     const linha = Array.isArray(data) ? data[0] : data
@@ -369,7 +414,7 @@ export async function POST(req: Request) {
   // Venda anterior ao primeiro extrato que existe não é pendência: é
   // conciliação impossível. Sai da fila com data e motivo escritos, em vez de
   // ficar para sempre pedindo uma decisão que ninguém pode tomar.
-  try {
+  if (grupo('financeiro')) try {
     const { data, error } = await supabaseServer().rpc('dispensar_conciliacao_sem_extrato')
     if (error) throw error
     const linha = Array.isArray(data) ? data[0] : data
@@ -392,7 +437,7 @@ export async function POST(req: Request) {
   // Roda aqui, e não só na leitura, porque o pulso de 5 minutos reimporta e
   // reverteria a correção. Quem decide é o extrato: se entrou mais do que
   // saiu, o pedido está pago.
-  try {
+  if (grupo('vendas')) try {
     const { data, error } = await supabaseServer().rpc(
       'corrigir_pagamento_por_estorno_parcial',
     )
@@ -408,7 +453,7 @@ export async function POST(req: Request) {
   // de trazer os faturamentos novos. Antes dela, os pedidos faturados nesta
   // hora só sairiam do estoque na rodada seguinte — e o saldo ficaria sempre
   // uma hora otimista, justamente no número que decide quando repor.
-  try {
+  if (grupo('operacao')) try {
     const b = await baixarEstoqueDosFaturados(100)
     relatorio.baixaDeEstoque = {
       candidatos: b.candidatos,
@@ -423,7 +468,7 @@ export async function POST(req: Request) {
   // Provas que subiram e nunca viraram solicitação: o cliente escolheu as
   // fotos, elas foram para o bucket e ele fechou a aba antes de concluir.
   // Sem esta varrida, cada desistência deixaria um arquivo pago para sempre.
-  try {
+  if (grupo('operacao')) try {
     const sb = supabaseServer()
     const { data: vencidos } = await sb.rpc('rascunhos_de_devolucao_vencidos')
     const nomes = ((vencidos ?? []) as { nome: string }[]).map((v) => v.nome)
@@ -439,7 +484,7 @@ export async function POST(req: Request) {
   // perdido os faturados daquela hora: a loja ficava sempre uma rodada
   // otimista — publicando unidades que o estoque já não tinha. Depois da
   // reserva e da baixa, o disponível que vai para a vitrine é o real.
-  if (shopifyConfigurada()) {
+  if (grupo('operacao') && shopifyConfigurada()) {
     try {
       const s = await aplicarEstoqueCalculado()
       relatorio.shopifyEstoque = {
@@ -450,7 +495,7 @@ export async function POST(req: Request) {
     } catch (e) {
       relatorio.shopifyEstoque = { erro: mensagemDe(e) }
     }
-  } else {
+  } else if (naEtapa('operacao')) {
     relatorio.shopifyEstoque = { pulado: 'credenciais da Shopify não estão definidas' }
   }
 
@@ -463,7 +508,7 @@ export async function POST(req: Request) {
   // do `try` de cada etapa. Agora são rotina própria, em
   // `/api/pedidos/avisos`, agendada de dez em dez minutos.
 
-  try {
+  if (grupo('operacao')) try {
     const { data, error } = await supabaseServer().rpc('varrer_ocorrencias', {
       p_dias: 15,
       p_responsavel: 'Varredura automática',
@@ -474,6 +519,11 @@ export async function POST(req: Request) {
     relatorio.ocorrencias = { erro: mensagemDe(e) }
   }
 
+  if (puladasPorTempo.length) {
+    relatorio.puladasPorTempo = [...new Set(puladasPorTempo)]
+  }
+  relatorio.etapa = etapa ?? 'tudo'
+  relatorio.duracaoMs = Date.now() - inicio
   return NextResponse.json(relatorio)
 }
 
