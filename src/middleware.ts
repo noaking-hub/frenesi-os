@@ -44,6 +44,13 @@ const ABERTO = [
   // o cookie vai junto e nada quebra ao fechar. O repositório é público: o
   // formato do corpo estava documentado para quem lesse o código.
   '/api/crm/espelhar',
+  // As campanhas de relacionamento, agendadas de hora em hora. Entram aqui
+  // pelo mesmo motivo do espelho e com a mesma proteção — conferem
+  // CRON_SEGREDO no corpo da rota. Ficar de fora desta lista seria o erro que
+  // os avisos ao cliente já cometeram: o middleware redireciona para /entrar,
+  // a resposta volta 200 com HTML de login, e o pg_net registra "sucesso" numa
+  // rotina que nunca rodou.
+  '/api/crm/campanhas',
   '/api/financeiro',
   '/api/pedidos/pulso',
   // Os avisos ao cliente, agendados de dez em dez minutos. Estavam DE FORA

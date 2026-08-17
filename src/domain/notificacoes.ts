@@ -28,6 +28,8 @@ export type EventoNotificacao =
   | 'devolucao_novas_fotos'
   | 'devolucao_concluida'
   | 'devolucao_recebida'
+  | 'carrinho_recuperacao'
+  | 'aniversario_giftback'
   | 'cashback_creditado'
   | 'cashback_expirando'
 
@@ -115,6 +117,8 @@ export const ASSUNTO: Record<EventoNotificacao, string> = {
   devolucao_novas_fotos: 'Precisamos de novas fotos · {protocolo}',
   devolucao_concluida: 'Devolução concluída · {protocolo}',
   devolucao_recebida: 'Recebemos sua devolução · {pedido}',
+  carrinho_recuperacao: 'Você esqueceu algo no carrinho',
+  aniversario_giftback: 'Feliz aniversário — um presente da FRENESI',
   cashback_creditado: 'Você ganhou cashback na Frenesi',
   cashback_expirando: 'Seu cashback está perto de expirar',
 }
@@ -130,6 +134,8 @@ export const ROTULO_EVENTO: Record<EventoNotificacao, string> = {
   devolucao_novas_fotos: 'Novas fotos pedidas ao cliente',
   devolucao_concluida: 'Devolução concluída · resolução informada',
   devolucao_recebida: 'Devolução recebida',
+  carrinho_recuperacao: 'Recuperação de carrinho',
+  aniversario_giftback: 'Aniversário (Giftback)',
   cashback_creditado: 'Cashback creditado',
   cashback_expirando: 'Cashback expirando',
 }
