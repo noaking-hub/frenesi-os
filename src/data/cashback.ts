@@ -71,11 +71,37 @@ function movimentosDe(resposta: unknown): Record<string, unknown>[] {
 
 const pausa = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/**
+ * Roda `tarefa` sobre a lista com no máximo `limite` em voo.
+ *
+ * A varredura era estritamente sequencial com 180 ms de pausa cega entre
+ * clientes — 1.456 clientes × (uma consulta + 180 ms) não terminam dentro de
+ * nenhum orçamento que a Netlify conceda. A pausa existia por causa de um 429
+ * antigo, mas pausa fixa é o remédio errado: atrasa todo mundo para o caso de
+ * um, e mesmo assim não protege se o limite for atingido. Quem protege é o
+ * recuo em cima do 429, que está na leitura da carteira.
+ */
+async function emParalelo<T, R>(itens: T[], limite: number, tarefa: (t: T) => Promise<R>): Promise<R[]> {
+  const saida: R[] = new Array(itens.length)
+  let proximo = 0
+  const trabalhadores = Array.from({ length: Math.min(limite, itens.length) }, async () => {
+    for (;;) {
+      const i = proximo++
+      if (i >= itens.length) return
+      saida[i] = await tarefa(itens[i])
+    }
+  })
+  await Promise.all(trabalhadores)
+  return saida
+}
+
 export interface RodadaCashback {
   /** Página do cadastro de clientes onde a próxima rodada continua. */
   proximaPagina: number | null
   lidos: number
   comSaldo: number
+  /** Quantas páginas o cadastro tem, quando a Yampi informa. */
+  totalPaginas: number | null
 }
 
 /** Telefone do cliente da Yampi, só dígitos, em qualquer formato que ela use. */
@@ -99,73 +125,67 @@ function telefoneDe(c: Record<string, unknown>): string | null {
  * Yampi, consulta a carteira de cada um e grava o retrato. Para no prazo e
  * devolve onde continuar — a tela repete até o fim.
  */
-export async function sincronizarCashbackYampi(
-  paginaInicial: number,
-  prazoMs: number,
-): Promise<RodadaCashback> {
-  if (!yampiConfigurada()) {
-    throw new Error('A Yampi precisa estar configurada para espelhar o cashback.')
-  }
-  const sb = supabaseConfigurado() ? supabaseServer() : null
-  if (!sb) throw new Error('O Supabase precisa estar configurado para guardar o espelho.')
-
-  const inicio = Date.now()
-  let lidos = 0
-  let comSaldo = 0
-  const hoje = hojeEmSaoPaulo()
-
-  for (let pagina = Math.max(1, paginaInicial); ; pagina++) {
-    const r = await chamarYampi<{
-      data?: Record<string, unknown>[]
-      meta?: { pagination?: { current_page: number; total_pages: number } }
-    }>('/customers', { limit: '50', page: String(pagina) })
-    const clientes = r.data ?? []
-
-    const linhas: Record<string, unknown>[] = []
-    const movimentos: Record<string, unknown>[] = []
-
-    for (const c of clientes) {
-      const id = campo(c, ['id'])
-      if (id === undefined) continue
-      lidos++
-      const nome =
-        (typeof c.name === 'string' && c.name.trim()) ||
-        [c.first_name, c.last_name].filter((x) => typeof x === 'string' && x).join(' ') ||
-        null
-      const email = typeof c.email === 'string' ? c.email.trim().toLowerCase() : null
-
-      // O extrato é a fonte: o endpoint de saldo desta loja responde 404, e
-      // era ele que fazia TODAS as carteiras aparecerem zeradas.
-      let extrato: Record<string, unknown>[] = []
-      let tentativas = 0
-      for (;;) {
-        try {
-          extrato = movimentosDe(await chamarYampi(`/pricing/wallet/statement/${String(id)}`))
-          break
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e)
-          // Carteira inexistente = cliente nunca teve cashback: saldo zero.
-          if (/404|não encontrou/i.test(msg)) break
-          if (/429|Too Many/i.test(msg) && tentativas < 2) {
-            tentativas++
-            await pausa(15_000)
-            continue
-          }
-          throw new Error(`Falha ao ler a carteira do cliente ${String(id)}: ${msg}`)
-        }
+/**
+ * Lê a carteira de UM cliente, com recuo em cima do limite da Yampi.
+ *
+ * O recuo era de 15 s fixos, duas vezes: meio minuto parado dentro de uma
+ * função que tem 26 s de vida. Uma carteira em 429 derrubava a rodada INTEIRA,
+ * e o que se via era uma varredura que não gravava nada e não dizia por quê —
+ * quatro dias seguidos sem uma única carteira atualizada.
+ */
+async function extratoDoCliente(id: string): Promise<Record<string, unknown>[]> {
+  const recuos = [1_000, 3_000, 6_000]
+  for (let tentativa = 0; ; tentativa++) {
+    try {
+      return movimentosDe(await chamarYampi(`/pricing/wallet/statement/${id}`))
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      // Carteira inexistente = cliente nunca teve cashback: saldo zero.
+      if (/404|não encontrou/i.test(msg)) return []
+      if (/429|Too Many/i.test(msg) && tentativa < recuos.length) {
+        await pausa(recuos[tentativa])
+        continue
       }
+      throw new Error(`Falha ao ler a carteira do cliente ${id}: ${msg}`)
+    }
+  }
+}
 
-      const saldo = saldoDoExtrato(extrato)
-      if (saldo > 0) comSaldo++
+interface RetratoDoCliente {
+  linha: Record<string, unknown>
+  movimentos: Record<string, unknown>[]
+  temSaldo: boolean
+}
 
-      // O que a gestão precisa e o saldo sozinho não conta: quando vence o
-      // próximo crédito, quanto já entrou e saiu, e a última compra que
-      // gerou cashback.
-      let gerado = 0
-      let usado = 0
-      let expiraEm: string | null = null
-      let ultimoCredito: string | null = null
-      for (const m of extrato) {
+/** O retrato de um cliente: a carteira e os movimentos dela. */
+async function retratoDoCliente(
+  c: Record<string, unknown>,
+  hoje: string,
+): Promise<RetratoDoCliente | null> {
+  const idCru = campo(c, ['id'])
+  if (idCru === undefined) return null
+  const id = String(idCru)
+  const nome =
+    (typeof c.name === 'string' && c.name.trim()) ||
+    [c.first_name, c.last_name].filter((x) => typeof x === 'string' && x).join(' ') ||
+    null
+  const email = typeof c.email === 'string' ? c.email.trim().toLowerCase() : null
+
+  // O extrato é a fonte: o endpoint de saldo desta loja responde 404, e
+  // era ele que fazia TODAS as carteiras aparecerem zeradas.
+  const extrato = await extratoDoCliente(id)
+  const saldo = saldoDoExtrato(extrato)
+  const movimentos: Record<string, unknown>[] = []
+
+  // O que a gestão precisa e o saldo sozinho não conta: quando vence o
+  // próximo crédito, quanto já entrou e saiu, e a última compra que
+  // gerou cashback.
+  let gerado = 0
+  let usado = 0
+  let expiraEm: string | null = null
+  let ultimoCredito: string | null = null
+  {
+    for (const m of extrato) {
         const mid = campo(m, ['id'])
         const tipo = String(campo(m, ['transaction_type', 'type', 'operation', 'kind']) ?? 'credit')
         const valor = numero(campo(m, ['amount', 'value', 'total']))
@@ -191,7 +211,7 @@ export async function sincronizarCashbackYampi(
         if (mid !== undefined) {
           movimentos.push({
             id: String(mid),
-            customer_id: String(id),
+            customer_id: id,
             tipo,
             valor: Math.round(valor * 100) / 100,
             usado: Math.round(gasto * 100) / 100,
@@ -203,23 +223,59 @@ export async function sincronizarCashbackYampi(
           })
         }
       }
+  }
 
-      linhas.push({
-        customer_id: String(id),
-        email,
-        nome,
-        telefone: telefoneDe(c),
-        saldo,
-        expira_em: expiraEm,
-        gerado: Math.round(gerado * 100) / 100,
-        usado: Math.round(usado * 100) / 100,
-        ultimo_credito_em: ultimoCredito ? new Date(ultimoCredito.replace(' ', 'T')).toISOString() : null,
-        atualizado_em: new Date().toISOString(),
-      })
-      // Espaçamento curto: são muitas consultas pequenas, e o limite da
-      // Yampi já nos derrubou uma vez.
-      await pausa(180)
-    }
+  return {
+    temSaldo: saldo > 0,
+    movimentos,
+    linha: {
+      customer_id: id,
+      email,
+      nome,
+      telefone: telefoneDe(c),
+      saldo,
+      expira_em: expiraEm,
+      gerado: Math.round(gerado * 100) / 100,
+      usado: Math.round(usado * 100) / 100,
+      ultimo_credito_em: ultimoCredito ? new Date(ultimoCredito.replace(' ', 'T')).toISOString() : null,
+      atualizado_em: new Date().toISOString(),
+    },
+  }
+}
+
+/** Quantas carteiras são lidas ao mesmo tempo. */
+const CARTEIRAS_EM_PARALELO = 5
+
+export async function sincronizarCashbackYampi(
+  paginaInicial: number,
+  prazoMs: number,
+): Promise<RodadaCashback> {
+  if (!yampiConfigurada()) {
+    throw new Error('A Yampi precisa estar configurada para espelhar o cashback.')
+  }
+  const sb = supabaseConfigurado() ? supabaseServer() : null
+  if (!sb) throw new Error('O Supabase precisa estar configurado para guardar o espelho.')
+
+  const inicio = Date.now()
+  let lidos = 0
+  let comSaldo = 0
+  let totalPaginas: number | null = null
+  const hoje = hojeEmSaoPaulo()
+
+  for (let pagina = Math.max(1, paginaInicial); ; pagina++) {
+    const r = await chamarYampi<{
+      data?: Record<string, unknown>[]
+      meta?: { pagination?: { current_page: number; total_pages: number } }
+    }>('/customers', { limit: '50', page: String(pagina) })
+    const clientes = r.data ?? []
+
+    const retratos = (await emParalelo(clientes, CARTEIRAS_EM_PARALELO, (c) => retratoDoCliente(c, hoje)))
+      .filter(Boolean) as RetratoDoCliente[]
+
+    lidos += retratos.length
+    comSaldo += retratos.filter((x) => x.temSaldo).length
+    const linhas = retratos.map((x) => x.linha)
+    const movimentos = retratos.flatMap((x) => x.movimentos)
 
     if (linhas.length) {
       const { error } = await sb.from('cashback_yampi').upsert(linhas)
@@ -233,9 +289,77 @@ export async function sincronizarCashbackYampi(
     }
 
     const p = r.meta?.pagination
+    if (p) totalPaginas = p.total_pages
     const acabou = !p || p.current_page >= p.total_pages
-    if (acabou) return { proximaPagina: null, lidos, comSaldo }
-    if (Date.now() - inicio > prazoMs) return { proximaPagina: pagina + 1, lidos, comSaldo }
+    if (acabou) return { proximaPagina: null, lidos, comSaldo, totalPaginas }
+    if (Date.now() - inicio > prazoMs) {
+      return { proximaPagina: pagina + 1, lidos, comSaldo, totalPaginas }
+    }
+  }
+}
+
+export interface PassadaDoEspelho {
+  lidos: number
+  comSaldo: number
+  /** A passada inteira terminou nesta rodada. */
+  completa: boolean
+  paginaAtual: number
+  totalPaginas: number | null
+  duracaoMs: number
+}
+
+/**
+ * UMA fatia da varredura, continuando de onde a anterior parou.
+ *
+ * A diferença para chamar `sincronizarCashbackYampi` direto é o marcador: a
+ * página fica no banco, não numa variável que morre com a execução. Era essa a
+ * razão de a varredura nunca alcançar a cauda do cadastro — cada rodada
+ * recomeçava da página 1 e era cortada no mesmo lugar.
+ */
+export async function fatiaDoEspelhoDeCashback(prazoMs: number): Promise<PassadaDoEspelho> {
+  const sb = supabaseServer()
+  const comecou = Date.now()
+  const { data: marcador } = await sb
+    .from('cashback_varredura')
+    .select('proxima_pagina, passada_iniciada_em')
+    .eq('id', true)
+    .maybeSingle()
+
+  const pagina = Math.max(1, Number(marcador?.proxima_pagina) || 1)
+  const agora = new Date().toISOString()
+
+  try {
+    const r = await sincronizarCashbackYampi(pagina, prazoMs)
+    await sb
+      .from('cashback_varredura')
+      .update({
+        proxima_pagina: r.proximaPagina ?? 1,
+        passada_iniciada_em: pagina === 1 ? agora : (marcador?.passada_iniciada_em ?? agora),
+        ...(r.proximaPagina === null ? { passada_concluida_em: new Date().toISOString() } : {}),
+        rodada_em: new Date().toISOString(),
+        rodada_lidos: r.lidos,
+        rodada_erro: null,
+        total_paginas: r.totalPaginas,
+      })
+      .eq('id', true)
+    return {
+      lidos: r.lidos,
+      comSaldo: r.comSaldo,
+      completa: r.proximaPagina === null,
+      paginaAtual: pagina,
+      totalPaginas: r.totalPaginas,
+      duracaoMs: Date.now() - comecou,
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    // A falha fica GRAVADA. Quatro madrugadas seguidas sem uma carteira nova
+    // não deixaram rastro em lugar nenhum: o pg_net só guarda seis horas, e a
+    // rotina não escrevia o próprio fracasso.
+    await sb
+      .from('cashback_varredura')
+      .update({ rodada_em: new Date().toISOString(), rodada_erro: msg.slice(0, 500) })
+      .eq('id', true)
+    throw e
   }
 }
 
@@ -245,9 +369,25 @@ export interface CarteiraYampi extends CarteiraCashback {
 
 export async function carteirasYampi(): Promise<{
   carteiras: CarteiraYampi[]
+  /**
+   * Desde quando TODO o espelho está em pé.
+   *
+   * É a leitura mais VELHA do cadastro, não a mais nova. A mais nova sempre
+   * existe — basta uma carteira lida há um minuto — e usá-la fazia a tela
+   * anunciar "atualizado agora" com 356 carteiras de cinco dias atrás dentro
+   * da mesma soma. Pior: a tela só se atualizava sozinha se essa data passasse
+   * de seis horas, então a carteira recém-lida impedia para sempre a leitura
+   * das outras. O número velho se defendia sozinho.
+   */
   ultimaSincronizacao: string | null
 }> {
   if (!supabaseConfigurado()) return { carteiras: [], ultimaSincronizacao: null }
+  const { data: maisVelha } = await supabaseServer()
+    .from('cashback_yampi')
+    .select('atualizado_em')
+    .order('atualizado_em', { ascending: true })
+    .limit(1)
+    .maybeSingle()
   const { data, error } = await supabaseServer()
     .from('cashback_yampi')
     .select('customer_id, email, nome, telefone, saldo, expira_em, ultimo_credito_em, aviso_em, atualizado_em')
@@ -278,11 +418,10 @@ export async function carteirasYampi(): Promise<{
     atualizadoEm: c.atualizado_em,
   }))
 
-  const ultima = carteiras.reduce<string | null>(
-    (a, c) => (!a || c.atualizadoEm > a ? c.atualizadoEm : a),
-    null,
-  )
-  return { carteiras, ultimaSincronizacao: ultima }
+  return {
+    carteiras,
+    ultimaSincronizacao: (maisVelha?.atualizado_em as string | undefined) ?? null,
+  }
 }
 
 /**
