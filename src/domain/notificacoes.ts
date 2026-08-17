@@ -4,6 +4,7 @@ import {
   HTML_VALIDADO_DEVOLUCAO_APROVADA,
   HTML_VALIDADO_DEVOLUCAO_CONCLUIDA,
   HTML_VALIDADO_ENTREGUE,
+  HTML_VALIDADO_PAGAMENTO,
   HTML_VALIDADO_ENVIO,
 } from './emails-validados'
 import type { ModeloEmailRecuperacao } from './recuperacao'
@@ -358,6 +359,44 @@ export function emailDevolucaoAprovada(
  * Sem código e sem rastreio: o objeto chegou, não há o que acompanhar. O botão
  * convida a voltar à loja, que é o único próximo passo que faz sentido aqui.
  */
+/**
+ * Pagamento confirmado.
+ *
+ * O primeiro e-mail da relação, e o que mais precisa acertar a expectativa: o
+ * cliente acabou de pagar e a próxima notícia — o rastreio — só vem dias
+ * depois. Sem esta mensagem dizendo "até 3 dias úteis", o silêncio vira
+ * dúvida e a dúvida vira mensagem no WhatsApp.
+ *
+ * `total` chega já formatado em reais por quem chama, porque a formatação de
+ * moeda mora no domínio financeiro e duplicá-la aqui faria os dois divergirem
+ * no primeiro ajuste.
+ */
+export function emailPagamento(d: {
+  nome: string | null
+  pedido: string
+  total: string
+  pagamento: string | null
+}): { assunto: string; html: string } {
+  const nome = d.nome?.trim().split(/\s+/)[0] || 'Olá'
+  const html = HTML_VALIDADO_PAGAMENTO.split('{nome}')
+    .join(escapa(nome))
+    .split('{pedido}')
+    .join(escapa(d.pedido))
+    .split('{total}')
+    .join(escapa(d.total))
+    // Meio de pagamento é informação de conferência, não de venda: quando o
+    // ERP não sabe qual foi, a frase some inteira em vez de exibir um
+    // "Pago em —" que parece defeito.
+    .split(' &middot; guarde este e-mail como comprovante')
+    .join(d.pagamento ? ' &middot; guarde este e-mail como comprovante' : ' guarde este e-mail como comprovante')
+    .split('Pago em {pagamento}')
+    .join(d.pagamento ? `Pago em ${escapa(d.pagamento)}` : 'Pagamento aprovado')
+    .split('{link}')
+    .join(LOJA)
+
+  return { assunto: ASSUNTO.pedido_pago.replace('{pedido}', d.pedido), html }
+}
+
 export function emailEntregue(d: {
   nome: string | null
   pedido: string

@@ -722,6 +722,185 @@ export const HTML_VALIDADO_ENVIO = `<!DOCTYPE html>
  * Sem código: o objeto chegou, não há o que rastrear. O botão convida a voltar
  * à loja. Placeholders: {nome}, {pedido}, {transportadora}, {link}.
  */
+/**
+ * Pagamento confirmado — o primeiro e-mail que o cliente recebe da FRENESI.
+ *
+ * Moldura idêntica à do aviso de entrega, e literal, não derivada por
+ * substituição: derivar quebraria em silêncio na primeira edição do outro
+ * modelo, que foi exatamente o que já aconteceu uma vez neste arquivo.
+ *
+ * O destaque é o VALOR PAGO, no mesmo tratamento dos códigos de cupom e
+ * protocolo — fundo escuro, borda dourada, 31px. Quem abre um e-mail de
+ * confirmação procura duas informações, o número do pedido e quanto saiu da
+ * conta, e as duas precisam ser legíveis sem esforço.
+ *
+ * O texto promete 3 dias úteis para postar e avisa que o rastreio vem em outro
+ * e-mail. Isso não é enfeite: sem a expectativa dita aqui, o silêncio dos dias
+ * seguintes vira dúvida, e a dúvida vira mensagem no WhatsApp.
+ *
+ * Placeholders: {nome}, {pedido}, {total}, {pagamento}, {link}, {site}.
+ */
+export const HTML_VALIDADO_PAGAMENTO = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light only" />
+<meta name="supported-color-schemes" content="light" />
+<title>FRENESI &mdash; pagamento confirmado</title>
+<!--[if mso]>
+<xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml>
+<![endif]-->
+<style>
+  body { margin:0; padding:0; background-color:#EDE6DA; }
+  table { border-collapse:separate; }
+  img { border:0; outline:none; text-decoration:none; }
+  @media only screen and (max-width:620px) {
+    .w600 { width:100% !important; max-width:100% !important; }
+    .win { width:100% !important; }
+    .pad { padding-left:20px !important; padding-right:20px !important; }
+    .cod { font-size:24px !important; letter-spacing:2px !important; padding:14px 18px !important; }
+  }
+</style>
+</head>
+<body style="margin:0; padding:0; background-color:#EDE6DA;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%; background-color:#EDE6DA; margin:0; padding:0;">
+  <tr>
+    <td align="center" style="padding:28px 12px 44px 12px; background-color:#EDE6DA;">
+
+      <span style="display:none; font-size:1px; color:#EDE6DA; line-height:1px; max-height:0; max-width:0; opacity:0; overflow:hidden;">Recebemos seu pagamento &mdash; seu pedido entrou na fila de preparo.</span>
+
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="680" class="w600" style="width:680px; max-width:680px; background-color:#FFFDF9; border:1px solid #D8C49B; border-radius:16px;">
+        <tr>
+          <td style="padding:8px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="662" class="win" style="width:662px; border:1px solid #E4DAC5; border-radius:10px;">
+
+              <tr>
+                <td align="center" class="pad" style="padding:44px 40px 0 40px;">
+                  <img src="{site}/assets/frenesi-logo-email.png" width="172" alt="FRENESI" style="display:block; width:172px; height:auto; border:0;" />
+                </td>
+              </tr>
+
+              <tr>
+                <td align="center" class="pad" style="padding:26px 46px 0 46px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="570" class="win" style="width:570px;">
+                    <tr>
+                      <td width="60" valign="middle" style="width:60px;"><div style="border-top:1px solid #D8C49B; height:1px; line-height:1px; font-size:0;">&nbsp;</div></td>
+                      <td align="center" valign="middle" style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#8A6A2F; padding:0 14px;">PEDIDO {pedido}</td>
+                      <td width="60" valign="middle" style="width:60px;"><div style="border-top:1px solid #D8C49B; height:1px; line-height:1px; font-size:0;">&nbsp;</div></td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              <tr>
+                <td align="center" class="pad" style="padding:26px 50px 0 50px;">
+                  <div style="font-family:Georgia,'Times New Roman',serif; font-size:38px; line-height:48px; mso-line-height-rule:exactly; color:#241F18;">{nome}, recebemos seu pagamento</div>
+                  <div style="font-family:Georgia,'Times New Roman',serif; font-size:24px; line-height:32px; font-style:italic; mso-line-height-rule:exactly; color:#8A6A2F; padding-top:8px;">pedido confirmado</div>
+                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:15px; line-height:25px; mso-line-height-rule:exactly; color:#6B6355; padding-top:20px;">Seu pagamento foi aprovado e o pedido entrou na fila de preparo. Cada frasco &eacute; envasado &agrave; m&atilde;o, um a um &mdash; por isso levamos at&eacute; 3 dias &uacute;teis para postar. Voc&ecirc; recebe outro e-mail com o c&oacute;digo de rastreio assim que ele sair daqui.</div>
+                </td>
+              </tr>
+
+              <tr>
+                <td align="center" class="pad" style="padding:34px 32px 0 32px;">
+                  <div style="font-family:Georgia,serif; font-size:12px; line-height:12px; color:#8A6A2F;">&#9670;</div>
+                </td>
+              </tr>
+              <tr>
+                <td align="center" class="pad" style="padding:10px 32px 0 32px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="598" class="win" style="width:598px; border:1px solid #D8C49B; border-radius:12px; background-color:#FAF6EE;">
+                    <tr>
+                      <td align="center" style="padding:28px 30px 30px 30px;">
+                        <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#8A6A2F;">PAGAMENTO APROVADO</div>
+                        <div style="font-family:Georgia,'Times New Roman',serif; font-size:26px; line-height:34px; mso-line-height-rule:exactly; color:#241F18; padding-top:14px;">Pedido {pedido}</div>
+                        <div style="padding-top:18px;">
+                          <span class="cod" style="display:inline-block; font-family:Arial,Helvetica,sans-serif; font-size:31px; line-height:38px; mso-line-height-rule:exactly; font-weight:bold; color:#EFD18C; background-color:#241F18; border:2px solid #B08D4B; border-radius:10px; padding:18px 34px;">{total}</span>
+                        </div>
+                        <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#6B6355; padding-top:16px;">Pago em {pagamento} &middot; guarde este e-mail como comprovante</div>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+              <tr>
+                <td align="center" class="pad" style="padding:10px 32px 0 32px;">
+                  <div style="font-family:Georgia,serif; font-size:12px; line-height:12px; color:#8A6A2F;">&#9670;</div>
+                </td>
+              </tr>
+
+              <tr>
+                <td align="center" class="pad" style="padding:26px 32px 0 32px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="598" class="win" style="width:598px;">
+                    <tr>
+                      <td bgcolor="#D4AF6A" align="center" style="background-color:#D4AF6A; background-image:linear-gradient(180deg,#EAC97E,#C89A4E); border-radius:10px; padding:19px 20px;">
+                        <a href="{link}" style="display:block; font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:18px; mso-line-height-rule:exactly; letter-spacing:2.5px; color:#14100A; text-decoration:none; font-weight:bold;">ACOMPANHAR MEU PEDIDO</a>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              <tr>
+                <td align="center" class="pad" style="padding:32px 50px 0 50px;">
+                  <div style="font-family:Georgia,'Times New Roman',serif; font-size:19px; line-height:26px; font-style:italic; mso-line-height-rule:exactly; color:#8A6A2F;">Obrigado pela confian&ccedil;a.</div>
+                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:22px; mso-line-height-rule:exactly; color:#6B6355; padding-top:10px;">Qualquer d&uacute;vida sobre este pedido, &eacute; s&oacute; responder este e-mail.</div>
+                </td>
+              </tr>
+
+              <tr>
+                <td align="center" class="pad" style="padding:30px 46px 0 46px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="570" class="win" style="width:570px; border-top:1px solid #E4DAC5;">
+                    <tr>
+                      <td align="center" style="padding-top:26px;">
+                        <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#8A6A2F;">ATENDIMENTO OFICIAL</div>
+                        <div style="font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:23px; mso-line-height-rule:exactly; color:#6B6355; padding-top:10px;">Precisa mudar algo no pedido?<br />Fale com a gente no <a href="https://wa.me/5532998661887" style="color:#8A6A2F; text-decoration:underline;">WhatsApp (32)&nbsp;99866-1887</a>.</div>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              <tr>
+                <td align="center" class="pad" style="padding:26px 40px 0 40px;">
+                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:12px; line-height:18px; mso-line-height-rule:exactly; letter-spacing:2px; color:#7A7263; padding-bottom:12px;">@frenesiperfumes</div>
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:auto;">
+                    <tr>
+                      <td align="center" style="padding:0 7px;">
+                        <a href="https://wa.me/5532998661887" style="display:inline-block; text-decoration:none;"><img src="https://gxzvlknlxwihooqgctst.supabase.co/functions/v1/marca/icon-whatsapp.png" width="40" height="40" alt="WhatsApp" style="display:block; width:40px; height:40px; border:0;" /></a>
+                      </td>
+                      <td align="center" style="padding:0 7px;">
+                        <a href="https://instagram.com/frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="https://gxzvlknlxwihooqgctst.supabase.co/functions/v1/marca/icon-instagram.png" width="40" height="40" alt="Instagram" style="display:block; width:40px; height:40px; border:0;" /></a>
+                      </td>
+                      <td align="center" style="padding:0 7px;">
+                        <a href="https://tiktok.com/@frenesiperfumes" style="display:inline-block; text-decoration:none;"><img src="https://gxzvlknlxwihooqgctst.supabase.co/functions/v1/marca/icon-tiktok.png?v=2" width="40" height="40" alt="TikTok" style="display:block; width:40px; height:40px; border:0;" /></a>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              <tr>
+                <td align="center" class="pad" style="padding:24px 40px 0 40px;">
+                  <div style="font-family:Georgia,serif; font-size:10px; line-height:10px; color:#D8C49B;">&#9670;</div>
+                </td>
+              </tr>
+
+              <tr>
+                <td align="center" class="pad" style="padding:16px 40px 40px 40px;">
+                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:18px; mso-line-height-rule:exactly; color:#8A8274;">Voc&ecirc; recebeu este e-mail porque tem um pedido na FRENESI.</div>
+                </td>
+              </tr>
+
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>`
+
 export const HTML_VALIDADO_ENTREGUE = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>

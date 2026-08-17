@@ -10,6 +10,9 @@ import {
   emailDevolucaoNovasFotos,
   emailEntregue,
   emailEnvio,
+  emailPagamento,
+  normalizarMeio,
+  brl,
   identificarFrete,
   paginaDeRastreio,
   type AvisoPendente,
@@ -50,8 +53,38 @@ import { supabaseConfigurado, supabaseServer } from './supabase'
 
 /**
  * Quais eventos o módulo cobre hoje. Os outros ficam para quando houver fonte.
+ *
+ * "Pedido pago" tem chave PRÓPRIA, e não é preciosismo. A ordem da virada com
+ * a Yampi é evento por evento — desliga lá, liga aqui —, e uma chave só
+ * obrigaria a virar os três de uma vez. Pior: a confirmação de pagamento é a
+ * que mais depende de a Yampi estar calada, porque é a que ela dispara no
+ * segundo seguinte ao checkout.
+ *
+ * Há um motivo a mais para este evento nascer atrás de uma segunda chave. Até
+ * hoje a consulta desta rotina só lia pedido JÁ ENVIADO, então pedido pago e
+ * não despachado nunca chegou a ser lido — e nunca entrou no log como
+ * dispensado. Medido no dia em que isto foi escrito: 69 pedidos nessa
+ * situação, todos com e-mail. Alargar a consulta e ligar o evento no mesmo
+ * deploy mandaria 69 confirmações de pagamento de uma vez, algumas de compras
+ * de duas semanas atrás.
+ *
+ * Com as chaves separadas, a sequência fica segura: este deploy alarga a
+ * consulta com `AVISO_PEDIDO_PAGO` desligado, e na primeira rodada os 69 caem
+ * no log como dispensados pelo caminho de `foraDoEscopo`. Ligar depois avisa
+ * só quem pagar daí para frente.
  */
-const EVENTOS_ATIVOS: EventoNotificacao[] = ['pedido_enviado', 'pedido_entregue']
+/**
+ * Os eventos que `mensagemDoAviso` sabe transformar em e-mail.
+ *
+ * Ligado ou desligado é outra pergunta — esta lista é sobre o que EXISTE. Ela
+ * serve ao ensaio, que precisa mostrar tudo que a rotina é capaz de mandar.
+ */
+const RENDERIZAVEIS: EventoNotificacao[] = ['pedido_pago', 'pedido_enviado', 'pedido_entregue']
+
+function eventosAtivos(): EventoNotificacao[] {
+  const base: EventoNotificacao[] = ['pedido_enviado', 'pedido_entregue']
+  return process.env.AVISO_PEDIDO_PAGO === '1' ? ['pedido_pago', ...base] : base
+}
 
 type ModeloEnvio = Parameters<typeof emailEnvio>[1]
 
@@ -99,6 +132,8 @@ interface LinhaPedidoAviso {
   id: string
   pagamento: string
   envio: string
+  valor: number | string | null
+  meio_pagamento: string | null
   rastreio: string | null
   servico_frete: string | null
   rastreio_url: string | null
@@ -146,9 +181,13 @@ export async function enviarAvisosDePedido(opcoes?: {
   const sb = supabaseServer()
   const { data, error } = await sb
     .from('pedidos')
-    .select('id, pagamento, envio, rastreio, servico_frete, rastreio_url, clientes(nome, email)')
+    .select('id, pagamento, envio, valor, meio_pagamento, rastreio, servico_frete, rastreio_url, clientes(nome, email)')
     .gte('comprado_em', desde)
-    .in('envio', ['enviado', 'entregue'])
+    // Pedido PAGO entra mesmo sem ter saído — sem isto, "pedido pago" seria um
+    // evento ligado que não avisa ninguém, e o silêncio pareceria
+    // funcionamento normal. Pedido não pago e não enviado continua fora: não
+    // há fato nenhum a comunicar sobre ele.
+    .or('pagamento.eq.pago,envio.in.(enviado,entregue)')
     .order('comprado_em', { ascending: false })
     .limit(300)
   if (error) throw error
@@ -183,15 +222,21 @@ export async function enviarAvisosDePedido(opcoes?: {
    * Agora eles entram no log como dispensados, com o motivo escrito. Ligar o
    * evento passa a avisar só o que acontecer daí para frente.
    */
-  const doEscopo = pendentes.filter((p) => EVENTOS_ATIVOS.includes(p.aviso.evento))
-  const foraDoEscopo = pendentes.filter((p) => !EVENTOS_ATIVOS.includes(p.aviso.evento))
+  /*
+   * O ENSAIO vê tudo que o módulo sabe montar, e não só o que está ligado.
+   *
+   * A chave de ambiente decide quem escreve para CLIENTE, não quem o dono
+   * pode conferir. Filtrar o teste pela mesma lista criaria o impasse óbvio:
+   * para ver o e-mail de pagamento antes de liberá-lo seria preciso liberá-lo
+   * antes de vê-lo.
+   */
+  const ativos = teste ? RENDERIZAVEIS : eventosAtivos()
+  const doEscopo = pendentes.filter((p) => ativos.includes(p.aviso.evento))
+  const foraDoEscopo = pendentes.filter((p) => !ativos.includes(p.aviso.evento))
 
-  // AVISO PARA QUEM FOR LIGAR "pedido_pago" OU "pedido_faturado":
-  // a consulta lá em cima filtra `envio in ('enviado','entregue')`, porque
-  // hoje o módulo só cobre envio e entrega. Acrescentar um desses dois eventos
-  // a `EVENTOS_ATIVOS` sem alargar aquele filtro não avisa ninguém — o pedido
-  // pago que ainda não saiu nem chega a ser lido aqui. É a linha do `.in(...)`
-  // que precisa mudar junto.
+  // AVISO PARA QUEM FOR LIGAR "pedido_faturado": a consulta lá em cima lê
+  // pedido pago OU já despachado. Nota fiscal emitida em pedido que não é nem
+  // um nem outro não chega aqui — o `.or(...)` precisa mudar junto.
 
   // ── Módulo desligado: o fato entra no log, o e-mail não sai ──────────────
   //
@@ -332,7 +377,22 @@ function mensagemDoAviso(
   const nome = transportadora === 'Não informada' ? null : transportadora
 
   const conteudo =
-    aviso.evento === 'pedido_entregue'
+    aviso.evento === 'pedido_pago'
+      ? emailPagamento({
+          nome: aviso.cliente,
+          pedido: aviso.pedidoId,
+          total: brl(Number(pedido.valor ?? 0)),
+          // Rótulo cru do gateway seria pior que a ausência: "credit_card" no
+          // corpo do e-mail denuncia o encanamento. `normalizarMeio` devolve o
+          // nome que o cliente reconhece ("Pix", "Cartão de crédito 3x"), e o
+          // seu "Não identificado" vira null — nesse caso a frase inteira some,
+          // em vez de o cliente ler que pagou de um jeito não identificado.
+          pagamento: (() => {
+            const m = normalizarMeio(pedido.meio_pagamento)
+            return m === 'Não identificado' ? null : m
+          })(),
+        })
+      : aviso.evento === 'pedido_entregue'
       ? emailEntregue({ nome: aviso.cliente, pedido: aviso.pedidoId, transportadora: nome })
       : emailEnvio(
           {
