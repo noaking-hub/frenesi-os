@@ -484,6 +484,17 @@ const CONSULTA_ITENS = /* GraphQL */ `
         inventoryItem {
           id
           tracked
+          inventoryLevels(first: 5) {
+            nodes {
+              location {
+                id
+              }
+              quantities(names: ["available"]) {
+                name
+                quantity
+              }
+            }
+          }
         }
       }
     }
@@ -503,7 +514,16 @@ const MUTACAO_ESTOQUE = /* GraphQL */ `
 
 interface NoVariante {
   id: string
-  inventoryItem: { id: string; tracked: boolean } | null
+  inventoryItem: {
+    id: string
+    tracked: boolean
+    inventoryLevels: {
+      nodes: {
+        location: { id: string }
+        quantities: { name: string; quantity: number }[]
+      }[]
+    }
+  } | null
 }
 
 /** Uma chamada GraphQL autenticada, com as mensagens de erro que importam. */
@@ -609,7 +629,12 @@ export async function aplicarEstoqueShopify(
   }
 
   const ignoradas: ResultadoAplicacao['ignoradas'] = []
-  const quantidades: { inventoryItemId: string; locationId: string; quantity: number }[] = []
+  const quantidades: {
+    inventoryItemId: string
+    locationId: string
+    quantity: number
+    changeFromQuantity: number
+  }[] = []
 
   // `nodes(ids:)` aceita lotes; 100 por vez mantém o custo da query baixo.
   for (const parte of emLotes(alvos, 100)) {
@@ -639,15 +664,30 @@ export async function aplicarEstoqueShopify(
         })
         return
       }
+      // A API exige `changeFromQuantity`: a quantidade de que estamos
+      // partindo. Ela vem da MESMA leitura, não de um palpite — e é a leitura
+      // mais recente que existe. Sem nível para este local, a Shopify ainda
+      // não criou o registro ali e o ponto de partida é zero.
+      const nivel = no.inventoryItem.inventoryLevels.nodes.find(
+        (n) => n.location.id === local.id,
+      )
+      const atual = nivel?.quantities.find((q) => q.name === 'available')?.quantity ?? 0
+
+      // Já está no valor certo: escrever de novo gastaria chamada e poluiria o
+      // histórico de ajustes da loja com uma correção que não corrige nada.
+      if (atual === alvo.novoValor) return
+
       quantidades.push({
         inventoryItemId: no.inventoryItem.id,
         locationId: local.id,
         quantity: alvo.novoValor,
+        changeFromQuantity: atual,
       })
     })
   }
 
-  // 250 por mutação é o limite prático da API.
+  // 250 por mutação é o limite prático da API. Lista vazia significa que a
+  // loja já está com os números certos — e aí não há mutação a fazer.
   for (const parte of emLotes(quantidades, 250)) {
     const r = await chamarShopify<{
       inventorySetQuantities: { userErrors: { field: string[]; message: string }[] }
@@ -664,13 +704,22 @@ export async function aplicarEstoqueShopify(
           // verdade, e comparar faria a escrita falhar sempre que uma venda
           // entrasse entre a leitura e a gravação.
           //
-          // Existia um `ignoreCompareQuantity: true` no lugar desta ausência.
-          // O campo saiu da API (`Field is not defined on
-          // InventorySetQuantitiesInput` na 2026-07) e derrubava a mutação
-          // INTEIRA — nenhuma quantidade era publicada na loja. A falha ficou
-          // invisível por estar no fim da rotina horária, que morria de
-          // timeout antes de chegar aqui; ela só apareceu quando a rotina foi
-          // dividida em etapas.
+          // Existia um `ignoreCompareQuantity: true` aqui. O campo saiu da
+          // API (2026-07 responde `Field is not defined on
+          // InventorySetQuantitiesInput`) e derrubava a mutação INTEIRA —
+          // nenhuma quantidade era publicada na loja. No lugar dele, cada
+          // linha leva `changeFromQuantity`, que a API passou a exigir: o
+          // ponto de partida vem da leitura feita segundos antes, na mesma
+          // rodada.
+          //
+          // Se uma venda entrar entre a leitura e a gravação, a Shopify
+          // recusa AQUELE lote — o que é o comportamento certo: significa que
+          // o número que íamos publicar já nasceu velho. A rodada seguinte,
+          // dez minutos depois, lê de novo e acerta.
+          //
+          // A falha ficou invisível por estar no fim da rotina horária, que
+          // morria de timeout antes de chegar aqui; só apareceu quando a
+          // rotina foi dividida em etapas.
           quantities: parte,
         },
       },

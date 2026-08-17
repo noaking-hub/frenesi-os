@@ -123,7 +123,11 @@ export async function POST(req: Request) {
    */
   const etapa = new URL(req.url).searchParams.get('etapa')
   const inicio = Date.now()
-  const ORCAMENTO_MS = 20_000
+  // 12 segundos, e não 20: o orçamento é conferido ANTES de cada passo, então
+  // o último a entrar ainda roda inteiro depois dele. Com 20s, um passo de dez
+  // segundos começava aos 19 e terminava aos 29 — fora do teto da plataforma.
+  // Doze deixa margem para o passo mais lento caber.
+  const ORCAMENTO_MS = 12_000
   const puladasPorTempo: string[] = []
 
   type Grupo = 'vendas' | 'logistica' | 'financeiro' | 'operacao'
@@ -291,7 +295,7 @@ export async function POST(req: Request) {
       // 15 por rodada, não 60: com o corte de tempo da Netlify, a varredura
       // grande morria no meio e NENHUM evento era gravado. 15 cabem — e
       // 15 × 24 rodadas cobrem os ~55 códigos vivos várias vezes por dia.
-      const r = await varrerRastreiosFrenet(15)
+      const r = await varrerRastreiosFrenet(10)
       relatorio.rastreio = {
         consultados: r.consultados,
         eventos: r.eventos,
@@ -305,7 +309,7 @@ export async function POST(req: Request) {
     // expedição são regra da operação; daqui em diante quem promete é a
     // transportadora, e a promessa dela sai desta cotação.
     try {
-      const c = await cotarPrazosDeEntrega(10)
+      const c = await cotarPrazosDeEntrega(6)
       relatorio.prazosDeEntrega = c.pulado
         ? { pulado: c.pulado }
         : { consultados: c.consultados, cotados: c.cotados, falhas: c.falhas.length }
@@ -369,7 +373,19 @@ export async function POST(req: Request) {
     try {
       // Dez tentativas de 15s cabem folgadas nos 300s da rota, junto com a
       // importação de pedidos que vem antes.
-      relatorio.mercadopago = await atualizarExtratoEsperando(de, ate, { tentativas: 10 })
+      // ZERO tentativas: a rotina PEDE o relatório e vai embora.
+      //
+      // Ela esperava até dez ciclos de quinze segundos — dois minutos e meio
+      // dormindo dentro de uma função que a Netlify mata aos 26 segundos. Era
+      // a causa direta do timeout da etapa financeira: a rodada morria dentro
+      // do `setTimeout`, e nada depois dela acontecia.
+      //
+      // O estado do pedido é persistido de propósito (foi assim que a tela e a
+      // rotina passaram a esperar o MESMO relatório). Então pedir agora e
+      // importar na rodada seguinte dá no mesmo resultado, sem ninguém
+      // esperando: o Mercado Pago leva um ou dois minutos para gerar o
+      // arquivo, e a próxima rodada é daqui a uma hora.
+      relatorio.mercadopago = await atualizarExtratoEsperando(de, ate, { tentativas: 0 })
     } catch (e) {
       relatorio.mercadopago = { erro: mensagemDe(e) }
     }
