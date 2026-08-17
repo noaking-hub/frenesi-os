@@ -96,7 +96,14 @@ export function BarraDeFiltros({
     // de trocar o período mostra uma tela vazia e parece defeito.
     novo.delete('pagina')
     // Trocar o filtro fecha o detalhe: a lista embaixo vira outra, e manter o
-    // modal do lançamento antigo por cima esconde justamente o que se pediu.
+    // detalhe do lançamento antigo por cima esconde justamente o que se pediu.
+    //
+    // Isto chegou a ser removido durante a otimização, por receio de o debounce
+    // da busca fechar sozinho um detalhe recém-aberto. Não fecha: o efeito
+    // depende só de `texto`, e clicar numa linha não muda `texto` — nenhum
+    // timeout fica pendente para disparar depois. Sem esta linha, mexer num
+    // filtro com o detalhe aberto não muda nada na tela, que é o defeito pior
+    // dos dois.
     novo.delete('lancamento')
     // Data à mão e atalho são a MESMA decisão dita de dois jeitos; manter os
     // dois faria a tela obedecer a um e exibir o outro aceso.
@@ -115,9 +122,11 @@ export function BarraDeFiltros({
 
   return (
     <section
-      // A barra inteira esmaece e para de aceitar clique enquanto a resposta
-      // do servidor não chega. É o oposto do que a tela fazia antes: ficar
-      // exatamente igual, aceitando cliques que se atropelavam.
+      // A barra esmaece enquanto a resposta do servidor não chega — é o oposto
+      // do que a tela fazia antes, que era ficar exatamente igual e parecer
+      // morta. Esmaece mas NÃO desliga: `pointerEvents: none` engoliria as
+      // teclas de quem continua digitando durante a ida ao servidor, e o
+      // debounce garante que digitar durante uma navegação é o caso comum.
       aria-busy={pendente}
       style={{
         display: 'flex',
@@ -127,8 +136,7 @@ export function BarraDeFiltros({
         border: '1px solid rgba(255,255,255,.065)',
         borderRadius: 14,
         background: 'linear-gradient(168deg, #15141608, #0E0E0F)',
-        opacity: pendente ? 0.55 : 1,
-        pointerEvents: pendente ? 'none' : undefined,
+        opacity: pendente ? 0.72 : 1,
         transition: 'opacity .16s ease',
       }}
     >
