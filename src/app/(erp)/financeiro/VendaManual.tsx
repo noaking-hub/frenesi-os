@@ -8,6 +8,7 @@ import { COR } from '@/components/erp/tokens'
 import { brl, parseNum, plural, volume, hojeEmSaoPaulo } from '@/domain'
 
 import { registrarVendaManual, type ItemVendaManual } from '../pedidos/actions'
+import { carregarCatalogoDaVendaManual } from './acoes-da-venda-manual'
 
 /**
  * Venda manual — a venda de balcão, WhatsApp ou Instagram lançada à mão.
@@ -191,23 +192,55 @@ function Rodape({
   )
 }
 
-export function VendaManual({
-  bases,
-  contas,
-  tamanhos,
-}: {
-  bases: BaseParaVenda[]
-  contas: ContaParaVenda[]
-  /** Tamanhos de decant realmente praticados, lidos do catálogo. */
-  tamanhos: number[]
-}) {
+/**
+ * O catálogo chega no CLIQUE, não por propriedade.
+ *
+ * Medido: as 412 bases com os mapas de preço são 95 KB de JSON. Como este
+ * componente é 'use client', receber `bases` por propriedade fazia esses 95 KB
+ * serem serializados no payload RSC de TODA navegação da tela de Lançamentos —
+ * com o modal fechado, e a cada mudança de filtro. Era o único custo daquela
+ * tela que não encolhia quando o filtro devolvia uma linha, e é ele que
+ * explica o congelamento com "1 de 1268" no rodapé.
+ *
+ * O mesmo erro já tinha sido cometido um nível abaixo: o comentário em
+ * Compromissos.tsx conta que repetir contas/categorias/centros por linha
+ * "estourava o payload e derrubava a tela". As 412 bases eram a versão maior
+ * disso.
+ *
+ * O botão nunca fica inerte: o clique abre o diálogo no ato, e o diálogo diz
+ * que está buscando. `contas` continua por propriedade porque são 5 linhas
+ * (2,3 KB) que a tela já carregou para a barra de filtros — buscá-las de novo
+ * custaria uma ida ao banco para economizar nada.
+ */
+export function VendaManual({ contas }: { contas: ContaParaVenda[] }) {
   const [aberto, setAberto] = useState(false)
+  const [catalogo, setCatalogo] = useState<{ bases: BaseParaVenda[]; tamanhos: number[] } | null>(
+    null,
+  )
+  const [erroCatalogo, setErroCatalogo] = useState<string | null>(null)
+  const [buscando, buscar] = useTransition()
+
+  function abrir() {
+    setAberto(true)
+    // Uma vez por sessão da tela: reabrir o modal não paga o catálogo de novo,
+    // e fechar sem gravar é o caso mais comum.
+    if (catalogo || buscando) return
+    setErroCatalogo(null)
+    buscar(async () => {
+      const r = await carregarCatalogoDaVendaManual()
+      if (!r.ok) {
+        setErroCatalogo(r.erro)
+        return
+      }
+      setCatalogo({ bases: r.bases, tamanhos: r.tamanhos })
+    })
+  }
 
   return (
     <>
       <button
         type="button"
-        onClick={() => setAberto(true)}
+        onClick={abrir}
         className="font-sans hover:brightness-110"
         style={{
           height: 30,
@@ -226,11 +259,40 @@ export function VendaManual({
         + Nova venda manual
       </button>
 
-      {aberto && (
+      {aberto && !catalogo && (
+        <Modal titulo="Nova venda manual" largura={520} aoFechar={() => setAberto(false)}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 13, padding: '18px 0' }}>
+            <TituloSecao tamanho={16}>
+              {erroCatalogo ? 'Não deu para abrir o formulário' : 'Buscando o catálogo…'}
+            </TituloSecao>
+            <span
+              className="font-sans"
+              style={{
+                fontSize: 11.5,
+                lineHeight: 1.55,
+                color: erroCatalogo ? COR.erro : 'var(--color-secundario)',
+                textWrap: 'pretty',
+              }}
+            >
+              {erroCatalogo ??
+                'O disponível de cada base e o preço praticado são lidos agora, para que o formulário não ofereça um perfume que acabou nem um preço antigo.'}
+            </span>
+            {erroCatalogo && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <BotaoSecundario altura={36} onClick={abrir}>
+                  Tentar de novo
+                </BotaoSecundario>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {aberto && catalogo && (
         <DialogoVendaManual
-          bases={bases}
+          bases={catalogo.bases}
           contas={contas}
-          tamanhos={tamanhos}
+          tamanhos={catalogo.tamanhos}
           aoFechar={() => setAberto(false)}
         />
       )}

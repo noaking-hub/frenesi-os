@@ -78,6 +78,8 @@ function conta(over: Partial<ContaFinanceira> = {}): ContaFinanceira {
     saldoBloqueado: 0,
     saldoCalculado: 1000,
     saldoInformado: 0,
+    saldoInformadoPara: null,
+    movimentosDesdeOInformado: 0,
     entradas30d: 0,
     saidas30d: 0,
     sincronizadoEm: null,

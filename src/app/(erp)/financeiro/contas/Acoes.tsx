@@ -1,16 +1,17 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 
 import { Ico, type NomeIcone } from '@/components/erp/IconesUi'
 import { Modal } from '@/components/erp/Modal'
 import { BotaoOuro, TituloSecao } from '@/components/erp/primitivos'
 import { BORDA, COR, FUNDO } from '@/components/erp/tokens'
-import { brl, parseNum, hojeEmSaoPaulo } from '@/domain'
+import { brl, diaCurtoPt, parseNum, hojeEmSaoPaulo } from '@/domain'
 import type { ContaFinanceira } from '@/domain'
 
 import {
   informarSaldo,
+  somaBaixadaDepois,
   registrarTransferencia,
   removerConta,
   salvarConta,
@@ -225,16 +226,39 @@ export function InformarSaldo({ conta, atalho }: { conta: ContaFinanceira; atalh
   const [valor, setValor] = useState(
     conta.origemSaldo === 'informado' ? conta.saldoInformado.toFixed(2).replace('.', ',') : '',
   )
+  // A data a que o saldo se refere. Vem preenchida com a que já está gravada —
+  // reabrir o diálogo para corrigir só o valor não pode ressuscitar a data de
+  // hoje por baixo e mudar silenciosamente quais lançamentos contam.
+  const [para, setPara] = useState(conta.saldoInformadoPara ?? hojeEmSaoPaulo())
   const [erro, setErro] = useState<string | null>(null)
   const [pendente, iniciar] = useTransition()
+  const [movimentoDepois, setMovimentoDepois] = useState(0)
 
   const informado = parseNum(valor)
   const diferenca = Math.round((informado - conta.saldoCalculado) * 100) / 100
 
+  // Cada data escolhida pergunta ao servidor quanto ela deixa de fora. O
+  // `vivo` protege contra resposta velha chegando depois da nova: trocar a
+  // data duas vezes rápido colocaria na tela a soma da primeira escolha.
+  useEffect(() => {
+    let vivo = true
+    if (!aberto || !para) return
+    somaBaixadaDepois(conta.id, para)
+      .then((r) => {
+        if (vivo) setMovimentoDepois(r.soma)
+      })
+      .catch(() => {
+        if (vivo) setMovimentoDepois(0)
+      })
+    return () => {
+      vivo = false
+    }
+  }, [aberto, para, conta.id])
+
   const gravar = (limpar: boolean) =>
     iniciar(async () => {
       setErro(null)
-      const r = await informarSaldo(conta.id, limpar ? null : informado)
+      const r = await informarSaldo(conta.id, limpar ? null : informado, limpar ? null : para)
       if (!r.ok) {
         setErro(r.erro)
         return
@@ -280,14 +304,20 @@ export function InformarSaldo({ conta, atalho }: { conta: ContaFinanceira; atalh
               className="font-sans"
               style={{ fontSize: 11.5, lineHeight: 1.55, color: 'var(--color-secundario)', textWrap: 'pretty' }}
             >
-              Digite o saldo que o app do banco mostra agora. O ERP guarda a data da leitura e
-              passa a exibir a diferença contra o que ele calculou do extrato — é essa diferença
-              que revela lançamento faltando.
+              Digite o saldo que o app do banco mostra e o dia a que ele se refere. A partir daí
+              o ERP soma sozinho tudo o que for baixado DEPOIS dessa data — o número deixa de ser
+              uma foto parada. A diferença contra o que ele calculou do extrato continua visível:
+              é ela que revela lançamento faltando.
             </span>
 
-            <Campo rotulo="Saldo no app do banco">
-              <input value={valor} onChange={(e) => setValor(e.target.value)} inputMode="decimal" placeholder="0,00" style={CAMPO} />
-            </Campo>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <Campo rotulo="Saldo no app do banco">
+                <input value={valor} onChange={(e) => setValor(e.target.value)} inputMode="decimal" placeholder="0,00" style={CAMPO} />
+              </Campo>
+              <Campo rotulo="Saldo no fim do dia">
+                <input type="date" value={para} onChange={(e) => setPara(e.target.value)} style={CAMPO} />
+              </Campo>
+            </div>
 
             <Previa
               linhas={[
@@ -298,6 +328,14 @@ export function InformarSaldo({ conta, atalho }: { conta: ContaFinanceira; atalh
                   valor: brl(diferenca),
                   tom: Math.abs(diferenca) > 0.05 ? COR.atencao : COR.ok,
                 },
+                // A conta que o dono precisa ver ANTES de gravar: quanto o ERP
+                // vai somar por cima. Sem esta linha, escolher a data seria
+                // apostar — e o efeito só apareceria depois, na tela de contas.
+                {
+                  rotulo: `Movimentos baixados depois de ${diaCurtoPt(para)}`,
+                  valor: brl(movimentoDepois),
+                },
+                { rotulo: 'Saldo que a tela vai mostrar', valor: brl(informado + movimentoDepois) },
               ]}
             />
 

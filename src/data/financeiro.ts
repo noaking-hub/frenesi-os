@@ -7,6 +7,7 @@ import {
   coberturaDeCaixa,
   competenciaAnterior,
   diaDaOperacao,
+  LANCAMENTOS_POR_PAGINA,
   mesmoDiaNoProximoMes,
   montarDreGerencial,
   movimentacaoInterna,
@@ -18,6 +19,7 @@ import {
   type CategoriaGerencial,
   type ContaFinanceira,
   type DreGerencial,
+  type FiltroDeLancamentos,
   type LancamentoGerencial,
   type NaturezaGerencial,
   type OrigemSaldo,
@@ -83,6 +85,8 @@ interface LinhaConta {
   saldo_bloqueado: number | string
   saldo_calculado: number | string
   saldo_informado: number | string
+  saldo_informado_para: string | null
+  movimentos_desde_o_informado: number | string | null
   entradas_30d: number | string
   saidas_30d: number | string
   sincronizado_em: string | null
@@ -120,6 +124,8 @@ export async function lerContas(): Promise<ContaFinanceira[]> {
       saldoBloqueado: Number(c.saldo_bloqueado),
       saldoCalculado: Number(c.saldo_calculado),
       saldoInformado: Number(c.saldo_informado),
+      saldoInformadoPara: c.saldo_informado_para ?? null,
+      movimentosDesdeOInformado: Number(c.movimentos_desde_o_informado ?? 0),
       entradas30d: Number(c.entradas_30d),
       saidas30d: Number(c.saidas_30d),
       sincronizadoEm: c.sincronizado_em,
@@ -250,6 +256,320 @@ export async function lerLancamentos(opcoes?: {
       impactaCaixa: l.categorias_financeiras?.impacta_caixa ?? true,
     }),
   )
+}
+
+// ── A tela de Lançamentos: filtro, página e totais vindos do banco ─────────
+//
+// `carregarLancamentos` abaixo continua existindo e continua lendo tudo — o
+// Assessor pede a lista inteira de propósito, para responder perguntas em
+// linguagem natural sobre ela. O que NÃO podia continuar é a TELA usar esse
+// caminho: ela chamava `carregarLancamentos()` sem argumento, recebia as 1.268
+// linhas (444.783 bytes medidos, 2 requisições PostgREST) e aplicava o filtro,
+// a ordenação e a paginação em JavaScript. Com `?q=Icaro` isso significava
+// transferir 434 KB para desenhar UMA linha — a razão medida foi 1268:1.
+//
+// Aqui a consulta desce inteira para o Postgres em UMA chamada de RPC, que
+// devolve a página de 50 linhas E os somatórios do filtro inteiro no mesmo
+// jsonb. Os somatórios voltarem juntos não é economia de round-trip: é a única
+// forma de o rodapé continuar dizendo a verdade. Somar as 50 linhas visíveis
+// faria "A pagar em aberto" encolher a cada página virada — um erro pior que a
+// lentidão, porque não aparece.
+
+/** Somatórios do FILTRO INTEIRO — nunca da página visível. */
+export interface ResumoDoFiltro {
+  /** Linhas que o filtro devolve, contadas no banco. */
+  total: number
+  entrou: number
+  saiu: number
+  movimentosEntrada: number
+  movimentosSaida: number
+  aReceberAberto: number
+  aPagarAberto: number
+}
+
+/** Um vencimento à frente, já com o que falta receber ou pagar. */
+export interface ProximoVencimento {
+  id: string
+  descricao: string
+  venceEm: string
+  categoria: string | null
+  tipo: 'entrada' | 'saida'
+  saldoAberto: number
+}
+
+/**
+ * Os números que NÃO dependem do filtro da tela.
+ *
+ * Os cinco cartões do rodapé, o painel "Resumo do período", "Próximos
+ * vencimentos" e os avisos de lançamento incompleto sempre falaram da base
+ * inteira — eram calculados sobre a lista completa em memória. Com a lista
+ * paginada essa fonte deixou de existir, e sem esta agregação eles passariam
+ * a descrever só as 50 linhas da tela.
+ */
+export interface PanoramaDosLancamentos {
+  /** Todos os lançamentos da base, cancelados inclusive: o "de 1268" do rodapé. */
+  totalDaBase: number
+  qtdSaidas: number
+  qtdPagas: number
+  /** Dias entre vencimento e baixa. Negativo é antecipação; null é "não dá para medir". */
+  prazoPagamento: number | null
+  prazoRecebimento: number | null
+  totalAPagar: number
+  totalAReceber: number
+  vencidos: { valor: number; qtd: number }
+  recorrentes: { valor: number; qtd: number }
+  aprovacoes: { valor: number; qtd: number }
+  semCategoria: { qtd: number; valor: number }
+  semVencimento: { qtd: number; valor: number }
+  recorrentesPorCategoria: { rotulo: string; valor: number }[]
+  proximos: ProximoVencimento[]
+}
+
+/** Uma linha da lista, com a situação já derivada pelo banco. */
+export interface LinhaDaTela {
+  lancamento: LancamentoGerencial
+  situacao: SituacaoLancamento
+}
+
+export interface TelaDeLancamentos {
+  linhas: LinhaDaTela[]
+  /**
+   * O lançamento do `?lancamento=`, buscado FORA do filtro.
+   *
+   * O link do Assessor aponta para um lançamento sem saber que filtro está
+   * valendo aqui, e um cancelado — que a lista esconde por padrão — continua
+   * sendo um registro que alguém precisa abrir para entender o que aconteceu.
+   */
+  alvo: LinhaDaTela | null
+  pagina: number
+  paginas: number
+  resumo: ResumoDoFiltro
+  panorama: PanoramaDosLancamentos
+  categorias: CategoriaGerencial[]
+  contas: ContaFinanceira[]
+  centrosCusto: { id: string; nome: string }[]
+  hoje: string
+  saldoProjetado: number
+  semBanco: boolean
+}
+
+/** A linha como o `lancamentos_da_tela` devolve: joins achatados, situação pronta. */
+interface LinhaDaRpc extends Omit<LinhaLancamento, 'categorias_financeiras' | 'contas_bancarias'> {
+  natureza_gerencial: string | null
+  impacta_dre: boolean
+  impacta_caixa: boolean
+  conta_nome: string | null
+  saldo: number | string
+  situacao: string
+}
+
+function traduzirLinhaDaTela(l: LinhaDaRpc): LinhaDaTela {
+  return {
+    lancamento: {
+      id: l.id,
+      descricao: l.descricao,
+      favorecido: l.favorecido,
+      tipo: l.tipo === 'entrada' ? 'entrada' : 'saida',
+      categoriaId: l.categoria_id,
+      categoria: l.categoria,
+      natureza: (l.natureza_gerencial ?? null) as NaturezaGerencial | null,
+      centroCusto: l.centro_custo,
+      // Conta some do banco em teoria; na tela ela vira um traço, e nunca
+      // `null` cru — o domínio promete texto aqui e as colunas confiam nisso.
+      contaId: l.conta_id ?? '',
+      conta: l.conta_nome ?? l.conta_id ?? '—',
+      competencia: l.competencia,
+      ocorridoEm: l.ocorrido_em ?? l.baixado_em ?? l.vence_em ?? l.competencia,
+      venceEm: l.vence_em,
+      baixadoEm: l.baixado_em,
+      valor: Number(l.valor),
+      recebido: Number(l.recebido),
+      multa: Number(l.multa ?? 0),
+      juros: Number(l.juros ?? 0),
+      desconto: Number(l.desconto ?? 0),
+      parcela: l.parcela,
+      parcelas: l.parcelas,
+      recorrente: l.recorrente,
+      recorrencia: l.recorrencia,
+      origem: l.origem,
+      documento: l.documento,
+      observacao: l.observacao,
+      transferenciaId: l.transferencia_id,
+      canceladoEm: l.cancelado_em,
+      impactaDre: l.impacta_dre,
+      impactaCaixa: l.impacta_caixa,
+    },
+    // A situação vem do banco porque foi lá que ela precisou existir para o
+    // `?situacao=vencido` filtrar. Recalculá-la aqui com `situacaoDe` daria o
+    // mesmo resultado — e é justamente por isso que ela não é recalculada:
+    // dois cálculos da mesma regra é um convite a divergirem.
+    situacao: l.situacao as SituacaoLancamento,
+  }
+}
+
+/** `null` quando não há o que medir — a tela escreve "—", não "0,0 dias". */
+function numeroOuNulo(v: unknown): number | null {
+  return v === null || v === undefined ? null : Number(v)
+}
+
+export async function carregarTelaDeLancamentos(
+  filtro: FiltroDeLancamentos,
+): Promise<TelaDeLancamentos> {
+  const hoje = HOJE()
+  const vazio: TelaDeLancamentos = {
+    linhas: [],
+    alvo: null,
+    pagina: 1,
+    paginas: 1,
+    resumo: {
+      total: 0,
+      entrou: 0,
+      saiu: 0,
+      movimentosEntrada: 0,
+      movimentosSaida: 0,
+      aReceberAberto: 0,
+      aPagarAberto: 0,
+    },
+    panorama: {
+      totalDaBase: 0,
+      qtdSaidas: 0,
+      qtdPagas: 0,
+      prazoPagamento: null,
+      prazoRecebimento: null,
+      totalAPagar: 0,
+      totalAReceber: 0,
+      vencidos: { valor: 0, qtd: 0 },
+      recorrentes: { valor: 0, qtd: 0 },
+      aprovacoes: { valor: 0, qtd: 0 },
+      semCategoria: { qtd: 0, valor: 0 },
+      semVencimento: { qtd: 0, valor: 0 },
+      recorrentesPorCategoria: [],
+      proximos: [],
+    },
+    categorias: [],
+    contas: [],
+    centrosCusto: [],
+    hoje,
+    saldoProjetado: 0,
+    semBanco: false,
+  }
+  if (!supabaseConfigurado()) return { ...vazio, semBanco: true }
+
+  const sb = supabaseServer()
+  // Quatro leituras independentes, uma onda só. Antes eram 12 requisições
+  // PostgREST por render (19 com o detalhe aberto): duas páginas de 1.000
+  // lançamentos, o catálogo inteiro de perfumes para alimentar um modal
+  // fechado, e `lerContas` duas vezes na mesma renderização.
+  const [lista, panorama, categorias, contas, centros] = await Promise.all([
+    sb.rpc('lancamentos_da_tela', {
+      p_hoje: hoje,
+      // Janela vazia vira `null`, não string vazia: `ocorrido_em >= ''` é erro
+      // de tipo no Postgres, e é assim que "Tudo" se diz.
+      p_de: filtro.de || null,
+      p_ate: filtro.ate || null,
+      p_situacao: filtro.situacao,
+      p_tipo: filtro.tipo,
+      p_categoria: filtro.categoria,
+      p_conta: filtro.conta,
+      p_centro: filtro.centro,
+      p_venc: filtro.venc,
+      p_recorrente: filtro.recorrente,
+      p_q: filtro.q,
+      p_pagina: filtro.pagina,
+      p_por_pagina: LANCAMENTOS_POR_PAGINA,
+      p_lancamento: filtro.lancamento,
+    }),
+    sb.rpc('panorama_dos_lancamentos', { p_hoje: hoje }),
+    lerCategorias(),
+    lerContas(),
+    lerCentrosCusto(),
+  ])
+
+  if (lista.error) throw lista.error
+  if (panorama.error) throw panorama.error
+
+  const l = lista.data as {
+    linhas: LinhaDaRpc[]
+    total: number
+    pagina: number
+    paginas: number
+    resumo: Record<string, number>
+    alvo: LinhaDaRpc | null
+  }
+  const p = panorama.data as {
+    totais: Record<string, number | null>
+    recorrentesPorCategoria: { rotulo: string; valor: number | string }[]
+    proximos: {
+      id: string
+      descricao: string
+      vence_em: string
+      categoria: string | null
+      tipo: string
+      saldo: number | string
+    }[]
+  }
+  const t = p.totais
+
+  const totalAPagar = Number(t.total_a_pagar ?? 0)
+  const totalAReceber = Number(t.total_a_receber ?? 0)
+  const disponivel = contas.reduce((a, c) => a + c.saldoDisponivel, 0)
+
+  return {
+    linhas: (l.linhas ?? []).map(traduzirLinhaDaTela),
+    alvo: l.alvo ? traduzirLinhaDaTela(l.alvo) : null,
+    pagina: l.pagina,
+    paginas: l.paginas,
+    resumo: {
+      total: Number(l.resumo.total ?? 0),
+      entrou: Number(l.resumo.entrou ?? 0),
+      saiu: Number(l.resumo.saiu ?? 0),
+      movimentosEntrada: Number(l.resumo.movimentos_entrada ?? 0),
+      movimentosSaida: Number(l.resumo.movimentos_saida ?? 0),
+      aReceberAberto: Number(l.resumo.a_receber_aberto ?? 0),
+      aPagarAberto: Number(l.resumo.a_pagar_aberto ?? 0),
+    },
+    panorama: {
+      totalDaBase: Number(t.total_da_base ?? 0),
+      qtdSaidas: Number(t.qtd_saidas ?? 0),
+      qtdPagas: Number(t.qtd_pagas ?? 0),
+      prazoPagamento: numeroOuNulo(t.prazo_pagamento),
+      prazoRecebimento: numeroOuNulo(t.prazo_recebimento),
+      totalAPagar,
+      totalAReceber,
+      vencidos: { valor: Number(t.vencidos_valor ?? 0), qtd: Number(t.vencidos_qtd ?? 0) },
+      recorrentes: {
+        valor: Number(t.recorrentes_valor ?? 0),
+        qtd: Number(t.recorrentes_qtd ?? 0),
+      },
+      aprovacoes: { valor: Number(t.aprovacoes_valor ?? 0), qtd: Number(t.aprovacoes_qtd ?? 0) },
+      semCategoria: {
+        qtd: Number(t.sem_categoria_qtd ?? 0),
+        valor: Number(t.sem_categoria_valor ?? 0),
+      },
+      semVencimento: {
+        qtd: Number(t.sem_vencimento_qtd ?? 0),
+        valor: Number(t.sem_vencimento_valor ?? 0),
+      },
+      recorrentesPorCategoria: (p.recorrentesPorCategoria ?? []).map((r) => ({
+        rotulo: r.rotulo,
+        valor: Number(r.valor),
+      })),
+      proximos: (p.proximos ?? []).map((x) => ({
+        id: x.id,
+        descricao: x.descricao,
+        venceEm: x.vence_em,
+        categoria: x.categoria,
+        tipo: x.tipo === 'entrada' ? 'entrada' : 'saida',
+        saldoAberto: Number(x.saldo),
+      })),
+    },
+    categorias,
+    contas,
+    centrosCusto: centros,
+    hoje,
+    saldoProjetado: Math.round((disponivel + totalAReceber - totalAPagar) * 100) / 100,
+    semBanco: false,
+  }
 }
 
 export interface PainelLancamentos {
@@ -446,6 +766,26 @@ export interface ExplicacaoLancamento {
   irmaos: LancamentoIrmao[]
   pedido: PedidoDoLancamento | null
   historico: EdicaoRegistrada[]
+  /** Quais das leituras acima FALHARAM — ver `LeiturasQueFalharam`. */
+  naoLidas: LeiturasQueFalharam
+}
+
+/**
+ * Quais leituras do detalhe falharam.
+ *
+ * Existe porque array vazio por ERRO e array vazio por AUSÊNCIA são a mesma
+ * coisa para quem só olha o `.data`, e a tela transformava os dois na mesma
+ * frase afirmativa. Sem esta distinção, uma consulta que falhou virava "este é
+ * o único movimento financeiro registrado para o pedido", "o pedido não está
+ * mais na base" ou — pior de todas — "nenhuma alteração registrada" numa
+ * trilha de auditoria. Erro de rede não pode sair da tela como fato sobre o
+ * dinheiro.
+ */
+export interface LeiturasQueFalharam {
+  extrato: boolean
+  irmaos: boolean
+  pedido: boolean
+  historico: boolean
 }
 
 interface IrmaoCru {
@@ -490,6 +830,9 @@ export async function explicarLancamento(id: string): Promise<ExplicacaoLancamen
     )
     .eq('id', id)
     .maybeSingle()
+  // Sem log, "não deu para ler" some no servidor e o dono fica com uma tela
+  // que diz que algo falhou e ninguém consegue dizer o quê.
+  if (error) console.error('[financeiro] explicar lançamento falhou:', id, error)
   if (error || !base) return null
 
   const l = base as unknown as {
@@ -520,16 +863,19 @@ export async function explicarLancamento(id: string): Promise<ExplicacaoLancamen
       )
       .eq('lancamento_id', id)
       .limit(1),
+    // O ramo "não perguntei" precisa carregar `error: null` como o ramo que
+    // consulta: sem ele o tipo da união não tem `error`, e foi assim que a
+    // falha das leituras deste bloco ficou impossível de checar.
     l.pedido_id
       ? sb.from('lancamentos').select(CAMPOS_IRMAO).eq('pedido_id', l.pedido_id).neq('id', id)
-      : Promise.resolve({ data: [] }),
+      : Promise.resolve({ data: [], error: null }),
     l.transferencia_id
       ? sb
           .from('lancamentos')
           .select(CAMPOS_IRMAO)
           .eq('transferencia_id', l.transferencia_id)
           .neq('id', id)
-      : Promise.resolve({ data: [] }),
+      : Promise.resolve({ data: [], error: null }),
     l.pedido_id
       ? sb
           .from('pedidos')
@@ -541,7 +887,7 @@ export async function explicarLancamento(id: string): Promise<ExplicacaoLancamen
           )
           .eq('id', l.pedido_id)
           .maybeSingle()
-      : Promise.resolve({ data: null }),
+      : Promise.resolve({ data: null, error: null }),
     sb
       .from('financeiro_auditoria')
       .select('id, ocorrido_em, acao, operador, justificativa')
@@ -551,8 +897,23 @@ export async function explicarLancamento(id: string): Promise<ExplicacaoLancamen
       .limit(20),
     l.conta_destino_id
       ? sb.from('contas_bancarias').select('nome').eq('id', l.conta_destino_id).maybeSingle()
-      : Promise.resolve({ data: null }),
+      : Promise.resolve({ data: null, error: null }),
   ])
+
+  // Uma leitura que falhou é registrada no servidor e MARCADA para a tela. O
+  // que não pode acontecer é o `.data` nulo virar array vazio e a tela ler
+  // esse vazio como resposta: "nenhum irmão", "pedido removido da base",
+  // "nenhuma alteração registrada" são afirmações sobre o dinheiro, e nenhuma
+  // delas pode nascer de um timeout do Postgres.
+  const naoLidas = {
+    extrato: Boolean(extrato.error),
+    irmaos: Boolean(porPedido.error || porTransferencia.error),
+    pedido: Boolean(pedido.error),
+    historico: Boolean(historico.error),
+  }
+  for (const [secao, falhou] of Object.entries(naoLidas)) {
+    if (falhou) console.error('[financeiro] detalhe do lançamento', id, '— falhou lendo', secao)
+  }
 
   const linha = ((extrato.data ?? []) as unknown as {
     origem: string
@@ -666,6 +1027,7 @@ export async function explicarLancamento(id: string): Promise<ExplicacaoLancamen
       operador: (a.operador as string) ?? null,
       justificativa: (a.justificativa as string) ?? null,
     })),
+    naoLidas,
   }
 }
 
@@ -676,12 +1038,23 @@ export async function lerCategorias(): Promise<CategoriaGerencial[]> {
   const sb = supabaseServer()
   const [{ data: cats }, { data: usos }] = await Promise.all([
     sb.from('categorias_financeiras').select('*').order('nome'),
-    sb.from('lancamentos').select('categoria_id').not('categoria_id', 'is', null).limit(5000),
+    // A contagem vem AGREGADA do banco, não em linhas cruas.
+    //
+    // Isto aqui era `select categoria_id from lancamentos limit 5000`: 1.229
+    // linhas atravessando a rede para produzir 8 números, a cada render, em
+    // dois caminhos diferentes (`carregarLancamentos` e `carregarFilaDeDestino`).
+    // A agregação custa o MESMO tempo no Postgres — 1,255 ms contra 1,115 ms,
+    // os mesmos 71 buffers — e devolve 8 linhas.
+    //
+    // O `limit(5000)` que sumiu junto era uma bomba-relógio: aos 5.001
+    // lançamentos a contagem passaria a mentir sem erro nenhum na tela, que é
+    // exatamente o bug que o comentário de supabase.ts:35-41 descreve.
+    sb.from('categorias_em_uso').select('categoria_id, em_uso'),
   ])
 
   const contagem = new Map<string, number>()
-  for (const u of (usos ?? []) as { categoria_id: string }[]) {
-    contagem.set(u.categoria_id, (contagem.get(u.categoria_id) ?? 0) + 1)
+  for (const u of (usos ?? []) as { categoria_id: string; em_uso: number }[]) {
+    contagem.set(u.categoria_id, Number(u.em_uso))
   }
 
   return ((cats ?? []) as Record<string, unknown>[]).map(

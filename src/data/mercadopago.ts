@@ -1088,14 +1088,23 @@ async function importarEComplementar(
     /* marcação é derivada, não pré-requisito */
   }
 
+  // A regra é conforto, não pré-requisito — mas calar o erro dela custou caro.
+  // `classificar_extrato`, que é quem grava o lançamento da regra, não
+  // preenchia `competencia` (NOT NULL desde a reconstrução do Financeiro) e
+  // estourava a cada linha casada, derrubando a rotina inteira das regras. O
+  // `catch` vazio que estava aqui engoliu isso: as 9 regras cadastradas nunca
+  // categorizaram nada e nenhuma tela disse por quê.
   try {
-    const { data: regras } = await supabaseServer().rpc('aplicar_regras_categoria')
+    const { data: regras, error } = await supabaseServer().rpc('aplicar_regras_categoria')
+    if (error) throw error
     const aplicadas = Number((regras as { aplicadas?: number } | null)?.aplicadas ?? 0)
     if (aplicadas > 0) {
       linhas.push(`${aplicadas} movimento(s) categorizados sozinhos pelas regras.`)
     }
-  } catch {
-    /* regra é conforto, não pré-requisito */
+  } catch (e) {
+    linhas.push(
+      `As regras de categoria não rodaram desta vez: ${mensagemDe(e)}. Os movimentos entram sem categoria e ficam na fila de classificação.`,
+    )
   }
 
   // E aqui o extrato vira CAIXA — o passo que faltava.
@@ -1113,7 +1122,14 @@ async function importarEComplementar(
   // (`on conflict do nothing`), então a chamada que a rotina faz logo depois
   // desta não duplica nada.
   try {
-    const { data } = await supabaseServer().rpc('converter_extrato_em_caixa')
+    // `if (error) throw error` é o que faz a mensagem abaixo existir. O cliente
+    // do Supabase RESOLVE com `{ data, error }` em falha de banco — não rejeita
+    // —, então sem esta linha o `catch` só pegaria queda de rede: erro de SQL
+    // viraria `criados = 0` e a tela diria "importado" com o caixa parado. Foi
+    // assim que uma colisão de chave derrubou a conversão inteira por nove
+    // horas sem aparecer em lugar nenhum.
+    const { data, error } = await supabaseServer().rpc('converter_extrato_em_caixa')
+    if (error) throw error
     const criados = Number((Array.isArray(data) ? data[0] : data)?.criados ?? 0)
     if (criados > 0) linhas.push(`${criados} movimento(s) viraram lançamento no caixa.`)
   } catch (e) {

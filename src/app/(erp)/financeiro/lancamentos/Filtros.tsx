@@ -1,10 +1,10 @@
 'use client'
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useTransition, type ReactNode } from 'react'
 
 import { Etiqueta, Ico, TINTA } from '@/components/erp/ui'
-import { ROTULO_SITUACAO_LANCAMENTO } from '@/domain'
+import { CHAVES_DE_FILTRO, ROTULO_SITUACAO_LANCAMENTO } from '@/domain'
 import type { SituacaoLancamento } from '@/domain'
 
 /**
@@ -53,6 +53,30 @@ export function BarraDeFiltros({
 
   const [texto, setTexto] = useState(params.get('q') ?? '')
 
+  /*
+   * `useTransition` existe aqui por causa do sintoma, não por elegância.
+   *
+   * `router.replace()` cru deixa a tela ANTERIOR na tela até o servidor
+   * responder: nenhum controle desabilita, nenhum pixel muda. Quem clicou no
+   * filtro não tem como distinguir "está indo" de "travou" — e "travou" foi a
+   * palavra do relato. Com `isPending`, a tabela esmaece e a lupa pulsa
+   * enquanto a resposta não chega.
+   */
+  const [pendente, navegar] = useTransition()
+
+  /*
+   * A URL de AGORA, não a do render em que o debounce foi agendado.
+   *
+   * Bug que este ref conserta: ao clicar em "Limpar N filtros", `setTexto('')`
+   * agendava um `trocar('q','')` para 350 ms depois. Quando o timeout
+   * disparava, `trocar` reconstruía a URL a partir da cópia de `params`
+   * capturada NAQUELE render — que ainda continha situação, tipo, categoria,
+   * conta, centro, datas e recorrente. Resultado: o botão limpava tudo e, um
+   * terço de segundo depois, a própria tela ressuscitava os filtros apagados.
+   */
+  const paramsAgora = useRef(params)
+  paramsAgora.current = params
+
   // Digitar não pode navegar a cada tecla: cada navegação é uma ida ao
   // servidor, e o cursor saltaria. 350 ms é o intervalo entre "parou de
   // digitar" e "quer o resultado".
@@ -65,12 +89,15 @@ export function BarraDeFiltros({
   }, [texto])
 
   function trocar(chave: string, valor: string) {
-    const novo = new URLSearchParams(params.toString())
+    const novo = new URLSearchParams(paramsAgora.current.toString())
     if (valor) novo.set(chave, valor)
     else novo.delete(chave)
     // Mexeu no filtro, volta para a primeira página. Ficar na página 7 depois
     // de trocar o período mostra uma tela vazia e parece defeito.
     novo.delete('pagina')
+    // Trocar o filtro fecha o detalhe: a lista embaixo vira outra, e manter o
+    // modal do lançamento antigo por cima esconde justamente o que se pediu.
+    novo.delete('lancamento')
     // Data à mão e atalho são a MESMA decisão dita de dois jeitos; manter os
     // dois faria a tela obedecer a um e exibir o outro aceso.
     if (chave === 'de' || chave === 'ate') novo.delete('periodo')
@@ -79,26 +106,19 @@ export function BarraDeFiltros({
       novo.delete('ate')
     }
     const qs = novo.toString()
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+    navegar(() => router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false }))
   }
 
   const periodoAtivo = params.get('de') || params.get('ate') ? '' : (params.get('periodo') ?? 'hoje')
 
-  const ativos = [
-    'situacao',
-    'tipo',
-    'categoria',
-    'conta',
-    'centro',
-    'q',
-    'de',
-    'ate',
-    'recorrente',
-    'venc',
-  ].filter((k) => params.get(k)).length
+  const ativos = CHAVES_DE_FILTRO.filter((k) => params.get(k)).length
 
   return (
     <section
+      // A barra inteira esmaece e para de aceitar clique enquanto a resposta
+      // do servidor não chega. É o oposto do que a tela fazia antes: ficar
+      // exatamente igual, aceitando cliques que se atropelavam.
+      aria-busy={pendente}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -107,6 +127,9 @@ export function BarraDeFiltros({
         border: '1px solid rgba(255,255,255,.065)',
         borderRadius: 14,
         background: 'linear-gradient(168deg, #15141608, #0E0E0F)',
+        opacity: pendente ? 0.55 : 1,
+        pointerEvents: pendente ? 'none' : undefined,
+        transition: 'opacity .16s ease',
       }}
     >
       {/* O período é a decisão que mais muda o que a tela mostra, então é o
@@ -279,7 +302,13 @@ export function BarraDeFiltros({
             borderRadius: 9,
           }}
         >
-          <span style={{ color: 'rgba(242,237,227,.34)' }}>
+          <span
+            // A lupa pulsa enquanto a busca está indo ao servidor: é o único
+            // pedaço da tela que não pode esmaecer junto com o resto, porque é
+            // ele que explica por que o resto esmaeceu.
+            className={pendente ? 'animate-[fr-pulse_1.1s_ease-in-out_infinite]' : undefined}
+            style={{ color: pendente ? TINTA.ouro : 'rgba(242,237,227,.34)' }}
+          >
             <Ico n="busca" tamanho={14} />
           </span>
           <input
@@ -303,8 +332,12 @@ export function BarraDeFiltros({
           <button
             type="button"
             onClick={() => {
+              // A ordem importa: zerar o texto ANTES de navegar faz o efeito de
+              // debounce enxergar `texto === atual` no próximo render e não
+              // agendar nada. Com o ref de `params`, mesmo um timeout que
+              // escape reconstrói a URL já limpa em vez da antiga.
               setTexto('')
-              router.replace(pathname, { scroll: false })
+              navegar(() => router.replace(pathname, { scroll: false }))
             }}
             className="font-sans hover:brightness-125"
             style={{

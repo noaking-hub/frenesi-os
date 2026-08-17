@@ -56,6 +56,9 @@ const TOM_SITUACAO: Record<SituacaoLancamento, TomUi> = {
   cancelado: 'neutro',
 }
 
+/** O único painel das abas — as duas trocam o conteúdo dele, não o elemento. */
+const PAINEL = 'painel-do-lancamento'
+
 /** dd/mm/aaaa a partir de AAAA-MM-DD, sem passar por `Date` (que desloca fuso). */
 function diaPt(iso: string | null | undefined): string | null {
   if (!iso) return null
@@ -191,7 +194,11 @@ export function DetalheDoLancamento({
           </AbaBotao>
         </nav>
 
-        <div role="tabpanel" id={`painel-${aba}`} aria-labelledby={`aba-${aba}`}>
+        {/* Um painel só, com id fixo: os dois `aria-controls` apontavam para
+            `painel-detalhe`/`painel-editar` e só um dos dois existia por vez,
+            então a aba inativa anunciava ao leitor de tela um alvo que não
+            estava no documento. */}
+        <div role="tabpanel" id={PAINEL} aria-labelledby={`aba-${aba}`}>
           {aba === 'detalhe' ? (
             <Dossie
               lancamento={lancamento}
@@ -340,15 +347,34 @@ function Dossie({
                 : 'depende da categoria, que ainda não foi escolhida'
             }
           />
+          {/* `impactaDre`/`impactaCaixa` nascem de um `?? true` na leitura:
+              sem categoria não há o que juntar, e o padrão otimista serve às
+              somas da lista. Aqui ele mentia — a faixa dourada no topo diz
+              "não entra em nenhuma linha da DRE" e este campo respondia "Sim"
+              logo abaixo, na mesma janela, para os mesmos 39 lançamentos que
+              esta tela existe para classificar. Sem categoria, quem responde é
+              a ausência dela. */}
           <Dado
             rotulo="Entra no resultado (DRE)"
-            valor={l.impactaDre ? 'Sim' : 'Não — a categoria diz que este movimento não é resultado'}
-            ausente="não foi possível determinar"
+            valor={
+              l.categoriaId
+                ? l.impactaDre
+                  ? 'Sim'
+                  : 'Não — a categoria diz que este movimento não é resultado'
+                : null
+            }
+            ausente="não — sem categoria ele fica fora da DRE; quem decide isso é a categoria que ainda falta"
           />
           <Dado
             rotulo="Entra no caixa"
-            valor={l.impactaCaixa ? 'Sim' : 'Não — dinheiro trocando de bolso, não saindo dele'}
-            ausente="não foi possível determinar"
+            valor={
+              l.categoriaId
+                ? l.impactaCaixa
+                  ? 'Sim'
+                  : 'Não — dinheiro trocando de bolso, não saindo dele'
+                : null
+            }
+            ausente="depende da categoria, que ainda não foi escolhida"
           />
           <Dado
             rotulo="Conta"
@@ -423,6 +449,12 @@ function comoNasceu(l: LancamentoGerencial, e: ExplicacaoLancamento | null): str
     frases.push(
       `Nasceu de uma linha do ${l.origem}: o ERP leu o arquivo do gateway e converteu essa linha neste lançamento. A linha crua está logo abaixo, do jeito que chegou.`,
     )
+  } else if (veioDoExtrato && e?.naoLidas.extrato) {
+    // Sem a linha lida não dá para escolher entre "nasceu do extrato" e "é
+    // derivado": as duas frases afirmam coisas diferentes sobre a origem.
+    frases.push(
+      `Veio da leitura do ${l.origem}, mas não foi possível ler a linha de extrato para dizer se ele nasceu de um movimento próprio ou foi derivado de outro.`,
+    )
   } else if (veioDoExtrato) {
     frases.push(
       `Veio da leitura do ${l.origem}, mas não é uma linha do extrato: é um lançamento DERIVADO, que o ERP criou a partir de outro movimento. É o caso da tarifa cobrada sobre um crédito e da perna de destino de um saque — o gateway informa o valor junto da operação principal, sem uma linha própria para ele.`,
@@ -448,6 +480,8 @@ function comoNasceu(l: LancamentoGerencial, e: ExplicacaoLancamento | null): str
         e.pedido.cliente ? ` — ${e.pedido.cliente}` : ''
       }, vendido pelo canal ${e.pedido.canal} por ${brl(e.pedido.valor)}.`,
     )
+  } else if (e?.pedidoId && e.naoLidas.pedido) {
+    frases.push(`Aponta para o pedido ${e.pedidoId}, que não foi possível ler agora.`)
   } else if (e?.pedidoId) {
     frases.push(
       `Aponta para o pedido ${e.pedidoId}, mas esse pedido não está mais na base — ele pode ter sido removido depois da importação.`,
@@ -489,6 +523,18 @@ function Extrato({
 
   if (!linha) {
     if (!e) return null
+    // Leitura que falhou não vira "não tem linha de extrato": essa frase é uma
+    // afirmação sobre a origem do dinheiro, e ela seria falsa por um timeout.
+    if (e.naoLidas.extrato) {
+      return (
+        <Secao titulo="Linha do extrato">
+          <Nota tom="atencao">
+            Não foi possível ler a linha de extrato deste lançamento — a consulta ao banco falhou.
+            Não dá para dizer daqui se ela existe; recarregue a página para tentar de novo.
+          </Nota>
+        </Secao>
+      )
+    }
     return (
       <Secao titulo="Linha do extrato">
         <Nota tom="neutro">
@@ -570,7 +616,14 @@ function Irmaos({
 
   return (
     <Secao titulo="Lançamentos ligados a este">
-      {irmaos.length === 0 ? (
+      {e.naoLidas.irmaos ? (
+        // "Nenhum irmão" e "não consegui perguntar" davam a mesma tela, e a
+        // segunda mandava conferir uma importação que pode estar perfeita.
+        <Nota tom="atencao">
+          Não foi possível ler os lançamentos ligados a este — a consulta ao banco falhou. A lista
+          abaixo não está vazia por não existirem: ela está vazia por não ter sido lida.
+        </Nota>
+      ) : irmaos.length === 0 ? (
         <Nota tom="neutro">
           {e.pedidoId
             ? `Nenhum outro lançamento aponta para o pedido ${e.pedidoId}. Este é o único movimento financeiro registrado para ele.`
@@ -639,7 +692,13 @@ function Pedido({ explicacao: e }: { explicacao: ExplicacaoLancamento | null }) 
 
   return (
     <Secao titulo="Pedido que originou este lançamento">
-      {!p ? (
+      {e.naoLidas.pedido ? (
+        // Dizer "o pedido não está mais na base" quando a consulta caiu é
+        // acusar a importação de ter perdido uma venda que está lá.
+        <Nota tom="atencao">
+          {`Não foi possível ler o pedido ${e.pedidoId} — a consulta ao banco falhou. Isso não quer dizer que ele sumiu; recarregue a página para tentar de novo.`}
+        </Nota>
+      ) : !p ? (
         <Nota tom="atencao">
           {`O lançamento aponta para o pedido ${e.pedidoId}, mas ele não está mais na base de pedidos.`}
         </Nota>
@@ -700,7 +759,15 @@ function Historico({ explicacao: e }: { explicacao: ExplicacaoLancamento | null 
 
   return (
     <Secao titulo="Histórico de alterações">
-      {e.historico.length === 0 ? (
+      {e.naoLidas.historico ? (
+        // Trilha de auditoria é o único lugar do ERP onde "nada aconteceu"
+        // precisa ser verdade para servir de prova. Se a leitura falhou, ela
+        // não prova nada, e tem que dizer isso.
+        <Nota tom="atencao">
+          Não foi possível ler a trilha de auditoria — a consulta ao banco falhou. Esta seção NÃO
+          está dizendo que o lançamento nunca foi alterado; está dizendo que não deu para conferir.
+        </Nota>
+      ) : e.historico.length === 0 ? (
         <Nota tom="neutro">
           Nenhuma alteração registrada. A trilha de auditoria só grava edição feita por gente dentro
           do ERP — o que veio da importação do extrato entrou direto, sem passar por ela.
@@ -986,7 +1053,17 @@ function Formulario({
           },
           {
             rotulo: 'Entra na DRE como',
-            valor: escolhida ? escolhida.nome : 'sem categoria — fica fora da DRE',
+            // Três estados, não dois. `escolhida` é undefined tanto para "não
+            // tem categoria" quanto para "tem uma que o select não mostra
+            // porque a natureza não bate com o tipo" — e são 62 entradas
+            // classificadas hoje como despesa administrativa. Juntar os dois
+            // fazia a prévia prometer que a gravação tiraria da DRE um
+            // lançamento que continua nela, classificado.
+            valor: escolhida
+              ? escolhida.nome
+              : categoriaId
+                ? `${l.categoria ?? categoriaId} — a classificação atual continua valendo se você não trocar`
+                : 'sem categoria — fica fora da DRE',
             tom: escolhida ? undefined : COR.ouro,
           },
         ]}
@@ -1023,7 +1100,7 @@ function AbaBotao({
       role="tab"
       id={`aba-${chave}`}
       aria-selected={ativa}
-      aria-controls={`painel-${chave}`}
+      aria-controls={PAINEL}
       onClick={aoClicar}
       className="font-sans"
       style={{

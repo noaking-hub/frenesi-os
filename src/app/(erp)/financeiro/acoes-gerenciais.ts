@@ -926,24 +926,45 @@ export async function removerConta(id: string): Promise<Resposta> {
 // ── Saldo informado ────────────────────────────────────────────────────────
 
 /**
- * Informa o saldo que o app do banco mostra, com a data da leitura.
+ * Informa o saldo que o app do banco mostra, e A QUE DIA ele se refere.
  *
  * Conta cujo saldo o ERP só consegue calcular do extrato sempre atrasa; um
- * número digitado com carimbo de hoje é mais honesto que uma soma que parece
- * saldo. A divergência contra o calculado fica visível na tela de contas.
+ * número digitado é mais honesto que uma soma que parece saldo. A divergência
+ * contra o calculado fica visível na tela de contas.
+ *
+ * O segundo parâmetro é o conserto de um bug que congelava a conta. Antes só
+ * existia `saldo_informado_em`, a hora do clique, e a view fazia
+ * `COALESCE(saldo_informado, ledger)` — ou seja, informar um saldo parava
+ * aquela conta naquele número PARA SEMPRE, e nenhum lançamento voltava a
+ * mexer nele. A tela chegou a exibir "SAÍDAS (30D) R$ 965,89" ao lado de um
+ * saldo que não sentiu essas saídas.
+ *
+ * `para` é a data de FECHAMENTO a que o número se refere ("no fim de 15/08 eu
+ * tinha X"). Tudo que for baixado depois dela soma por cima. A distinção
+ * importa: informar o saldo hoje de manhã e lançar à tarde um pagamento de
+ * ontem é indefensável pela hora do clique — pelo relógio o pagamento é
+ * "anterior" e some. Com a data explícita, quem decide é o dono do dinheiro.
  */
 export async function informarSaldo(
   contaId: string,
   saldo: number | null,
+  para?: string | null,
 ): Promise<Resposta> {
   const bloqueio = exigeSupabase('informar saldos')
   if (bloqueio) return bloqueio
+
+  // Sem data escolhida, hoje — que é o caso comum de quem abriu o app do banco
+  // agora. O fuso é o da operação, não o do servidor: um saldo informado às
+  // 21h de São Paulo cairia no dia seguinte em UTC e passaria a ignorar os
+  // lançamentos do próprio dia.
+  const referencia = saldo === null ? null : (para?.trim() || hojeEmSaoPaulo())
 
   const { error } = await supabaseServer()
     .from('contas_bancarias')
     .update({
       saldo_informado: saldo,
       saldo_informado_em: saldo === null ? null : new Date().toISOString(),
+      saldo_informado_para: referencia,
       origem_saldo: saldo === null ? 'calculado' : 'informado',
     })
     .eq('id', contaId)
@@ -954,6 +975,36 @@ export async function informarSaldo(
 
   revalidarFinanceiro()
   return { ok: true }
+}
+
+/**
+ * Quanto o ERP vai somar por cima de um saldo informado para a data escolhida.
+ *
+ * Existe para o diálogo poder mostrar o resultado ANTES de gravar. Escolher a
+ * data de referência sem ver o efeito é apostar: o número só apareceria
+ * depois, na tela de contas, e quem errou o dia não teria como saber que
+ * errou. É a mesma postura das prévias de baixa e de parcelamento.
+ */
+export async function somaBaixadaDepois(
+  contaId: string,
+  data: string,
+): Promise<{ soma: number; quantos: number }> {
+  if (!supabaseConfigurado() || !data) return { soma: 0, quantos: 0 }
+
+  const { data: linhas, error } = await supabaseServer()
+    .from('lancamentos')
+    .select('tipo, recebido')
+    .eq('conta_id', contaId)
+    .is('cancelado_em', null)
+    .not('baixado_em', 'is', null)
+    .gt('baixado_em', data)
+  if (error || !linhas) return { soma: 0, quantos: 0 }
+
+  const soma = (linhas as { tipo: string; recebido: number | string }[]).reduce(
+    (a, l) => a + (l.tipo === 'entrada' ? Number(l.recebido) : -Number(l.recebido)),
+    0,
+  )
+  return { soma: Math.round(soma * 100) / 100, quantos: linhas.length }
 }
 
 // ── Destino dos repasses ───────────────────────────────────────────────────

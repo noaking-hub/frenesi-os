@@ -281,6 +281,17 @@ export interface ContaFinanceira {
   saldoBloqueado: number
   saldoCalculado: number
   saldoInformado: number
+  /**
+   * A DATA a que o saldo informado se refere — o fechamento daquele dia.
+   *
+   * Não confundir com a hora em que alguém clicou em salvar, que é auditoria.
+   * É esta data que decide o que soma por cima: tudo o que foi baixado DEPOIS
+   * dela. Sem ela, o saldo informado congelava a conta para sempre, e a tela
+   * exibia saídas de 30 dias ao lado de um saldo que nunca as sentiu.
+   */
+  saldoInformadoPara: string | null
+  /** Quantos lançamentos já andaram desde a data de referência. */
+  movimentosDesdeOInformado: number
   entradas30d: number
   saidas30d: number
   sincronizadoEm: string | null

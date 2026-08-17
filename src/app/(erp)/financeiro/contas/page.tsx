@@ -26,6 +26,7 @@ import { lerContas, lerLancamentos } from '@/data/financeiro'
 import {
   brl,
   concentracao,
+  diaCurtoPt,
   divergenciaDeSaldo,
   horasDesdeSincronia,
   plural,
@@ -420,6 +421,26 @@ const ORIGEM_LINHA: Record<ContaFinanceira['origemSaldo'], { texto: string; cor:
   calculado: { texto: 'Calculado pelo ERP', cor: 'rgba(242,237,227,.5)' },
 }
 
+/**
+ * De onde vem o saldo desta conta, em uma frase.
+ *
+ * "Registro manual" sozinho não explicava nada — e foi exatamente por isso que
+ * um bug grave passou despercebido: a view congelava a conta no valor
+ * informado, a tela exibia saídas de 30 dias ao lado dele, e nada na interface
+ * dizia que as duas coisas não conversavam. Um número que se explica é um
+ * número que denuncia o próprio erro.
+ */
+function comoOSaldoFoiFeito(conta: ContaFinanceira): string | null {
+  if (conta.origemSaldo !== 'informado') return null
+  if (!conta.saldoInformadoPara) {
+    return 'Saldo informado sem data de referência — informe para o ERP voltar a somar'
+  }
+  const dia = diaCurtoPt(conta.saldoInformadoPara)
+  return conta.movimentosDesdeOInformado === 0
+    ? `Saldo de ${dia} · nenhum movimento depois disso`
+    : `Saldo de ${dia} + ${plural(conta.movimentosDesdeOInformado, 'movimento', 'movimentos')} desde então`
+}
+
 /** A linha-painel de uma conta: marca, saldo, movimento, tendência e origem. */
 function LinhaConta({
   conta,
@@ -436,6 +457,7 @@ function LinhaConta({
 }) {
   const fatia = concentracao(conta, contas)
   const origem = ORIGEM_LINHA[conta.origemSaldo]
+  const receita = comoOSaldoFoiFeito(conta)
 
   return (
     <div
@@ -516,6 +538,14 @@ function LinhaConta({
               {origem.texto}
             </span>
           </span>
+          {receita && (
+            <span
+              className="font-sans"
+              style={{ fontSize: 9.5, lineHeight: 1.4, color: 'rgba(242,237,227,.42)', textWrap: 'pretty' }}
+            >
+              {receita}
+            </span>
+          )}
         </span>
         {/* As ações da linha são reais: os dois modais que já existem. O kebab
             do mockup viraria menu inerte, e botão que não faz nada é proibido. */}

@@ -24,21 +24,23 @@ import {
 } from '@/components/erp/ui'
 import { iconeDaCategoria } from '@/components/erp/Marcas'
 import { Mini, Progresso, RoscaLegenda } from '@/components/erp/Visualizacoes'
-import { carregarLancamentos, explicarLancamento } from '@/data/financeiro'
+import { carregarTelaDeLancamentos, explicarLancamento } from '@/data/financeiro'
+import type { LinhaDaTela } from '@/data/financeiro'
 import {
   brl,
   diaCurtoPt,
+  hojeEmSaoPaulo,
+  LANCAMENTOS_POR_PAGINA,
+  normalizarFiltroDeLancamentos,
+  periodoPorExtenso,
   plural,
   ROTULO_NATUREZA,
   ROTULO_SITUACAO_LANCAMENTO,
   saldoAberto,
-  SEM_CATEGORIA,
-  situacaoDe,
 } from '@/domain'
-import type { LancamentoGerencial, SituacaoLancamento } from '@/domain'
+import type { SituacaoLancamento } from '@/domain'
 
 import { AcoesGerenciais, NovoCompromisso } from '../Compromissos'
-import { dadosDaVendaManual } from '../dados-da-venda-manual'
 import { VendaManual } from '../VendaManual'
 import { ProvedorDeListas } from '../ListasDoFormulario'
 import { DetalheDoLancamento } from './DetalheDoLancamento'
@@ -121,13 +123,6 @@ function Passo({ href, children }: { href: string | null; children: ReactNode })
   )
 }
 
-/** N dias para trás de uma data AAAA-MM-DD, em UTC para não escorregar de dia. */
-function recuar(dia: string, dias: number): string {
-  const d = new Date(`${dia}T12:00:00Z`)
-  d.setUTCDate(d.getUTCDate() - dias)
-  return d.toISOString().slice(0, 10)
-}
-
 const TOM_SITUACAO: Record<SituacaoLancamento, TomUi> = {
   previsto: 'info',
   agendado: 'neutro',
@@ -169,13 +164,37 @@ interface Busca {
 
 export default async function Lancamentos({ searchParams }: { searchParams: Promise<Busca> }) {
   const filtro = await searchParams
+
+  /*
+   * O filtro vai INTEIRO para o Postgres — período, situação, tipo, conta,
+   * categoria, centro, recorrente, vencimento, busca, ordenação e página.
+   *
+   * Antes nada disso chegava ao banco: `carregarLancamentos()` era chamada sem
+   * argumento, as 1.268 linhas vinham completas (444.783 bytes, 2 requisições
+   * PostgREST) e o recorte era feito aqui, com `Array.filter` e `Array.slice`.
+   * Na URL do relato — `?periodo=tudo&q=Icaro`, rodapé "1 de 1268" — isso era
+   * transferir 434 KB para desenhar UMA linha. A razão medida foi 1268:1.
+   *
+   * O Postgres nunca foi o gargalo (a consulta mede 4,6 ms com Index Scan
+   * Backward, tudo em cache), e o JavaScript também não (as ~25 passadas sobre
+   * as 1.268 linhas mediam 0,90 ms). O custo era transporte e round-trip: 12
+   * requisições ao Supabase por render, 19 com o detalhe aberto, ~840 KB.
+   *
+   * A janela padrão continua sendo HOJE, e não "todo o histórico": quem
+   * precisa do resto pede — "Tudo" está a um clique e o rodapé sempre diz qual
+   * janela está valendo. A decisão mora em `normalizarFiltroDeLancamentos`
+   * (src/domain) porque ela precisa valer igual na consulta e nos links que
+   * esta tela desenha.
+   */
+  const hoje = hojeEmSaoPaulo()
+  const f = normalizarFiltroDeLancamentos(filtro, hoje)
+
   // A explicação do detalhe sai junto com a lista, e não depois dela: ela só
   // depende do id que já está na URL, e encadear as duas leituras somaria uma
   // ida ao banco ao tempo de abrir a tela para quem chegou por um link direto.
-  const [p, venda, explicacao] = await Promise.all([
-    carregarLancamentos(),
-    dadosDaVendaManual(),
-    filtro.lancamento ? explicarLancamento(filtro.lancamento) : Promise.resolve(null),
+  const [p, explicacao] = await Promise.all([
+    carregarTelaDeLancamentos(f),
+    f.lancamento ? explicarLancamento(f.lancamento) : Promise.resolve(null),
   ])
 
   if (p.semBanco) {
@@ -191,187 +210,45 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
     )
   }
 
-  /**
-   * A janela padrão é HOJE, e não "todo o histórico".
+  /*
+   * A página vem grampeada do banco.
    *
-   * Abrir a tela carregava 1.244 lançamentos e desenhava 250 — segundos de
-   * espera para responder uma pergunta que quase sempre é sobre o dia.
-   * Quem precisa do histórico inteiro pede: o atalho "Tudo" está a um clique,
-   * e o rodapé sempre diz qual janela está valendo.
-   *
-   * Data digitada à mão vence o atalho — quem escolheu 01/06 quer 01/06.
+   * `?pagina=99` num filtro de 1 linha devolveria zero linhas — tela vazia que
+   * parece defeito. Só a consulta sabe o total, então é ela quem decide qual
+   * página existe; aqui só se lê a resposta.
    */
-  const atalho = ['hoje', '7', '30', 'mes', 'tudo'].includes(filtro.periodo ?? '')
-    ? (filtro.periodo as 'hoje' | '7' | '30' | 'mes' | 'tudo')
-    : 'hoje'
-  const temDataManual = Boolean(filtro.de || filtro.ate)
-  const janela = temDataManual
-    ? { de: filtro.de ?? '', ate: filtro.ate ?? '' }
-    : atalho === 'tudo'
-      ? { de: '', ate: '' }
-      : atalho === 'mes'
-        ? { de: `${p.hoje.slice(0, 7)}-01`, ate: p.hoje }
-        : { de: recuar(p.hoje, atalho === '30' ? 29 : atalho === '7' ? 6 : 0), ate: p.hoje }
-
-  const comSituacao = p.lancamentos.map((l) => ({ l, situacao: situacaoDe(l, p.hoje) }))
-  const busca = (filtro.q ?? '').trim().toLowerCase()
-
-  // O detalhe é procurado na lista INTEIRA, não na filtrada: o link do
-  // Assessor aponta para um lançamento sem saber que filtro está valendo aqui,
-  // e um cancelado — que a lista esconde por padrão — continua sendo um
-  // registro que alguém precisa abrir para entender o que aconteceu.
-  const alvo = filtro.lancamento
-    ? (comSituacao.find((x) => x.l.id === filtro.lancamento) ?? null)
-    : null
-
-  const visiveis = comSituacao
-    .filter(({ l, situacao }) => {
-      if (filtro.situacao && situacao !== filtro.situacao) return false
-      // Sem filtro explícito, cancelado sai da lista: não é trabalho pendente
-      // nem histórico de caixa, é um registro que deixou de valer.
-      if (!filtro.situacao && situacao === 'cancelado') return false
-      if (filtro.tipo && l.tipo !== filtro.tipo) return false
-      // 'sem' é o filtro que o extrato tornou necessário: quase cem
-      // lançamentos importados sem categoria, que a DRE não consegue
-      // classificar. Sem esse valor não havia como listá-los para
-      // classificar um a um.
-      if (filtro.categoria === 'sem') {
-        if (l.categoriaId) return false
-      } else if (filtro.categoria && l.categoriaId !== filtro.categoria) {
-        return false
-      }
-      // Mesma ideia para a projeção de caixa: título sem vencimento não é
-      // posicionado em nenhum dia e some do fluxo.
-      if (filtro.venc === 'sem' && l.venceEm) return false
-      if (filtro.conta && l.contaId !== filtro.conta) return false
-      if (filtro.centro && l.centroCusto !== filtro.centro) return false
-      // O período filtra pelo DIA DO MOVIMENTO, não pelo vencimento. Filtrar
-      // por vencimento descartava 1.223 das 1.244 linhas — tudo que já
-      // aconteceu não tem vencimento, e a janela devolvia só as parcelas do
-      // financiamento.
-      if (janela.de && l.ocorridoEm < janela.de) return false
-      if (janela.ate && l.ocorridoEm > janela.ate) return false
-      if (filtro.recorrente === 'sim' && !l.recorrente) return false
-      if (filtro.recorrente === 'nao' && l.recorrente) return false
-      if (busca) {
-        const alvo = `${l.descricao} ${l.favorecido ?? ''} ${l.documento ?? ''}`.toLowerCase()
-        if (!alvo.includes(busca)) return false
-      }
-      return true
-    })
-    /*
-     * Do mais recente para o mais antigo — a ordem de um extrato.
-     *
-     * A ordem anterior era a de uma FILA DE TRABALHO: vencido primeiro,
-     * liquidado por último. Numa base em que 1.219 de 1.244 lançamentos já
-     * foram baixados, isso empurrava todo o dinheiro que se moveu para depois
-     * das 21 parcelas em aberto — e o teto de linhas cortava o resto. Quem
-     * abria a tela via uma parede de "Sicredi - KGIRO FAMPE" e concluía, com
-     * razão, que o ERP não estava mostrando as entradas e saídas.
-     *
-     * Pior: o desempate era `venceEm ?? '9999'`, e como quase ninguém tem
-     * vencimento, quase todos empatavam — o pouco que aparecia vinha em ordem
-     * arbitrária, sem ser cronológica nem nada.
-     *
-     * O que exige decisão continua acessível pelo filtro de situação e pelo
-     * painel "Próximos vencimentos" ao lado. A lista principal responde a
-     * outra pergunta, que é a que se faz todo dia: o que entrou e o que saiu.
-     */
-    .sort((a, b) => {
-      const d = b.l.ocorridoEm.localeCompare(a.l.ocorridoEm)
-      return d !== 0 ? d : b.l.id.localeCompare(a.l.id)
-    })
-
-  /**
-   * Paginação de 50, no lugar do teto cego de 250.
-   *
-   * O teto anterior cortava o desenho e não oferecia saída: as linhas 251 em
-   * diante simplesmente não existiam para quem estava na tela. A página é a
-   * mesma economia de desenho com uma diferença que importa — dá para chegar
-   * às outras.
-   *
-   * Os totais e indicadores continuam sobre o FILTRO INTEIRO, não sobre a
-   * página: "entrou R$ 2.841,13" tem de responder pela semana, não pelas
-   * cinquenta linhas que couberam na tela.
-   */
-  const POR_PAGINA = 50
-  const paginas = Math.max(1, Math.ceil(visiveis.length / POR_PAGINA))
-  const pagina = Math.min(Math.max(1, Number(filtro.pagina ?? '1') || 1), paginas)
-  const listadas = visiveis.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA)
-  const ocultas = visiveis.length - listadas.length
+  const { pagina, paginas } = p
+  const listadas = p.linhas
+  const alvo = p.alvo
+  const periodoNaTela = periodoPorExtenso(f, diaCurtoPt)
 
   /*
-   * Os três primeiros indicadores passam a responder sobre MOVIMENTO, e sobre
-   * o recorte que está na tela.
+   * TODOS os números abaixo vêm agregados do Postgres, e essa é a metade
+   * difícil desta correção.
    *
-   * "A pagar hoje", "A receber hoje" e "Vencidos" mostravam R$ 0,00 os três ao
-   * mesmo tempo — verdade inútil numa operação que recebe à vista e não tem
-   * boleto vencido. Enquanto isso, os R$ 669,73 que entraram e os R$ 2.171,38
-   * que saíram no dia não apareciam em lugar nenhum da tela.
+   * Com a lista paginada, somar em JavaScript passaria a somar só as 50 linhas
+   * da página: "A pagar em aberto" encolheria a cada virada de página e
+   * "Entrou" descreveria meia semana. Um total que passa a somar só o visível
+   * é um bug pior que a lentidão, porque não aparece — ninguém confere um
+   * número que já estava lá.
    *
-   * Movido é o que já foi baixado: previsão somada com realizado daria um
-   * número que não existe em conta nenhuma.
+   * Por isso há DUAS agregações, com escopos diferentes e deliberados:
+   *
+   * `p.resumo` fala do FILTRO INTEIRO — entrou, saiu, movimentos, a receber e
+   * a pagar em aberto. É o que responde "o que aconteceu nesta janela".
+   *
+   * `p.panorama` fala da BASE INTEIRA, ignorando o filtro — taxa de
+   * pagamento, prazos médios, inadimplência, total a pagar e a receber,
+   * recorrências, pendências de preenchimento e próximos vencimentos. É o que
+   * sempre respondeu "como está a operação", e continua não obedecendo ao
+   * recorte da tela.
    */
-  const movidos = visiveis.filter((x) => x.l.baixadoEm)
-  const entrou = movidos
-    .filter((x) => x.l.tipo === 'entrada')
-    .reduce((a, x) => a + x.l.recebido, 0)
-  const saiu = movidos.filter((x) => x.l.tipo === 'saida').reduce((a, x) => a + x.l.recebido, 0)
-  const periodoNaTela = !janela.de && !janela.ate
-    ? 'todo o histórico'
-    : `${janela.de ? diaCurtoPt(janela.de) : 'início'} a ${janela.ate ? diaCurtoPt(janela.ate) : 'hoje'}`
+  const { resumo, panorama } = p
+  const taxaPagamento = panorama.qtdSaidas ? (panorama.qtdPagas / panorama.qtdSaidas) * 100 : 0
+  const inadimplencia =
+    panorama.totalAPagar > 0 ? (panorama.vencidos.valor / panorama.totalAPagar) * 100 : 0
 
-  const abertos = visiveis.filter((x) => x.situacao !== 'liquidado' && x.situacao !== 'cancelado')
-  const somaAberto = (ls: { l: LancamentoGerencial }[]) => ls.reduce((a, x) => a + saldoAberto(x.l), 0)
-  const entradasAbertas = abertos.filter((x) => x.l.tipo === 'entrada')
-  const saidasAbertas = abertos.filter((x) => x.l.tipo === 'saida')
-
-  // ── Indicadores derivados do conjunto inteiro, não do filtro ────────────
-  const vivos = p.lancamentos.filter((l) => !l.canceladoEm)
-  const saidas = vivos.filter((l) => l.tipo === 'saida')
-  const pagas = saidas.filter((l) => l.baixadoEm)
-  const taxaPagamento = saidas.length ? (pagas.length / saidas.length) * 100 : 0
-
-  /** Dias entre vencimento e baixa efetiva. Negativo é antecipação. */
-  const atrasoMedio = (ls: LancamentoGerencial[]) => {
-    const comAmbas = ls.filter((l) => l.baixadoEm && l.venceEm)
-    if (!comAmbas.length) return null
-    const soma = comAmbas.reduce(
-      (a, l) => a + (Date.parse(l.baixadoEm!) - Date.parse(l.venceEm!)) / 86_400_000,
-      0,
-    )
-    return soma / comAmbas.length
-  }
-  const prazoPagamento = atrasoMedio(pagas)
-  const prazoRecebimento = atrasoMedio(vivos.filter((l) => l.tipo === 'entrada' && l.baixadoEm))
-
-  const totalAPagar = saidas.reduce((a, l) => a + saldoAberto(l), 0)
-  const inadimplencia = totalAPagar > 0 ? (p.vencidos.valor / totalAPagar) * 100 : 0
-
-  const recorrentesPorCategoria = new Map<string, number>()
-  for (const l of vivos.filter((x) => x.recorrente)) {
-    const chave = l.categoria ?? SEM_CATEGORIA
-    recorrentesPorCategoria.set(chave, (recorrentesPorCategoria.get(chave) ?? 0) + l.valor)
-  }
-
-  // ── Pendências de preenchimento ────────────────────────────────────────
-  //
-  // As duas listas abaixo não são um relatório: são fila de trabalho. Sem
-  // categoria, o lançamento não tem linha na DRE; sem vencimento, ele não tem
-  // dia na projeção de caixa. Nos dois casos o número existe no banco e não
-  // aparece em nenhum total — o pior tipo de dado, o que some sem avisar.
-  const semCategoria = vivos.filter((l) => !l.categoriaId)
-  const semVencimento = vivos.filter((l) => !l.venceEm && saldoAberto(l) > 0)
-  const valorSemCategoria = semCategoria.reduce((a, l) => a + l.valor, 0)
-  const valorSemVencimento = semVencimento.reduce((a, l) => a + saldoAberto(l), 0)
-
-  const proximos = vivos
-    .filter((l) => saldoAberto(l) > 0 && l.venceEm && l.venceEm >= p.hoje)
-    .sort((a, b) => (a.venceEm ?? '').localeCompare(b.venceEm ?? ''))
-    .slice(0, 5)
-  const totalProximos = proximos.reduce((a, l) => a + saldoAberto(l), 0)
-
-  const colunas: ColunaUi<{ l: LancamentoGerencial; situacao: SituacaoLancamento }>[] = [
+  const colunas: ColunaUi<LinhaDaTela>[] = [
     {
       chave: 'data',
       titulo: 'Data',
@@ -379,7 +256,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       // O dia do MOVIMENTO, com a legenda dizendo qual dia é esse. A coluna
       // mostrava o vencimento e escrevia "—" em 1.223 das 1.244 linhas: uma
       // coluna de data que quase nunca tem data.
-      render: ({ l, situacao }) => (
+      render: ({ lancamento: l, situacao }) => (
         <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           <Num tamanho={11.5} tom={situacao === 'vencido' ? 'erro' : undefined}>
             {diaCurtoPt(l.ocorridoEm)}
@@ -407,7 +284,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
        * `Link` e não botão: assim dá para abrir em outra aba e copiar o
        * endereço de um lançamento específico para mandar para alguém.
        */
-      render: ({ l }) => (
+      render: ({ lancamento: l }) => (
         <Link
           href={urlCom(filtro, { lancamento: l.id })}
           scroll={false}
@@ -469,7 +346,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       chave: 'tipo',
       titulo: 'Tipo',
       largura: '92px',
-      render: ({ l }) => (
+      render: ({ lancamento: l }) => (
         <Chip tom={l.tipo === 'entrada' ? 'ok' : 'erro'} contorno>
           {l.tipo === 'entrada' ? '↑ A receber' : '↓ A pagar'}
         </Chip>
@@ -479,7 +356,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       chave: 'cat',
       titulo: 'Categoria',
       largura: '150px',
-      render: ({ l }) => (
+      render: ({ lancamento: l }) => (
         <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           <span style={{ color: 'rgba(242,237,227,.4)', flex: 'none' }}>
             <Ico n={iconeDaCategoria(l.categoria)} tamanho={13} />
@@ -505,7 +382,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       chave: 'conta',
       titulo: 'Conta',
       largura: '112px',
-      render: ({ l }) => (
+      render: ({ lancamento: l }) => (
         <span
           className="font-sans"
           style={{
@@ -526,7 +403,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       titulo: 'Valor',
       largura: '124px',
       alinhamento: 'right',
-      render: ({ l }) => {
+      render: ({ lancamento: l }) => {
         const falta = saldoAberto(l)
         const encargos = l.multa + l.juros
         return (
@@ -571,7 +448,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       // conta já está na coluna ao lado, então o que esta coluna informa é a
       // procedência: veio do extrato do banco ou foi digitado à mão. O nome
       // completo fica no title, para quem precisar conferir.
-      render: ({ l }) => (
+      render: ({ lancamento: l }) => (
         <span title={l.origem}>
           <Chip tom={l.origem === 'Manual' ? 'neutro' : 'info'} contorno>
             {l.origem.startsWith('Extrato') ? 'Extrato' : l.origem}
@@ -588,7 +465,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       // 160, e a 124 o último botão saía cortado na borda da coluna.
       largura: '164px',
       alinhamento: 'right',
-      render: ({ l, situacao }) => (
+      render: ({ lancamento: l, situacao }) => (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, justifyContent: 'flex-end' }}>
           <AbrirDetalhe href={urlCom(filtro, { lancamento: l.id })} id={l.id} />
           <AcoesGerenciais lancamento={l} situacao={situacao} />
@@ -606,37 +483,37 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
           icone="entrada"
           tom="ok"
           rotulo="Entrou"
-          valor={brl(entrou)}
+          valor={brl(resumo.entrou)}
           tomValor="ok"
-          nota={`${periodoNaTela} · ${plural(movidos.filter((x) => x.l.tipo === 'entrada').length, 'movimento', 'movimentos')}`}
+          nota={`${periodoNaTela} · ${plural(resumo.movimentosEntrada, 'movimento', 'movimentos')}`}
         />
         <Indicador
           icone="saida"
           tom="erro"
           rotulo="Saiu"
-          valor={brl(saiu)}
+          valor={brl(resumo.saiu)}
           tomValor="erro"
-          nota={`${periodoNaTela} · ${plural(movidos.filter((x) => x.l.tipo === 'saida').length, 'movimento', 'movimentos')}`}
+          nota={`${periodoNaTela} · ${plural(resumo.movimentosSaida, 'movimento', 'movimentos')}`}
         />
         <Indicador
           icone="balanca"
-          tom={entrou - saiu >= 0 ? 'ok' : 'erro'}
+          tom={resumo.entrou - resumo.saiu >= 0 ? 'ok' : 'erro'}
           rotulo="Resultado do período"
-          valor={brl(entrou - saiu)}
-          tomValor={entrou - saiu >= 0 ? 'ok' : 'erro'}
+          valor={brl(resumo.entrou - resumo.saiu)}
+          tomValor={resumo.entrou - resumo.saiu >= 0 ? 'ok' : 'erro'}
           nota={
-            p.vencidos.qtd
-              ? `${plural(p.vencidos.qtd, 'obrigação vencida', 'obrigações vencidas')} · ${brl(p.vencidos.valor)}`
+            panorama.vencidos.qtd
+              ? `${plural(panorama.vencidos.qtd, 'obrigação vencida', 'obrigações vencidas')} · ${brl(panorama.vencidos.valor)}`
               : 'Entrou menos saiu, já baixado'
           }
-          tomNota={p.vencidos.qtd ? 'erro' : 'neutro'}
+          tomNota={panorama.vencidos.qtd ? 'erro' : 'neutro'}
         />
         <Indicador
           icone="repetir"
           tom="roxo"
           rotulo="Recorrentes do mês"
-          valor={brl(p.recorrentes.valor)}
-          nota={plural(p.recorrentes.qtd, 'despesa fixa cadastrada', 'despesas fixas cadastradas')}
+          valor={brl(panorama.recorrentes.valor)}
+          nota={plural(panorama.recorrentes.qtd, 'despesa fixa cadastrada', 'despesas fixas cadastradas')}
         />
         <Indicador
           icone="tendencia"
@@ -648,15 +525,15 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
         />
         <Indicador
           icone="ampulheta"
-          tom={p.aprovacoes.qtd ? 'atencao' : 'ok'}
+          tom={panorama.aprovacoes.qtd ? 'atencao' : 'ok'}
           rotulo="Pendências de aprovação"
-          valor={brl(p.aprovacoes.valor)}
+          valor={brl(panorama.aprovacoes.valor)}
           nota={
-            p.aprovacoes.qtd
-              ? `${plural(p.aprovacoes.qtd, 'lançamento veio', 'lançamentos vieram')} de integração sem conferência`
+            panorama.aprovacoes.qtd
+              ? `${plural(panorama.aprovacoes.qtd, 'lançamento veio', 'lançamentos vieram')} de integração sem conferência`
               : 'Tudo conferido'
           }
-          tomNota={p.aprovacoes.qtd ? 'atencao' : 'ok'}
+          tomNota={panorama.aprovacoes.qtd ? 'atencao' : 'ok'}
         />
       </GradeIndicadores>
 
@@ -669,10 +546,18 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
                     WhatsApp ou Instagram é o ÚNICO dinheiro que o ERP não
                     descobre sozinho. Mercado Pago e Pagaleve chegam pelo
                     extrato; esta aqui só existe se alguém digitar. */}
+                {/* Só as contas por propriedade — 5 linhas que a tela já
+                    carregou. O catálogo (412 bases, 95 KB) é buscado quando o
+                    modal ABRE: passá-lo aqui fazia esses 95 KB atravessarem no
+                    payload RSC de toda navegação, com o modal fechado, e era o
+                    único custo da tela que não encolhia quando o filtro
+                    devolvia uma linha. */}
                 <VendaManual
-                  bases={venda.bases}
-                  contas={venda.contas}
-                  tamanhos={venda.tamanhos}
+                  contas={p.contas.map((c) => ({
+                    id: c.id,
+                    nome: c.nome,
+                    principal: c.principal,
+                  }))}
                 />
                 <NovoCompromisso
                   contas={p.contas}
@@ -688,15 +573,15 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
               icone="calendario"
               acao={<AcaoPainel href="/financeiro/fluxo-de-caixa">Ver todos</AcaoPainel>}
             >
-              {proximos.length > 0 ? (
+              {panorama.proximos.length > 0 ? (
                 <>
                   <Pilha gap={0}>
-                    {proximos.map((l) => (
+                    {panorama.proximos.map((l) => (
                       <LinhaValor
                         key={l.id}
                         rotulo={l.descricao}
-                        nota={`${diaCurtoPt(l.venceEm!)} · ${l.categoria}`}
-                        valor={brl(saldoAberto(l))}
+                        nota={`${diaCurtoPt(l.venceEm)} · ${l.categoria ?? 'Sem categoria'}`}
+                        valor={brl(l.saldoAberto)}
                         tom={l.tipo === 'entrada' ? 'ok' : 'erro'}
                       />
                     ))}
@@ -713,7 +598,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
                     <Etiqueta>Total listado</Etiqueta>
                     <div style={{ flex: 1 }} />
                     <Num tamanho={13} tom="ouro">
-                      {brl(totalProximos)}
+                      {brl(panorama.proximos.reduce((a, l) => a + l.saldoAberto, 0))}
                     </Num>
                   </div>
                 </>
@@ -726,24 +611,24 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
               <Pilha gap={0}>
                 <LinhaValor
                   rotulo="Total a pagar"
-                  valor={brl(totalAPagar)}
+                  valor={brl(panorama.totalAPagar)}
                   tom="erro"
                   icone="saida"
                   tomIcone="erro"
                 />
                 <LinhaValor
                   rotulo="Total a receber"
-                  valor={brl(vivos.filter((l) => l.tipo === 'entrada').reduce((a, l) => a + saldoAberto(l), 0))}
+                  valor={brl(panorama.totalAReceber)}
                   tom="ok"
                   icone="entrada"
                   tomIcone="ok"
                 />
                 <LinhaValor
                   rotulo="Vencidos"
-                  valor={brl(p.vencidos.valor)}
-                  tom={p.vencidos.qtd ? 'erro' : 'neutro'}
+                  valor={brl(panorama.vencidos.valor)}
+                  tom={panorama.vencidos.qtd ? 'erro' : 'neutro'}
                   icone="alerta"
-                  tomIcone={p.vencidos.qtd ? 'erro' : 'neutro'}
+                  tomIcone={panorama.vencidos.qtd ? 'erro' : 'neutro'}
                 />
                 <LinhaValor
                   rotulo="Saldo líquido"
@@ -754,14 +639,11 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
               </Pilha>
             </Painel>
 
-            {recorrentesPorCategoria.size > 0 && (
+            {panorama.recorrentesPorCategoria.length > 0 && (
               <Painel titulo="Recorrências do mês" icone="repetir" tom="roxo">
                 <RoscaLegenda
-                  fatias={[...recorrentesPorCategoria.entries()].map(([rotulo, valor]) => ({
-                    rotulo,
-                    valor,
-                  }))}
-                  total={p.recorrentes.valor}
+                  fatias={panorama.recorrentesPorCategoria}
+                  total={panorama.recorrentes.valor}
                   legendaTotal="Recorrente"
                   formatar={brl}
                   tamanho={148}
@@ -792,7 +674,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
           </Destaque>
         )}
 
-        {(semCategoria.length > 0 || semVencimento.length > 0) && (
+        {(panorama.semCategoria.qtd > 0 || panorama.semVencimento.qtd > 0) && (
           <Destaque
             tom="atencao"
             icone="alerta"
@@ -805,14 +687,20 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
                     antigo trazia de volta para cá com um filtro, deixando o
                     trabalho inteiro na mão de quem já não sabia o que a linha
                     era — e é dessa dúvida que a fila cuida. */}
-                {semCategoria.length > 0 && (
+                {panorama.semCategoria.qtd > 0 && (
                   <AcaoPainel href="/assessor/classificacao">
-                    {`Classificar ${semCategoria.length} com ajuda da IA`}
+                    {`Classificar ${panorama.semCategoria.qtd} com ajuda da IA`}
                   </AcaoPainel>
                 )}
-                {semVencimento.length > 0 && (
-                  <AcaoPainel href="/financeiro/lancamentos?venc=sem">
-                    {`Datar ${semVencimento.length} sem vencimento`}
+                {panorama.semVencimento.qtd > 0 && (
+                  /* `?periodo=tudo` junto do `?venc=sem`: sem ele o link cai na
+                     janela padrão (hoje) e mostra zero linhas, porque o que não
+                     tem vencimento quase nunca é do dia. Antes o filtro rodava
+                     sobre a lista inteira já carregada e a janela era outra
+                     conta; agora que a janela desce para o banco, o link
+                     precisa dizer qual janela quer. */
+                  <AcaoPainel href="/financeiro/lancamentos?periodo=tudo&venc=sem">
+                    {`Datar ${panorama.semVencimento.qtd} sem vencimento`}
                   </AcaoPainel>
                 )}
               </span>
@@ -823,10 +711,10 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
               style={{ fontSize: 11.5, lineHeight: 1.55, color: 'rgba(242,237,227,.6)', textWrap: 'pretty' }}
             >
               {[
-                semCategoria.length > 0 &&
-                  `${plural(semCategoria.length, 'lançamento está', 'lançamentos estão')} sem categoria (${brl(valorSemCategoria)}) — nenhum entra na DRE enquanto ninguém disser o que são. A fila de classificação mostra cada um com a sugestão do ERP, a confiança e o porquê.`,
-                semVencimento.length > 0 &&
-                  `${plural(semVencimento.length, 'lançamento está', 'lançamentos estão')} sem data de vencimento (${brl(valorSemVencimento)}) — a projeção de caixa posiciona cada valor no dia do vencimento, então esses não aparecem no fluxo.`,
+                panorama.semCategoria.qtd > 0 &&
+                  `${plural(panorama.semCategoria.qtd, 'lançamento está', 'lançamentos estão')} sem categoria (${brl(panorama.semCategoria.valor)}) — nenhum entra na DRE enquanto ninguém disser o que são. A fila de classificação mostra cada um com a sugestão do ERP, a confiança e o porquê.`,
+                panorama.semVencimento.qtd > 0 &&
+                  `${plural(panorama.semVencimento.qtd, 'lançamento está', 'lançamentos estão')} sem data de vencimento (${brl(panorama.semVencimento.valor)}) — a projeção de caixa posiciona cada valor no dia do vencimento, então esses não aparecem no fluxo.`,
               ]
                 .filter(Boolean)
                 .join(' ')}
@@ -843,13 +731,18 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
         <Painel
           titulo="Lançamentos"
           icone="lista"
-          nota={`${visiveis.length} de ${comSituacao.length} no período`}
+          // "1 de 1268": o primeiro número é o que o filtro devolveu, o
+          // segundo é a base inteira. Os dois vêm contados no banco — o
+          // primeiro por `count(*)` sobre o filtro, o segundo por `count(*)`
+          // sobre a tabela. Contar o array da página daria "50 de 50" em toda
+          // tela, que é a forma silenciosa deste bug.
+          nota={`${resumo.total} de ${panorama.totalDaBase} no período`}
           padding="16px 17px 14px"
         >
           <TabelaUi
             colunas={colunas}
             itens={listadas}
-            chaveDe={({ l }) => l.id}
+            chaveDe={({ lancamento: l }) => l.id}
             larguraMinima={1120}
             faixaDe={({ situacao }) =>
               situacao === 'vencido' ? 'erro' : situacao === 'parcial' ? 'ouro' : null
@@ -857,31 +750,36 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
             // A linha que o detalhe está mostrando fica marcada: fechar o modal
             // sem isso devolve a pessoa a cinquenta linhas iguais, sem lembrar
             // em qual delas ela estava.
-            selecionadoDe={({ l }) => l.id === filtro.lancamento}
+            selecionadoDe={({ lancamento: l }) => l.id === filtro.lancamento}
             vazio={
               <Vazio
                 icone="busca"
                 texto={
-                  comSituacao.length === 0
+                  panorama.totalDaBase === 0
                     ? 'Nenhum lançamento cadastrado ainda.'
                     : 'Nenhum lançamento atende a este filtro.'
                 }
               />
             }
             rodape={
-              visiveis.length > 0 ? (
+              resumo.total > 0 ? (
                 <RodapeTabela
                   contagem={
                     paginas > 1
-                      ? `${(pagina - 1) * POR_PAGINA + 1}–${(pagina - 1) * POR_PAGINA + listadas.length} de ${visiveis.length} · página ${pagina} de ${paginas} · ${periodoNaTela}`
-                      : `${plural(visiveis.length, 'lançamento', 'lançamentos')} · ${periodoNaTela}`
+                      ? `${(pagina - 1) * LANCAMENTOS_POR_PAGINA + 1}–${(pagina - 1) * LANCAMENTOS_POR_PAGINA + listadas.length} de ${resumo.total} · página ${pagina} de ${paginas} · ${periodoNaTela}`
+                      : `${plural(resumo.total, 'lançamento', 'lançamentos')} · ${periodoNaTela}`
                   }
+                  // Os três totais falam do FILTRO INTEIRO, não das 50 linhas
+                  // desenhadas. É a razão de existir o `resumo` agregado no
+                  // Postgres: com a lista paginada, um `reduce` sobre
+                  // `listadas` faria "A pagar em aberto" encolher a cada
+                  // página virada, sem erro nenhum na tela.
                   totais={[
-                    { rotulo: 'A receber em aberto', valor: brl(somaAberto(entradasAbertas)), tom: 'ok' },
-                    { rotulo: 'A pagar em aberto', valor: brl(somaAberto(saidasAbertas)), tom: 'erro' },
+                    { rotulo: 'A receber em aberto', valor: brl(resumo.aReceberAberto), tom: 'ok' },
+                    { rotulo: 'A pagar em aberto', valor: brl(resumo.aPagarAberto), tom: 'erro' },
                     {
                       rotulo: 'Resultado do filtro',
-                      valor: brl(somaAberto(entradasAbertas) - somaAberto(saidasAbertas)),
+                      valor: brl(resumo.aReceberAberto - resumo.aPagarAberto),
                       tom: 'ouro',
                     },
                   ]}
@@ -930,29 +828,29 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
             valor={`${taxaPagamento.toFixed(1).replace('.', ',')}%`}
             tom={taxaPagamento >= 80 ? 'ok' : 'atencao'}
             medidor={<Progresso pct={taxaPagamento} tom={taxaPagamento >= 80 ? 'ok' : 'atencao'} />}
-            nota={`${pagas.length} de ${saidas.length} contas pagas`}
+            nota={`${panorama.qtdPagas} de ${panorama.qtdSaidas} contas pagas`}
           />
 
           <Metrica
             rotulo="Prazo médio de pagamento"
             valor={
-              prazoPagamento === null
+              panorama.prazoPagamento === null
                 ? '—'
-                : `${Math.abs(prazoPagamento).toFixed(1).replace('.', ',')} dias`
+                : `${Math.abs(panorama.prazoPagamento).toFixed(1).replace('.', ',')} dias`
             }
-            tom={prazoPagamento !== null && prazoPagamento > 0 ? 'erro' : 'ok'}
+            tom={panorama.prazoPagamento !== null && panorama.prazoPagamento > 0 ? 'erro' : 'ok'}
             medidor={
               <Mini
-                valores={pagas.length > 1 ? [0, prazoPagamento ?? 0] : [0, 0]}
+                valores={panorama.qtdPagas > 1 ? [0, panorama.prazoPagamento ?? 0] : [0, 0]}
                 largura={140}
                 altura={26}
-                tom={prazoPagamento !== null && prazoPagamento > 0 ? 'erro' : 'ok'}
+                tom={panorama.prazoPagamento !== null && panorama.prazoPagamento > 0 ? 'erro' : 'ok'}
               />
             }
             nota={
-              prazoPagamento === null
+              panorama.prazoPagamento === null
                 ? 'Nenhuma conta baixada com vencimento definido'
-                : prazoPagamento > 0
+                : panorama.prazoPagamento > 0
                   ? 'em média DEPOIS do vencimento'
                   : 'em média ANTES do vencimento'
             }
@@ -961,23 +859,23 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
           <Metrica
             rotulo="Prazo médio de recebimento"
             valor={
-              prazoRecebimento === null
+              panorama.prazoRecebimento === null
                 ? '—'
-                : `${Math.abs(prazoRecebimento).toFixed(1).replace('.', ',')} dias`
+                : `${Math.abs(panorama.prazoRecebimento).toFixed(1).replace('.', ',')} dias`
             }
-            tom={prazoRecebimento !== null && prazoRecebimento > 0 ? 'atencao' : 'ok'}
+            tom={panorama.prazoRecebimento !== null && panorama.prazoRecebimento > 0 ? 'atencao' : 'ok'}
             medidor={
               <Mini
-                valores={prazoRecebimento !== null ? [0, prazoRecebimento] : [0, 0]}
+                valores={panorama.prazoRecebimento !== null ? [0, panorama.prazoRecebimento] : [0, 0]}
                 largura={140}
                 altura={26}
-                tom={prazoRecebimento !== null && prazoRecebimento > 0 ? 'atencao' : 'ok'}
+                tom={panorama.prazoRecebimento !== null && panorama.prazoRecebimento > 0 ? 'atencao' : 'ok'}
               />
             }
             nota={
-              prazoRecebimento === null
+              panorama.prazoRecebimento === null
                 ? 'Nenhum recebimento baixado ainda'
-                : prazoRecebimento > 0
+                : panorama.prazoRecebimento > 0
                   ? 'o dinheiro entra depois do previsto'
                   : 'o dinheiro entra antes do previsto'
             }
@@ -988,7 +886,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
             valor={`${inadimplencia.toFixed(1).replace('.', ',')}%`}
             tom={inadimplencia > 5 ? 'erro' : 'ok'}
             medidor={<Progresso pct={inadimplencia} tom={inadimplencia > 5 ? 'erro' : 'ok'} />}
-            nota={`${brl(p.vencidos.valor)} vencido em aberto`}
+            nota={`${brl(panorama.vencidos.valor)} vencido em aberto`}
           />
 
           <Metrica
@@ -1013,8 +911,8 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
           os campos do lançamento anterior — inclusive a aba escolhida. */}
       {alvo && (
         <DetalheDoLancamento
-          key={alvo.l.id}
-          lancamento={alvo.l}
+          key={alvo.lancamento.id}
+          lancamento={alvo.lancamento}
           situacao={alvo.situacao}
           explicacao={explicacao}
         />
