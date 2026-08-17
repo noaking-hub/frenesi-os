@@ -224,6 +224,16 @@ export function emailEnvio(
 
 const LOJA = 'https://frenesiperfumes.com.br'
 
+/**
+ * A área do cliente — onde ele vê os pedidos dele.
+ *
+ * Destino do botão da confirmação de pagamento. A vitrine seria o convite
+ * errado no momento errado: quem acabou de pagar quer ACOMPANHAR a compra que
+ * fez, não olhar outra. Mandar para a home é responder "veja nossos produtos" a
+ * quem perguntou "e o meu pedido?".
+ */
+const CONTA_DO_CLIENTE = 'https://conta.frenesiperfumes.com.br'
+
 // ── Modelos da devolução ────────────────────────────────────────────────────
 
 /**
@@ -395,7 +405,7 @@ export function emailPagamento(d: {
     .split('{total}')
     .join(escapa(d.total))
     .split('{link}')
-    .join(LOJA)
+    .join(CONTA_DO_CLIENTE)
 
   return { assunto: ASSUNTO.pedido_pago.replace('{pedido}', d.pedido), html }
 }

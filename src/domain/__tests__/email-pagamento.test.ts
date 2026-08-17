@@ -66,6 +66,15 @@ describe('e-mail de pagamento confirmado', () => {
     expect(html).toContain('rastreio')
   })
 
+  it('manda o botão para a área do cliente, não para a vitrine', () => {
+    // O botão dizia "acompanhar meu pedido" e caía na home da loja: quem
+    // acabou de pagar perguntou "e o meu pedido?" e recebia "veja nossos
+    // produtos". O destino certo é onde ele vê as compras dele.
+    const { html } = emailPagamento(base)
+    expect(html).toContain('href="https://conta.frenesiperfumes.com.br"')
+    expect(html).not.toContain('href="https://frenesiperfumes.com.br"')
+  })
+
   it('mantém o fundo claro da nova identidade', () => {
     // A troca para fundo claro já foi desfeita uma vez por um teste esquecido.
     const { html } = emailPagamento(base)
