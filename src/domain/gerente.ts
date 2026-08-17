@@ -87,6 +87,62 @@ export function temPermissoes(ator: Ator, exigidas: string[]): boolean {
   return exigidas.every((p) => ator.permissoes.includes(p))
 }
 
+/**
+ * O que cada papel autoriza a IA a fazer em nome de quem está logado.
+ *
+ * Esta função é a correção de um bug que anulou a Fase 3 inteira sem que nada
+ * acusasse. O ator do ERP nascia com `['gerente.ler']` fixo — herança da Fase
+ * 1, quando leitura era tudo o que existia. As ferramentas de escrita vieram
+ * depois exigindo `financeiro.escrever` e `estoque.escrever`, e como
+ * `catalogoVisivel` ESCONDE o que a permissão nega, elas nunca chegaram ao
+ * modelo.
+ *
+ * O efeito era pior do que uma recusa. A tela de Configurações dizia "escrita
+ * liberada, modo assistido", a política concordava — e o assistente, sem
+ * enxergar a ferramenta, respondia com toda a convicção que "o ERP não
+ * disponibiliza ferramenta de escrita para regras". Uma limitação inventada,
+ * indistinguível de uma real para quem estava do outro lado da tela.
+ *
+ * Permissão aqui é o direito de ser PERGUNTADO, não o de gravar sozinho: a
+ * política ainda exige confirmação no risco B, confirmação reforçada no C, e
+ * risco D continua fora de alcance para qualquer papel.
+ */
+export const PERMISSOES_POR_PAPEL: Record<string, string[]> = {
+  // Dono responde pelo caixa: a escrita financeira é dele.
+  dono: ['gerente.ler', 'financeiro.escrever', 'estoque.escrever'],
+  // Operação mexe no que é operação — reposição, solicitação de compra. Sem
+  // categorizar dinheiro.
+  operacao: ['gerente.ler', 'estoque.escrever'],
+}
+
+const PAPEL_PADRAO = 'operacao'
+
+export function permissoesDoPapel(papel: string): string[] {
+  return PERMISSOES_POR_PAPEL[papel] ?? PERMISSOES_POR_PAPEL[PAPEL_PADRAO]
+}
+
+/** Tudo que ALGUM papel concede. É contra isto que o catálogo se confere. */
+export function permissoesConhecidas(): string[] {
+  return [...new Set(Object.values(PERMISSOES_POR_PAPEL).flat())]
+}
+
+/**
+ * Ferramentas que nenhum papel consegue enxergar.
+ *
+ * Uma ferramenta que exige permissão que ninguém tem não é uma ferramenta
+ * restrita: é uma ferramenta morta, e morta em silêncio — some do catálogo
+ * sem erro, sem log, sem nada. Este cálculo existe para transformar esse
+ * silêncio em falha de carga do módulo, do lado de cá do deploy.
+ */
+export function ferramentasInalcancaveis<T extends ContratoDaFerramenta & { nome: string }>(
+  contratos: T[],
+): { nome: string; faltando: string[] }[] {
+  const concedidas = new Set(permissoesConhecidas())
+  return contratos
+    .map((c) => ({ nome: c.nome, faltando: c.permissoes.filter((p) => !concedidas.has(p)) }))
+    .filter((x) => x.faltando.length > 0)
+}
+
 // ── Policy Engine (§7) ─────────────────────────────────────────────────────
 
 export type Veredito =

@@ -35,7 +35,7 @@ export async function POST(req: Request) {
   }
 
   const usuario = await sessaoAtual()
-  const ator = atorDoErp(usuario?.id ?? null, usuario?.papel ?? 'operador')
+  const ator = atorDoErp(usuario?.id ?? null, usuario?.papel ?? 'operacao')
   if (!atorValido(ator)) {
     return NextResponse.json({ erro: 'Não consegui identificar o usuário.' }, { status: 403 })
   }

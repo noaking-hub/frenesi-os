@@ -52,7 +52,7 @@ export async function POST(req: Request) {
 
   const usuario = await sessaoAtual()
   const usuarioId = usuario?.id ?? null
-  const ator = atorDoErp(usuarioId, usuario?.papel ?? 'operador')
+  const ator = atorDoErp(usuarioId, usuario?.papel ?? 'operacao')
   // O motor exige ator inteiro; se um dia a montagem mudar e vier quebrada, é
   // melhor recusar aqui do que executar sem escopo de empresa.
   if (!atorValido(ator)) {

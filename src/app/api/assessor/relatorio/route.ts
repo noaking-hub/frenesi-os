@@ -32,7 +32,7 @@ export async function POST(req: Request) {
   if (!ferramenta) return NextResponse.json({ erro: 'Falta a ferramenta.' }, { status: 400 })
 
   const usuario = await sessaoAtual()
-  const ator = atorDoErp(usuario?.id ?? null, usuario?.papel ?? 'operador')
+  const ator = atorDoErp(usuario?.id ?? null, usuario?.papel ?? 'operacao')
   if (!atorValido(ator)) {
     return NextResponse.json({ erro: 'Não consegui identificar o usuário.' }, { status: 403 })
   }

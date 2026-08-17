@@ -25,7 +25,7 @@ export const dynamic = 'force-dynamic'
 
 export async function GET() {
   const usuario = await sessaoAtual()
-  const ator = atorDoErp(usuario?.id ?? null, usuario?.papel ?? 'operador')
+  const ator = atorDoErp(usuario?.id ?? null, usuario?.papel ?? 'operacao')
   if (!atorValido(ator)) return NextResponse.json({ acoes: [] })
   const acoes = await lerAcoesPendentes(null)
   return NextResponse.json({ acoes, escritaLiberada: await escritaLiberada() })
@@ -41,7 +41,7 @@ export async function POST(req: Request) {
   if (!id) return NextResponse.json({ erro: 'Informe a ação.' }, { status: 400 })
 
   const usuario = await sessaoAtual()
-  const ator = atorDoErp(usuario?.id ?? null, usuario?.papel ?? 'operador')
+  const ator = atorDoErp(usuario?.id ?? null, usuario?.papel ?? 'operacao')
   if (!atorValido(ator)) {
     return NextResponse.json({ erro: 'Não consegui identificar o usuário.' }, { status: 403 })
   }

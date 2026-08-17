@@ -15,6 +15,7 @@ import {
   LIMITES_PADRAO,
   nomeDoArquivo,
   paraCsv,
+  permissoesDoPapel,
   REGRA_DE_DADOS_NAO_CONFIAVEIS,
   saneadoEmProfundidade,
   tabelaDoResultado,
@@ -113,16 +114,15 @@ export function assessorConfigurado(): boolean {
  * e quando o WhatsApp entrar, é este objeto que vai precisar ser resolvido a
  * partir do número, com a mesma forma e as mesmas checagens.
  */
-export function atorDoErp(usuarioId: string | null, perfil = 'operador'): Ator {
+export function atorDoErp(usuarioId: string | null, perfil = 'operacao'): Ator {
   return {
     usuarioId: usuarioId ?? 'sessao-anonima',
     perfil,
-    // Fase 1 é leitura: a permissão de leitura é a única que existe hoje. A
-    // lista fica aqui, e não no modelo, porque é o backend que decide.
-    permissoes: ['gerente.ler'],
+    permissoes: permissoesDoPapel(perfil),
     empresaId: 'frenesi',
   }
 }
+
 
 /**
  * As regras de conduta do Gerente.
