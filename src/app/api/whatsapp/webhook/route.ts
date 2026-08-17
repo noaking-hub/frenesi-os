@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
 
 import { NextResponse } from 'next/server'
 
@@ -58,9 +58,53 @@ interface MensagemRecebida {
   type?: string
 }
 
+/**
+ * A mensagem veio mesmo da Meta?
+ *
+ * O `WHATSAPP_VERIFY_TOKEN` só protege o GET de verificação, que acontece uma
+ * vez na vida. O POST — o que efetivamente FALA com o Gerente — não conferia
+ * nada: a identidade saía de `m.from`, um campo do corpo que quem envia
+ * escolhe. Acertando um dos números autorizados, qualquer POST na internet
+ * confirmava ação financeira pendente sem estar logado em coisa nenhuma. E
+ * mesmo errando o número, já fazia o número comercial da FRENESI escrever
+ * para quem o atacante quisesse.
+ *
+ * A Meta assina cada entrega com HMAC-SHA256 do CORPO CRU usando o App
+ * Secret. Por isso o corpo é lido como texto e só depois vira JSON: qualquer
+ * re-serialização muda os bytes e invalida a assinatura.
+ *
+ * `timingSafeEqual` porque comparação de string com `===` volta mais cedo no
+ * primeiro byte diferente, e isso vaza a assinatura correta byte a byte.
+ *
+ * Sem `WHATSAPP_APP_SECRET` configurado a rota fica FECHADA — a mesma
+ * postura do webhook da Frenet. Segredo ausente não pode virar porta aberta.
+ */
+function assinaturaConfere(corpoCru: string, cabecalho: string | null): boolean {
+  const segredo = process.env.WHATSAPP_APP_SECRET?.trim()
+  if (!segredo) return false
+  if (!cabecalho?.startsWith('sha256=')) return false
+
+  const recebida = Buffer.from(cabecalho.slice('sha256='.length), 'hex')
+  const esperada = createHmac('sha256', segredo).update(corpoCru, 'utf8').digest()
+  // Tamanhos diferentes fazem `timingSafeEqual` lançar em vez de devolver false.
+  if (recebida.length !== esperada.length) return false
+  return timingSafeEqual(recebida, esperada)
+}
+
 export async function POST(req: Request) {
-  const corpo = (await req.json().catch(() => ({}))) as {
+  const corpoCru = await req.text()
+  if (!assinaturaConfere(corpoCru, req.headers.get('x-hub-signature-256'))) {
+    console.error('[whatsapp] POST recusado: assinatura ausente ou inválida')
+    return NextResponse.json({ erro: 'Assinatura inválida.' }, { status: 401 })
+  }
+
+  let corpo: {
     entry?: { changes?: { value?: { messages?: MensagemRecebida[] } }[] }[]
+  }
+  try {
+    corpo = JSON.parse(corpoCru)
+  } catch {
+    return NextResponse.json({ erro: 'Corpo inválido.' }, { status: 400 })
   }
 
   const mensagens =

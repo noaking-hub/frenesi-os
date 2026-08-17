@@ -29,9 +29,16 @@ const ABERTO = [
   // assim que o pulso de pedidos ficou surdo até a rota entrar nesta lista.
   '/api/frenet',
   '/api/melhorenvio',
-  '/api/crm',
+  // Só o ESPELHO do CRM, que é agendado e confere CRON_SEGREDO. O prefixo
+  // inteiro estava aberto, e com ele duas rotas sem verificação nenhuma:
+  // `/api/crm/recuperacao` dispara e-mail para até mil clientes e CRIA CUPOM
+  // REAL na Yampi (um `{tipo:'unico',pct:99}` passava, porque a validação só
+  // recusa 100% ou mais), e `/api/crm/cashback` escreve no banco com service
+  // role. As duas são chamadas pelo navegador de quem já está logado, então
+  // o cookie vai junto e nada quebra ao fechar. O repositório é público: o
+  // formato do corpo estava documentado para quem lesse o código.
+  '/api/crm/espelhar',
   '/api/financeiro',
-  '/api/tela',
   '/api/pedidos/pulso',
   '/api/diagnostico',
   '/api/pagarme',
@@ -41,8 +48,11 @@ const ABERTO = [
   // chamadas pelo navegador e continuam exigindo sessão. Abrir o prefixo todo
   // deixaria qualquer um perguntar o saldo do caixa sem estar logado.
   '/api/assessor/vigilia',
-  // Webhook do WhatsApp: a Meta chama sem cookie e a rota valida por token
-  // próprio, resolve identidade pelo número autorizado e recusa desconhecido.
+  // Webhook do WhatsApp: a Meta chama sem cookie. O GET confere o
+  // `WHATSAPP_VERIFY_TOKEN` e o POST confere a assinatura HMAC-SHA256 do
+  // corpo cru contra o `WHATSAPP_APP_SECRET`. Sem o segredo, a rota recusa
+  // tudo — antes ela aceitava qualquer POST e confiava no número que o
+  // próprio corpo declarava.
   '/api/whatsapp',
 ]
 

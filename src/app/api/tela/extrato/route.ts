@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 
+import { exigeSessao } from '@/app/api/exige-sessao'
+
 import { atualizarExtrato } from '@/app/(erp)/financeiro/extrato/actions'
 
 /**
@@ -14,6 +16,9 @@ export const maxDuration = 300
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: Request) {
+  const semSessao = await exigeSessao()
+  if (semSessao) return semSessao
+
   const corpo = (await req.json().catch(() => ({}))) as {
     de?: string
     ate?: string

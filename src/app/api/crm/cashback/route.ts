@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 
+import { exigeSessao } from '@/app/api/exige-sessao'
+
 import { sincronizarCashbackYampi } from '@/data/cashback'
 
 /**
@@ -23,6 +25,9 @@ export const maxDuration = 26
 export const dynamic = 'force-dynamic'
 
 export async function POST(pedido: Request) {
+  const semSessao = await exigeSessao()
+  if (semSessao) return semSessao
+
   let corpo: { pagina?: number }
   try {
     corpo = await pedido.json()

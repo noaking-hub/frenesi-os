@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 
+import { exigeSessao } from '@/app/api/exige-sessao'
+
 import { importarDaYampi, sincronizarEnvios } from '@/app/(erp)/pedidos/actions'
 import { baixarNaShopify } from '@/app/(erp)/pedidos/envios/actions'
 import { importarEntregasLocaisDaShopify, mensagemDe, shopifyConfigurada } from '@/data/shopify'
@@ -25,6 +27,9 @@ const PRAZO_ESPELHO_MS = 14_000
 type Corpo = { passo?: 'locais' | 'importar' | 'envios'; dias?: number }
 
 export async function POST(req: Request) {
+  const semSessao = await exigeSessao()
+  if (semSessao) return semSessao
+
   const corpo = (await req.json().catch(() => ({}))) as Corpo
 
   if (corpo.passo === 'locais') {

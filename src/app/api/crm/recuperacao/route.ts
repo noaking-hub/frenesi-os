@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 
+import { exigeSessao } from '@/app/api/exige-sessao'
+
 import { enviarEmailsCarrinho, type CupomEnvio } from '@/app/(erp)/crm/carrinhos/actions'
 
 /**
@@ -16,6 +18,9 @@ export const maxDuration = 300
 export const dynamic = 'force-dynamic'
 
 export async function POST(pedido: Request) {
+  const semSessao = await exigeSessao()
+  if (semSessao) return semSessao
+
   let corpo: { ids?: string[]; cupom?: CupomEnvio | null; forcar?: boolean }
   try {
     corpo = await pedido.json()
