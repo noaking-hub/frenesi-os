@@ -24,7 +24,7 @@ import {
 } from '@/components/erp/ui'
 import { iconeDaCategoria } from '@/components/erp/Marcas'
 import { Mini, Progresso, RoscaLegenda } from '@/components/erp/Visualizacoes'
-import { carregarLancamentos } from '@/data/financeiro'
+import { carregarLancamentos, explicarLancamento } from '@/data/financeiro'
 import {
   brl,
   diaCurtoPt,
@@ -41,6 +41,7 @@ import { AcoesGerenciais, NovoCompromisso } from '../Compromissos'
 import { dadosDaVendaManual } from '../dados-da-venda-manual'
 import { VendaManual } from '../VendaManual'
 import { ProvedorDeListas } from '../ListasDoFormulario'
+import { DetalheDoLancamento } from './DetalheDoLancamento'
 import { BarraDeFiltros } from './Filtros'
 
 /**
@@ -62,15 +63,31 @@ import { BarraDeFiltros } from './Filtros'
  */
 export const dynamic = 'force-dynamic'
 
-/** A mesma URL, trocando só a página — os filtros seguem intactos. */
-function comPagina(filtro: Busca, pagina: number): string {
+/**
+ * A mesma URL com algumas chaves trocadas — o resto do filtro segue intacto.
+ *
+ * Chave sem valor é REMOVIDA, nunca escrita vazia: `?lancamento=` reabriria o
+ * detalhe num id em branco, e `?situacao=` faria a barra de filtros acender um
+ * filtro que não filtra nada.
+ */
+function urlCom(filtro: Busca, mudancas: Partial<Record<keyof Busca, string | null>>): string {
   const qs = new URLSearchParams()
-  for (const [k, v] of Object.entries(filtro)) {
-    if (v && k !== 'pagina') qs.set(k, v)
+  for (const [k, v] of Object.entries({ ...filtro, ...mudancas })) {
+    if (v) qs.set(k, String(v))
   }
-  if (pagina > 1) qs.set('pagina', String(pagina))
   const s = qs.toString()
   return s ? `/financeiro/lancamentos?${s}` : '/financeiro/lancamentos'
+}
+
+/**
+ * A mesma URL, trocando só a página.
+ *
+ * O detalhe aberto fica para trás de propósito: paginar é trocar a lista, e
+ * carregar a página 3 com o modal do lançamento da página 1 por cima esconde
+ * justamente o que se foi buscar.
+ */
+function comPagina(filtro: Busca, pagina: number): string {
+  return urlCom(filtro, { pagina: pagina > 1 ? String(pagina) : null, lancamento: null })
 }
 
 /** Um passo da paginação. Sem destino, vira texto apagado — nunca botão morto. */
@@ -139,11 +156,27 @@ interface Busca {
   pagina?: string
   /** 'sim' | 'nao' — o mockup separa o que se repete todo mês do avulso. */
   recorrente?: string
+  /**
+   * O lançamento cujo detalhe está aberto.
+   *
+   * Mora na URL como os filtros, e pelos mesmos motivos: sobrevive ao F5, o
+   * botão Voltar fecha o detalhe em vez de sair da lista, e o alerta do
+   * Assessor consegue apontar para um lançamento específico em vez de para uma
+   * fila onde ele se perde.
+   */
+  lancamento?: string
 }
 
 export default async function Lancamentos({ searchParams }: { searchParams: Promise<Busca> }) {
   const filtro = await searchParams
-  const [p, venda] = await Promise.all([carregarLancamentos(), dadosDaVendaManual()])
+  // A explicação do detalhe sai junto com a lista, e não depois dela: ela só
+  // depende do id que já está na URL, e encadear as duas leituras somaria uma
+  // ida ao banco ao tempo de abrir a tela para quem chegou por um link direto.
+  const [p, venda, explicacao] = await Promise.all([
+    carregarLancamentos(),
+    dadosDaVendaManual(),
+    filtro.lancamento ? explicarLancamento(filtro.lancamento) : Promise.resolve(null),
+  ])
 
   if (p.semBanco) {
     return (
@@ -182,6 +215,14 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
 
   const comSituacao = p.lancamentos.map((l) => ({ l, situacao: situacaoDe(l, p.hoje) }))
   const busca = (filtro.q ?? '').trim().toLowerCase()
+
+  // O detalhe é procurado na lista INTEIRA, não na filtrada: o link do
+  // Assessor aponta para um lançamento sem saber que filtro está valendo aqui,
+  // e um cancelado — que a lista esconde por padrão — continua sendo um
+  // registro que alguém precisa abrir para entender o que aconteceu.
+  const alvo = filtro.lancamento
+    ? (comSituacao.find((x) => x.l.id === filtro.lancamento) ?? null)
+    : null
 
   const visiveis = comSituacao
     .filter(({ l, situacao }) => {
@@ -353,8 +394,34 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       chave: 'desc',
       titulo: 'Descrição',
       largura: 'minmax(0,1fr)',
+      /*
+       * A descrição inteira é o link que abre o detalhe.
+       *
+       * A linha não vira clicável como um todo porque ela já carrega quatro
+       * botões na coluna de ações, e botão dentro de botão é HTML inválido —
+       * o mesmo motivo pelo qual Pedidos precisou de tabela própria. Aqui a
+       * saída é a da Conciliação: a coluna mais larga vira `Link`, e o ícone
+       * de olho ao lado das ações dá o segundo caminho, com nome para quem
+       * navega por teclado ou leitor de tela.
+       *
+       * `Link` e não botão: assim dá para abrir em outra aba e copiar o
+       * endereço de um lançamento específico para mandar para alguém.
+       */
       render: ({ l }) => (
-        <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+        <Link
+          href={urlCom(filtro, { lancamento: l.id })}
+          scroll={false}
+          title="Abrir o detalhe deste lançamento"
+          className="hover:text-ouro"
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 3,
+            minWidth: 0,
+            color: 'inherit',
+            textDecoration: 'none',
+          }}
+        >
           <span style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
             <span
               className="font-sans"
@@ -395,7 +462,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
               {[l.favorecido, l.documento && `doc. ${l.documento}`].filter(Boolean).join(' · ') || '—'}
             </span>
           </span>
-        </span>
+        </Link>
       ),
     },
     {
@@ -515,11 +582,18 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
     {
       chave: 'acoes',
       titulo: 'Ações',
-      // 156px sobravam: os botões ocupam pouco mais de 120 e o resto virava um
-      // vão entre Origem e Ações que fazia as duas colunas parecerem soltas.
-      largura: '124px',
+      // 124px cabiam os quatro botões da linha; o olho é o quinto. No pior
+      // caso — compromisso em aberto, sem parcela e sem transferência — são
+      // olho, baixa, lápis, parcelar e cancelar: 5 × 28 mais 4 folgas de 5 dá
+      // 160, e a 124 o último botão saía cortado na borda da coluna.
+      largura: '164px',
       alinhamento: 'right',
-      render: ({ l, situacao }) => <AcoesGerenciais lancamento={l} situacao={situacao} />,
+      render: ({ l, situacao }) => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, justifyContent: 'flex-end' }}>
+          <AbrirDetalhe href={urlCom(filtro, { lancamento: l.id })} id={l.id} />
+          <AcoesGerenciais lancamento={l} situacao={situacao} />
+        </span>
+      ),
     },
   ]
 
@@ -698,6 +772,26 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
           </>
         }
       >
+        {/* Link para um lançamento que não existe mais não pode abrir um modal
+            vazio nem sumir em silêncio: quem chegou por um link antigo do
+            Assessor precisa saber que o registro foi embora, e não achar que a
+            tela ignorou o clique. */}
+        {filtro.lancamento && !alvo && (
+          <Destaque
+            tom="atencao"
+            icone="alerta"
+            titulo="Esse lançamento não está mais nesta base"
+            acao={<AcaoPainel href={urlCom(filtro, { lancamento: null })}>Voltar à lista</AcaoPainel>}
+          >
+            <span
+              className="font-sans"
+              style={{ fontSize: 11.5, lineHeight: 1.55, color: 'rgba(242,237,227,.6)', textWrap: 'pretty' }}
+            >
+              {`O endereço pede o lançamento ${filtro.lancamento}, e ele não foi encontrado — pode ter sido removido depois que o link foi criado.`}
+            </span>
+          </Destaque>
+        )}
+
         {(semCategoria.length > 0 || semVencimento.length > 0) && (
           <Destaque
             tom="atencao"
@@ -756,10 +850,14 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
             colunas={colunas}
             itens={listadas}
             chaveDe={({ l }) => l.id}
-            larguraMinima={1080}
+            larguraMinima={1120}
             faixaDe={({ situacao }) =>
               situacao === 'vencido' ? 'erro' : situacao === 'parcial' ? 'ouro' : null
             }
+            // A linha que o detalhe está mostrando fica marcada: fechar o modal
+            // sem isso devolve a pessoa a cinquenta linhas iguais, sem lembrar
+            // em qual delas ela estava.
+            selecionadoDe={({ l }) => l.id === filtro.lancamento}
             vazio={
               <Vazio
                 icone="busca"
@@ -909,8 +1007,52 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
           />
         </Colunas>
       </ComTrilha>
+
+      {/* `key` pelo id: clicar num lançamento irmão dentro do detalhe troca o
+          conteúdo sem desmontar o componente, e o formulário continuaria com
+          os campos do lançamento anterior — inclusive a aba escolhida. */}
+      {alvo && (
+        <DetalheDoLancamento
+          key={alvo.l.id}
+          lancamento={alvo.l}
+          situacao={alvo.situacao}
+          explicacao={explicacao}
+        />
+      )}
     </Pilha>
     </ProvedorDeListas>
+  )
+}
+
+/**
+ * O segundo caminho para o detalhe, ao lado das ações da linha.
+ *
+ * A descrição já é o link, mas ela não tem nome próprio para leitor de tela —
+ * "Venda YP-15101907" não diz que clicar ali abre alguma coisa. Este ícone tem
+ * `aria-label`, e é o alvo que quem navega por teclado alcança na ordem
+ * natural da linha.
+ */
+function AbrirDetalhe({ href, id }: { href: string; id: string }) {
+  return (
+    <Link
+      href={href}
+      scroll={false}
+      title="Abrir o detalhe"
+      aria-label={`Abrir o detalhe do lançamento ${id}`}
+      className="hover:border-ouro/45 hover:text-ouro"
+      style={{
+        width: 28,
+        height: 28,
+        display: 'grid',
+        placeItems: 'center',
+        border: '1px solid rgba(255,255,255,.1)',
+        borderRadius: 8,
+        color: 'rgba(242,237,227,.55)',
+        flex: 'none',
+      }}
+    >
+      <Ico n="olho" tamanho={13} />
+    </Link>
   )
 }
 

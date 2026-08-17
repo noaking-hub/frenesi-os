@@ -442,7 +442,13 @@ export async function sincronizarMercadoPago(de: string, ate: string): Promise<R
     paraConciliar.push({
       pedido_id: casamento.pedidoId,
       recebido: p.liquido,
-      creditado_em: (p.liberadoEm ?? p.aprovadoEm ?? '').slice(0, 10) || null,
+      // `money_release_date` vem no fuso do Mercado Pago (`-04:00`), não no
+      // nosso. Cortar os dez primeiros caracteres entregava o dia de LÁ: as
+      // compras de 16/08 feitas até 01:00 em São Paulo ficaram com
+      // `creditado_em = 2026-08-15` enquanto o extrato de liberações trazia
+      // 16/08 — a mesma venda com duas datas, e a Conciliação mostrando o
+      // dinheiro um dia antes de ele existir.
+      creditado_em: dataEmSaoPaulo(p.liberadoEm ?? p.aprovadoEm ?? '') ?? null,
       gateway_id: p.id,
       bruto: p.bruto,
       taxa_real: p.tarifa,
@@ -809,14 +815,78 @@ async function limparPedido(): Promise<void> {
 }
 
 /**
+ * O relatório pronto que vale a pena importar agora — ou nada.
+ *
+ * Existe para desfazer um impasse que travou a rotina por 22 horas seguidas.
+ * O medo original era legítimo: um relatório pedido às 10h para a janela
+ * "22/07 até hoje" DECLARA fim = hoje, mas o conteúdo dele para às 10h;
+ * importá-lo às 21h traz zero movimentos novos e a tela diz "importado"
+ * enquanto os pagamentos da tarde não estão lá — parece sucesso. A defesa
+ * escolhida foi recusar TODO arquivo pronto quando a janela alcança hoje, e
+ * aceitar só um que não existisse antes do pedido desta rodada.
+ *
+ * Só que o pedido vale 30 minutos e a rotina roda de hora em hora: toda
+ * rodada encontrava o pendente vencido, pedia outro e ia embora. O arquivo
+ * gerado na hora anterior ficava pronto, listado, com o período certo — e era
+ * ignorado. Zero importações vieram da rotina; as duas de 17/08 só
+ * aconteceram porque alguém abriu a tela.
+ *
+ * A troca aqui é a régua, não o medo: em vez de recusar todo arquivo pronto,
+ * recusa-se o que é mais VELHO que o último já importado. Um arquivo de 60
+ * minutos atrás continua sendo notícia melhor que um extrato de 22 horas, e o
+ * "parece sucesso" morre porque quem importa diz em que instante o Mercado
+ * Pago tirou a foto (veja `corteDoArquivo`).
+ *
+ * A comparação é entre carimbos da MESMA fonte — o `date_created` que o
+ * Mercado Pago devolve na listagem —, então não depende de saber em que fuso
+ * ele vem. Arquivo sem carimbo não passa: sem régua, não há decisão honesta.
+ */
+function relatorioMaisNovoQueOImportado(
+  lista: RelatorioDisponivel[],
+  de: string,
+  ate: string,
+): RelatorioDisponivel | null {
+  const piso = lista.reduce(
+    (maior, r) => (r.jaImportado && r.criadoEm > maior ? r.criadoEm : maior),
+    '',
+  )
+  // A lista já vem do mais novo para o mais velho, e `relatorioServe` recusa
+  // o que já foi importado e o que não cobre a janela.
+  return lista.find((r) => relatorioServe(r, de, ate) && r.criadoEm > piso) ?? null
+}
+
+/**
+ * Até que instante o arquivo enxerga, lido do NOME dele.
+ *
+ * `reserve-release-3195610773-manual-2026-08-17-073421.csv` foi pedido às
+ * 10:34:21 UTC — 07:34:21 em São Paulo. Conferido em três arquivos contra a
+ * hora de importação gravada em `relatorios_importados`: o carimbo do nome é
+ * o horário daqui, não UTC.
+ *
+ * É o único número desta tela que responde à pergunta que o operador tem de
+ * verdade. "Lido há 6 minutos" fala de quando o ERP leu; não fala de até onde
+ * o arquivo vai — e é essa confusão que faz ele achar que o sistema quebrou
+ * quando a venda das 07:43 não aparece num extrato tirado às 07:34.
+ *
+ * Nome fora do padrão devolve nulo e a frase simplesmente não aparece:
+ * inventar um corte seria pior que não ter nenhum.
+ */
+function corteDoArquivo(arquivo: string): string | null {
+  const m = arquivo.match(/-(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})\.csv$/)
+  return m ? `${m[3]}/${m[2]} às ${m[4]}:${m[5]}` : null
+}
+
+/**
  * Atualiza o extrato do jeito que deveria ter sido desde o começo: sozinho.
  *
  * Antes eram três cliques em ordem — pedir, listar, importar —, e a ordem
  * estava na cabeça de quem escreveu, não na tela. Aqui o passo é decidido
  * pelo estado real da conta:
  *
- *   já existe relatório que cobre a janela  →  importa e lê as tarifas
- *   não existe                              →  pede e devolve "aguardando"
+ *   o arquivo do pedido em andamento já saiu  →  importa e lê as tarifas
+ *   existe arquivo pronto mais novo que o
+ *   último importado                          →  importa esse
+ *   não existe                                →  pede e devolve "aguardando"
  *
  * `pedir` é falso na volta automática da tela: sem isso, cada consulta geraria
  * um relatório novo e a conta encheria de arquivos idênticos.
@@ -830,9 +900,10 @@ export async function atualizarExtratoMp(
   // aberta, o recorte das linhas, a mensagem na tela — fale da mesma data.
   const ate = ateNoMaximoHoje(deAte)
   const lista = await relatoriosDisponiveis()
+  const janelaAberta = ate >= hojeEmSaoPaulo()
 
-  // Há um pedido em andamento? Então a única pergunta é se o arquivo dele já
-  // apareceu. Pedir outro aqui encheria a conta de relatórios idênticos.
+  // Há um pedido em andamento? Então a primeira pergunta é se o arquivo dele
+  // já apareceu — ele é o mais fresco que pode existir.
   const pendente = await pedidoPendente()
   if (pendente) {
     const conhecidos = new Set(pendente.jaExistiam)
@@ -844,24 +915,17 @@ export async function atualizarExtratoMp(
       }
     }
     await limparPedido()
-    return importarEComplementar(novo.arquivo, de, ate)
+    return encomendarOProximoEImportar(novo.arquivo, de, ate, lista, janelaAberta && opcoes.pedir)
   }
 
-  // O período declarado não é o mesmo que o conteúdo. Um relatório pedido às
-  // 10h para a janela "22/07 até hoje" declara fim = hoje e serve pelo
-  // período — mas o conteúdo dele para às 10h. Importá-lo às 21h traz 341
-  // movimentos, zero novos, e a tela diz "importado" enquanto os pagamentos
-  // da tarde não estão lá. É o pior desfecho: parece sucesso.
-  //
-  // Por isso, janela que alcança hoje SEMPRE pede um relatório novo, e só
-  // aceita um arquivo que não existia antes do pedido.
-  const janelaAberta = ate >= hojeEmSaoPaulo()
-
-  // Janela fechada no passado aproveita relatório existente: o conteúdo não
-  // muda mais, e pedir outro só faria esperar por um arquivo idêntico.
-  if (!janelaAberta) {
-    const alvo = lista.find((r) => relatorioServe(r, de, ate))
-    if (alvo) return importarEComplementar(alvo.arquivo, de, ate)
+  // Janela fechada no passado aproveita qualquer relatório existente: o
+  // conteúdo não muda mais, e pedir outro só faria esperar por um arquivo
+  // idêntico. Janela que alcança hoje usa a régua do carimbo.
+  const alvo = janelaAberta
+    ? relatorioMaisNovoQueOImportado(lista, de, ate)
+    : (lista.find((r) => relatorioServe(r, de, ate)) ?? null)
+  if (alvo) {
+    return encomendarOProximoEImportar(alvo.arquivo, de, ate, lista, janelaAberta && opcoes.pedir)
   }
 
   if (!opcoes.pedir) {
@@ -884,41 +948,57 @@ export async function atualizarExtratoMp(
 }
 
 /**
- * Atualiza o extrato do começo ao fim, esperando o relatório ficar pronto.
+ * Encomenda o extrato seguinte e SÓ ENTÃO importa o de agora.
  *
- * É a versão para a rotina automática. A tela não pode esperar — quem está
- * olhando merece resposta imediata e a volta automática cuida do resto —, mas
- * a rotina não tem ninguém olhando: ela pede, aguarda e importa, e é isso que
- * mantém o extrato em dia sem depender de alguém abrir a tela.
+ * É o que transforma a rotina numa esteira em vez de um pedido perdido: a
+ * rodada de agora importa o arquivo que a rodada anterior encomendou e deixa
+ * outro na fila para a próxima. O atraso do extrato passa a ser um ciclo do
+ * agendador, e não "até alguém abrir a tela".
  *
- * O teto de tempo existe porque a rotina roda dentro de uma requisição com
- * limite. Estourar sem importar não perde nada: o pedido continua válido do
- * lado do Mercado Pago e a próxima rodada encontra o arquivo pronto.
+ * A ordem é o ponto, e é contraintuitiva. Encomendar depois de importar seria
+ * o natural — só que a importação é a parte cara da rodada (baixa o CSV, lê as
+ * tarifas de 35 dias, consulta contrapartes) e a Netlify mata a função perto
+ * de 26 segundos. Um corte no meio da importação levaria a encomenda junto, a
+ * rodada seguinte não acharia arquivo novo, e o impasse voltaria pela porta
+ * dos fundos. Encomendado primeiro, o corte não custa mais que o atraso de um
+ * ciclo: as linhas já gravadas ficam, e o próximo arquivo está a caminho.
+ *
+ * Esperar o arquivo ficar pronto, aqui dentro, continua proibido pelo mesmo
+ * motivo — foi um `setTimeout` de até 150 segundos que fez a etapa financeira
+ * registrar só "Timeout of 30000 ms" e mais nada.
+ *
+ * A tela NÃO encomenda (`encomendar` falso na volta automática): ela pede
+ * quando alguém clica, e um pedido por consulta encheria a conta de arquivos.
  */
-export async function atualizarExtratoEsperando(
+async function encomendarOProximoEImportar(
+  arquivo: string,
   de: string,
   ate: string,
-  opcoes: { tentativas?: number; intervaloMs?: number } = {},
+  lista: RelatorioDisponivel[],
+  encomendar: boolean,
 ): Promise<PassoAtualizacao> {
-  const tentativas = opcoes.tentativas ?? 14
-  const intervalo = opcoes.intervaloMs ?? 15_000
-
-  const primeiro = await atualizarExtratoMp(de, ate, { pedir: true })
-  if (primeiro.estado === 'pronto') return primeiro
-
-  for (let i = 0; i < tentativas; i += 1) {
-    await new Promise((r) => setTimeout(r, intervalo))
-    const passo = await atualizarExtratoMp(de, ate, { pedir: false })
-    if (passo.estado === 'pronto') return passo
+  const notas: string[] = []
+  if (encomendar) {
+    try {
+      await pedirRelatorio(de, ate)
+      // A lista de antes da encomenda é o que identifica o arquivo novo pelo
+      // nome — inclusive o que está sendo importado agora, que não pode ser
+      // confundido com o que acabou de ser pedido.
+      await gravarPedido(lista.map((r) => r.arquivo))
+      notas.push(
+        'O extrato seguinte já foi encomendado ao Mercado Pago: a próxima rodada traz o que entrou depois desse corte, sem ninguém precisar clicar.',
+      )
+    } catch (e) {
+      // O extrato de agora continua valendo; o que falhou foi só a encomenda
+      // do próximo. Dizer isso é o que impede a rodada seguinte de parecer
+      // inexplicavelmente parada.
+      notas.push(`Não consegui encomendar o extrato seguinte agora: ${mensagemDe(e)}`)
+    }
   }
 
-  return {
-    estado: 'aguardando',
-    linhas: [
-      `O relatório de ${de} a ${ate} foi pedido e não ficou pronto a tempo desta rodada.`,
-      'O pedido fica registrado: a próxima rodada encontra o arquivo e importa sem pedir de novo.',
-    ],
-  }
+  const passo = await importarEComplementar(arquivo, de, ate)
+  passo.linhas.push(...notas)
+  return passo
 }
 
 /** Importa o arquivo escolhido e completa com tarifas e ligação aos pedidos. */
@@ -928,8 +1008,14 @@ async function importarEComplementar(
   ate: string,
 ): Promise<PassoAtualizacao> {
   const r = await importarLiberacoes(arquivo, { de, ate })
+  const corte = corteDoArquivo(arquivo)
   const linhas = [
     `Extrato de ${r.periodo.de} a ${r.periodo.ate} importado.`,
+    ...(corte
+      ? [
+          `O Mercado Pago montou este arquivo em ${corte} (horário de São Paulo) — venda posterior a esse instante ainda não está nele.`,
+        ]
+      : []),
     `${r.linhasLidas} movimento(s) · ${r.novas} novo(s) · ${r.repetidas} já conhecido(s).`,
     ...(r.foraDaJanela
       ? [`${r.foraDaJanela} linha(s) do arquivo eram de antes de ${de} e foram descartadas.`]
@@ -1012,6 +1098,30 @@ async function importarEComplementar(
     /* regra é conforto, não pré-requisito */
   }
 
+  // E aqui o extrato vira CAIXA — o passo que faltava.
+  //
+  // Só a rotina chamava `converter_extrato_em_caixa`, então "Atualizar
+  // extrato" gravava a linha e parava por aí: em 16/08 o crédito lido às
+  // 11:30 só virou lançamento às 13:15, quando a rodada seguinte passou. Até
+  // lá a mesma tela dizia duas coisas contrárias sobre o mesmo dinheiro —
+  // movimento no extrato, R$ 0,00 no caixa.
+  //
+  // Vem por último de propósito: a ligação com o pedido, o nome da
+  // contraparte, o carimbo de estorno e as regras de categoria já rodaram, e
+  // é disso que o lançamento nasce. Rodar antes das regras roubaria delas as
+  // linhas que elas sabem categorizar. A conversão é idempotente
+  // (`on conflict do nothing`), então a chamada que a rotina faz logo depois
+  // desta não duplica nada.
+  try {
+    const { data } = await supabaseServer().rpc('converter_extrato_em_caixa')
+    const criados = Number((Array.isArray(data) ? data[0] : data)?.criados ?? 0)
+    if (criados > 0) linhas.push(`${criados} movimento(s) viraram lançamento no caixa.`)
+  } catch (e) {
+    linhas.push(
+      `O extrato foi importado, mas não virou lançamento agora: ${mensagemDe(e)}. A próxima rodada da sincronia converte.`,
+    )
+  }
+
   return { estado: 'pronto', linhas }
 }
 
@@ -1022,8 +1132,17 @@ async function importarEComplementar(
  * o objeto do pagamento identifica. A colheita é defensiva como a dos
  * pedidos da Yampi: procura strings em campos com cara de nome em vez de
  * apostar num caminho fixo, porque o formato varia por meio de pagamento.
+ *
+ * O PRAZO não é preciosismo. São 264 linhas sem nome hoje, e cada uma custa
+ * uma consulta própria ao Mercado Pago: rodar as 90 de enfiada consome mais
+ * tempo do que a Netlify dá à função inteira (~26s), e o corte cairia sobre o
+ * que vem DEPOIS — inclusive a conversão do extrato em caixa. Passado o
+ * prazo, o que sobrou fica para a próxima rodada; nomear contraparte é
+ * melhoria contínua, e nenhuma melhoria vale derrubar o lançamento do
+ * dinheiro que acabou de entrar.
  */
-async function enriquecerContrapartes(limite = 90): Promise<number> {
+async function enriquecerContrapartes(limite = 90, prazoMs = 6_000): Promise<number> {
+  const expiraEm = Date.now() + prazoMs
   const sb = supabaseServer()
   const { data, error } = await sb
     .from('extrato_linhas')
@@ -1048,6 +1167,7 @@ async function enriquecerContrapartes(limite = 90): Promise<number> {
 
   let nomeados = 0
   for (const linha of data ?? []) {
+    if (Date.now() > expiraEm) break
     const id = String(linha.documento ?? '')
     // Id que não é numérico não é pagamento consultável (saldo inicial,
     // ajuste manual). Pular é o certo; tentar geraria 404 a cada rodada.

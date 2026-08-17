@@ -3,6 +3,7 @@ import 'server-only'
 import {
   alertasFinanceiros,
   avaliarVenda,
+  brl,
   coberturaDeCaixa,
   competenciaAnterior,
   diaDaOperacao,
@@ -331,6 +332,340 @@ export async function carregarLancamentos(periodo?: {
     })(),
     saldoProjetado: Math.round((disponivel + soma(aReceberTudo) - soma(aPagarTudo)) * 100) / 100,
     semBanco: false,
+  }
+}
+
+// ── Detalhe de um lançamento ───────────────────────────────────────────────
+
+/**
+ * Chaves do `bruto` (jsonb) do extrato que PODEM aparecer na tela, e como se
+ * chamam em português.
+ *
+ * É uma lista de permissão, não de bloqueio, e o motivo é concreto: o payload
+ * do Pagar.me carrega `email` do comprador junto da tarifa. Despejar o jsonb
+ * inteiro num painel do Financeiro publicaria o e-mail de quem comprou numa
+ * tela que ninguém abre para isso. Chave nova que o gateway inventar amanhã
+ * fica de fora até alguém decidir que ela deve entrar.
+ */
+const CAMPOS_DO_GATEWAY: { chave: string; rotulo: string; dinheiro: boolean }[] = [
+  { chave: 'bruto', rotulo: 'Bruto informado pelo gateway', dinheiro: true },
+  { chave: 'pago', rotulo: 'Pago pelo cliente', dinheiro: true },
+  { chave: 'tarifa', rotulo: 'Tarifa cobrada pelo gateway', dinheiro: true },
+  { chave: 'impostos', rotulo: 'Impostos retidos', dinheiro: true },
+  { chave: 'liquido', rotulo: 'Líquido creditado', dinheiro: true },
+  { chave: 'parcelas', rotulo: 'Parcelas', dinheiro: false },
+  { chave: 'meio', rotulo: 'Meio de pagamento', dinheiro: false },
+  { chave: 'adquirente', rotulo: 'Adquirente', dinheiro: false },
+  { chave: 'origem_relatorio', rotulo: 'Relatório de origem', dinheiro: false },
+  { chave: 'fonte', rotulo: 'Identificador na origem', dinheiro: false },
+  { chave: 'pedido_pagarme', rotulo: 'Pedido no Pagar.me', dinheiro: false },
+]
+
+/** A linha do extrato como o gateway a mandou, sem tradução do ERP. */
+export interface LinhaCruaDoExtrato {
+  /** 'mercadopago' | 'pagarme' — o nome técnico do arquivo, não o rótulo bonito. */
+  origem: string
+  chave: string
+  ocorridoEm: string
+  descricao: string
+  contraparte: string
+  documento: string
+  tipo: 'entrada' | 'saida'
+  valor: number
+  interno: boolean
+  ignorado: boolean
+  motivoIgnorado: string
+  lidoEm: string | null
+  /** O que o gateway informou junto da linha, já filtrado (ver CAMPOS_DO_GATEWAY). */
+  detalhesDoGateway: { rotulo: string; valor: string }[]
+}
+
+/** Outro lançamento amarrado a este por um FATO gravado, nunca por semelhança. */
+export interface LancamentoIrmao {
+  id: string
+  descricao: string
+  tipo: 'entrada' | 'saida'
+  valor: number
+  categoria: string | null
+  ocorridoEm: string
+  conta: string
+  cancelado: boolean
+  /** O que amarra os dois: o mesmo pedido ou as duas pernas da transferência. */
+  vinculo: 'pedido' | 'transferencia'
+}
+
+export interface PedidoDoLancamento {
+  id: string
+  canal: string
+  situacao: string | null
+  pagamento: string
+  gateway: string | null
+  valor: number
+  frete: number
+  cashback: number
+  compradoEm: string
+  cliente: string | null
+  itens: { descricao: string; variante: string | null; quantidade: number; preco: number }[]
+}
+
+export interface EdicaoRegistrada {
+  id: number
+  ocorridoEm: string
+  acao: string
+  operador: string | null
+  justificativa: string | null
+}
+
+/**
+ * Tudo que o banco sabe EXPLICAR sobre um lançamento.
+ *
+ * `lerLancamentos` traz o que a lista precisa e para por aí — `chave_externa`,
+ * `pedido_id` e `criado_por` ficam de fora de propósito, porque multiplicar
+ * três textos por 1.264 linhas é payload que ninguém lê. A pergunta "o que é
+ * este lançamento?" só existe para UM de cada vez, e é aqui que ela é
+ * respondida: procedência, linha de extrato que o originou, irmãos ligados
+ * pelo mesmo pedido ou pela mesma transferência, o pedido que o gerou e o
+ * histórico de edições.
+ */
+export interface ExplicacaoLancamento {
+  id: string
+  chaveExterna: string | null
+  pedidoId: string | null
+  /** O nome da outra ponta da transferência; o id fica no banco, sem uso na tela. */
+  contaDestino: string | null
+  serieId: string | null
+  recorrenciaAte: string | null
+  canceladoMotivo: string | null
+  criadoEm: string | null
+  /** Quem criou: 'conversão automática', 'regra: …' ou o nome de quem digitou. */
+  criadoPor: string | null
+  atualizadoEm: string | null
+  /** Saque do gateway sem destino declarado — fora do caixa e fora da DRE. */
+  aguardaDestino: boolean
+  extrato: LinhaCruaDoExtrato | null
+  irmaos: LancamentoIrmao[]
+  pedido: PedidoDoLancamento | null
+  historico: EdicaoRegistrada[]
+}
+
+interface IrmaoCru {
+  id: string
+  descricao: string
+  tipo: string
+  valor: number | string
+  categoria: string | null
+  ocorrido_em: string
+  cancelado_em: string | null
+  conta_id: string | null
+  contas_bancarias: { nome: string } | null
+}
+
+const CAMPOS_IRMAO =
+  'id, descricao, tipo, valor, categoria, ocorrido_em, cancelado_em, conta_id, ' +
+  'contas_bancarias!lancamentos_conta_id_fkey(nome)'
+
+function traduzirIrmao(l: IrmaoCru, vinculo: 'pedido' | 'transferencia'): LancamentoIrmao {
+  return {
+    id: l.id,
+    descricao: l.descricao,
+    tipo: l.tipo === 'entrada' ? 'entrada' : 'saida',
+    valor: Number(l.valor),
+    categoria: l.categoria,
+    ocorridoEm: l.ocorrido_em,
+    conta: l.contas_bancarias?.nome ?? l.conta_id ?? '—',
+    cancelado: Boolean(l.cancelado_em),
+    vinculo,
+  }
+}
+
+export async function explicarLancamento(id: string): Promise<ExplicacaoLancamento | null> {
+  if (!supabaseConfigurado() || !id) return null
+
+  const sb = supabaseServer()
+  const { data: base, error } = await sb
+    .from('lancamentos')
+    .select(
+      'id, chave_externa, pedido_id, transferencia_id, conta_destino_id, serie_id, ' +
+        'recorrencia_ate, cancelado_motivo, criado_em, criado_por, atualizado_em, aguarda_destino',
+    )
+    .eq('id', id)
+    .maybeSingle()
+  if (error || !base) return null
+
+  const l = base as unknown as {
+    id: string
+    chave_externa: string | null
+    pedido_id: string | null
+    transferencia_id: string | null
+    conta_destino_id: string | null
+    serie_id: string | null
+    recorrencia_ate: string | null
+    cancelado_motivo: string | null
+    criado_em: string | null
+    criado_por: string | null
+    atualizado_em: string | null
+    aguarda_destino: boolean | null
+  }
+
+  const [extrato, porPedido, porTransferencia, pedido, historico, contaDestino] = await Promise.all([
+    // A ligação é 1:1 (toda linha do extrato tem lançamento, e o par nunca se
+    // repete), mas a leitura não usa `maybeSingle`: uma importação torta que
+    // apontasse duas linhas para o mesmo lançamento derrubaria a tela inteira
+    // em vez de mostrar o detalhe com a primeira delas.
+    sb
+      .from('extrato_linhas')
+      .select(
+        'origem, chave, ocorrido_em, descricao, contraparte, documento, tipo, valor, ' +
+          'interno, ignorado, motivo_ignorado, lido_em, bruto',
+      )
+      .eq('lancamento_id', id)
+      .limit(1),
+    l.pedido_id
+      ? sb.from('lancamentos').select(CAMPOS_IRMAO).eq('pedido_id', l.pedido_id).neq('id', id)
+      : Promise.resolve({ data: [] }),
+    l.transferencia_id
+      ? sb
+          .from('lancamentos')
+          .select(CAMPOS_IRMAO)
+          .eq('transferencia_id', l.transferencia_id)
+          .neq('id', id)
+      : Promise.resolve({ data: [] }),
+    l.pedido_id
+      ? sb
+          .from('pedidos')
+          .select(
+            'id, canal, situacao, pagamento, gateway, valor, frete, cashback, comprado_em, ' +
+              // Só o NOME do cliente: e-mail, CPF e telefone não têm o que fazer
+              // num painel que explica de onde veio um lançamento.
+              'clientes(nome), pedido_itens(descricao, variante_titulo, quantidade, preco)',
+          )
+          .eq('id', l.pedido_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    sb
+      .from('financeiro_auditoria')
+      .select('id, ocorrido_em, acao, operador, justificativa')
+      .eq('entidade', 'lancamento')
+      .eq('entidade_id', id)
+      .order('ocorrido_em', { ascending: false })
+      .limit(20),
+    l.conta_destino_id
+      ? sb.from('contas_bancarias').select('nome').eq('id', l.conta_destino_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ])
+
+  const linha = ((extrato.data ?? []) as unknown as {
+    origem: string
+    chave: string
+    ocorrido_em: string
+    descricao: string
+    contraparte: string
+    documento: string
+    tipo: string
+    valor: number | string
+    interno: boolean
+    ignorado: boolean
+    motivo_ignorado: string
+    lido_em: string | null
+    bruto: Record<string, unknown> | null
+  }[])[0]
+
+  const p = (pedido.data ?? null) as unknown as {
+    id: string
+    canal: string
+    situacao: string | null
+    pagamento: string
+    gateway: string | null
+    valor: number | string
+    frete: number | string
+    cashback: number | string
+    comprado_em: string
+    clientes: { nome: string } | null
+    pedido_itens: {
+      descricao: string
+      variante_titulo: string | null
+      quantidade: number
+      preco: number | string
+    }[] | null
+  } | null
+
+  return {
+    id: l.id,
+    chaveExterna: l.chave_externa,
+    pedidoId: l.pedido_id,
+    contaDestino: ((contaDestino.data ?? null) as { nome: string } | null)?.nome ?? null,
+    serieId: l.serie_id,
+    recorrenciaAte: l.recorrencia_ate,
+    canceladoMotivo: l.cancelado_motivo,
+    criadoEm: l.criado_em,
+    criadoPor: l.criado_por,
+    atualizadoEm: l.atualizado_em,
+    aguardaDestino: Boolean(l.aguarda_destino),
+    extrato: linha
+      ? {
+          origem: linha.origem,
+          chave: linha.chave,
+          ocorridoEm: linha.ocorrido_em,
+          descricao: linha.descricao,
+          contraparte: linha.contraparte,
+          documento: linha.documento,
+          tipo: linha.tipo === 'saida' ? 'saida' : 'entrada',
+          valor: Number(linha.valor),
+          interno: Boolean(linha.interno),
+          ignorado: Boolean(linha.ignorado),
+          motivoIgnorado: linha.motivo_ignorado ?? '',
+          lidoEm: linha.lido_em,
+          detalhesDoGateway: CAMPOS_DO_GATEWAY.flatMap(({ chave, rotulo, dinheiro }) => {
+            const v = linha.bruto?.[chave]
+            if (v === undefined || v === null || v === '') return []
+            const n = Number(v)
+            return [
+              {
+                rotulo,
+                valor: dinheiro && !Number.isNaN(n) ? brl(n) : String(v),
+              },
+            ]
+          }),
+        }
+      : null,
+    irmaos: [
+      ...((porPedido.data ?? []) as unknown as IrmaoCru[]).map((x) => traduzirIrmao(x, 'pedido')),
+      // A perna da transferência entra só se o pedido já não a trouxe: os dois
+      // vínculos podem apontar para a mesma linha, e listá-la duas vezes faria
+      // a tela sugerir que existem dois lançamentos onde há um.
+      ...((porTransferencia.data ?? []) as unknown as IrmaoCru[])
+        .filter(
+          (x) => !((porPedido.data ?? []) as unknown as IrmaoCru[]).some((y) => y.id === x.id),
+        )
+        .map((x) => traduzirIrmao(x, 'transferencia')),
+    ].sort((a, b) => a.ocorridoEm.localeCompare(b.ocorridoEm)),
+    pedido: p
+      ? {
+          id: p.id,
+          canal: p.canal,
+          situacao: p.situacao,
+          pagamento: p.pagamento,
+          gateway: p.gateway,
+          valor: Number(p.valor),
+          frete: Number(p.frete ?? 0),
+          cashback: Number(p.cashback ?? 0),
+          compradoEm: p.comprado_em,
+          cliente: p.clientes?.nome ?? null,
+          itens: (p.pedido_itens ?? []).map((i) => ({
+            descricao: i.descricao,
+            variante: i.variante_titulo,
+            quantidade: Number(i.quantidade),
+            preco: Number(i.preco),
+          })),
+        }
+      : null,
+    historico: ((historico.data ?? []) as Record<string, unknown>[]).map((a) => ({
+      id: Number(a.id),
+      ocorridoEm: String(a.ocorrido_em),
+      acao: String(a.acao),
+      operador: (a.operador as string) ?? null,
+      justificativa: (a.justificativa as string) ?? null,
+    })),
   }
 }
 

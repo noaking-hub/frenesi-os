@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 
 import { OPERADOR } from '@/data/operador'
+import { sessaoAtual } from '@/data/sessao'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import type { NaturezaGerencial } from '@/domain'
 import { hojeEmSaoPaulo } from '@/domain'
@@ -30,6 +31,24 @@ function exigeSupabase(acao: string) {
   return supabaseConfigurado()
     ? null
     : { ok: false as const, erro: `O Supabase precisa estar configurado para ${acao}.` }
+}
+
+/**
+ * Quem esconde não protege.
+ *
+ * A tela só mostra o lápis para quem está logado, mas Server Action é um
+ * endpoint HTTP como outro qualquer: quem souber o nome dela chama direto, sem
+ * passar por tela nenhuma. A verificação é repetida aqui porque é a única que
+ * o navegador não consegue pular.
+ */
+async function exigeSessao(acao: string) {
+  // Sem Supabase não há Auth para consultar — e quem chama já passou por
+  // `exigeSupabase`, que devolve o motivo verdadeiro. Mandar "faça login" no
+  // ERP rodando sem banco seria pedir o impossível para esconder a causa real.
+  if (!supabaseConfigurado()) return null
+  return (await sessaoAtual())
+    ? null
+    : { ok: false as const, erro: `Faça login no ERP para ${acao}.` }
 }
 
 /** Só as rotas do módulo — o resto do ERP não muda quando um boleto é pago. */
@@ -267,6 +286,8 @@ export async function editarLancamento(
 ): Promise<Resposta<{ alteracoes: number }>> {
   const bloqueio = exigeSupabase('editar lançamentos')
   if (bloqueio) return bloqueio
+  const semSessao = await exigeSessao('editar lançamentos')
+  if (semSessao) return semSessao
   if (!id) return { ok: false, erro: 'Lançamento não informado.' }
   if (!dados.descricao.trim()) return { ok: false, erro: 'Informe a descrição.' }
   if (!(dados.valor > 0)) {

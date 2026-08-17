@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { sincronizarEnvios } from '@/app/(erp)/pedidos/actions'
 import { cotarPrazosDeEntrega, frenetConfigurada, varrerRastreiosFrenet } from '@/data/frenet'
 import { codigosDoMelhorEnvio, melhorEnvioConectado, rastrearNoMelhorEnvio } from '@/data/melhorenvio'
-import { atualizarExtratoEsperando, mercadoPagoConfigurado } from '@/data/mercadopago'
+import { atualizarExtratoMp, mercadoPagoConfigurado } from '@/data/mercadopago'
 import { baixarEstoqueDosFaturados } from '@/data/baixa-estoque'
 import { pagaleveConfigurada } from '@/data/pagaleve'
 import { importarPagaleve } from '@/data/pagaleve-importacao'
@@ -173,11 +173,13 @@ export async function POST(req: Request) {
   // A Pagaleve entra AQUI, e o lugar é a parte que importa.
   //
   // Ela nasceu no fim da rotina, depois do Mercado Pago, e ali nunca rodava.
-  // Medido: a corrente é cortada por tempo antes de chegar lá — a espera pelo
-  // relatório do Mercado Pago sozinha pode consumir 150 segundos, e o que vem
-  // atrás dela é etapa que só executa em rodada de sorte. O sintoma era o
-  // pior possível para um financeiro: nenhum erro, nenhum aviso, e a Pagaleve
-  // simplesmente parada no tempo enquanto a tela dizia estar em dia.
+  // Medido: a corrente era cortada por tempo antes de chegar lá — naquela
+  // época o passo do Mercado Pago dormia até 150 segundos esperando o
+  // relatório, e o que vinha atrás dele só executava em rodada de sorte. A
+  // espera acabou, mas o lugar continua sendo este: o download e a importação
+  // do extrato ainda são o passo mais caro da rodada, e o sintoma de ficar
+  // atrás dele era o pior possível para um financeiro — nenhum erro, nenhum
+  // aviso, e a Pagaleve parada no tempo enquanto a tela dizia estar em dia.
   //
   // Aqui ela é barata e determinística: autentica, lê o mês corrente, casa
   // pelo checkout que a Yampi acabou de trazer, agenda as parcelas e concilia.
@@ -226,14 +228,19 @@ export async function POST(req: Request) {
    * O extrato vira CAIXA — e esta chamada acontece DUAS VEZES na rotina, aqui e
    * depois do Mercado Pago. Não é descuido.
    *
-   * A etapa do Mercado Pago espera o relatório ficar pronto por até 150s, e a
-   * rotina morre por tempo antes de chegar ao fim com frequência. Tudo o que
-   * ficava atrás dela virava etapa fantasma: existia no código, aparecia na
-   * revisão, e não rodava. Foi o que aconteceu com a Pagaleve hoje de manhã, e
-   * era o que estava acontecendo aqui — cinco vendas com o crédito registrado
-   * no extrato e nenhuma delas virando caixa. O ERP mostrava R$ 0,00 recebido
-   * num dia em que entraram R$ 669,73, e o Gerente, lendo esse zero,
-   * respondia ao dono da loja que não havia entrado dinheiro.
+   * A etapa do Mercado Pago já esperou o relatório ficar pronto por até 150s,
+   * e a rodada morria por tempo antes de chegar ao fim com frequência. Tudo o
+   * que ficava atrás dela virava etapa fantasma: existia no código, aparecia
+   * na revisão, e não rodava. Foi o que aconteceu com a Pagaleve, e era o que
+   * estava acontecendo aqui — cinco vendas com o crédito registrado no extrato
+   * e nenhuma delas virando caixa. O ERP mostrava R$ 0,00 recebido num dia em
+   * que entraram R$ 669,73, e o Gerente, lendo esse zero, respondia ao dono da
+   * loja que não havia entrado dinheiro.
+   *
+   * A espera acabou e a importação já converte o que acabou de ler, mas esta
+   * chamada continua: ela alcança o que a rodada anterior importou e o que
+   * entrou por outra porta — extrato do Sicoob, importação manual, correção de
+   * ligação com o pedido. Nenhum desses passa por `importarEComplementar`.
    *
    * Rodando ANTES, as linhas que a rodada anterior importou viram caixa mesmo
    * que esta rodada morra no meio. A conversão é idempotente (`on conflict do
@@ -365,27 +372,24 @@ export async function POST(req: Request) {
   // Cada etapa é isolada: uma falha de rede no gateway não pode impedir a
   // varredura de ocorrências, que não depende dele.
   //
-  // A rotina ESPERA o relatório ficar pronto, ao contrário da tela. Quem está
-  // olhando merece resposta imediata; aqui não há ninguém olhando, e esperar
-  // três minutos é o que faz o extrato se manter em dia sem depender de
-  // alguém abrir a tela e clicar.
+  // A rodada NÃO ESPERA o relatório ficar pronto — nunca mais. Esperar era
+  // dormir até dois minutos e meio dentro de uma função que a Netlify mata
+  // aos 26 segundos, e foi a causa direta de a etapa financeira só registrar
+  // "Timeout of 30000 ms": a rodada morria dentro do `setTimeout` e nada
+  // depois dele acontecia.
+  //
+  // Mas só pedir e ir embora era pior ainda: o pedido vale 30 minutos e o
+  // agendador volta em 60, então toda rodada encontrava o pendente vencido,
+  // pedia outro e desistia — a rotina, sozinha, era incapaz de importar. O
+  // extrato ficou 22 horas parado no dia 16, com 22 rodadas dentro do buraco,
+  // e as duas importações de 17/08 só aconteceram porque alguém abriu a tela.
+  //
+  // Agora a rodada é uma esteira: importa o arquivo que a rodada anterior
+  // encomendou e deixa o próximo na fila. Sem espera nenhuma, o atraso do
+  // extrato passa a ser um ciclo do agendador em vez de "até alguém clicar".
   if (grupo('financeiro') && mercadoPagoConfigurado()) {
     try {
-      // Dez tentativas de 15s cabem folgadas nos 300s da rota, junto com a
-      // importação de pedidos que vem antes.
-      // ZERO tentativas: a rotina PEDE o relatório e vai embora.
-      //
-      // Ela esperava até dez ciclos de quinze segundos — dois minutos e meio
-      // dormindo dentro de uma função que a Netlify mata aos 26 segundos. Era
-      // a causa direta do timeout da etapa financeira: a rodada morria dentro
-      // do `setTimeout`, e nada depois dela acontecia.
-      //
-      // O estado do pedido é persistido de propósito (foi assim que a tela e a
-      // rotina passaram a esperar o MESMO relatório). Então pedir agora e
-      // importar na rodada seguinte dá no mesmo resultado, sem ninguém
-      // esperando: o Mercado Pago leva um ou dois minutos para gerar o
-      // arquivo, e a próxima rodada é daqui a uma hora.
-      relatorio.mercadopago = await atualizarExtratoEsperando(de, ate, { tentativas: 0 })
+      relatorio.mercadopago = await atualizarExtratoMp(de, ate, { pedir: true })
     } catch (e) {
       relatorio.mercadopago = { erro: mensagemDe(e) }
     }
