@@ -1179,7 +1179,13 @@ async function enriquecerContrapartes(limite = 90, prazoMs = 6_000): Promise<num
     // que precisam do nome: a conversão em caixa roda antes desta rotina, então
     // toda linha interessante JÁ tem lançamento. Era uma condição que garantia
     // que o enriquecimento nunca alcançaria quem precisava dele.
-    .order('ocorrido_em', { ascending: false })
+    // Pela FILA, não pela data. Ordenar por `ocorrido_em desc` com teto de 90
+    // devolvia as mesmas 90 linhas recentes a cada rodada: as que não têm nome
+    // a oferecer continuam sem contraparte de propósito, então voltavam para
+    // sempre e as antigas nunca eram alcançadas. Medido: 475 de 525 linhas
+    // anônimas, nenhuma anterior a 09/08 jamais consultada. Quem nunca foi
+    // tentado passa na frente; o resto entra pelo mais antigo.
+    .order('contraparte_buscada_em', { ascending: true, nullsFirst: true })
     .limit(limite)
   if (error) throw error
 
@@ -1190,6 +1196,14 @@ async function enriquecerContrapartes(limite = 90, prazoMs = 6_000): Promise<num
     // Id que não é numérico não é pagamento consultável (saldo inicial,
     // ajuste manual). Pular é o certo; tentar geraria 404 a cada rodada.
     if (!/^\d{6,}$/.test(id)) continue
+    // O carimbo vai ANTES da consulta, e vale mesmo se ela falhar: o que ele
+    // registra é "esta linha já teve a vez dela", não "deu certo". Carimbar só
+    // no sucesso reproduziria a esteira parada, com outro nome.
+    await sb
+      .from('extrato_linhas')
+      .update({ contraparte_buscada_em: new Date().toISOString() })
+      .eq('origem', 'mercadopago')
+      .eq('chave', String(linha.chave))
     try {
       const pagamento = await chamar(`/v1/payments/${id}`)
       // `contraparteDe` tira o nome da PRÓPRIA casa do texto. O Mercado Pago

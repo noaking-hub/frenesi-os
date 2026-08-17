@@ -1508,11 +1508,17 @@ export async function sincronizarEnviosShopify(
           trackingInfo: e.rastreio
             ? { number: e.rastreio, company: e.transportadora ?? undefined }
             : undefined,
-          // NÃO notificar: a Yampi já manda o e-mail de faturamento, envio e
-          // entrega. Ligar isto aqui daria dois avisos do mesmo fato ao mesmo
-          // cliente — o que é pior que não avisar. O objetivo desta sincronia
-          // é a Shopify parar de mostrar o pedido como aberto, e o cliente
-          // encontrar o rastreio quando entrar na conta.
+          // NÃO notificar: quem escreve para o cliente é o ERP, e só ele.
+          //
+          // O motivo original era outro — "a Yampi já manda" —, e envelheceu:
+          // os transacionais da Yampi foram todos desligados. A decisão
+          // continua a mesma pela razão nova, e é ela que vale daqui para
+          // frente: o aviso de envio sai de `enviarAvisosDePedido`, com a cara
+          // da marca e o código de rastreio. Ligar isto aqui daria dois avisos
+          // do mesmo fato ao mesmo cliente, o que é pior que não avisar.
+          //
+          // O objetivo desta sincronia é a loja parar de mostrar o pedido como
+          // aberto, e o cliente encontrar o rastreio quando entrar na conta.
           notifyCustomer: false,
         },
       },
