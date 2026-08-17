@@ -50,7 +50,10 @@ lado de fora.
 2. Menu lateral → **Turnstile** → **Add widget**.
 3. Preencha:
    - **Widget name**: `FRENESI OS`
-   - **Hostnames**: `erp.frenesiperfumes.com.br`
+   - **Hostnames**: `erp.frenesiperfumes.com.br` **e**
+     `devolucoes.frenesiperfumes.com.br` — o mesmo widget serve os dois, e o
+     domínio que ficar de fora recebe erro `110200` no navegador em vez de
+     desafio.
    - **Widget Mode**: `Managed`
 4. Salve. A tela mostra duas chaves:
    - **Site Key** — pública, vai para o navegador.
@@ -68,9 +71,18 @@ lado de fora.
    no navegador em tempo de build, então mudar a variável sem novo build não
    surte efeito.
 
-Pronto. O widget aparece no login e no "esqueci a senha", em modo
-`interaction-only`: ele só interrompe alguém quando o desafio deixa de ser
-trivial, e na maior parte das vezes é invisível.
+Pronto. O widget aparece no login, no "esqueci a senha" e na busca do portal de
+devoluções — **visível**, em `appearance: always`. Ele resolve o desafio
+sozinho na maior parte das vezes (ninguém precisa clicar em nada); o que muda é
+que a caixa fica na tela dizendo "Verificando…" e depois "Sucesso!".
+
+A primeira versão usava `interaction-only`, que a Cloudflare só pinta quando o
+desafio exige clique. Ficava bonito e era pior: não dava para olhar a tela de
+login e saber se a proteção estava no ar, e quando o script da Cloudflare não
+carregava (bloqueador, rede corporativa, DNS filtrado) o sintoma só aparecia no
+envio, como "a verificação de segurança não foi concluída" — sem nada na tela
+que explicasse o porquê. Agora o próprio widget mostra o erro, com o código da
+Cloudflare, no lugar onde o erro aconteceu.
 
 ### Se a Cloudflare cair
 

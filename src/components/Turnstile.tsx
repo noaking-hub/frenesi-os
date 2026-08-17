@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 /**
  * O widget do Turnstile.
@@ -12,6 +12,14 @@ import { useEffect, useRef } from 'react'
  * Some inteiro quando não há chave pública configurada — e some de verdade,
  * devolvendo `null`, em vez de deixar uma caixa vazia no meio do cartão de
  * login esperando por um script que nunca vai carregar.
+ *
+ * Havendo chave, ele APARECE. A primeira versão usava `interaction-only`, que
+ * a Cloudflare só pinta quando o desafio exige clique — ou seja, quase nunca.
+ * O efeito prático foi um cadeado invisível: ninguém que olhasse a tela de
+ * login conseguia dizer se a proteção estava ligada, e o único jeito de
+ * descobrir que o script tinha falhado era tentar entrar e ser recusado. Um
+ * widget visível resolve os dois: confirma que a camada existe e mostra o erro
+ * no lugar onde o erro aconteceu.
  */
 
 declare global {
@@ -25,6 +33,16 @@ declare global {
 }
 
 const SCRIPT = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+
+/**
+ * Quanto esperar pelo script da Cloudflare antes de admitir que ele não vem.
+ *
+ * Bloqueador de anúncio, rede corporativa e DNS filtrado derrubam
+ * `challenges.cloudflare.com` calados. Sem prazo, o componente ficaria
+ * girando para sempre e a pessoa só descobriria o problema ao ser recusada no
+ * envio, com uma mensagem que não explica nada.
+ */
+const PRAZO_DO_SCRIPT_MS = 12_000
 
 export function Turnstile({
   acao,
@@ -51,6 +69,7 @@ export function Turnstile({
   const chave = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY
   const caixa = useRef<HTMLDivElement>(null)
   const id = useRef<string | null>(null)
+  const [falha, setFalha] = useState<string | null>(null)
   // A referência mais recente do callback, sem entrar nas dependências do
   // efeito: uma função nova a cada render redesenharia o widget sem parar.
   const resolver = useRef(aoResolver)
@@ -68,42 +87,62 @@ export function Turnstile({
 
     const desenhar = () => {
       if (!vivo || !caixa.current || !window.turnstile || id.current) return
+      setFalha(null)
       id.current = window.turnstile.render(caixa.current, {
         sitekey: chave,
         action: acao,
         theme: tema,
-        // O widget do ERP não precisa ser visível quando o desafio é trivial —
-        // e a maior parte das vezes é. Some do caminho de quem só quer entrar.
-        appearance: 'interaction-only',
+        // Visível sempre. O desafio segue automático — ninguém precisa clicar
+        // em nada —, mas a caixa fica na tela dizendo o que está acontecendo.
+        appearance: 'always',
+        size: 'normal',
         language: 'pt-br',
         callback: (ficha: string) => resolver.current?.(ficha),
         'expired-callback': () => resolver.current?.(null),
-        'error-callback': () => resolver.current?.(null),
+        // O código vem da própria Cloudflare e vale ouro no diagnóstico:
+        // `110200` é domínio fora da lista do site key, `300***` é rede
+        // instável. Mostrar o número evita a caçada às cegas.
+        'error-callback': (codigo?: string) => {
+          resolver.current?.(null)
+          setFalha(
+            codigo
+              ? `A verificação de segurança falhou (código ${codigo}).`
+              : 'A verificação de segurança falhou.',
+          )
+        },
       })
     }
 
-    if (window.turnstile) {
-      desenhar()
-    } else if (!document.querySelector(`script[src="${SCRIPT}"]`)) {
+    if (!window.turnstile && !document.querySelector(`script[src="${SCRIPT}"]`)) {
       const s = document.createElement('script')
       s.src = SCRIPT
       s.async = true
       s.defer = true
-      s.onload = desenhar
       document.head.appendChild(s)
-    } else {
-      // O script já está carregando por causa de outro formulário na página.
-      const espera = setInterval(() => {
-        if (window.turnstile) {
-          clearInterval(espera)
-          desenhar()
-        }
-      }, 120)
-      return () => clearInterval(espera)
+    }
+
+    // Uma espera só, para os dois casos: o script que este componente acabou
+    // de pedir e o que outro formulário da página já tinha pedido.
+    const limite = Date.now() + PRAZO_DO_SCRIPT_MS
+    const espera = setInterval(() => {
+      if (!vivo) return
+      if (window.turnstile) {
+        clearInterval(espera)
+        desenhar()
+      } else if (Date.now() > limite) {
+        clearInterval(espera)
+        setFalha('Não foi possível carregar a verificação de segurança. Recarregue a página.')
+      }
+    }, 120)
+
+    if (window.turnstile) {
+      clearInterval(espera)
+      desenhar()
     }
 
     return () => {
       vivo = false
+      clearInterval(espera)
       if (id.current && window.turnstile) {
         window.turnstile.remove(id.current)
         id.current = null
@@ -112,5 +151,18 @@ export function Turnstile({
   }, [chave, acao, tema])
 
   if (!chave) return null
-  return <div ref={caixa} className="fr-turnstile" />
+  return (
+    <div className="fr-turnstile" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div ref={caixa} style={{ display: 'flex', justifyContent: 'center' }} />
+      {falha && (
+        <span
+          role="alert"
+          className="font-sans"
+          style={{ fontSize: 11.5, lineHeight: 1.5, color: '#C25A50', textAlign: 'center' }}
+        >
+          {falha}
+        </span>
+      )}
+    </div>
+  )
 }

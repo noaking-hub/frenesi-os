@@ -210,7 +210,9 @@ export function EstilosDaPorta() {
       .fr-forca-trilho { flex: 1; height: 3px; border-radius: 2px; background: rgba(255,255,255,.07); overflow: hidden; }
       .fr-forca-barra { height: 100%; border-radius: 2px; transition: width .2s ease, background .2s ease; }
       .fr-forca-rotulo { font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: rgba(242,237,227,.38); }
-      .fr-turnstile { display: flex; justify-content: center; min-height: 0; }
+      /* O widget tem 300px fixos; o cartão tem 332px de área útil. Cabe
+         inteiro, e o align-items é o que o mantém centrado. */
+      .fr-turnstile { align-items: center; }
       .fr-rodape {
         font-size: 9.5px;
         letter-spacing: .16em;

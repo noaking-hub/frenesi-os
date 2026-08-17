@@ -71,11 +71,19 @@ diga quais doem mais — a ordem de ataque é sua.
 
 ---
 
-## 5. Turnstile no portal de devoluções (opcional)
+## 5. Turnstile: conferir os hostnames do widget na Cloudflare
 
-O portal já conta consultas por identidade e por origem, e já tem o widget do
-Turnstile no lugar. Ele fica **invisível** enquanto não houver chave.
+As duas chaves já estão na Netlify e o widget está **visível** no login, no
+"esqueci a senha" e na busca do portal de devoluções. (Ele estava configurado
+como `interaction-only`, que a Cloudflare só desenha quando o desafio exige
+clique — por isso não aparecia nada. Agora aparece sempre.)
 
-Para ligar: crie um site em dash.cloudflare.com → Turnstile e ponha
-`TURNSTILE_SECRET_KEY` e `NEXT_PUBLIC_TURNSTILE_SITE_KEY` na Netlify. Sem
-isso, o freio por contagem continua valendo — só falta a camada contra robô.
+Falta uma conferência que só você pode fazer, porque exige o painel:
+dash.cloudflare.com → **Turnstile** → o widget do ERP → **Hostnames**. Os
+**dois** domínios precisam estar lá:
+
+- `erp.frenesiperfumes.com.br`
+- `devolucoes.frenesiperfumes.com.br`
+
+Se faltar um, a caixa vai mostrar erro **110200** nesse domínio — e agora ela
+mostra o código na tela, em vez de falhar calada.
