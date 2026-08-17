@@ -77,3 +77,16 @@ export function diaDaOperacao(instante: string): string {
   const d = new Date(instante)
   return Number.isNaN(d.getTime()) ? instante.slice(0, 10) : DIA_LOCAL.format(d)
 }
+
+/**
+ * dd/mm/aaaa a partir de AAAA-MM-DD, sem passar por `Date` (que desloca fuso).
+ *
+ * Existe ao lado de `diaCurtoPt` (dd/mm) por causa do cronograma de
+ * parcelamento: 48 parcelas de 30 dias passam de três anos, e "06/11" numa
+ * lista assim não diz de qual novembro se trata. Onde o ano é óbvio — a coluna
+ * de baixa da tabela de lançamentos — o formato curto continua sendo o certo.
+ */
+export function diaPt(iso: string): string {
+  const [a, m, d] = iso.split('-')
+  return a && m && d ? `${d}/${m}/${a}` : iso
+}

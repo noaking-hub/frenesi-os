@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, type ReactNode } from 'react'
 
 import type { CategoriaGerencial, ContaFinanceira } from '@/domain'
 
@@ -28,8 +28,19 @@ const Listas = createContext<ListasDeEdicao>({})
 
 export function ProvedorDeListas({
   children,
-  ...listas
+  contas,
+  categorias,
+  centros,
 }: ListasDeEdicao & { children: ReactNode }) {
+  // `value={{contas, categorias, centros}}` cru é objeto novo a cada render, e
+  // identidade nova de contexto re-renderiza TODO consumidor — aqui, o botão de
+  // ações de cada uma das 50 linhas da página, mesmo quando as listas não
+  // mudaram um item. Com o `useMemo` o custo volta a depender das listas, que é
+  // o que este provedor foi criado para garantir.
+  const listas = useMemo(
+    () => ({ contas, categorias, centros }),
+    [contas, categorias, centros],
+  )
   return <Listas.Provider value={listas}>{children}</Listas.Provider>
 }
 

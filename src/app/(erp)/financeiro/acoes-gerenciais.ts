@@ -6,7 +6,9 @@ import { OPERADOR } from '@/data/operador'
 import { sessaoAtual } from '@/data/sessao'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import type { NaturezaGerencial } from '@/domain'
-import { hojeEmSaoPaulo } from '@/domain'
+import { INTERVALO_PADRAO_DIAS, MAX_PARCELAS, MIN_PARCELAS, hojeEmSaoPaulo } from '@/domain'
+
+import { ROTAS_DO_FINANCEIRO } from './rotas'
 
 /**
  * Ações do Financeiro gerencial.
@@ -53,17 +55,7 @@ async function exigeSessao(acao: string) {
 
 /** Só as rotas do módulo — o resto do ERP não muda quando um boleto é pago. */
 function revalidarFinanceiro() {
-  for (const rota of [
-    '/financeiro',
-    '/financeiro/lancamentos',
-    '/financeiro/contas',
-    '/financeiro/fluxo-de-caixa',
-    '/financeiro/dre',
-    '/financeiro/conciliacao',
-    '/financeiro/categorias',
-  ]) {
-    revalidatePath(rota)
-  }
+  for (const rota of ROTAS_DO_FINANCEIRO) revalidatePath(rota)
 }
 
 // ── Compromissos ───────────────────────────────────────────────────────────
@@ -525,21 +517,58 @@ export async function registrarTransferencia(dados: {
 
 // ── Parcelamento ───────────────────────────────────────────────────────────
 
-/** Quebra um compromisso em N parcelas mensais e cancela o original. */
+/**
+ * Quebra um compromisso em N parcelas mensais e cancela o original.
+ *
+ * `jaRecebidas` é o K do relato do dono: "parcelei essa venda em 2x, mas o
+ * lançamento eu só fiz depois que recebi a primeira parcela". Sem ele, o único
+ * parcelamento possível era o que nasce inteiro em aberto, e a venda gravada
+ * como recebida por inteiro não tinha conserto — `parcelar_lancamento` recusava
+ * lançamento baixado.
+ *
+ * A validação aqui não é desconfiança da tela: Server Action é endpoint HTTP, e
+ * quem souber o nome chama direto. O invariante que importa de verdade — o
+ * parcelamento não pode marcar como recebido MAIS do que já estava recebido —
+ * mora no banco, dentro de `parcelar_lancamento`, porque é lá que `recebido` do
+ * pai é legível dentro da mesma transação.
+ *
+ * A sessão passou a ser exigida junto com K: com `jaRecebidas > 0` esta ação
+ * MEXE NO SALDO calculado da conta (para menos, quando o ERP tinha marcado
+ * recebido a mais). Isso não é operação para um endpoint aberto.
+ */
 export async function parcelarLancamento(
   id: string,
   parcelas: number,
-  intervaloDias = 30,
+  intervaloDias = INTERVALO_PADRAO_DIAS,
+  jaRecebidas = 0,
+  recebidasEm: string | null = null,
 ): Promise<Resposta<{ criadas: number }>> {
   const bloqueio = exigeSupabase('parcelar lançamentos')
   if (bloqueio) return bloqueio
-  if (!(parcelas >= 2)) return { ok: false, erro: 'O parcelamento exige ao menos 2 parcelas.' }
-  if (parcelas > 48) return { ok: false, erro: 'No máximo 48 parcelas.' }
+  const semSessao = await exigeSessao('parcelar lançamentos')
+  if (semSessao) return semSessao
+  if (!(parcelas >= MIN_PARCELAS)) {
+    return { ok: false, erro: `O parcelamento exige ao menos ${MIN_PARCELAS} parcelas.` }
+  }
+  if (parcelas > MAX_PARCELAS) return { ok: false, erro: `No máximo ${MAX_PARCELAS} parcelas.` }
+  if (!(jaRecebidas >= 0) || jaRecebidas > parcelas) {
+    return {
+      ok: false,
+      erro: `Não dá para marcar ${jaRecebidas} parcelas já recebidas em um parcelamento de ${parcelas}.`,
+    }
+  }
+  if (jaRecebidas > 0 && !dataValida(recebidasEm ?? '')) {
+    return { ok: false, erro: 'Informe a data em que as parcelas já recebidas entraram na conta.' }
+  }
 
   const { data, error } = await supabaseServer().rpc('parcelar_lancamento', {
     p_lancamento_id: id,
     p_parcelas: parcelas,
     p_intervalo_dias: intervaloDias,
+    p_ja_recebidas: jaRecebidas,
+    // Nulo quando K = 0: aí o banco cai no `coalesce` com a baixa do próprio
+    // pai, e a data nunca chega a ser usada porque o invariante já obriga K = 0.
+    p_recebidas_em: jaRecebidas > 0 ? recebidasEm : null,
   })
   if (error) {
     console.error('[financeiro] parcelar_lancamento falhou:', error)

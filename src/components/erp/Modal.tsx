@@ -12,13 +12,27 @@ import { createPortal } from 'react-dom'
  * Numa lista de 400 linhas isso põe o diálogo a 10 mil pixels do topo — o
  * fundo escurece e nada aparece. No `body` não há ancestral para prender.
  */
-/** Esc fecha e a página atrás não rola enquanto o diálogo está aberto. */
+/**
+ * Esc fecha e a página atrás não rola enquanto o diálogo está aberto.
+ *
+ * `aoFechar` entra por REF, e não como dependência do efeito, porque quem chama
+ * escreve `aoFechar={() => setAberto(null)}` — função nova a cada render. Como
+ * dependência, ela remontava o efeito inteiro a cada re-render do pai: o
+ * cleanup devolvia `body.overflow` ao valor anterior e o efeito o punha em
+ * 'hidden' de novo, duas invalidações de layout do DOCUMENTO INTEIRO por
+ * re-render, com o diálogo parado na tela. Numa lista longa isso é caro à toa,
+ * e a janela entre o restaurar e o repor é a única em que a página atrás volta
+ * a rolar com o modal aberto. Pela ref, o efeito roda uma vez por abertura e o
+ * Esc continua chamando sempre a versão mais recente do fechamento.
+ */
 function useDialogoAberto(aoFechar: () => void) {
   const [montado, setMontado] = useState(false)
+  const fechar = useRef(aoFechar)
+  fechar.current = aoFechar
   useEffect(() => setMontado(true), [])
   useEffect(() => {
     const aoTeclar = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') aoFechar()
+      if (e.key === 'Escape') fechar.current()
     }
     document.addEventListener('keydown', aoTeclar)
     const overflowAnterior = document.body.style.overflow
@@ -27,7 +41,7 @@ function useDialogoAberto(aoFechar: () => void) {
       document.removeEventListener('keydown', aoTeclar)
       document.body.style.overflow = overflowAnterior
     }
-  }, [aoFechar])
+  }, [])
   return montado
 }
 

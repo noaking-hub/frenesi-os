@@ -4,6 +4,9 @@ import { confirmarEntregaLocal } from '@/data/baixa-estoque'
 import { eventosDoPedido, frenetConfigurada, rastrearPedidos } from '@/data/frenet'
 import { OPERADOR } from '@/data/operador'
 import type { EventoTransportadora } from '@/domain'
+import { INTERVALO_PADRAO_DIAS, MAX_PARCELAS, MIN_PARCELAS } from '@/domain'
+
+import { ROTAS_DO_FINANCEIRO } from '../financeiro/rotas'
 
 import { revalidatePath } from 'next/cache'
 
@@ -410,8 +413,34 @@ export interface ItemVendaManual {
   descricao: string
 }
 
+/** Uma parcela como o BANCO a gravou — não como a prévia a estimou. */
+export interface ParcelaGravada {
+  numero: number
+  valor: number
+  /** AAAA-MM-DD. */
+  venceEm: string
+  /** AAAA-MM-DD quando a parcela já nasceu baixada; null quando está em aberto. */
+  recebidaEm: string | null
+}
+
 export type RespostaVendaManual =
-  | { ok: true; pedidoId: string; total: number; mlBaixado: number }
+  | {
+      ok: true
+      pedidoId: string
+      total: number
+      /**
+       * Quanto do total JÁ está na conta — lido do que o banco gravou.
+       *
+       * A tela de sucesso mostra fato, não dedução: com a venda em 2× e a
+       * primeira parcela recebida no ato, "Entrou no caixa" é R$ 108,00 e não
+       * o total nem zero. Deduzir isso do cronograma na tela seria recalcular
+       * na mão o que o próprio banco acabou de decidir.
+       */
+      recebido: number
+      mlBaixado: number
+      /** Vazio quando a venda não foi repartida; o cronograma completo quando foi. */
+      parcelas: ParcelaGravada[]
+    }
   | { ok: false; erro: string }
 
 /**
@@ -437,6 +466,19 @@ const CANAIS_MANUAIS = new Set(['manual', 'whatsapp', 'instagram'])
  * A validação abaixo repete a do banco de propósito: a mesma regra dita em
  * português, antes da viagem, é o que separa "Informe a quantidade do item 2"
  * de uma exceção de plpgsql na cara do operador.
+ *
+ * PARCELAMENTO: `parcelas >= 2` reparte o total em N lançamentos com
+ * vencimentos espaçados, e `jaRecebidas` (K) diz quantos dos primeiros já
+ * entraram na conta. NÃO é verdade que a venda parcelada nasça inteiramente a
+ * receber — nesta operação o normal é o contrário: fecha-se em 2× e a primeira
+ * parcela é paga no ato. K = 0 é a venda parcelada em que nada entrou ainda;
+ * K = N é o cliente que pagou tudo adiantado; K = 1 é o caso de todo dia.
+ *
+ * Isso é decidido DENTRO da mesma função do banco, e não por uma segunda
+ * chamada a `parcelarLancamento`, por dois motivos que o SQL da migração
+ * detalha: duas RPCs são duas transações — meia venda gravada é pior que venda
+ * nenhuma — e `parcelar_lancamento` cancela o lançamento original, o que
+ * deixaria a venda com um lançamento nascido e morto no mesmo segundo.
  */
 export async function registrarVendaManual(dados: {
   itens: ItemVendaManual[]
@@ -447,6 +489,14 @@ export async function registrarVendaManual(dados: {
   clienteNome: string
   clienteEmail: string
   observacao: string
+  /** 1 não reparte a venda. De 2 a 48, o total vira N parcelas. */
+  parcelas: number
+  /** Dias corridos entre um vencimento e o próximo. */
+  intervaloDias: number
+  /** K: quantas das PRIMEIRAS parcelas já entraram na conta. */
+  jaRecebidas: number
+  /** AAAA-MM-DD em que essas K entraram; null quando K = 0. */
+  recebidasEm: string | null
 }): Promise<RespostaVendaManual> {
   if (!supabaseConfigurado()) {
     return { ok: false, erro: 'O Supabase precisa estar configurado para registrar vendas.' }
@@ -477,6 +527,40 @@ export async function registrarVendaManual(dados: {
     return { ok: false, erro: 'Informe a data da venda.' }
   }
 
+  // A faixa é a MESMA do diálogo Parcelar (2..48) porque as duas telas parcelam
+  // o mesmo tipo de fato — se uma aceitasse 60 e a outra não, o dono descobriria
+  // pela mensagem de erro do plpgsql.
+  const parcelas = Math.round(dados.parcelas) || 1
+  if (parcelas > 1) {
+    if (parcelas < MIN_PARCELAS || parcelas > MAX_PARCELAS) {
+      return { ok: false, erro: `O parcelamento vai de ${MIN_PARCELAS} a ${MAX_PARCELAS} vezes.` }
+    }
+    if (!(Math.round(dados.intervaloDias) >= 1)) {
+      return { ok: false, erro: 'O intervalo entre as parcelas precisa ser de ao menos 1 dia.' }
+    }
+  }
+
+  // K vive entre 0 e N. Acima disso, a venda marcaria como recebido mais do que
+  // vale — e como esta função grava a baixa direto, sem passar pelo invariante
+  // de `parcelar_lancamento`, aqui e no plpgsql são as duas únicas travas.
+  const jaRecebidas = Math.round(dados.jaRecebidas)
+  if (!(jaRecebidas >= 0) || jaRecebidas > parcelas) {
+    return {
+      ok: false,
+      erro:
+        parcelas > 1
+          ? `Não dá para marcar ${jaRecebidas} parcelas já recebidas em uma venda de ${parcelas}.`
+          : 'Sem parcelamento, a venda foi recebida (1) ou não foi (0).',
+    }
+  }
+  // Sem o dia, a baixa não entra no fluxo de caixa: ele posiciona o dinheiro
+  // por `baixado_em`. Assumir "hoje" jogaria no dia do cadastro um recebimento
+  // que aconteceu na semana passada — que é justamente o caso que esta venda
+  // precisa registrar.
+  if (jaRecebidas > 0 && !/^\d{4}-\d{2}-\d{2}$/.test(dados.recebidasEm ?? '')) {
+    return { ok: false, erro: 'Informe a data em que as parcelas já recebidas entraram na conta.' }
+  }
+
   const email = dados.clienteEmail.trim()
   // E-mail torto vira cliente novo e permanente no CRM — a função do banco
   // cadastra quem ela não encontra. Recusar antes é mais barato que limpar
@@ -503,6 +587,11 @@ export async function registrarVendaManual(dados: {
     p_observacao: dados.observacao.trim() || null,
     p_operador: OPERADOR,
     p_cliente_email: email || null,
+    p_parcelas: parcelas,
+    p_intervalo_dias: Math.round(dados.intervaloDias) || INTERVALO_PADRAO_DIAS,
+    p_ja_recebidas: jaRecebidas,
+    // Nulo com K = 0 — o banco só usa a data para carimbar parcela recebida.
+    p_recebidas_em: jaRecebidas > 0 ? dados.recebidasEm : null,
   })
   if (error) {
     console.error('[venda manual] registrar_venda_manual falhou:', error)
@@ -511,7 +600,15 @@ export async function registrarVendaManual(dados: {
 
   // `returns table (...)` chega como lista de uma linha só.
   const linha = (Array.isArray(data) ? data[0] : data) as
-    | { pedido_id: string; total: number | string; ml_baixado: number | string }
+    | {
+        pedido_id: string
+        total: number | string
+        total_recebido: number | string
+        ml_baixado: number | string
+        parcelas:
+          | { numero: number; vence_em: string; valor: number | string; recebida_em: string | null }[]
+          | null
+      }
     | undefined
   if (!linha) {
     return { ok: false, erro: 'A venda foi enviada, mas o banco não devolveu o pedido criado.' }
@@ -523,14 +620,28 @@ export async function registrarVendaManual(dados: {
   // mostrando o mundo de antes da venda.
   revalidatePath('/pedidos')
   revalidatePath('/estoque')
-  revalidatePath('/financeiro')
   revalidatePath('/')
+  // E as sete do Financeiro, não só a raiz: o botão que dispara esta ação vive
+  // em `/financeiro/lancamentos`, e a venda parcelada aparece também no fluxo
+  // de caixa e no painel de próximos vencimentos.
+  for (const rota of ROTAS_DO_FINANCEIRO) revalidatePath(rota)
 
   return {
     ok: true,
     pedidoId: String(linha.pedido_id),
     total: Number(linha.total),
+    recebido: Number(linha.total_recebido),
     mlBaixado: Number(linha.ml_baixado),
+    // O cronograma vem do banco, não da prévia: a tela de sucesso mostra o que
+    // foi GRAVADO, do mesmo jeito que já fazia com o total e os ml baixados.
+    // Inclusive quais parcelas nasceram baixadas — é o que separa "já entrou"
+    // de "vai entrar" na lista que o operador confere.
+    parcelas: (linha.parcelas ?? []).map((p) => ({
+      numero: Number(p.numero),
+      valor: Number(p.valor),
+      venceEm: String(p.vence_em),
+      recebidaEm: p.recebida_em ? String(p.recebida_em) : null,
+    })),
   }
 }
 

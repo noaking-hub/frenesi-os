@@ -80,15 +80,29 @@ export function BarraDeFiltros({
   // Digitar não pode navegar a cada tecla: cada navegação é uma ida ao
   // servidor, e o cursor saltaria. 350 ms é o intervalo entre "parou de
   // digitar" e "quer o resultado".
+  //
+  // O detalhe aberto é fotografado NO AGENDAMENTO e conferido no disparo — e
+  // isso conserta um defeito real, não é precaução. Este efeito depende só de
+  // `texto`; clicar numa linha da tabela não muda `texto`, então ele NÃO
+  // re-executa e o `clearTimeout` do cleanup não roda. O timeout da última
+  // tecla sobrevivia ao clique, disparava 350 ms depois e apagava
+  // `lancamento` — o dono via o detalhe que acabara de abrir sumir sozinho.
+  // Comparar as duas fotos separa os dois casos: mudou de detalhe no meio do
+  // caminho significa que o clique é a intenção mais recente e ele fica; nada
+  // mudou significa que a busca é o único gesto em jogo e o detalhe fecha,
+  // como em qualquer outro filtro.
   useEffect(() => {
     const atual = params.get('q') ?? ''
     if (texto === atual) return
-    const t = setTimeout(() => trocar('q', texto), 350)
+    const detalheAoAgendar = paramsAgora.current.get('lancamento')
+    const t = setTimeout(() => {
+      trocar('q', texto, paramsAgora.current.get('lancamento') === detalheAoAgendar)
+    }, 350)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [texto])
 
-  function trocar(chave: string, valor: string) {
+  function trocar(chave: string, valor: string, fecharDetalhe = true) {
     const novo = new URLSearchParams(paramsAgora.current.toString())
     if (valor) novo.set(chave, valor)
     else novo.delete(chave)
@@ -98,13 +112,11 @@ export function BarraDeFiltros({
     // Trocar o filtro fecha o detalhe: a lista embaixo vira outra, e manter o
     // detalhe do lançamento antigo por cima esconde justamente o que se pediu.
     //
-    // Isto chegou a ser removido durante a otimização, por receio de o debounce
-    // da busca fechar sozinho um detalhe recém-aberto. Não fecha: o efeito
-    // depende só de `texto`, e clicar numa linha não muda `texto` — nenhum
-    // timeout fica pendente para disparar depois. Sem esta linha, mexer num
-    // filtro com o detalhe aberto não muda nada na tela, que é o defeito pior
-    // dos dois.
-    novo.delete('lancamento')
+    // `fecharDetalhe` só chega falso pelo debounce da busca, quando o operador
+    // abriu um detalhe DEPOIS da última tecla — ver o comentário do efeito
+    // acima. Todo clique direto em filtro (período, situação, tipo, conta…)
+    // fecha, porque ali o gesto e a navegação são o mesmo instante.
+    if (fecharDetalhe) novo.delete('lancamento')
     // Data à mão e atalho são a MESMA decisão dita de dois jeitos; manter os
     // dois faria a tela obedecer a um e exibir o outro aceso.
     if (chave === 'de' || chave === 'ate') novo.delete('periodo')

@@ -1,12 +1,27 @@
 'use client'
 
-import { useState, useTransition, type ReactNode } from 'react'
+import { useMemo, useState, useTransition, type ReactNode } from 'react'
 
 import { Ico, type NomeIcone } from '@/components/erp/IconesUi'
 import { Modal } from '@/components/erp/Modal'
 import { BotaoOuro, BotaoSecundario, Rotulo, TituloSecao } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
-import { brl, diaCurtoPt, parseNum, ROTULO_NATUREZA, saldoAberto, hojeEmSaoPaulo } from '@/domain'
+import {
+  INTERVALO_PADRAO_DIAS,
+  MAX_PARCELAS,
+  MIN_PARCELAS,
+  brl,
+  diaCurtoPt,
+  diaPt,
+  efeitoDoParcelamento,
+  hojeEmSaoPaulo,
+  parcelasValidas,
+  parseNum,
+  planejarParcelamento,
+  ROTULO_NATUREZA,
+  ROTULO_ORIGEM_SALDO,
+  saldoAberto,
+} from '@/domain'
 import type {
   CategoriaGerencial,
   ContaFinanceira,
@@ -135,8 +150,20 @@ function Rodape({
   )
 }
 
-/** Prévia do que vai ser gravado — o número antes do clique. */
-function Previa({ linhas }: { linhas: { rotulo: string; valor: string; tom?: string }[] }) {
+/**
+ * Prévia do que vai ser gravado — o número antes do clique.
+ *
+ * `rolagem` existe por causa do cronograma do Parcelar: 48 parcelas empurrariam
+ * o botão de confirmar para fora do modal, e o operador não teria como gravar o
+ * que a própria tela acabou de mostrar.
+ */
+function Previa({
+  linhas,
+  rolagem,
+}: {
+  linhas: { rotulo: string; valor: string; tom?: string }[]
+  rolagem?: boolean
+}) {
   return (
     <div
       style={{
@@ -147,6 +174,7 @@ function Previa({ linhas }: { linhas: { rotulo: string; valor: string; tom?: str
         border: '1px solid rgba(239,209,140,.22)',
         borderRadius: 10,
         background: 'rgba(239,209,140,.045)',
+        ...(rolagem ? { maxHeight: 196, overflowY: 'auto' as const } : null),
       }}
     >
       {linhas.map((l) => (
@@ -503,7 +531,15 @@ export function AcoesGerenciais({
           onClick={() => setAberto('editar')}
         />
       )}
-      {!encerrado && !lancamento.parcela && !lancamento.transferenciaId && (
+      {/* Liquidado TAMBÉM parcela, e não é folga: é onde mora o erro que a
+          funcionalidade conserta — "parcelei em 2x, mas lancei a venda só
+          depois de receber a primeira parcela", com o ERP marcando o total
+          como recebido. Enquanto o ícone sumia no liquidado, o único caminho
+          para corrigir isso não existia na interface. O banco protege o que
+          precisa ser protegido: `parcelar_lancamento` recusa quando o
+          parcelamento marcaria como recebido mais do que já estava.
+          Cancelado continua fora: o registro deixou de valer. */}
+      {situacao !== 'cancelado' && !lancamento.parcela && !lancamento.transferenciaId && (
         <BotaoIcone icone="calendario" rotulo="Parcelar" onClick={() => setAberto('parcelar')} />
       )}
       {!encerrado && (
@@ -536,7 +572,15 @@ export function AcoesGerenciais({
         <DialogoBaixa lancamento={lancamento} aoFechar={() => setAberto(null)} />
       )}
       {aberto === 'parcelar' && (
-        <DialogoParcelar lancamento={lancamento} aoFechar={() => setAberto(null)} />
+        <DialogoParcelar
+          lancamento={lancamento}
+          // A conta sai da mesma lista do contexto que o lápis usa: o diálogo
+          // precisa dos saldos dela para dizer quanto o parcelamento derruba.
+          // Sem provedor, `contas` é undefined e o aviso mostra só a diferença
+          // no lançamento — que continua sendo verdade.
+          conta={contas?.find((c) => c.id === lancamento.contaId)}
+          aoFechar={() => setAberto(null)}
+        />
       )}
       {aberto === 'cancelar' && (
         <DialogoCancelar lancamento={lancamento} aoFechar={() => setAberto(null)} />
@@ -997,26 +1041,147 @@ function DialogoBaixa({
   )
 }
 
+/**
+ * Parcelar um compromisso que já existe — inclusive um que já foi baixado.
+ *
+ * A prévia sai INTEIRA de `planejarParcelamento`, no domínio. A versão anterior
+ * deste diálogo tinha cópia própria da divisão
+ * (`Math.trunc((lancamento.valor / n) * 100) / 100`), que é a conta em ponto
+ * flutuante que `src/domain/parcelamento.ts` foi criado para matar: numa
+ * varredura de R$ 0,01 a R$ 10.000,00 × 2..48 parcelas, 348.983 de 47 milhões
+ * de combinações discordavam de `dividirEmParcelas` (~1 em 135). Casos banais
+ * caíam nela — R$ 100,02 em 3× exibia "3× de R$ 33,33" com R$ 0,03 de diferença
+ * na 1ª, e o banco gravava 33,34/33,34/33,34, porque `trunc(100.02/3, 2)` em
+ * numeric dá 33.34 e em float dá 33.33 (100.02/3 é 33.339999999999996). A
+ * prévia mentia sobre TODAS as parcelas, e o dono só descobriria conferindo
+ * boleto — que é literalmente o cenário que aquele módulo diz querer evitar.
+ *
+ * "Já recebidas" é o caso do dono: "parcelei essa venda em 2x, mas o lançamento
+ * eu só fiz depois que recebi a primeira parcela". O ERP tinha gravado
+ * R$ 216,00 recebidos em 12/08 quando só R$ 108,00 entraram. Marcar K parcelas
+ * como recebidas é o conserto — e por isso o diálogo agora abre para lançamento
+ * liquidado também, que é onde esse erro mora.
+ */
 function DialogoParcelar({
   lancamento,
+  conta,
   aoFechar,
 }: {
   lancamento: LancamentoGerencial
+  /** A conta do lançamento — é o saldo dela que muda. Ausente fora do provedor. */
+  conta: ContaFinanceira | undefined
   aoFechar: () => void
 }) {
-  const [parcelas, setParcelas] = useState('2')
-  const [intervalo, setIntervalo] = useState('30')
+  const jaBaixado = Boolean(lancamento.baixadoEm)
+  const [parcelas, setParcelas] = useState(String(MIN_PARCELAS))
+  const [intervalo, setIntervalo] = useState(String(INTERVALO_PADRAO_DIAS))
+  // Lançamento já baixado abre com UMA parcela recebida, não com zero: quem
+  // chega aqui com o compromisso liquidado está quase sempre consertando o
+  // relato do dono — "parcelei em 2x e lancei depois de receber a primeira".
+  // Zero seria pedir para ele redigitar o que o ERP já sabe, e — pior — um
+  // clique distraído desmarcaria como recebido um dinheiro que entrou.
+  const [jaRecebidas, setJaRecebidas] = useState(jaBaixado ? '1' : '0')
+  // A data padrão é a baixa do próprio lançamento quando ela existe: se o
+  // dinheiro entrou, aquele é o dia. É também o que o banco assume no
+  // `coalesce(p_recebidas_em, v_pai.baixado_em)`.
+  const [recebidasEm, setRecebidasEm] = useState(lancamento.baixadoEm ?? hoje())
   const [erro, setErro] = useState<string | null>(null)
   const [pendente, iniciar] = useTransition()
 
-  const n = Math.max(2, Math.min(48, Math.round(parseNum(parcelas))))
-  const cada = Math.trunc((lancamento.valor / n) * 100) / 100
-  const resto = Math.round((lancamento.valor - cada * n) * 100) / 100
+  const n = parcelasValidas(parseNum(parcelas))
+  const dias = Math.round(parseNum(intervalo)) || INTERVALO_PADRAO_DIAS
+  const k = Math.max(0, Math.round(parseNum(jaRecebidas)) || 0)
+
+  /*
+   * A âncora do cronograma copia o `case` de `gravar_parcelas_do_lancamento`,
+   * linha por linha: com K > 0 a primeira parcela é a que já foi recebida, e a
+   * data dela é a do recebimento; sem K, vale o vencimento e, na falta dele, a
+   * competência — porque compromisso previsto ainda precisa cair em algum dia
+   * para entrar na projeção. Ancorar em outra coisa faria a prévia prometer
+   * vencimentos diferentes dos que o banco grava.
+   */
+  const primeiroVencimento =
+    k > 0 ? recebidasEm : (lancamento.venceEm ?? lancamento.competencia)
+
+  const plano = useMemo(
+    () =>
+      planejarParcelamento({
+        valor: lancamento.valor,
+        parcelas: n,
+        primeiroVencimento,
+        intervaloDias: dias,
+        jaRecebidas: k,
+        recebidasEm,
+      }),
+    [lancamento.valor, n, primeiroVencimento, dias, k, recebidasEm],
+  )
+
+  /*
+   * O invariante que o banco levanta, dito ANTES do clique.
+   *
+   * `parcelar_lancamento` recusa quando o total marcado como recebido depois
+   * passaria do que já estava recebido antes — isso seria o ERP inventando uma
+   * entrada que o extrato nunca teve. Ficar MENOR passa de propósito: é o
+   * conserto, e o saldo da conta cai na diferença.
+   *
+   * Quanto ele cai sai de `efeitoDoParcelamento`, que espelha a view
+   * `saldos_das_contas` — inclusive as duas regras que fazem o número surpreender
+   * quem só olha a tela: baixa sem data não entra em saldo nenhum, e o saldo
+   * EXIBIDO em Contas e Caixas só soma baixas posteriores à data do saldo
+   * informado à mão. No caso do dono, o calculado do Inter cai R$ 108,00 e o
+   * exibido não se mexe. Anunciar só "o saldo cai R$ 108" mandaria ele conferir
+   * um número parado.
+   */
+  const recebidoAgora = plano.ok ? plano.recebido : 0
+  const efeito = plano.ok
+    ? efeitoDoParcelamento({
+        tipo: lancamento.tipo,
+        movimentadoAntes: lancamento.recebido,
+        baixadoEmAntes: lancamento.baixadoEm,
+        movimentadoDepois: recebidoAgora,
+        baixadoEmDepois: recebidoAgora > 0 ? recebidasEm : null,
+        saldoInformadoPara: conta?.saldoInformadoPara ?? null,
+      })
+    : null
+  const inventaDinheiro = Boolean(efeito?.inventaDinheiro)
+  const devolveDinheiro = Boolean(efeito && efeito.diferenca < -0.004)
+
+  // Entrada e saída falam línguas diferentes: "recebido" numa despesa é "pago".
+  const movimentados = lancamento.tipo === 'entrada' ? 'recebidos' : 'pagos'
+  /*
+   * O aviso de saldo é montado aqui, e não no meio do JSX, porque são três
+   * frases condicionais: o que muda no lançamento, o que muda no saldo
+   * calculado e o que acontece (ou não) com o saldo exibido. Sem a conta —
+   * fora do provedor de listas — sobra a primeira, que continua verdadeira.
+   */
+  const avisoDeSaldo: string[] = []
+  if (efeito && devolveDinheiro) {
+    avisoDeSaldo.push(
+      `O ERP tem ${brl(lancamento.recebido)} marcados como ${movimentados} neste lançamento e passa a ter ${brl(recebidoAgora)} — ${brl(lancamento.recebido - recebidoAgora)} a menos, que é o dinheiro que ainda não entrou.`,
+    )
+    if (conta) {
+      const calculadoDepois = conta.saldoCalculado + efeito.variacaoNoCalculado
+      avisoDeSaldo.push(
+        `Saldo calculado de ${conta.nome}: ${brl(conta.saldoCalculado)} → ${brl(calculadoDepois)}.`,
+      )
+      avisoDeSaldo.push(
+        efeito.variacaoNoDisponivel === 0 && conta.saldoInformadoPara
+          ? `O saldo exibido em Contas e Caixas (${brl(conta.saldoDisponivel)}) NÃO muda: ele foi informado à mão para ${diaPt(conta.saldoInformadoPara)} e só soma baixas posteriores a essa data. Quem cai é o número da conferência, "${ROTULO_ORIGEM_SALDO.calculado}".`
+          : `O saldo exibido de ${conta.nome} vai de ${brl(conta.saldoDisponivel)} para ${brl(conta.saldoDisponivel + efeito.variacaoNoDisponivel)}.`,
+      )
+    }
+  }
 
   const confirmar = () =>
     iniciar(async () => {
+      // A recusa já está escrita na tela, com a mesma frase que o banco usaria;
+      // a viagem ao servidor só voltaria com ela traduzida de plpgsql.
+      if (!plano.ok) {
+        setErro(plano.erro)
+        return
+      }
       setErro(null)
-      const r = await parcelarLancamento(lancamento.id, n, Math.round(parseNum(intervalo)) || 30)
+      const r = await parcelarLancamento(lancamento.id, n, dias, k, k > 0 ? recebidasEm : null)
       if (!r.ok) {
         setErro(r.erro)
         return
@@ -1025,7 +1190,7 @@ function DialogoParcelar({
     })
 
   return (
-    <Modal titulo="Parcelar" largura={500} aoFechar={aoFechar}>
+    <Modal titulo="Parcelar" largura={520} aoFechar={aoFechar}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
         <TituloSecao tamanho={16}>Parcelar compromisso</TituloSecao>
         <span
@@ -1036,26 +1201,127 @@ function DialogoParcelar({
         </span>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 12 }}>
-          <Campo rotulo="Parcelas">
+          <Campo rotulo="Parcelas" dica={`De ${MIN_PARCELAS} a ${MAX_PARCELAS}`}>
             <input value={parcelas} onChange={(e) => setParcelas(e.target.value)} inputMode="numeric" style={CAMPO} />
           </Campo>
-          <Campo rotulo="Intervalo (dias)" dica="30 dias é o padrão do boleto mensal">
+          <Campo rotulo="Intervalo (dias)" dica="Dias corridos — 30 é o padrão do boleto mensal">
             <input value={intervalo} onChange={(e) => setIntervalo(e.target.value)} inputMode="numeric" style={CAMPO} />
           </Campo>
         </div>
 
-        <Previa
-          linhas={[
-            { rotulo: `${n}× de`, valor: brl(cada) },
-            ...(resto > 0
-              ? [{ rotulo: 'Diferença de arredondamento na 1ª', valor: brl(resto), tom: COR.ouro }]
-              : []),
-            { rotulo: 'Soma das parcelas', valor: brl(lancamento.valor) },
-          ]}
-        />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 12 }}>
+          <Campo
+            rotulo="Já recebidas"
+            dica="Quantas das PRIMEIRAS parcelas já entraram na conta. Zero é o parcelamento de sempre, inteiro em aberto."
+          >
+            <input
+              value={jaRecebidas}
+              onChange={(e) => setJaRecebidas(e.target.value)}
+              inputMode="numeric"
+              style={CAMPO}
+            />
+          </Campo>
+          <Campo
+            rotulo="Recebidas em"
+            dica={
+              k > 0
+                ? 'O dia em que o dinheiro caiu na conta, que quase sempre é retroativo — é esta data que o fluxo de caixa usa'
+                : 'Só vale com "Já recebidas" maior que zero'
+            }
+          >
+            <input
+              type="date"
+              value={recebidasEm}
+              onChange={(e) => setRecebidasEm(e.target.value)}
+              disabled={k === 0}
+              style={{ ...CAMPO, opacity: k === 0 ? 0.4 : 1 }}
+            />
+          </Campo>
+        </div>
+
+        {plano.ok ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* O rótulo diz o total, não "N× de X": quando a divisão não fecha
+                redonda não existe um "de X" único, e é justamente essa mentira
+                que a cópia antiga da conta contava. */}
+            <Rotulo>{`Cronograma — ${n}× · ${brl(lancamento.valor)}`}</Rotulo>
+            <Previa
+              rolagem
+              linhas={[
+                ...plano.parcelas.map((p) => ({
+                  rotulo: p.recebidaEm
+                    ? `${p.numero}/${n} · RECEBIDA em ${diaPt(p.recebidaEm)}`
+                    : `${p.numero}/${n} · vence ${diaPt(p.venceEm)}`,
+                  valor: brl(p.valor),
+                  tom: p.recebidaEm ? COR.ok : undefined,
+                })),
+                { rotulo: 'Soma das parcelas', valor: brl(lancamento.valor), tom: COR.ok },
+                ...(k > 0
+                  ? [
+                      { rotulo: 'Já no caixa', valor: brl(plano.recebido), tom: COR.ok },
+                      { rotulo: 'Ainda a receber', valor: brl(plano.emAberto), tom: COR.ouro },
+                    ]
+                  : []),
+              ]}
+            />
+            {inventaDinheiro && (
+              <span
+                className="font-sans"
+                style={{ fontSize: 11, lineHeight: 1.5, color: COR.erro, textWrap: 'pretty' }}
+              >
+                {`Isto marcaria ${brl(recebidoAgora)} como ${movimentados}, e este lançamento só tem ${brl(lancamento.recebido)} ${movimentados} — seria uma entrada que o extrato nunca teve. O banco vai recusar; reduza "Já recebidas".`}
+              </span>
+            )}
+            {/* O saldo cai, e o dono precisa ver QUANTO e POR QUÊ antes de
+                confirmar — não descobrir depois, conferindo o extrato. É um
+                bloco destacado, e não mais uma linha de prévia, porque é a
+                única consequência deste diálogo que sai do lançamento e chega
+                na conta. */}
+            {avisoDeSaldo.length > 0 && (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 5,
+                  padding: '11px 13px',
+                  border: `1px solid ${COR.atencao}`,
+                  borderRadius: 10,
+                  background: 'rgba(217,140,63,.08)',
+                }}
+              >
+                <span className="font-sans" style={{ fontSize: 11.5, fontWeight: 600, color: COR.atencao }}>
+                  {`O saldo ${conta ? `de ${conta.nome} ` : ''}muda com este parcelamento`}
+                </span>
+                {avisoDeSaldo.map((frase) => (
+                  <span
+                    key={frase}
+                    className="font-sans"
+                    style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-secundario)', textWrap: 'pretty' }}
+                  >
+                    {frase}
+                  </span>
+                ))}
+                <span
+                  className="font-sans"
+                  style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+                >
+                  A queda é o conserto, não um efeito colateral: esse dinheiro não tinha entrado. Ele
+                  volta ao saldo quando a parcela em aberto for baixada.
+                </span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <Erro texto={plano.erro} />
+        )}
 
         <Erro texto={erro} />
-        <Rodape rotulo={`Criar ${n} parcelas`} aoConfirmar={confirmar} aoCancelar={aoFechar} pendente={pendente} />
+        <Rodape
+          rotulo={k > 0 ? `Criar ${n} parcelas, ${k} recebida${k > 1 ? 's' : ''}` : `Criar ${n} parcelas`}
+          aoConfirmar={confirmar}
+          aoCancelar={aoFechar}
+          pendente={pendente}
+        />
       </div>
     </Modal>
   )

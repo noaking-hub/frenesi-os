@@ -20,6 +20,13 @@ import type { BaseParaVenda } from './VendaManual'
  *
  * O botão continua VIVO: ele abre o diálogo no ato e o diálogo mostra que está
  * buscando o catálogo. Nada de botão que não faz nada.
+ *
+ * O `try` existe porque catálogo pela metade é pior que catálogo nenhum:
+ * `dadosDaVendaManual` lê pelo `tudoDe`, que LEVANTA o erro do banco em vez de
+ * devolver lista curta, e sem este `catch` a falha viraria um erro de Server
+ * Action genérico. Traduzida aqui, ela cai no mesmo aviso que o diálogo já
+ * mostra quando o Supabase não está configurado — e o operador vê que o ERP não
+ * conseguiu ler, em vez de um <select> de ml vazio sem explicação nenhuma.
  */
 export async function carregarCatalogoDaVendaManual(): Promise<
   { ok: true; bases: BaseParaVenda[]; tamanhos: number[] } | { ok: false; erro: string }
@@ -34,6 +41,14 @@ export async function carregarCatalogoDaVendaManual(): Promise<
   if (!(await sessaoAtual())) {
     return { ok: false, erro: 'Faça login no ERP para registrar venda manual.' }
   }
-  const { bases, tamanhos } = await dadosDaVendaManual()
-  return { ok: true, bases, tamanhos }
+  try {
+    const { bases, tamanhos } = await dadosDaVendaManual()
+    return { ok: true, bases, tamanhos }
+  } catch (e) {
+    console.error('[financeiro] catálogo da venda manual falhou:', e)
+    return {
+      ok: false,
+      erro: 'O ERP não conseguiu ler o catálogo (perfumes, preços praticados ou tamanhos). Sem ele, o formulário mostraria preço e tamanho errados — tente de novo em instantes.',
+    }
+  }
 }

@@ -5,9 +5,24 @@ import { useMemo, useState, useTransition, type ReactNode } from 'react'
 import { Modal } from '@/components/erp/Modal'
 import { BotaoSecundario, Rotulo, TituloSecao } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
-import { brl, parseNum, plural, volume, hojeEmSaoPaulo } from '@/domain'
+import {
+  INTERVALO_PADRAO_DIAS,
+  MAX_PARCELAS,
+  MIN_PARCELAS,
+  brl,
+  diaPt,
+  hojeEmSaoPaulo,
+  parseNum,
+  planejarParcelamento,
+  plural,
+  volume,
+} from '@/domain'
 
-import { registrarVendaManual, type ItemVendaManual } from '../pedidos/actions'
+import {
+  registrarVendaManual,
+  type ItemVendaManual,
+  type ParcelaGravada,
+} from '../pedidos/actions'
 import { carregarCatalogoDaVendaManual } from './acoes-da-venda-manual'
 
 /**
@@ -68,6 +83,27 @@ const CAMPO = {
 
 const hoje = () => hojeEmSaoPaulo()
 
+/**
+ * Como o dinheiro desta venda entra — em DOIS números, não em um modo.
+ *
+ * A versão anterior desta tela tinha um seletor "à vista / parcelado" que
+ * desabilitava as parcelas quando a venda era marcada como recebida. A premissa
+ * era que parcelamento só faz sentido para venda a receber, e é o contrário do
+ * que esta operação faz: fecha-se em 2× e a primeira parcela é paga no ato — foi
+ * exatamente assim que a venda do Icaro nasceu, e foi por não caber nesse
+ * seletor que ela acabou gravada como R$ 216,00 recebidos de uma vez.
+ *
+ * O que restou são duas perguntas independentes, que é como o fato realmente é:
+ * em quantas parcelas a venda foi dividida, e quantas dessas já entraram na
+ * conta. Nenhuma combinação sobra sem sentido:
+ *
+ *   1 parcela,  1 recebida  → a venda à vista de sempre (o padrão da tela)
+ *   1 parcela,  0 recebidas → venda fiada: o total a receber, vencendo hoje
+ *   N parcelas, 0 recebidas → carnê inteiro em aberto
+ *   N parcelas, K recebidas → o caso de todo dia; com K = N, pagou adiantado
+ */
+
+
 interface Linha {
   /** Chave estável: remover a linha do meio não pode remontar as de baixo. */
   chave: number
@@ -118,8 +154,20 @@ function Erro({ texto }: { texto: string | null }) {
   )
 }
 
-/** Prévia do que vai ser gravado — o número antes do clique. */
-function Previa({ linhas }: { linhas: { rotulo: string; valor: string; tom?: string }[] }) {
+/**
+ * Prévia do que vai ser gravado — o número antes do clique.
+ *
+ * `rolagem` existe por causa do cronograma: 48 parcelas empurrariam o botão
+ * Registrar para fora da tela, e prévia que esconde o botão de confirmar não
+ * é prévia, é obstáculo. Nenhuma linha é omitida — só se rola.
+ */
+function Previa({
+  linhas,
+  rolagem,
+}: {
+  linhas: { rotulo: string; valor: string; tom?: string }[]
+  rolagem?: boolean
+}) {
   return (
     <div
       style={{
@@ -130,6 +178,7 @@ function Previa({ linhas }: { linhas: { rotulo: string; valor: string; tom?: str
         border: '1px solid rgba(239,209,140,.22)',
         borderRadius: 10,
         background: 'rgba(239,209,140,.045)',
+        ...(rolagem ? { maxHeight: 196, overflowY: 'auto' as const } : null),
       }}
     >
       {linhas.map((l) => (
@@ -320,10 +369,24 @@ function DialogoVendaManual({
   const [clienteNome, setClienteNome] = useState('')
   const [clienteEmail, setClienteEmail] = useState('')
   const [observacao, setObservacao] = useState('')
+  // Uma parcela, já recebida: a venda de balcão de sempre. O padrão é o caso
+  // mais comum, não o mais completo — quem vende à vista não digita nada aqui.
+  const [parcelas, setParcelas] = useState('1')
+  const [intervalo, setIntervalo] = useState(String(INTERVALO_PADRAO_DIAS))
+  const [jaRecebidas, setJaRecebidas] = useState('1')
+  // Vazio significa "no dia da venda", e não uma data congelada: enquanto o
+  // operador não escolher outra, mudar a data da venda leva o recebimento
+  // junto. Guardar `hoje()` aqui deixaria a venda de ontem com recebimento
+  // hoje, sem ninguém perceber.
+  const [recebidasEm, setRecebidasEm] = useState('')
   const [erro, setErro] = useState<string | null>(null)
-  const [feito, setFeito] = useState<{ pedidoId: string; total: number; mlBaixado: number } | null>(
-    null,
-  )
+  const [feito, setFeito] = useState<{
+    pedidoId: string
+    total: number
+    recebido: number
+    mlBaixado: number
+    parcelas: ParcelaGravada[]
+  } | null>(null)
   const [pendente, iniciar] = useTransition()
 
   const porId = useMemo(() => new Map(bases.map((b) => [b.id, b])), [bases])
@@ -383,8 +446,72 @@ function DialogoVendaManual({
       }),
     )
 
+  // Nada é grampeado no `onChange`: apagar o campo para digitar "12" faria o
+  // cursor pular para "1" no meio da digitação. Fora da faixa, quem explica é a
+  // prévia, com a mesma frase que o banco levantaria.
+  const n = Math.max(1, Math.round(parseNum(parcelas)) || 1)
+  const dias = Math.round(parseNum(intervalo)) || INTERVALO_PADRAO_DIAS
+  const k = Math.max(0, Math.round(parseNum(jaRecebidas)))
+  const reparte = n >= MIN_PARCELAS
+  // A data do recebimento acompanha a da venda até alguém escolher outra.
+  const recebidoEm = recebidasEm || ocorridoEm
+
+  /**
+   * O cronograma que a tela promete.
+   *
+   * Sai de `planejarParcelamento`, que compõe a mesma divisão em centavos de
+   * `gravar_parcelas_do_lancamento` e acrescenta o que a versão anterior desta
+   * tela não sabia dizer: quais parcelas já entraram. A prévia só serve para
+   * alguma coisa se bater com o banco no centavo E no dia — inclusive a âncora,
+   * que com K > 0 é a data do recebimento e não a da venda, exatamente como o
+   * `case` do plpgsql. Sem isso a tela prometeria a 2ª parcela para 30 dias
+   * depois da venda e o banco gravaria 30 dias depois do pagamento.
+   */
+  const plano = useMemo(
+    () =>
+      reparte && total > 0
+        ? planejarParcelamento({
+            valor: total,
+            parcelas: n,
+            primeiroVencimento: k > 0 ? recebidoEm : ocorridoEm,
+            intervaloDias: dias,
+            jaRecebidas: k,
+            recebidasEm: recebidoEm,
+          })
+        : null,
+    [reparte, total, n, dias, k, recebidoEm, ocorridoEm],
+  )
+
+  /**
+   * O que não dá para gravar, dito em uma linha antes do clique.
+   *
+   * A venda sem parcelamento não passa por `planejarParcelamento` (que exige 2
+   * ou mais), e por isso a checagem de K precisa existir aqui também: "2 já
+   * recebidas" numa venda de uma parcela marcaria como recebido o dobro do que
+   * a venda vale, e o erro só apareceria como exceção de plpgsql.
+   */
+  const impedimento =
+    k > n
+      ? reparte
+        ? `Não dá para marcar ${k} parcelas já recebidas em uma venda de ${n}.`
+        : 'Sem parcelamento a venda foi recebida (1) ou não foi (0) — não existe uma terceira.'
+      : plano && !plano.ok
+        ? plano.erro
+        : null
+
+  // Quanto entra na conta AGORA e quanto fica devendo. Com uma parcela só, é
+  // tudo ou nada; repartida, é a soma das que nasceram baixadas.
+  const entraNoCaixa = reparte ? (plano?.ok ? plano.recebido : 0) : k >= 1 ? total : 0
+  const ficaAReceber = Math.round((total - entraNoCaixa) * 100) / 100
+
   const confirmar = () =>
     iniciar(async () => {
+      // A recusa já está escrita na tela; repeti-la aqui evita a viagem ao
+      // servidor só para voltar com a mesma frase.
+      if (impedimento) {
+        setErro(impedimento)
+        return
+      }
       setErro(null)
       const itens: ItemVendaManual[] = linhas
         .filter((l) => l.baseId)
@@ -408,12 +535,24 @@ function DialogoVendaManual({
         clienteNome,
         clienteEmail,
         observacao,
+        parcelas: n,
+        intervaloDias: dias,
+        jaRecebidas: k,
+        // Sem nada recebido não há baixa para datar, e o banco recusa data de
+        // recebimento sem recebimento.
+        recebidasEm: k > 0 ? recebidoEm : null,
       })
       if (!r.ok) {
         setErro(r.erro)
         return
       }
-      setFeito({ pedidoId: r.pedidoId, total: r.total, mlBaixado: r.mlBaixado })
+      setFeito({
+        pedidoId: r.pedidoId,
+        total: r.total,
+        recebido: r.recebido,
+        mlBaixado: r.mlBaixado,
+        parcelas: r.parcelas,
+      })
     })
 
   const contaEscolhida = contas.find((c) => c.id === contaId)
@@ -427,16 +566,31 @@ function DialogoVendaManual({
             className="font-sans"
             style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--color-secundario)', textWrap: 'pretty' }}
           >
-            Tudo abaixo é o que o banco gravou nesta transação — estoque e caixa já estão em dia.
+            {feito.parcelas.length > 0
+              ? 'Tudo abaixo é o que o banco gravou nesta transação — o estoque já saiu, e o dinheiro entra parcela a parcela.'
+              : 'Tudo abaixo é o que o banco gravou nesta transação — estoque e caixa já estão em dia.'}
           </span>
           <Previa
             linhas={[
               { rotulo: 'Pedido criado', valor: feito.pedidoId },
+              // Os dois números vêm do banco, não de dedução da tela: quanto já
+              // está na conta e quanto ainda vai entrar. Verde só no que entrou
+              // de verdade — pintar de "ok" um total que ficou a receber seria a
+              // tela dizendo que o caixa subiu quando ele não subiu.
               {
-                rotulo: `Lançado em ${contaEscolhida?.nome ?? 'caixa'}`,
-                valor: brl(feito.total),
-                tom: COR.ok,
+                rotulo: `Entrou em ${contaEscolhida?.nome ?? 'caixa'}`,
+                valor: brl(feito.recebido),
+                tom: feito.recebido > 0 ? COR.ok : COR.ouro,
               },
+              ...(feito.total - feito.recebido > 0.004
+                ? [
+                    {
+                      rotulo: `A receber em ${contaEscolhida?.nome ?? 'caixa'}`,
+                      valor: brl(feito.total - feito.recebido),
+                      tom: COR.ouro,
+                    },
+                  ]
+                : []),
               {
                 rotulo: 'Saiu do estoque de base',
                 valor: volume(feito.mlBaixado),
@@ -444,6 +598,25 @@ function DialogoVendaManual({
               },
             ]}
           />
+
+          {feito.parcelas.length > 0 && (
+            <>
+              <Rotulo>{`${feito.parcelas.length} parcelas gravadas`}</Rotulo>
+              <Previa
+                rolagem
+                linhas={feito.parcelas.map((p) => ({
+                  // O estado de cada parcela é o que o banco escreveu em
+                  // `baixado_em` — a mesma linha que o dono vai reencontrar na
+                  // tela de Lançamentos.
+                  rotulo: p.recebidaEm
+                    ? `${p.numero}/${feito.parcelas.length} · RECEBIDA em ${diaPt(p.recebidaEm)}`
+                    : `${p.numero}/${feito.parcelas.length} · vence ${diaPt(p.venceEm)}`,
+                  valor: brl(p.valor),
+                  tom: p.recebidaEm ? COR.ok : undefined,
+                }))}
+              />
+            </>
+          )}
           <span
             className="font-sans"
             style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
@@ -496,8 +669,14 @@ function DialogoVendaManual({
           className="font-sans"
           style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--color-secundario)', textWrap: 'pretty' }}
         >
-          A venda que não passou pelo checkout. Ao confirmar, o ERP baixa o perfume e os insumos do
-          estoque e lança o valor recebido no caixa — as duas coisas juntas, na mesma transação.
+          {/* O estoque não depende do dinheiro: o perfume sai do frasco hoje,
+              tenha o cliente pagado tudo, metade ou nada. Só a segunda metade
+              da frase muda com o parcelamento. */}
+          {reparte
+            ? 'A venda que não passou pelo checkout. Ao confirmar, o ERP baixa o perfume e os insumos do estoque e grava as parcelas — tudo na mesma transação. O estoque sai hoje; o caixa entra no que já foi recebido e nos vencimentos das demais.'
+            : k >= 1
+              ? 'A venda que não passou pelo checkout. Ao confirmar, o ERP baixa o perfume e os insumos do estoque e lança o valor recebido no caixa — as duas coisas juntas, na mesma transação.'
+              : 'A venda que não passou pelo checkout. Ao confirmar, o ERP baixa o perfume e os insumos do estoque e deixa o valor a receber — o estoque sai hoje, o caixa espera o cliente pagar.'}
         </span>
 
         {bases.length === 0 ? (
@@ -637,7 +816,10 @@ function DialogoVendaManual({
         )}
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 12 }}>
-          <Campo rotulo="Data da venda" dica="É esta data que entra no caixa e na competência">
+          <Campo
+            rotulo="Data da venda"
+            dica="O dia do fato: define a competência e o vencimento da 1ª parcela. Quando o dinheiro entrou é outra data, ao lado."
+          >
             <input
               type="date"
               value={ocorridoEm}
@@ -654,7 +836,14 @@ function DialogoVendaManual({
               ))}
             </select>
           </Campo>
-          <Campo rotulo="Conta que recebeu" dica="O valor entra aqui já baixado, como recebido">
+          <Campo
+            rotulo={entraNoCaixa > 0 ? 'Conta que recebeu' : 'Conta que vai receber'}
+            dica={
+              ficaAReceber > 0
+                ? 'O que já entrou é baixado aqui; o resto é baixado nesta mesma conta a cada vencimento'
+                : 'O valor entra aqui já baixado, como recebido'
+            }
+          >
             <select value={contaId} onChange={(e) => setContaId(e.target.value)} style={CAMPO}>
               {contas.length === 0 && <option value="">Nenhuma conta ativa</option>}
               {contas.map((c) => (
@@ -663,6 +852,83 @@ function DialogoVendaManual({
                 </option>
               ))}
             </select>
+          </Campo>
+        </div>
+
+        {/*
+          Em quantas parcelas a venda foi dividida, e quantas dessas já entraram
+          — duas perguntas independentes, porque é assim que o fato é. A venda em
+          2× com a primeira paga no ato é o caso NORMAL desta operação, e o
+          seletor "à vista OU parcelado" que existia aqui não tinha como
+          representá-la: ele desabilitava o parcelamento justamente quando a
+          venda tinha sido recebida.
+
+          Os dois campos que continuam podendo ficar indisponíveis dizem o
+          motivo embaixo, porque combinação impossível explicada é diferente de
+          campo que não responde ao clique.
+        */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 12 }}>
+          <Campo
+            rotulo="Parcelas"
+            dica={`1 não reparte a venda; de ${MIN_PARCELAS} a ${MAX_PARCELAS} vira carnê`}
+          >
+            <input
+              value={parcelas}
+              onChange={(e) => setParcelas(e.target.value)}
+              inputMode="numeric"
+              aria-label="Número de parcelas"
+              style={CAMPO}
+            />
+          </Campo>
+          <Campo
+            rotulo="Intervalo (dias)"
+            dica={
+              reparte
+                ? 'Dias corridos entre um vencimento e o próximo — 30 é o padrão do carnê'
+                : 'Indisponível com uma parcela só: não existe segundo vencimento para espaçar'
+            }
+          >
+            <input
+              value={intervalo}
+              onChange={(e) => setIntervalo(e.target.value)}
+              disabled={!reparte}
+              inputMode="numeric"
+              aria-label="Intervalo em dias entre as parcelas"
+              style={{ ...CAMPO, opacity: reparte ? 1 : 0.4 }}
+            />
+          </Campo>
+          <Campo
+            rotulo="Já recebidas"
+            dica={
+              reparte
+                ? 'Quantas das PRIMEIRAS já entraram na conta. 1 é o comum: fechou em parcelas e recebeu a primeira no ato. Com todas, o cliente pagou adiantado.'
+                : '1 = a venda entrou no caixa; 0 = ficou fiado, a receber'
+            }
+          >
+            <input
+              value={jaRecebidas}
+              onChange={(e) => setJaRecebidas(e.target.value)}
+              inputMode="numeric"
+              aria-label="Quantas parcelas já foram recebidas"
+              style={CAMPO}
+            />
+          </Campo>
+          <Campo
+            rotulo="Recebidas em"
+            dica={
+              k > 0
+                ? 'O dia em que o dinheiro caiu na conta — pode ser retroativo, e é esta data que o fluxo de caixa usa. Em branco, segue a data da venda.'
+                : 'Indisponível com nada recebido: não há baixa para datar'
+            }
+          >
+            <input
+              type="date"
+              value={recebidoEm}
+              onChange={(e) => setRecebidasEm(e.target.value)}
+              disabled={k === 0}
+              aria-label="Data em que as parcelas já recebidas entraram"
+              style={{ ...CAMPO, opacity: k === 0 ? 0.4 : 1 }}
+            />
           </Campo>
         </div>
 
@@ -744,10 +1010,77 @@ function DialogoVendaManual({
                 tom: COR.ok,
               },
               { rotulo: 'Base a sair do estoque', valor: volume(mlNominal) },
-              { rotulo: 'Entra no caixa em', valor: `${ocorridoEm} · ${contaEscolhida?.nome ?? '—'}` },
+              // Os dois números que separam esta venda da de sempre: o que sobe
+              // no caixa AGORA e o que fica devendo. Zero em qualquer um dos
+              // dois é informação, não ausência dela — por isso a linha aparece
+              // mesmo valendo R$ 0,00.
+              {
+                // Sem nada recebido não há data de entrada para mostrar: pôr a
+                // data da venda ao lado de R$ 0,00 sugeriria que algo entrou.
+                rotulo:
+                  entraNoCaixa > 0
+                    ? `Entra no caixa em ${diaPt(recebidoEm)} · ${contaEscolhida?.nome ?? '—'}`
+                    : `Entra no caixa agora · ${contaEscolhida?.nome ?? '—'}`,
+                valor: brl(entraNoCaixa),
+                tom: entraNoCaixa > 0 ? COR.ok : COR.ouro,
+              },
+              {
+                rotulo: 'Fica a receber',
+                valor: brl(ficaAReceber),
+                tom: ficaAReceber > 0 ? COR.ouro : COR.ok,
+              },
             ]}
           />
         )}
+
+        {plano?.ok && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* O rótulo diz o total, não "N× de X": quando a divisão não fecha
+                redonda não existe um "de X" único, e a lista abaixo é que tem
+                o valor de cada parcela. */}
+            <Rotulo>{`Cronograma — ${plano.parcelas.length}× · ${brl(total)}`}</Rotulo>
+            <Previa
+              rolagem
+              linhas={[
+                ...plano.parcelas.map((p) => ({
+                  // Estado por parcela, e não só vencimento: a lista precisa
+                  // mostrar de cara qual dinheiro já está na conta.
+                  rotulo: p.recebidaEm
+                    ? `${p.numero}/${plano.parcelas.length} · RECEBIDA em ${diaPt(p.recebidaEm)}`
+                    : `${p.numero}/${plano.parcelas.length} · vence ${diaPt(p.venceEm)}`,
+                  valor: brl(p.valor),
+                  tom: p.recebidaEm ? COR.ok : undefined,
+                })),
+                // A soma fecha exata com o total da venda — está aqui para ser
+                // conferida a olho, porque é justamente o que uma divisão que
+                // não fecha redonda faz o operador duvidar.
+                { rotulo: 'Soma das parcelas', valor: brl(total), tom: COR.ok },
+              ]}
+            />
+            {plano.parcelas[0].valor !== plano.parcelas[plano.parcelas.length - 1].valor && (
+              <span
+                className="font-sans"
+                style={{ fontSize: 10, lineHeight: 1.45, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+              >
+                {`A divisão não fecha redonda: a diferença de ${brl(plano.parcelas[0].valor - plano.parcelas[1].valor)} vai na PRIMEIRA parcela, para quem confere o boleto de hoje encontrá-la agora e não daqui a ${plano.parcelas.length - 1} vencimentos.`}
+              </span>
+            )}
+            {k > 0 && (
+              <span
+                className="font-sans"
+                style={{ fontSize: 10, lineHeight: 1.45, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+              >
+                {`${k === 1 ? 'A primeira parcela nasce baixada' : `As ${k} primeiras parcelas nascem baixadas`} em ${diaPt(recebidoEm)}${
+                  k >= n
+                    ? ' — a venda inteira já está paga, e o parcelamento fica registrado como o cliente combinou.'
+                    : `, e as demais vencem a cada ${dias} dias contados dessa data — não da data da venda, para o prazo bater com o que o cliente combinou ao pagar.`
+                }`}
+              </span>
+            )}
+          </div>
+        )}
+
+        {impedimento && <Erro texto={impedimento} />}
 
         <span
           className="font-sans"
@@ -759,7 +1092,7 @@ function DialogoVendaManual({
 
         <Erro texto={erro} />
         <Rodape
-          rotulo="Registrar venda"
+          rotulo={reparte ? `Registrar venda em ${n}×` : 'Registrar venda'}
           aoConfirmar={confirmar}
           aoCancelar={aoFechar}
           pendente={pendente}

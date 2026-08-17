@@ -120,7 +120,14 @@ create or replace function public.lancamentos_da_tela(
 language sql
 stable
 as $function$
-with marcada as (
+-- `not materialized` não é enfeite: medido, ele tira 3 ms de 17.
+--
+-- `marcada` é referenciada duas vezes (por `filtrada` e por `alvo`), e por
+-- padrão o Postgres materializa CTE referenciada mais de uma vez — despejando
+-- as 1.268 linhas projetadas num tuplestore antes de filtrar qualquer coisa.
+-- Inlineada, o WHERE de `filtrada` desce até o scan e o `id = p_lancamento` de
+-- `alvo` vira busca pela chave primária.
+with marcada as not materialized (
   select
     l.id, l.descricao, l.favorecido, l.tipo, l.categoria, l.categoria_id,
     l.centro_custo, l.conta_id, l.competencia, l.ocorrido_em, l.vence_em,
@@ -232,10 +239,11 @@ listada as (
   offset ((select p.pagina from posicao p) - 1) * greatest(p_por_pagina, 1)
 ),
 alvo as (
+  -- Sem o `p_lancamento is not null` de guarda: `id = NULL` já não casa com
+  -- nada, e escrever a guarda impedia o planejador de usar a chave primária.
   select m.*
     from marcada m
-   where p_lancamento is not null
-     and m.id = p_lancamento
+   where m.id = p_lancamento
 )
 select jsonb_build_object(
   'linhas', coalesce(
