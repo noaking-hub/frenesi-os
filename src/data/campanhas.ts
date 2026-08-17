@@ -41,6 +41,12 @@ export interface ResultadoCampanha {
   falhas: string[]
   /** A campanha está desligada na tela; nada foi tentado. */
   desligada: boolean
+  /**
+   * Quanto a campanha levou. Existe porque a carga inicial do carrinho morreu
+   * três vezes no teto de 26s da Netlify sem deixar rastro: o pg_net registrava
+   * timeout, e não havia como saber se o tempo foi da Yampi ou do banco.
+   */
+  duracaoMs?: number
 }
 
 /** Teto por rodada. O provedor tem limite por segundo, e a função tem 26s. */
@@ -79,6 +85,46 @@ async function reservar(
   return (data ?? []).length > 0
 }
 
+/**
+ * Reserva muitas vagas de uma vez, para a carga inicial.
+ *
+ * A carga do carrinho reservava uma por vez, e cada uma é uma ida ao banco: com
+ * algumas centenas de carrinhos acumulados, a soma das idas estourava o teto de
+ * 26s da Netlify no meio da varredura. O que se via depois era um punhado de
+ * dispensados gravados, nenhuma resposta, e nenhuma forma de saber se faltava
+ * pouco ou muito — a rodada seguinte recomeçava do zero e morria de novo.
+ *
+ * Aqui é uma ida só. `ignoreDuplicates` continua sendo quem decide: o retorno
+ * traz apenas as chaves que ESTA chamada inseriu, então repetir a carga não
+ * conta duas vezes.
+ */
+async function reservarEmLote(
+  linhas: { chave: string; evento: string; destinatario: string; motivo: string }[],
+): Promise<number> {
+  if (linhas.length === 0) return 0
+  const agora = new Date().toISOString()
+  let gravadas = 0
+  // Em blocos, porque um INSERT com milhares de linhas vira um corpo grande
+  // demais para o PostgREST — e o erro dele seria um 413 mudo.
+  for (let i = 0; i < linhas.length; i += 200) {
+    const { data, error } = await supabaseServer()
+      .from('notificacoes_enviadas')
+      .upsert(
+        linhas.slice(i, i + 200).map((l) => ({
+          ...l,
+          assunto: '(não enviado)',
+          estado: 'dispensado',
+          concluido_em: agora,
+        })),
+        { onConflict: 'chave', ignoreDuplicates: true },
+      )
+      .select('chave')
+    if (error) throw new Error(error.message)
+    gravadas += (data ?? []).length
+  }
+  return gravadas
+}
+
 async function concluir(chave: string, ok: boolean, motivo = '', corpo?: string) {
   await supabaseServer()
     .from('notificacoes_enviadas')
@@ -102,11 +148,40 @@ const vazio = (campanha: string, desligada = false): ResultadoCampanha => ({
 
 // ── Carrinho abandonado ─────────────────────────────────────────────────────
 
+/**
+ * Quantos toques cada carrinho já recebeu, numa leitura só.
+ *
+ * A fonte é o log, e não um contador na linha do carrinho: o log é o que
+ * sobrevive a reimportar o carrinho da Yampi. Antes esta contagem era um SELECT
+ * por carrinho dentro do laço — correto e inviável: algumas centenas de idas ao
+ * banco em sequência não cabem nos 26s da Netlify, e a varredura morria no meio.
+ */
+async function toquesPorCarrinho(): Promise<Map<string, number>> {
+  const mapa = new Map<string, number>()
+  const BLOCO = 1000
+  for (let inicio = 0; inicio < 50_000; inicio += BLOCO) {
+    const { data, error } = await supabaseServer()
+      .from('notificacoes_enviadas')
+      .select('chave')
+      .like('chave', 'carrinho:%')
+      .range(inicio, inicio + BLOCO - 1)
+    if (error) throw new Error(error.message)
+    for (const linha of data ?? []) {
+      // `carrinho:<id>:toque2` — o id é o miolo.
+      const id = String(linha.chave).split(':')[1]
+      if (id) mapa.set(id, (mapa.get(id) ?? 0) + 1)
+    }
+    if ((data ?? []).length < BLOCO) break
+  }
+  return mapa
+}
+
 async function rodarCarrinho(regra: RegraDeEnvio, apenasDispensar: boolean): Promise<ResultadoCampanha> {
   const r = vazio('carrinho')
-  const leitura = await lerCarrinhosYampi()
+  const [leitura, jaEnviados] = await Promise.all([lerCarrinhosYampi(), toquesPorCarrinho()])
   const agora = Date.now()
   const janelaMs = (regra.janelaMaxDias ?? 7) * 86_400_000
+  const paraDispensar: { chave: string; evento: string; destinatario: string; motivo: string }[] = []
 
   for (const c of leitura.carrinhos) {
     // Sem data de abandono não há como saber qual toque ele merece — e chutar
@@ -117,15 +192,7 @@ async function rodarCarrinho(regra: RegraDeEnvio, apenasDispensar: boolean): Pro
     if (idade > janelaMs) continue
 
     const horas = idade / 3_600_000
-    // Quantos toques deste carrinho já foram registrados — a fonte é o log, e
-    // não um contador na linha do carrinho: o log é o que sobrevive a reimportar
-    // o carrinho da Yampi.
-    const { count } = await supabaseServer()
-      .from('notificacoes_enviadas')
-      .select('chave', { count: 'exact', head: true })
-      .like('chave', `carrinho:${c.id}:%`)
-
-    const indice = toqueDevido(regra, horas, count ?? 0)
+    const indice = toqueDevido(regra, horas, jaEnviados.get(c.id) ?? 0)
     if (indice === null) continue
 
     const toque = (regra.toques ?? [])[indice]
@@ -133,8 +200,12 @@ async function rodarCarrinho(regra: RegraDeEnvio, apenasDispensar: boolean): Pro
     r.candidatos++
 
     if (apenasDispensar) {
-      if (await reservar(chave, 'carrinho_recuperacao', c.email, '(não enviado)', 'dispensado',
-        'carrinho já era antigo quando a rotina automática foi ligada')) r.dispensados++
+      paraDispensar.push({
+        chave,
+        evento: 'carrinho_recuperacao',
+        destinatario: c.email,
+        motivo: 'carrinho já era antigo quando a rotina automática foi ligada',
+      })
       continue
     }
     if (r.enviados >= POR_RODADA) break
@@ -162,6 +233,7 @@ async function rodarCarrinho(regra: RegraDeEnvio, apenasDispensar: boolean): Pro
       r.falhas.push(`${c.id}: ${msg}`)
     }
   }
+  r.dispensados = await reservarEmLote(paraDispensar)
   return r
 }
 
@@ -282,6 +354,7 @@ export async function rodarCampanhas(opcoes?: {
       saida.push(vazio(regra.campanha, true))
       continue
     }
+    const comecou = Date.now()
     try {
       if (regra.campanha === 'carrinho') saida.push(await rodarCarrinho(regra, apenasDispensar))
       if (regra.campanha === 'aniversario') saida.push(await rodarAniversario(regra, apenasDispensar))
@@ -291,6 +364,8 @@ export async function rodarCampanhas(opcoes?: {
       console.error(`[campanhas] ${regra.campanha} falhou:`, msg)
       saida.push({ ...vazio(regra.campanha), falhas: [msg] })
     }
+    const ultimo = saida[saida.length - 1]
+    if (ultimo?.campanha === regra.campanha) ultimo.duracaoMs = Date.now() - comecou
   }
   return saida
 }
