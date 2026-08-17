@@ -611,9 +611,46 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
         : null,
       // O vínculo com o pedido espelhado na Shopify. É por ele que o rastreio
       // chega até a conta onde o cliente faz login.
-      shopify_numero: p.marketplace_sale_number ? String(p.marketplace_sale_number) : null,
+      //
+      // Só entra quando a Yampi TEM o número. Escrever `null` aqui era apagar,
+      // a cada cinco minutos, o vínculo que `vincularPedidosShopify` tinha
+      // acabado de descobrir pelas tags do pedido na loja — e o vínculo é
+      // condição para o ERP marcar o pedido como processado lá. Ver abaixo.
+      shopify_numero: (p.marketplace_sale_number
+        ? String(p.marketplace_sale_number)
+        : undefined) as string | null | undefined,
     }
   })
+
+  /**
+   * O que a Yampi não sabe, ela não apaga.
+   *
+   * `upsert` monta as colunas a partir das chaves do objeto, e uma chave
+   * ausente em UM item do lote vira `null` para todos. Então a ausência
+   * precisa virar o valor que já está gravado, e não um buraco.
+   *
+   * O estrago era invisível e diário: a rotina de vínculo casava o pedido pela
+   * tag na Shopify de hora em hora, e o pulso da Yampi zerava o campo cinco
+   * minutos depois. Medido: 24 pedidos com `shopify_gid` preenchido e
+   * `shopify_numero` vazio — e o gid só é gravado pelo vínculo, junto com o
+   * número, o que prova que o par existiu e foi desfeito. Treze deles já
+   * tinham rastreio e e-mail enviado ao cliente, e continuavam "Não
+   * processado" na loja porque a fila do espelho exige o número.
+   */
+  const idsDoLote = linhasPedidos.map((p) => p.id)
+  const { data: vinculosAtuais } = await sb
+    .from('pedidos')
+    .select('id, shopify_numero')
+    .in('id', idsDoLote)
+    .not('shopify_numero', 'is', null)
+  const numeroGravado = new Map(
+    (vinculosAtuais ?? []).map((p) => [p.id as string, p.shopify_numero as string]),
+  )
+  for (const linha of linhasPedidos) {
+    if (linha.shopify_numero === undefined) {
+      linha.shopify_numero = numeroGravado.get(linha.id) ?? null
+    }
+  }
 
   for (const parte of lotes(linhasPedidos, 500)) {
     const { error } = await sb.from('pedidos').upsert(parte, { onConflict: 'id' })
