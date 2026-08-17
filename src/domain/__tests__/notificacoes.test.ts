@@ -98,12 +98,27 @@ describe('e-mail de envio', () => {
   }
 
   it('usa a moldura validada da marca, com logomarca e redes', () => {
-    // A primeira versão tinha moldura própria, clara e sem logo — e na caixa
-    // de entrada parecia outro remetente.
+    // A primeira versão tinha moldura própria e sem logo — e na caixa de
+    // entrada parecia outro remetente. O fundo é o creme da marca, o mesmo
+    // do portal de devoluções: e-mail escuro no meio de uma lista clara vira
+    // mancha preta, e o ouro some em tela de celular com pouca luz.
     const { html } = emailEnvio(base)
     expect(html).toContain('cdn.brandfetch.io')
-    expect(html).toContain('background-color:#070605')
+    expect(html).toContain('background-color:#EDE6DA')
+    expect(html).not.toContain('#070605')
     expect(html).toContain('marca/icon-instagram.png')
+  })
+
+  it('a frase do corpo serve a qualquer transportadora, e não inventa nome', () => {
+    // "Ele está com Correios" nasceu quando havia uma transportadora só.
+    for (const t of ['Correios', 'Jadlog', 'J&T Express', 'Total Express', 'Buslog']) {
+      const { html } = emailEnvio({ ...base, transportadora: t })
+      expect(html).toContain(`segue com ${t.replace('&', '&amp;')}`)
+    }
+    // Serviço que não identifica a empresa: o texto contorna em vez de chutar.
+    const { html } = emailEnvio({ ...base, transportadora: null })
+    expect(html).toContain('segue com a transportadora responsável')
+    expect(html).not.toContain('Correios')
   })
 
   it('traz o código em destaque e o botão apontando para a página certa', () => {

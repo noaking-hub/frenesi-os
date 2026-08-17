@@ -151,8 +151,12 @@ export const ROTULO_EVENTO: Record<EventoNotificacao, string> = {
 export const MODELO_ENVIO_PADRAO: ModeloEmailRecuperacao = {
   assunto: 'Seu pedido está a caminho · {pedido}',
   titulo: '{nome}, seu pedido está a caminho',
+  // A frase precisa fechar com QUALQUER transportadora: Correios, Jadlog,
+  // J&T, Total Express, Buslog — e com nenhuma, quando o serviço contratado
+  // não identifica a empresa. "Foi postado e segue com X" funciona nos seis
+  // casos; "Ele está com Correios" só funcionava quando ainda era uma só.
   mensagem:
-    'Ele está com {transportadora}. O primeiro registro costuma aparecer em até um dia útil depois da postagem — até lá é normal a consulta não mostrar movimentação.',
+    'Ele já foi postado e segue com {transportadora}. O primeiro registro costuma aparecer em até um dia útil depois da postagem — até lá é normal a consulta não mostrar movimentação.',
   textoBotao: 'Acompanhar entrega',
   html: HTML_VALIDADO_ENVIO,
 }
@@ -183,7 +187,11 @@ export function emailEnvio(
   modelo: ModeloEmailRecuperacao = MODELO_ENVIO_PADRAO,
 ): { assunto: string; html: string } {
   const nome = d.nome?.trim().split(/\s+/)[0] || 'Olá'
-  const transportadora = d.transportadora ?? 'a transportadora'
+  // Sem transportadora identificada a frase não inventa uma: `identificarFrete`
+  // devolve "Não informada" quando o rótulo do serviço não diz a empresa, e
+  // quem chama converte isso em null. Nomear errado é pior do que não nomear —
+  // o cliente vai procurar o pacote na transportadora errada.
+  const transportadora = d.transportadora ?? 'a transportadora responsável'
   const preenche = (t: string) =>
     t
       .split('{nome}').join(escapa(nome))
@@ -192,9 +200,18 @@ export function emailEnvio(
       .split('{transportadora}').join(escapa(transportadora))
 
   const assunto = preenche(modelo.assunto)
-  const html = preenche(modelo.html || HTML_VALIDADO_ENVIO).split('{link}').join(
-    escapa(d.link ?? LOJA),
-  )
+  // Título e mensagem entram ANTES dos demais placeholders: eles próprios
+  // contêm {nome} e {transportadora}, e é a passada seguinte que os resolve.
+  //
+  // Sem isso a moldura validada trazia o texto cravado no HTML, e os campos
+  // "Título" e "Mensagem" da Central de E-mails não mudavam nada — a operação
+  // editava, salvava, e o cliente recebia a frase antiga.
+  const comTexto = (modelo.html || HTML_VALIDADO_ENVIO)
+    .split('{titulo}')
+    .join(escapa(modelo.titulo))
+    .split('{mensagem}')
+    .join(escapa(modelo.mensagem))
+  const html = preenche(comTexto).split('{link}').join(escapa(d.link ?? LOJA))
   return { assunto, html }
 }
 

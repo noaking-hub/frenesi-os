@@ -47,6 +47,20 @@ const campo: React.CSSProperties = {
  * a prévia na hora: ninguém precisa mandar e-mail de teste para si mesmo só
  * para ver como ficou.
  */
+/**
+ * As transportadoras que a operação usa hoje — as mesmas que
+ * `identificarFrete` reconhece. A string vazia é o caso "o serviço contratado
+ * não diz a empresa", que o e-mail precisa saber contornar sem inventar nome.
+ */
+const TRANSPORTADORAS_DA_PREVIA = [
+  'Correios',
+  'Jadlog',
+  'J&T Express',
+  'Total Express',
+  'Buslog',
+  '',
+]
+
 export function ModeloEmail({
   tipo = 'carrinho',
   inicial,
@@ -72,6 +86,12 @@ export function ModeloEmail({
   const [erro, setErro] = useState<string | null>(null)
   const [salvo, setSalvo] = useState(false)
   const [emailTeste, setEmailTeste] = useState('')
+  // Com qual transportadora a prévia é montada. Existe porque a frase do
+  // aviso de envio nomeia a empresa, e antes só dava para conferir o texto
+  // com Correios — o exemplo cravado no código. Hoje saem cinco, e a sexta
+  // opção ("não identificada") é a que mais precisa ser vista: é o caso em
+  // que o serviço contratado não diz a empresa e o texto não pode inventar.
+  const [transportadoraPrevia, setTransportadoraPrevia] = useState<string | null>('Correios')
   const [avisoTeste, setAvisoTeste] = useState<{ tom: 'ok' | 'erro'; texto: string } | null>(null)
   const [pendente, iniciarTransicao] = useTransition()
   const router = useRouter()
@@ -99,7 +119,7 @@ export function ModeloEmail({
           nome: 'Marina Fontes',
           pedido: 'YP-1510190959842609',
           codigo: 'AD778124948BR',
-          transportadora: 'Correios',
+          transportadora: transportadoraPrevia,
           link: 'https://rastreio.frenet.com.br/COR/AD778124948BR',
         },
         modelo,
@@ -168,7 +188,7 @@ export function ModeloEmail({
       },
       modelo,
     )
-  }, [tipo, assunto, titulo, mensagem, textoBotao, cupom, modoHtml, htmlProprio])
+  }, [tipo, assunto, titulo, mensagem, textoBotao, cupom, modoHtml, htmlProprio, transportadoraPrevia])
 
   // {site} na prévia é o próprio ERP aberto no navegador — é ele que serve
   // os ícones de /marca. No envio real, o servidor usa a URL da Netlify.
@@ -420,6 +440,28 @@ export function ModeloEmail({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 9 }}>
             <Rotulo>Prévia — exatamente o que o cliente recebe</Rotulo>
+            {tipo === 'envio' ? (
+              <select
+                value={transportadoraPrevia ?? ''}
+                onChange={(e) => setTransportadoraPrevia(e.target.value || null)}
+                className="font-sans"
+                style={{
+                  height: 24,
+                  padding: '0 6px',
+                  borderRadius: 6,
+                  border: '1px solid rgba(255,255,255,.12)',
+                  background: 'rgba(255,255,255,.04)',
+                  color: 'var(--color-corrente)',
+                  fontSize: 11,
+                }}
+              >
+                {TRANSPORTADORAS_DA_PREVIA.map((t) => (
+                  <option key={t || 'nenhuma'} value={t}>
+                    {t || 'Sem transportadora identificada'}
+                  </option>
+                ))}
+              </select>
+            ) : null}
             <div style={{ flex: 1 }} />
             <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>
               {/* O que a prévia está simulando. Dizer "sem cupom" num aviso de
@@ -428,7 +470,7 @@ export function ModeloEmail({
               {tipo.startsWith('devolucao')
                 ? ' · K7QM-4XT9'
                 : tipo === 'envio'
-                ? ' · AD778124948BR · Correios'
+                ? ` · AD778124948BR · ${transportadoraPrevia ?? 'transportadora não identificada'}`
                 : tipo === 'cashback'
                   ? ' · saldo R$ 47,90'
                   : cupom

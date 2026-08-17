@@ -1028,8 +1028,25 @@ export interface VisaoFinanceira {
   semBanco: boolean
 }
 
-export async function carregarVisaoFinanceira(): Promise<VisaoFinanceira> {
-  const competencia = HOJE().slice(0, 7)
+/**
+ * A Visão Financeira de uma COMPETÊNCIA.
+ *
+ * O mês passou a ser parâmetro porque a tela respondia a uma pergunta só —
+ * "como está este mês?" — e a pergunta seguinte ("e o mês passado, fechou
+ * como?") obrigava a abrir a DRE e voltar. Sem argumento, continua sendo o
+ * mês corrente: o caminho de sempre não mudou.
+ *
+ * O que o filtro NÃO move é o caixa: saldo de hoje e projeção de 7 e 30 dias
+ * são o presente e o futuro, e não existem "em julho". Trocar a competência
+ * para julho e ver um saldo de julho seria inventar um extrato histórico que
+ * o ERP não guarda. Esses cartões continuam sendo o agora, e a tela diz isso.
+ */
+export async function carregarVisaoFinanceira(
+  competenciaAlvo?: string,
+): Promise<VisaoFinanceira> {
+  const competencia = /^\d{4}-\d{2}$/.test(competenciaAlvo ?? '')
+    ? competenciaAlvo!
+    : HOJE().slice(0, 7)
   const vazio: VisaoFinanceira = {
     caixaHoje: 0,
     caixaALiquidar: 0,

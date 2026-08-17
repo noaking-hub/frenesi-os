@@ -30,7 +30,16 @@ import {
 import { TileMarca, iconeDaCategoria } from '@/components/erp/Marcas'
 import { BarrasEixo, CORES_SERIE, Legenda, RoscaLegenda } from '@/components/erp/Visualizacoes'
 import { carregarVisaoFinanceira } from '@/data/financeiro'
-import { brl, competenciaAnterior, competenciaPorExtenso, diaCurtoPt, plural } from '@/domain'
+import {
+  brl,
+  competenciaAnterior,
+  competenciaPorExtenso,
+  diaCurtoPt,
+  hojeEmSaoPaulo,
+  plural,
+} from '@/domain'
+
+import { FiltroDeCompetencia } from './FiltroDeCompetencia'
 
 import type { AlertaFinanceiro, LancamentoGerencial } from '@/domain'
 
@@ -102,13 +111,14 @@ const ORIGEM_DOS_NUMEROS: { href: string; rotulo: string; responde: string; icon
 export default async function DashboardFinanceiro({
   searchParams,
 }: {
-  searchParams: Promise<{ fluxo?: string }>
+  searchParams: Promise<{ fluxo?: string; competencia?: string }>
 }) {
-  const { fluxo } = await searchParams
+  const { fluxo, competencia } = await searchParams
   // O mockup abre em 7 dias: horizonte curto o bastante para cada barra ter
   // nome, com 30 e 90 a um clique para quem procura o vale.
   const horizonte = ['7', '30', '90'].includes(fluxo ?? '') ? Number(fluxo) : 7
-  const v = await carregarVisaoFinanceira()
+  const mesAtual = hojeEmSaoPaulo().slice(0, 7)
+  const v = await carregarVisaoFinanceira(competencia)
 
   if (v.semBanco) {
     return (
@@ -167,6 +177,9 @@ export default async function DashboardFinanceiro({
           </BotaoLinha>
         }
       />
+
+      {/* Antes de qualquer número: de que mês estamos falando. */}
+      <FiltroDeCompetencia competencia={v.competencia} atual={mesAtual} />
 
       <GradeIndicadores>
         <Indicador
