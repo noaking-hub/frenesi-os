@@ -626,7 +626,6 @@ export const HTML_VALIDADO_ENVIO = `<!DOCTYPE html>
                         <div style="padding-top:18px;">
                           <span class="cod" style="display:inline-block; font-family:'Courier New',Courier,monospace; font-size:31px; font-weight:bold; line-height:40px; letter-spacing:3px; mso-line-height-rule:exactly; color:#EFD18C; background-color:#241F18; border:2px solid #B08D4B; border-radius:10px; padding:18px 34px;">{codigo}</span>
                         </div>
-                        <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#6B6355; padding-top:16px;">Toque no bot&atilde;o abaixo &mdash; a p&aacute;gina abre com o c&oacute;digo j&aacute; preenchido</div>
                       </td>
                     </tr>
                   </table>
@@ -653,7 +652,6 @@ export const HTML_VALIDADO_ENVIO = `<!DOCTYPE html>
               <tr>
                 <td align="center" class="pad" style="padding:32px 50px 0 50px;">
                   <div style="font-family:Georgia,'Times New Roman',serif; font-size:19px; line-height:26px; font-style:italic; mso-line-height-rule:exactly; color:#8A6A2F;">Fracionado do frasco original, lacrado e conferido.</div>
-                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:22px; mso-line-height-rule:exactly; color:#6B6355; padding-top:10px;">Se algo chegar diferente do esperado, responda este e-mail que a gente resolve.</div>
                 </td>
               </tr>
 
