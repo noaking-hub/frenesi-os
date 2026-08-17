@@ -326,20 +326,28 @@ const repositorioSupabase: Repositorio = {
   },
 
   async pedidos() {
-    const { data, error } = await supabaseServer()
-      .from('pedidos')
-      .select(
-        'id, canal, valor, frete, cashback, pagamento, envio, comprado_em, entregue_em, ' +
-          'destino, cep, logradouro, peso, dimensoes, gateway, rastreio, situacao, ' +
-          'servico_frete, rastreio_url, rastreio_lido_em, entrega_local, ' +
-          'producao_em, enviado_shopify_em, estoque_baixado_em, estoque_baixado_ml, ' +
-          'shopify_numero, entrega_shopify_em, prazo_entrega_dias, entrega_prevista_em, ' +
-          'clientes(nome, email, cpf, telefone), pedido_itens(descricao, variante, preco, base_id)',
-      )
-      .order('comprado_em', { ascending: false })
-    if (error) throw error
+    // Paginado, e não por precaução: o PostgREST corta em 1.000 linhas e
+    // responde 200 com a lista curta — sem erro, sem aviso. São 638 pedidos
+    // hoje, entrando ~71 por semana; o teto chegaria em cerca de cinco
+    // semanas, e o sintoma seria "sumiram pedidos antigos", não uma falha.
+    //
+    // Este repositório já pagou essa conta uma vez: 56% dos itens de pedido
+    // desapareceram pelo mesmo motivo, e foi por isso que `tudoDe` existe.
+    const linhas = await tudoDe<LinhaPedido>('pedidos', (de, ate) =>
+      supabaseServer()
+        .from('pedidos')
+        .select(
+          'id, canal, valor, frete, cashback, pagamento, envio, comprado_em, entregue_em, ' +
+            'destino, cep, logradouro, peso, dimensoes, gateway, rastreio, situacao, ' +
+            'servico_frete, rastreio_url, rastreio_lido_em, entrega_local, ' +
+            'producao_em, enviado_shopify_em, estoque_baixado_em, estoque_baixado_ml, ' +
+            'shopify_numero, entrega_shopify_em, prazo_entrega_dias, entrega_prevista_em, ' +
+            'clientes(nome, email, cpf, telefone), pedido_itens(descricao, variante, preco, base_id)',
+        )
+        .order('comprado_em', { ascending: false })
+        .range(de, ate) as unknown as PromiseLike<{ data: LinhaPedido[] | null; error: unknown }>,
+    )
     const dia = 24 * 60 * 60 * 1000
-    const linhas = (data ?? []) as unknown as LinhaPedido[]
 
     // A foto de cada item vem do catálogo. O caminho titular é o base_id que
     // a importação casou por SKU; os itens anteriores ao casamento ficam sem

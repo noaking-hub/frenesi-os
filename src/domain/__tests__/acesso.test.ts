@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   completarEmail,
   decidirBloqueio,
+  decidirFreioDoPortal,
   esperaEmPalavras,
   esperaPorFalhas,
   forcaDaSenha,
@@ -122,5 +123,40 @@ describe('forcaDaSenha', () => {
     expect(forcaDaSenha('abcdef').nivel).toBe(1)
     expect(forcaDaSenha('abcdefghij1').nivel).toBe(2)
     expect(forcaDaSenha('Trilha-Azul-42-Cedro!').nivel).toBe(3)
+  })
+})
+
+describe('decidirFreioDoPortal', () => {
+  const agora = new Date('2026-08-17T12:00:00Z')
+  const hoje = (minutosAtras: number) => new Date(agora.getTime() - minutosAtras * 60_000)
+
+  it('deixa o cliente legítimo consultar à vontade', () => {
+    // Sete consultas em quinze minutos é gente corrigindo o CPF, não varredura.
+    const consultas = [0, 1, 2, 3, 5, 8, 11].map(hoje)
+    expect(decidirFreioDoPortal(consultas, consultas, agora).bloqueado).toBe(false)
+  })
+
+  it('freia a partir da oitava consulta da mesma identidade', () => {
+    const consultas = [0, 1, 2, 3, 4, 5, 6, 7].map(hoje)
+    const freio = decidirFreioDoPortal(consultas, [], agora)
+    expect(freio.bloqueado).toBe(true)
+    expect(freio.motivo).toBe('consultas demais')
+    // A espera conta da ÚLTIMA consulta: insistir custa mais do que parar.
+    expect(freio.faltamSegundos).toBe(60)
+  })
+
+  it('o teto por origem é mais alto — celular põe muita gente no mesmo IP', () => {
+    const quarenta = Array.from({ length: 40 }, (_, i) => hoje(i % 14))
+    expect(decidirFreioDoPortal([], quarenta, agora).bloqueado).toBe(false)
+
+    const cem = Array.from({ length: 100 }, (_, i) => hoje(i % 14))
+    const freio = decidirFreioDoPortal([], cem, agora)
+    expect(freio.bloqueado).toBe(true)
+    expect(freio.motivo).toBe('consultas demais desta origem')
+  })
+
+  it('o que está fora da janela não pesa', () => {
+    const antigas = Array.from({ length: 30 }, (_, i) => hoje(20 + i))
+    expect(decidirFreioDoPortal(antigas, antigas, agora).bloqueado).toBe(false)
   })
 })

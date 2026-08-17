@@ -88,38 +88,27 @@ export interface Bloqueio {
 }
 
 /**
- * Decide se esta tentativa entra.
+ * O núcleo da decisão, compartilhado pela porta do ERP e pelo portal público.
  *
- * A conta é feita a partir da ÚLTIMA falha, não da primeira: assim cada nova
- * tentativa errada reinicia a espera, e insistir custa mais do que parar.
+ * A conta é feita a partir da ÚLTIMA tentativa, não da primeira: assim cada
+ * nova tentativa reinicia a espera, e insistir custa mais do que parar.
  */
-export function decidirBloqueio(
-  falhasDoEmail: Date[],
-  falhasDoIp: Date[],
-  agora: Date = new Date(),
+function decidirEspera(
+  grupos: { datas: Date[]; espera: (n: number) => number; motivo: string }[],
+  janelaMs: number,
+  agora: Date,
 ): Bloqueio {
-  const dentro = (d: Date[]) =>
-    d.filter((q) => agora.getTime() - q.getTime() < JANELA_DE_TENTATIVAS_MS)
-
-  const email = dentro(falhasDoEmail)
-  const ip = dentro(falhasDoIp)
-
   const candidatos: { espera: number; ultima: number; motivo: string }[] = []
-  const esperaEmail = esperaPorFalhas(email.length)
-  if (esperaEmail > 0) {
-    candidatos.push({
-      espera: esperaEmail,
-      ultima: Math.max(...email.map((d) => d.getTime())),
-      motivo: 'tentativas demais neste e-mail',
-    })
-  }
-  const esperaIp = esperaPorFalhasDoIp(ip.length)
-  if (esperaIp > 0) {
-    candidatos.push({
-      espera: esperaIp,
-      ultima: Math.max(...ip.map((d) => d.getTime())),
-      motivo: 'tentativas demais desta origem',
-    })
+  for (const g of grupos) {
+    const dentro = g.datas.filter((q) => agora.getTime() - q.getTime() < janelaMs)
+    const espera = g.espera(dentro.length)
+    if (espera > 0) {
+      candidatos.push({
+        espera,
+        ultima: Math.max(...dentro.map((d) => d.getTime())),
+        motivo: g.motivo,
+      })
+    }
   }
 
   if (candidatos.length === 0) return { bloqueado: false, faltamSegundos: 0 }
@@ -130,6 +119,65 @@ export function decidirBloqueio(
   const faltam = Math.ceil((pior.ultima + pior.espera * 1000 - agora.getTime()) / 1000)
   if (faltam <= 0) return { bloqueado: false, faltamSegundos: 0 }
   return { bloqueado: true, faltamSegundos: faltam, motivo: pior.motivo }
+}
+
+/** Decide se esta tentativa de login entra. */
+export function decidirBloqueio(
+  falhasDoEmail: Date[],
+  falhasDoIp: Date[],
+  agora: Date = new Date(),
+): Bloqueio {
+  return decidirEspera(
+    [
+      { datas: falhasDoEmail, espera: esperaPorFalhas, motivo: 'tentativas demais neste e-mail' },
+      { datas: falhasDoIp, espera: esperaPorFalhasDoIp, motivo: 'tentativas demais desta origem' },
+    ],
+    JANELA_DE_TENTATIVAS_MS,
+    agora,
+  )
+}
+
+// ── Freio do portal público ────────────────────────────────────────────────
+
+/**
+ * O portal de devoluções responde SEM senha: quem digita um e-mail descobre se
+ * existe compra naquele endereço, e quantas. Isso é um oráculo — e um oráculo
+ * sem freio vira varredura.
+ *
+ * A escada é mais tolerante que a do login porque aqui não existe "errar a
+ * senha": cliente legítimo consulta, volta, corrige o CPF, consulta de novo.
+ * Oito consultas em quinze minutos já é mais do que qualquer devolução exige.
+ */
+export function esperaPorConsultas(consultas: number): number {
+  if (consultas >= 25) return 30 * 60
+  if (consultas >= 14) return 5 * 60
+  if (consultas >= 8) return 60
+  return 0
+}
+
+/**
+ * Por origem o teto é mais alto — operadora de celular põe muita gente atrás
+ * do mesmo endereço — mas existe: é o número que separa cliente de script.
+ */
+export function esperaPorConsultasDoIp(consultas: number): number {
+  if (consultas >= 90) return 30 * 60
+  if (consultas >= 45) return 5 * 60
+  return 0
+}
+
+export function decidirFreioDoPortal(
+  daIdentidade: Date[],
+  doIp: Date[],
+  agora: Date = new Date(),
+): Bloqueio {
+  return decidirEspera(
+    [
+      { datas: daIdentidade, espera: esperaPorConsultas, motivo: 'consultas demais' },
+      { datas: doIp, espera: esperaPorConsultasDoIp, motivo: 'consultas demais desta origem' },
+    ],
+    JANELA_DE_TENTATIVAS_MS,
+    agora,
+  )
 }
 
 /** "40 segundos", "4 minutos" — o texto que a tela mostra sem fazer conta. */

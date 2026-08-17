@@ -2,8 +2,15 @@ import 'server-only'
 
 import { headers } from 'next/headers'
 
+import { createHash } from 'node:crypto'
+
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
-import { decidirBloqueio, JANELA_DE_TENTATIVAS_MS, type Bloqueio } from '@/domain'
+import {
+  decidirBloqueio,
+  decidirFreioDoPortal,
+  JANELA_DE_TENTATIVAS_MS,
+  type Bloqueio,
+} from '@/domain'
 
 /**
  * A contagem de tentativas da porta do ERP.
@@ -107,4 +114,86 @@ export async function conferirBloqueio(email: string, ip: string | null): Promis
 export async function limparTentativasAntigas() {
   if (!supabaseConfigurado()) return
   await supabaseServer().rpc('limpar_login_tentativas')
+}
+
+// ── Freio do portal público de devoluções ──────────────────────────────────
+
+/**
+ * A identidade consultada vira HASH antes de ser gravada.
+ *
+ * O placar precisa saber que "é a mesma pessoa de novo", e nada mais. Guardar
+ * o e-mail ou o CPF em claro criaria um segundo depósito de dado pessoal só
+ * para proteger o primeiro — e o portal existe justamente para não vazar isso.
+ */
+function chaveDaIdentidade(valor: string): string {
+  return createHash('sha256').update(valor.trim().toLowerCase()).digest('hex').slice(0, 32)
+}
+
+/**
+ * Registra uma consulta do portal. Falha em gravar NÃO derruba o atendimento:
+ * cliente com devolução legítima não pode ficar de fora porque a tabela do
+ * freio piscou.
+ */
+export async function registrarConsultaDoPortal(
+  identificacao: string,
+  ip: string | null,
+  motivo: 'busca' | 'acompanhamento',
+) {
+  if (!supabaseConfigurado()) return
+  const { error } = await supabaseServer()
+    .from('portal_consultas')
+    .insert({ chave: chaveDaIdentidade(identificacao), ip, motivo })
+  if (error) console.error('[portal] não consegui registrar a consulta:', error.message)
+}
+
+/**
+ * Pergunta ao freio se esta consulta entra.
+ *
+ * Igual ao login: banco mudo deixa passar. Um erro de infraestrutura não pode
+ * fechar o canal de devolução — o que se perde é o freio contra varredura, e a
+ * dupla chave (identidade + protocolo) continua valendo.
+ */
+export async function conferirFreioDoPortal(
+  identificacao: string,
+  ip: string | null,
+): Promise<Bloqueio> {
+  if (!supabaseConfigurado()) return { bloqueado: false, faltamSegundos: 0 }
+
+  const desde = new Date(Date.now() - JANELA_DE_TENTATIVAS_MS).toISOString()
+  const chave = chaveDaIdentidade(identificacao)
+
+  try {
+    const [porIdentidade, porIp] = await Promise.all([
+      supabaseServer()
+        .from('portal_consultas')
+        .select('criada_em')
+        .eq('chave', chave)
+        .gte('criada_em', desde)
+        .order('criada_em', { ascending: false })
+        .limit(40),
+      ip
+        ? supabaseServer()
+            .from('portal_consultas')
+            .select('criada_em')
+            .eq('ip', ip)
+            .gte('criada_em', desde)
+            .order('criada_em', { ascending: false })
+            .limit(120)
+        : Promise.resolve({ data: [] as { criada_em: string }[], error: null }),
+    ])
+
+    const datas = (r: { data: { criada_em: string }[] | null }) =>
+      (r.data ?? []).map((t) => new Date(t.criada_em))
+
+    return decidirFreioDoPortal(datas(porIdentidade), datas(porIp))
+  } catch (e) {
+    console.error('[portal] não consegui ler o freio:', e)
+    return { bloqueado: false, faltamSegundos: 0 }
+  }
+}
+
+/** Limpeza do placar do portal. Roda em segundo plano, sem segurar resposta. */
+export async function limparConsultasAntigas() {
+  if (!supabaseConfigurado()) return
+  await supabaseServer().rpc('limpar_portal_consultas')
 }

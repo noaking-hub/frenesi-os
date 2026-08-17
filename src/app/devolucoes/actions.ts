@@ -1,8 +1,15 @@
 'use server'
 
+import {
+  conferirFreioDoPortal,
+  ipDaRequisicao,
+  limparConsultasAntigas,
+  registrarConsultaDoPortal,
+} from '@/data/acesso'
 import { avisarDevolucaoAberta } from '@/data/notificacoes'
 import { repositorio } from '@/data/repository'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
+import { conferirTurnstile } from '@/data/turnstile'
 import {
   LIMITE_FOTO_BYTES,
   LIMITE_VIDEO_BYTES,
@@ -11,6 +18,7 @@ import {
   TIPOS_DE_VIDEO,
   diasDesdeEntregaDe,
   ehDanificado,
+  esperaEmPalavras,
   etapaDe,
   identificarFrete,
   provasCompletas,
@@ -20,6 +28,35 @@ import {
 import type { MotivoDevolucao, PedidoPortal, TipoSolicitacao, VarianteMl } from '@/domain'
 
 const LIMITE_DE_PEDIDOS = 20
+
+/**
+ * Como o cliente se identifica no portal: e-mail ou CPF da compra.
+ *
+ * Uma função só, usada na busca, na abertura, no acompanhamento e no reenvio —
+ * porque este é o ÚNICO fator de autenticação que existe deste lado. Duas
+ * leituras diferentes da mesma identificação seriam duas portas com
+ * fechaduras diferentes.
+ */
+function identidadeDe(bruta: string): { tipo: 'cpf' | 'email'; alvo: string } | null {
+  const ident = bruta.trim()
+  if (ident.length < 6) return null
+  const digitos = ident.replace(/\D/g, '')
+  if (digitos.length === 11 && /^[\d.\-\s]+$/.test(ident)) return { tipo: 'cpf', alvo: digitos }
+  const email = ident.toLowerCase()
+  if (!email.includes('@') || email.length < 6) return null
+  return { tipo: 'email', alvo: email }
+}
+
+/** A identificação confere com o cliente do pedido? */
+function confereIdentidade(
+  identidade: { tipo: 'cpf' | 'email'; alvo: string },
+  cliente: { email: string | null; cpf: string | null } | null | undefined,
+): boolean {
+  if (!cliente) return false
+  return identidade.tipo === 'cpf'
+    ? (cliente.cpf ?? '').replace(/\D/g, '') === identidade.alvo
+    : (cliente.email ?? '').toLowerCase() === identidade.alvo
+}
 
 function dataCurtaPt(iso: string): string {
   const d = new Date(iso)
@@ -43,24 +80,54 @@ function dataCurtaPt(iso: string): string {
  * A elegibilidade NÃO é decidida aqui: o portal aplica `statusDevolucao`
  * sobre os dias desde a entrega, a mesma função que o ERP usa. Assim o
  * cliente e o operador nunca veem prazos diferentes para o mesmo pedido.
+ *
+ * Ele também é um ORÁCULO: quem digita um e-mail descobre se existe compra
+ * naquele endereço. Por isso passa por duas barreiras antes do banco —
+ * Turnstile, que separa gente de script, e o freio por identidade e por
+ * origem, que limita quantas perguntas cabem em quinze minutos. As duas são
+ * silenciosas para o cliente legítimo: ele consulta uma vez e segue.
  */
+export interface BuscaDePedidos {
+  pedidos: PedidoPortal[]
+  /** Preenchido só quando a consulta foi barrada — a tela mostra este texto. */
+  erro?: string
+}
+
 export async function buscarPedidos(
   metodo: 'email' | 'cpf',
   identificacao: string,
-): Promise<PedidoPortal[]> {
+  fichaTurnstile: string | null = null,
+): Promise<BuscaDePedidos> {
   const alvo =
     metodo === 'cpf'
       ? identificacao.replace(/\D/g, '')
       : identificacao.trim().toLowerCase()
 
   // Formato inválido nem chega ao banco — corta tentativa de varredura barata.
-  if (metodo === 'cpf' && alvo.length !== 11) return []
-  if (metodo === 'email' && (alvo.length < 6 || !alvo.includes('@'))) return []
+  if (metodo === 'cpf' && alvo.length !== 11) return { pedidos: [] }
+  if (metodo === 'email' && (alvo.length < 6 || !alvo.includes('@'))) return { pedidos: [] }
+
+  const ip = await ipDaRequisicao()
+
+  // A ordem importa: quem já está travado não custa nem uma chamada externa.
+  const freio = await conferirFreioDoPortal(alvo, ip)
+  if (freio.bloqueado) {
+    return {
+      pedidos: [],
+      erro: `Muitas consultas seguidas. Espere ${esperaEmPalavras(freio.faltamSegundos)} e tente de novo.`,
+    }
+  }
+
+  const robo = await conferirTurnstile(fichaTurnstile, ip)
+  if (!robo.ok) return { pedidos: [], erro: robo.erro ?? 'A verificação de segurança não passou.' }
+
+  await registrarConsultaDoPortal(alvo, ip, 'busca')
+  void limparConsultasAntigas().catch(() => {})
 
   // Sem Supabase (desenvolvimento local), as fixtures respondem.
   if (!supabaseConfigurado()) {
     const todos = await repositorio().pedidos()
-    return todos
+    const encontrados = todos
       .filter((p) => (metodo === 'cpf' ? p.cpf === alvo : p.email.toLowerCase() === alvo))
       .sort((a, b) => b.id.localeCompare(a.id))
       .slice(0, LIMITE_DE_PEDIDOS)
@@ -81,6 +148,7 @@ export async function buscarPedidos(
           imagem: i.imagem ?? null,
         })),
       }))
+    return { pedidos: encontrados }
   }
 
   const sb = supabaseServer()
@@ -96,7 +164,7 @@ export async function buscarPedidos(
     .limit(LIMITE_DE_PEDIDOS)
   if (error) {
     console.error('[portal] busca de pedidos falhou:', error)
-    return []
+    return { pedidos: [] }
   }
 
   const linhas = (data ?? []) as unknown as {
@@ -111,7 +179,7 @@ export async function buscarPedidos(
     rastreio: string | null
     pedido_itens: { descricao: string; variante: number | null; preco: number | string; base_id: string | null }[]
   }[]
-  if (!linhas.length) return []
+  if (!linhas.length) return { pedidos: [] }
 
   // A foto do item vem do catálogo — mesma resolução das telas do ERP: pelo
   // base_id casado na importação ou, sem ele, pelo nome contido na descrição
@@ -150,7 +218,7 @@ export async function buscarPedidos(
     ]),
   )
 
-  return linhas.map((p): PedidoPortal => {
+  const pedidos = linhas.map((p): PedidoPortal => {
     return {
       id: p.id,
       data: dataCurtaPt(p.comprado_em),
@@ -179,6 +247,7 @@ export async function buscarPedidos(
       })),
     }
   })
+  return { pedidos }
 }
 
 export type CampoDeProva = 'nivel' | 'lacre' | 'video'
@@ -216,6 +285,14 @@ function extensaoSegura(nome: string, tipo: string): string {
 export async function prepararEnvioDeProvas(
   pedidoId: string,
   arquivos: { campo: CampoDeProva; nome: string; tipo: string; tamanho: number }[],
+  identificacao: string,
+  /**
+   * Preenchido quando o envio é um REENVIO pedido pela triagem. Aí a
+   * autorização é o protocolo, não o prazo: a devolução foi aberta dentro dos
+   * sete dias, e a análise pode pedir foto nova depois deles. Conferir prazo
+   * outra vez recusaria justamente quem a operação chamou.
+   */
+  protocolo: string | null = null,
 ): Promise<
   | { ok: true; rascunho: string; destinos: { campo: CampoDeProva; caminho: string; url: string }[] }
   | { ok: false; erro: string }
@@ -250,9 +327,10 @@ export async function prepararEnvioDeProvas(
   }
 
   const sb = supabaseServer()
-  if (!(await pedidoElegivel(sb, pedidoId))) {
-    return { ok: false, erro: 'Pedido não encontrado ou fora do prazo de devolução.' }
-  }
+  const autorizado = protocolo
+    ? await donoDaDevolucao(sb, protocolo, identificacao)
+    : await autorizarPedido(sb, pedidoId, identificacao)
+  if (!autorizado.ok) return { ok: false, erro: autorizado.erro }
 
   const rascunho = crypto.randomUUID()
   const destinos: { campo: CampoDeProva; caminho: string; url: string }[] = []
@@ -333,23 +411,59 @@ async function conferirRascunho(
   return { ok: true, provas }
 }
 
-/** Prazo conferido no servidor, com o mesmo relógio das telas. */
-async function pedidoElegivel(
+/**
+ * O dono do pedido é quem diz que é? E o prazo ainda está de pé?
+ *
+ * As duas perguntas moram juntas porque a resposta tem que ser a mesma: um
+ * número de pedido sozinho NÃO autoriza nada. Antes disto, quem descobrisse um
+ * id de pedido — e ele aparece em nota fiscal, etiqueta e print de WhatsApp —
+ * abria devolução no pedido de outra pessoa, subia arquivo para o bucket e
+ * disparava e-mail em nome dela. A dupla chave (pedido + e-mail ou CPF da
+ * compra) é a mesma do acompanhamento; aqui ela passou a valer também na
+ * escrita.
+ *
+ * A recusa é uma frase só para os dois casos. Distinguir "pedido não existe" de
+ * "não é seu" transformaria este endpoint público num verificador de ids
+ * válidos.
+ */
+async function autorizarPedido(
   sb: ReturnType<typeof supabaseServer>,
   pedidoId: string,
-): Promise<boolean> {
-  if (!pedidoId) return false
-  const { data: pedido } = await sb
+  identificacao: string,
+): Promise<{ ok: true } | { ok: false; erro: string }> {
+  const recusa = {
+    ok: false as const,
+    erro: 'Não foi possível confirmar este pedido. Volte ao início e busque de novo pelo e-mail ou CPF da compra.',
+  }
+  if (!pedidoId) return recusa
+
+  const identidade = identidadeDe(identificacao)
+  if (!identidade) return recusa
+
+  const { data } = await sb
     .from('pedidos')
-    .select('id, situacao, entregue_em, entrega_prevista_em')
+    .select('id, situacao, entregue_em, entrega_prevista_em, clientes(email, cpf)')
     .eq('id', pedidoId)
     .maybeSingle()
-  if (!pedido) return false
+  const pedido = data as unknown as {
+    situacao: string | null
+    entregue_em: string | null
+    entrega_prevista_em: string | null
+    clientes: { email: string | null; cpf: string | null } | null
+  } | null
+  if (!pedido) return recusa
+  if (!confereIdentidade(identidade, pedido.clientes)) return recusa
+
   const base =
-    (pedido.entregue_em as string | null) ??
-    (pedido.situacao === 'entregue' ? (pedido.entrega_prevista_em as string | null) : null)
+    pedido.entregue_em ?? (pedido.situacao === 'entregue' ? pedido.entrega_prevista_em : null)
   const dias = base ? Math.floor((Date.now() - Date.parse(base)) / 86_400_000) : null
-  return statusDevolucao(dias).elegivel
+  if (!statusDevolucao(dias).elegivel) {
+    return {
+      ok: false,
+      erro: 'Este pedido está fora do prazo de devolução. Fale com o atendimento.',
+    }
+  }
+  return { ok: true }
 }
 
 /**
@@ -374,6 +488,7 @@ export async function abrirDevolucao(
   }
 
   const pedidoId = String(form.get('pedidoId') ?? '')
+  const identificacao = String(form.get('identificacao') ?? '')
   const motivo = String(form.get('motivo') ?? '') as MotivoDevolucao | ''
   const comentario = String(form.get('comentario') ?? '').slice(0, 2000)
   const itens = form.getAll('item').map(String).filter(Boolean)
@@ -390,6 +505,11 @@ export async function abrirDevolucao(
   }
 
   const sb = supabaseServer()
+
+  // A identidade vem ANTES de qualquer outra coisa: sem ela, o resto é
+  // trabalho feito no pedido de um estranho.
+  const autorizado = await autorizarPedido(sb, pedidoId, identificacao)
+  if (!autorizado.ok) return { ok: false, erro: autorizado.erro }
 
   // As provas já estão no bucket, sob o rascunho. O que chega aqui é o
   // caminho — e caminho vindo do cliente é palpite até ser conferido contra o
@@ -420,12 +540,6 @@ export async function abrirDevolucao(
     }
   }
 
-  if (!(await pedidoElegivel(sb, pedidoId))) {
-    return {
-      ok: false,
-      erro: 'Este pedido está fora do prazo de devolução. Fale com o atendimento.',
-    }
-  }
   // Uma devolução aberta por pedido. O banco também garante isso por índice,
   // mas a recusa precisa acontecer ANTES do update das provas: a segunda
   // solicitação sobrescrevia a foto da primeira, e trocar a prova depois da
@@ -562,6 +676,19 @@ export async function consultarDevolucao(
   const ehCpf = digitos.length === 11 && /^[\d.\-\s]+$/.test(ident)
   const alvo = ehCpf ? digitos : ident.toLowerCase()
 
+  // O acompanhamento entra no MESMO freio da busca: o par protocolo + e-mail
+  // é curto o bastante para alguém tentar aos milhares, e a consulta devolve
+  // valor de reembolso e código de postagem.
+  const ip = await ipDaRequisicao()
+  const freio = await conferirFreioDoPortal(alvo, ip)
+  if (freio.bloqueado) {
+    return {
+      ok: false,
+      erro: `Muitas consultas seguidas. Espere ${esperaEmPalavras(freio.faltamSegundos)} e tente de novo.`,
+    }
+  }
+  await registrarConsultaDoPortal(alvo, ip, 'acompanhamento')
+
   if (!supabaseConfigurado()) {
     // Fixtures (desenvolvimento local): só o caminho por e-mail existe.
     const s = (await repositorio().solicitacoes()).find(
@@ -664,6 +791,50 @@ export async function consultarDevolucao(
 }
 
 /**
+ * Confere o par protocolo + identidade ANTES de qualquer escrita.
+ *
+ * Mesma dupla chave do acompanhamento — e a mesma recusa genérica, para o
+ * endpoint não virar um verificador de protocolos válidos. Também confere o
+ * ESTADO: reenvio só existe em "Aguardando fotos"; fora disso, trocar prova é
+ * mexer no que a triagem já analisou.
+ */
+async function donoDaDevolucao(
+  sb: ReturnType<typeof supabaseServer>,
+  protocoloBruto: string,
+  identificacao: string,
+): Promise<{ ok: true; protocolo: string } | { ok: false; erro: string }> {
+  const recusa = {
+    ok: false as const,
+    erro: 'Não encontramos essa devolução aguardando novas fotos. Confira o protocolo e o e-mail ou CPF da compra.',
+  }
+
+  const protocolo = protocoloBruto.trim().toUpperCase()
+  // O protocolo vira NOME DE PASTA no bucket logo abaixo: formato conferido
+  // aqui é também o que impede um "../" chegar ao caminho do arquivo.
+  const formatoValido =
+    /^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(protocolo) || /^DEV-\d{1,10}$/.test(protocolo)
+  if (!formatoValido) return recusa
+
+  const identidade = identidadeDe(identificacao)
+  if (!identidade) return recusa
+
+  const { data } = await sb
+    .from('solicitacoes_devolucao')
+    .select('protocolo, status, pedidos(clientes(email, cpf))')
+    .eq('protocolo', protocolo)
+    .maybeSingle()
+  const s = data as unknown as {
+    protocolo: string
+    status: string
+    pedidos: { clientes: { email: string | null; cpf: string | null } | null } | null
+  } | null
+  if (!s || s.status !== 'Aguardando fotos') return recusa
+  if (!confereIdentidade(identidade, s.pedidos?.clientes)) return recusa
+
+  return { ok: true, protocolo: s.protocolo }
+}
+
+/**
  * O cliente responde ao pedido de novas provas.
  *
  * Mesma máquina do envio original — `prepararEnvioDeProvas` assina, o
@@ -685,6 +856,18 @@ export async function reenviarProvas(
   }
 
   const sb = supabaseServer()
+
+  // A autorização vem ANTES de mover qualquer byte.
+  //
+  // A ordem era a inversa: o arquivo ia parar dentro da pasta do protocolo e
+  // só depois a RPC conferia a identidade. Quem tivesse um protocolo alheio —
+  // e ele circula em print — escrevia arquivo na pasta de outra pessoa e a
+  // recusa vinha tarde demais, com o objeto já lá dentro. Agora o par
+  // protocolo + e-mail/CPF é conferido primeiro, e a mesma frase vaga responde
+  // a "não existe" e a "não é seu".
+  const alvo = await donoDaDevolucao(sb, protocolo, identificacao)
+  if (!alvo.ok) return { ok: false, erro: alvo.erro }
+
   const conferido = await conferirRascunho(sb, rascunho, {
     nivel: caminhos.nivel ?? '',
     lacre: caminhos.lacre ?? '',
@@ -703,10 +886,10 @@ export async function reenviarProvas(
   const mover = async (campo: CampoDeProva) => {
     const origem = provas[campo]
     if (!origem) return null
-    const destino = `${protocolo}/${campo}-reenvio.${origem.split('.').pop()}`
+    const destino = `${alvo.protocolo}/${campo}-reenvio.${origem.split('.').pop()}`
     const { error } = await sb.storage.from(BUCKET).move(origem, destino)
     if (error) {
-      console.error(`[portal] reenvio de ${campo} em ${protocolo} falhou:`, error)
+      console.error(`[portal] reenvio de ${campo} em ${alvo.protocolo} falhou:`, error)
       return origem
     }
     return destino
@@ -714,7 +897,7 @@ export async function reenviarProvas(
   const [nivel, lacre, video] = await Promise.all([mover('nivel'), mover('lacre'), mover('video')])
 
   const { data, error } = await sb.rpc('reenviar_provas_da_devolucao', {
-    p_protocolo: protocolo,
+    p_protocolo: alvo.protocolo,
     p_identificacao: identificacao,
     p_nivel: nivel,
     p_lacre: lacre,

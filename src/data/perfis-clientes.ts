@@ -5,7 +5,7 @@ import type { StatusCliente } from '@/domain'
 
 import * as fixtures from './fixtures'
 import { origemDados } from './repository'
-import { supabaseServer } from './supabase'
+import { supabaseServer, tudoDe } from './supabase'
 
 /**
  * O perfil completo de cada cliente, montado dos pedidos PAGOS.
@@ -74,19 +74,32 @@ export async function carregarPerfisClientes(): Promise<PerfilCliente[]> {
     }))
   }
 
-  const { data, error } = await supabaseServer()
-    .from('pedidos')
-    .select(
-      'id, valor, comprado_em, destino, clientes(nome, email, telefone), ' +
-        'pedido_itens(descricao, quantidade, variante)',
-    )
-    .eq('pagamento', 'pago')
-    .not('cliente_id', 'is', null)
-    .order('comprado_em', { ascending: false })
-    .limit(3000)
-  if (error) throw error
-
-  const linhas = (data ?? []) as unknown as {
+  // O `.limit(3000)` daqui era ilusão de folga: o teto REAL do PostgREST é
+  // 1.000, e ele responde 200 com a lista curta. São 634 pedidos pagos hoje,
+  // ~200 por mês — o corte chegaria em cerca de dois meses, e o estrago seria
+  // silencioso e progressivo: a PRIMEIRA compra de cada cliente é a que fica
+  // de fora (a ordem é decrescente), então "Cliente desde" passa a mentir,
+  // gente cai de VIP para novo, e o segmento que decide quem recebe qual
+  // mensagem muda sozinho.
+  const linhas = await tudoDe<{
+    id: string
+    valor: number | string
+    comprado_em: string
+    destino: string | null
+    clientes: { nome: string | null; email: string | null; telefone: string | null } | null
+    pedido_itens: { descricao: string; quantidade: number; variante: number | null }[]
+  }>('pedidos', (de, ate) =>
+    supabaseServer()
+      .from('pedidos')
+      .select(
+        'id, valor, comprado_em, destino, clientes(nome, email, telefone), ' +
+          'pedido_itens(descricao, quantidade, variante)',
+      )
+      .eq('pagamento', 'pago')
+      .not('cliente_id', 'is', null)
+      .order('comprado_em', { ascending: false })
+      .range(de, ate) as never,
+  ) as unknown as {
     id: string
     valor: number | string
     comprado_em: string

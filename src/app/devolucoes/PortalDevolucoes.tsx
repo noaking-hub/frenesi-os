@@ -3,6 +3,7 @@
 import Image from 'next/image'
 import { useEffect, useRef, useState, useTransition } from 'react'
 
+import { Turnstile } from '@/components/Turnstile'
 import {
   BlocoAviso,
   BotaoPrimario,
@@ -109,6 +110,11 @@ export function PortalDevolucoes({
   const [identConsulta, setIdentConsulta] = useState('')
   const [metodo, setMetodo] = useState<Metodo>('email')
   const [ident, setIdent] = useState('')
+  // Ficha do Turnstile e erro da busca. Sem chave configurada, o widget não
+  // aparece e a ficha fica nula — o servidor deixa passar do mesmo jeito.
+  const [fichaRobo, setFichaRobo] = useState<string | null>(null)
+  const [rodadaRobo, setRodadaRobo] = useState(0)
+  const [erroBusca, setErroBusca] = useState<string | null>(null)
   const [pedidos, setPedidos] = useState<PedidoPortal[]>([])
   const [buscando, iniciarBusca] = useTransition()
   const [pedidoId, setPedidoId] = useState<string | null>(null)
@@ -152,9 +158,18 @@ export function PortalDevolucoes({
   }, [passo, tela])
 
   const buscar = () => {
+    setErroBusca(null)
     iniciarBusca(async () => {
-      const encontrados = await buscarPedidos(metodo, ident)
-      setPedidos(encontrados)
+      const r = await buscarPedidos(metodo, ident, fichaRobo)
+      // Token do Turnstile é de uso único: gastar e não pedir outro deixaria a
+      // segunda busca sem ficha, e ela seria recusada sem o cliente entender.
+      setFichaRobo(null)
+      setRodadaRobo((n) => n + 1)
+      if (r.erro) {
+        setErroBusca(r.erro)
+        return
+      }
+      setPedidos(r.pedidos)
       setItens([])
       setPedidoId(null)
       setPasso(2)
@@ -190,6 +205,7 @@ export function PortalDevolucoes({
           tipo: arquivo.type,
           tamanho: arquivo.size,
         })),
+        ident,
       )
       if (!preparo.ok) {
         setErroEnvio(preparo.erro)
@@ -223,6 +239,9 @@ export function PortalDevolucoes({
       // 3. Só então a solicitação nasce — com os caminhos, não com os bytes.
       const form = new FormData()
       form.set('pedidoId', pedido.id)
+      // O e-mail/CPF do passo 1 vai junto: é ele que prova, do lado do
+      // servidor, que este pedido é de quem está pedindo.
+      form.set('identificacao', ident)
       form.set('motivo', motivo)
       form.set('comentario', comentario)
       form.set('rascunho', preparo.rascunho)
@@ -426,6 +445,17 @@ export function PortalDevolucoes({
                   }}
                 />
               </label>
+
+              {/* Sem chave configurada não renderiza nada — e o servidor
+                  também não exige ficha. Ligar a proteção é trocar variável
+                  de ambiente, não mexer no código. */}
+              <Turnstile acao="portal-devolucoes" tema="light" aoResolver={setFichaRobo} rodada={rodadaRobo} />
+
+              {erroBusca ? (
+                <BlocoAviso titulo="Não deu para consultar agora" tom="erro">
+                  {erroBusca}
+                </BlocoAviso>
+              ) : null}
 
               <BotaoPrimario
                 ativo={ident.trim().length > 0 && !buscando}
@@ -2052,6 +2082,8 @@ function ReenvioDeProvas({
           tipo: arquivo.type,
           tamanho: arquivo.size,
         })),
+        identificacao,
+        devolucao.protocolo,
       )
       if (!preparo.ok) {
         setErro(preparo.erro)
