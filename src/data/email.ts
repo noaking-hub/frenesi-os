@@ -74,7 +74,15 @@ export interface Entrega {
  * Entrega uma mensagem. Devolve o id do provedor, que é o que permite
  * rastrear a entrega depois — sem ele, "enviado" é só uma afirmação nossa.
  */
-export async function entregar(m: Entrega): Promise<{ id: string }> {
+/**
+ * Devolve o HTML COMO FOI ENTREGUE, junto com o id do provedor.
+ *
+ * O `html` de volta não é enfeite: o log guarda uma cópia do e-mail para o dono
+ * poder abrir e ver o que o cliente leu, e guardar o texto de ENTRADA guardava
+ * uma cópia com `{site}` por resolver — a logomarca aparecia quebrada
+ * exatamente na tela cuja única promessa é fidelidade.
+ */
+export async function entregar(m: Entrega): Promise<{ id: string; html: string }> {
   const { chave, remetente, responder } = credenciaisEmail()
   if (!chave || !remetente) {
     throw new Error(
@@ -82,6 +90,10 @@ export async function entregar(m: Entrega): Promise<{ id: string }> {
         'domínio verificado no provedor — sem SPF e DKIM, o e-mail cai em spam.',
     )
   }
+
+  // Resolvido UMA vez e reaproveitado: o que vai para o provedor e o que volta
+  // para quem chama guardar precisam ser o mesmo texto, byte a byte.
+  const htmlEntregue = m.html.split('{site}').join(siteDoErp())
 
   const resposta = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -101,7 +113,7 @@ export async function entregar(m: Entrega): Promise<{ id: string }> {
       // os avisos de pedido e de devolução não — e ninguém percebia, porque a
       // logo vinha de um CDN de terceiro que não precisava disso. Uma vez
       // aqui vale para todos, inclusive os que forem escritos amanhã.
-      html: m.html.split('{site}').join(siteDoErp()),
+      html: htmlEntregue,
       ...(responder ? { reply_to: responder } : {}),
       ...(m.descadastrar
         ? {
@@ -134,7 +146,7 @@ export async function entregar(m: Entrega): Promise<{ id: string }> {
   }
 
   const corpo = (await resposta.json()) as { id?: string }
-  return { id: corpo.id ?? '' }
+  return { id: corpo.id ?? '', html: htmlEntregue }
 }
 
 /**

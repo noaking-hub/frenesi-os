@@ -353,7 +353,7 @@ export async function enviarAvisosDePedido(opcoes?: {
           // O corpo é guardado, não redesenhado depois: o modelo é editável, e
           // redesenhar mostraria o texto de hoje com os dados de ontem — o
           // oposto do que se procura ao abrir esta tela.
-          corpo_html: mensagem.html,
+          corpo_html: r.html,
         })
         .eq('chave', aviso.chave)
       resultado.enviados++
@@ -535,7 +535,7 @@ async function avisarDevolucao(
           estado: 'enviado',
           provedor_id: r.id,
           concluido_em: new Date().toISOString(),
-          corpo_html: mensagem.html,
+          corpo_html: r.html,
         })
         .eq('chave', chave)
     } catch (e) {
@@ -683,7 +683,7 @@ export async function avisarDevolucaoConcluida(protocolo: string): Promise<void>
           estado: 'enviado',
           provedor_id: r.id,
           concluido_em: new Date().toISOString(),
-          corpo_html: mensagem.html,
+          corpo_html: r.html,
         })
         .eq('chave', chave)
     } catch (e) {
