@@ -186,6 +186,13 @@ export async function enviarAvisosDePedido(opcoes?: {
   const doEscopo = pendentes.filter((p) => EVENTOS_ATIVOS.includes(p.aviso.evento))
   const foraDoEscopo = pendentes.filter((p) => !EVENTOS_ATIVOS.includes(p.aviso.evento))
 
+  // AVISO PARA QUEM FOR LIGAR "pedido_pago" OU "pedido_faturado":
+  // a consulta lá em cima filtra `envio in ('enviado','entregue')`, porque
+  // hoje o módulo só cobre envio e entrega. Acrescentar um desses dois eventos
+  // a `EVENTOS_ATIVOS` sem alargar aquele filtro não avisa ninguém — o pedido
+  // pago que ainda não saiu nem chega a ser lido aqui. É a linha do `.in(...)`
+  // que precisa mudar junto.
+
   // ── Módulo desligado: o fato entra no log, o e-mail não sai ──────────────
   //
   // Sem isto, cada envio que acontecesse com o módulo desligado ficaria como
