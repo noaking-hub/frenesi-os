@@ -259,6 +259,27 @@ export async function POST(req: Request) {
     relatorio.extratoEmCaixaAntes = { erro: mensagemDe(e) }
   }
 
+  /**
+   * O repasse da Pagaleve ganha nome logo depois de virar caixa.
+   *
+   * Roda DEPOIS da conversão de propósito: o que ela batiza é o lançamento que
+   * a conversão acabou de criar. O depósito da Pagaleve é agrupado — soma
+   * parcelas de vendas diferentes — e por isso não casa com nenhum pedido; sem
+   * este passo ele fica como "Crédito a classificar", fora da DRE.
+   */
+  if (grupo('financeiro')) try {
+    const { data, error } = await supabaseServer().rpc('casar_repasses_pagaleve')
+    if (error) throw error
+    const linha = Array.isArray(data) ? data[0] : data
+    relatorio.repassesPagaleve = {
+      repasses: linha?.repasses ?? 0,
+      parcelasBaixadas: linha?.parcelas_baixadas ?? 0,
+      valor: Number(linha?.valor ?? 0),
+    }
+  } catch (e) {
+    relatorio.repassesPagaleve = { erro: mensagemDe(e) }
+  }
+
   if (grupo('financeiro')) try {
     const { data, error } = await supabaseServer().rpc('conciliar_repasses_pelo_extrato')
     if (error) throw error
