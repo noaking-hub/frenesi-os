@@ -18,3 +18,7 @@ yarn-error.log*
 
 # Gerado pelo `next dev`, não é fonte do projeto.
 AGENTS.md
+
+# Andaimes de medição criados por agentes durante diagnóstico — nunca fazem
+# parte do produto.
+.medicao/
