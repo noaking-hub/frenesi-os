@@ -730,7 +730,7 @@ export const HTML_VALIDADO_ENVIO = `<!DOCTYPE html>
  * e-mail. Isso não é enfeite: sem a expectativa dita aqui, o silêncio dos dias
  * seguintes vira dúvida, e a dúvida vira mensagem no WhatsApp.
  *
- * Placeholders: {nome}, {pedido}, {total}, {pagamento}, {link}, {site}.
+ * Placeholders: {nome}, {pedido}, {total}, {link}, {site}.
  */
 export const HTML_VALIDADO_PAGAMENTO = `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -808,7 +808,6 @@ export const HTML_VALIDADO_PAGAMENTO = `<!DOCTYPE html>
                         <div style="padding-top:18px;">
                           <span class="cod" style="display:inline-block; font-family:Arial,Helvetica,sans-serif; font-size:31px; line-height:38px; mso-line-height-rule:exactly; font-weight:bold; color:#EFD18C; background-color:#241F18; border:2px solid #B08D4B; border-radius:10px; padding:18px 34px;">{total}</span>
                         </div>
-                        <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#6B6355; padding-top:16px;">Pago em {pagamento} &middot; guarde este e-mail como comprovante</div>
                       </td>
                     </tr>
                   </table>
@@ -835,7 +834,6 @@ export const HTML_VALIDADO_PAGAMENTO = `<!DOCTYPE html>
               <tr>
                 <td align="center" class="pad" style="padding:32px 50px 0 50px;">
                   <div style="font-family:Georgia,'Times New Roman',serif; font-size:19px; line-height:26px; font-style:italic; mso-line-height-rule:exactly; color:#8A6A2F;">Obrigado pela confian&ccedil;a.</div>
-                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:22px; mso-line-height-rule:exactly; color:#6B6355; padding-top:10px;">Qualquer d&uacute;vida sobre este pedido, &eacute; s&oacute; responder este e-mail.</div>
                 </td>
               </tr>
 

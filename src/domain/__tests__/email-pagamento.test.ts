@@ -11,7 +11,7 @@ import { emailPagamento } from '../notificacoes'
  * conclui que o e-mail é falso.
  */
 describe('e-mail de pagamento confirmado', () => {
-  const base = { nome: 'Icaro Moreno', pedido: 'YP-1234', total: 'R$ 216,00', pagamento: 'Pix' }
+  const base = { nome: 'Icaro Moreno', pedido: 'YP-1234', total: 'R$ 216,00' }
 
   it('não deixa nenhum placeholder por preencher, exceto o do site', () => {
     // `{site}` sobrevive de propósito: quem o resolve é `entregar()`, uma vez
@@ -38,17 +38,7 @@ describe('e-mail de pagamento confirmado', () => {
     expect(html).toMatch(/font-size:31px[^>]*R\$ 216,00|R\$ 216,00/)
   })
 
-  it('nomeia o meio de pagamento quando sabe qual foi', () => {
-    const { html } = emailPagamento(base)
-    expect(html).toContain('Pago em Pix')
-  })
 
-  it('some com a frase do meio quando não sabe, em vez de exibir vazio', () => {
-    // "Pago em —" parece defeito; a ausência da frase não parece nada.
-    const { html } = emailPagamento({ ...base, pagamento: null })
-    expect(html).not.toContain('Pago em')
-    expect(html).toContain('Pagamento aprovado')
-  })
 
   it('escapa o que veio do cliente', () => {
     // Nome com < ou & viraria HTML quebrado — ou pior, injeção no corpo.
