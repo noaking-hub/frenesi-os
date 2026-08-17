@@ -659,9 +659,18 @@ export async function aplicarEstoqueShopify(
         input: {
           name: 'available',
           reason: 'correction',
-          // O ERP é a fonte da verdade aqui; comparar com o valor anterior só
-          // faria a escrita falhar quando uma venda entrasse no meio.
-          ignoreCompareQuantity: true,
+          // Sem `compareQuantity` em cada linha, a Shopify grava sem conferir
+          // o valor anterior — que é o que se quer aqui: o ERP é a fonte da
+          // verdade, e comparar faria a escrita falhar sempre que uma venda
+          // entrasse entre a leitura e a gravação.
+          //
+          // Existia um `ignoreCompareQuantity: true` no lugar desta ausência.
+          // O campo saiu da API (`Field is not defined on
+          // InventorySetQuantitiesInput` na 2026-07) e derrubava a mutação
+          // INTEIRA — nenhuma quantidade era publicada na loja. A falha ficou
+          // invisível por estar no fim da rotina horária, que morria de
+          // timeout antes de chegar aqui; ela só apareceu quando a rotina foi
+          // dividida em etapas.
           quantities: parte,
         },
       },
