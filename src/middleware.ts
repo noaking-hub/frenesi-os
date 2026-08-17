@@ -46,6 +46,12 @@ const ABERTO = [
   '/api/crm/espelhar',
   '/api/financeiro',
   '/api/pedidos/pulso',
+  // Os avisos ao cliente, agendados de dez em dez minutos. Estavam DE FORA
+  // desta lista e a falha era exatamente a que o comentário acima descreve: o
+  // agendador recebia o redirect para /entrar, a página de login respondia
+  // 200 com HTML, e a rotina "sucedia" sem ter enviado nada. Só apareceu
+  // porque o histórico do pg_net guarda o corpo da resposta.
+  '/api/pedidos/avisos',
   '/api/diagnostico',
   '/api/pagarme',
   '/api/pagaleve',
