@@ -133,7 +133,13 @@ interface LinhaPedidoAviso {
   pagamento: string
   envio: string
   valor: number | string | null
-  meio_pagamento: string | null
+  /**
+   * O meio vem da TRANSAÇÃO, não do pedido: `pedidos` não tem coluna de meio de
+   * pagamento. Escrevi `pedidos.meio_pagamento` no select e a rotina inteira
+   * passou a devolver 500 a cada dez minutos — os avisos de envio e entrega
+   * pararam junto, porque a consulta é uma só.
+   */
+  pedido_transacoes: { gateway: string | null; parcelas: number | null }[] | null
   rastreio: string | null
   servico_frete: string | null
   rastreio_url: string | null
@@ -181,7 +187,7 @@ export async function enviarAvisosDePedido(opcoes?: {
   const sb = supabaseServer()
   const { data, error } = await sb
     .from('pedidos')
-    .select('id, pagamento, envio, valor, meio_pagamento, rastreio, servico_frete, rastreio_url, clientes(nome, email)')
+    .select('id, pagamento, envio, valor, rastreio, servico_frete, rastreio_url, clientes(nome, email), pedido_transacoes(gateway, parcelas)')
     .gte('comprado_em', desde)
     // Pedido PAGO entra mesmo sem ter saído — sem isto, "pedido pago" seria um
     // evento ligado que não avisa ninguém, e o silêncio pareceria
@@ -397,7 +403,12 @@ function mensagemDoAviso(
           // seu "Não identificado" vira null — nesse caso a frase inteira some,
           // em vez de o cliente ler que pagou de um jeito não identificado.
           pagamento: (() => {
-            const m = normalizarMeio(pedido.meio_pagamento)
+            const t = pedido.pedido_transacoes?.[0]
+            if (!t?.gateway) return null
+            // Parcelas entram no texto porque "Cartão de crédito 3x" é o que o
+            // cliente reconhece do extrato dele; só "cartão" não confere.
+            const bruto = t.parcelas && t.parcelas > 1 ? `${t.gateway} ${t.parcelas}x` : t.gateway
+            const m = normalizarMeio(bruto)
             return m === 'Não identificado' ? null : m
           })(),
         })
