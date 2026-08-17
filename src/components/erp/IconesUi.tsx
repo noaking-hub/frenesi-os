@@ -68,6 +68,7 @@ export type NomeIcone =
   | 'sino'
   | 'faisca'
   | 'grade'
+  | 'menu'
   | 'lista'
   | 'pessoas'
   | 'carrinho'
@@ -317,6 +318,12 @@ const TRACOS: Record<NomeIcone, ReactNode> = {
   filtro: (
     <>
       <path d="M3.5 5.5h17l-6.5 7.6v5.9l-4 2.1v-8z" />
+    </>
+  ),
+  // Três traços: o gesto que todo mundo já sabe que abre o menu no celular.
+  menu: (
+    <>
+      <path d="M4 7h16M4 12h16M4 17h16" />
     </>
   ),
   busca: (

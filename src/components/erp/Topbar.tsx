@@ -62,10 +62,34 @@ export function Topbar({
         backdropFilter: 'blur(14px)',
         borderBottom: '1px solid rgba(255,255,255,.06)',
       }}
+      className="topbar-erp"
     >
+      {/* A gaveta do menu no celular. Some no desktop, onde a barra lateral
+          está sempre visível — botão que abre o que já está aberto é ruído. */}
+      <button
+        type="button"
+        className="abrir-menu"
+        aria-label="Abrir o menu"
+        onClick={() => document.documentElement.classList.toggle('menu-mobile-aberto')}
+        style={{
+          width: 38,
+          height: 38,
+          flex: 'none',
+          borderRadius: 11,
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: VELADO.ouro,
+          border: `1px solid ${CONTORNO.ouro}`,
+          color: TINTA.ouro,
+          cursor: 'pointer',
+        }}
+      >
+        <Ico n="menu" tamanho={18} />
+      </button>
       <div style={{ display: 'flex', alignItems: 'center', gap: 13, minWidth: 0 }}>
         {cab.icone && (
           <span
+            className="icone-da-tela"
             style={{
               width: 38,
               height: 38,
@@ -97,7 +121,7 @@ export function Topbar({
             {cab.titulo}
           </h1>
           <span
-            className="font-sans"
+            className="font-sans subtitulo-da-tela"
             style={{
               fontSize: 11.5,
               lineHeight: 1.35,
@@ -115,7 +139,7 @@ export function Topbar({
       <div style={{ flex: 1 }} />
 
       <label
-        className="focus-within:border-ouro/45"
+        className="focus-within:border-ouro/45 busca-topo"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -169,6 +193,7 @@ export function Topbar({
       <AlertasDoTopo alertas={alertas} />
 
       <div
+        className="usuario-do-topo"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -194,7 +219,7 @@ export function Topbar({
         >
           {iniciais}
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <div className="nome-do-usuario" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span
             className="font-sans"
             style={{ fontWeight: 600, fontSize: 11.5, lineHeight: 1.3, color: 'var(--color-corrente)' }}

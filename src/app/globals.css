@@ -285,6 +285,140 @@
   }
 }
 
+/* ── ERP no iPhone e no iPad ────────────────────────────────────────────────
+   O ERP nasceu para 1440+ e a barra lateral de 244px, fixa, deixava 146px de
+   conteúdo num iPhone. Abaixo de 900px ela vira GAVETA: sai do fluxo, entra
+   por cima quando chamada, e o véu devolve o toque fora dela.
+
+   O estado é uma classe no `<html>` porque quem abre (o botão da Topbar) e
+   quem desenha (a barra) são componentes irmãos — e um booleano que só o CSS
+   lê não merece um contexto de React. */
+.erp .veu-menu {
+  display: none;
+}
+.erp .abrir-menu {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .erp .sidebar-erp {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    z-index: 60;
+    width: 244px !important;
+    height: 100dvh !important;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+  }
+  html.menu-mobile-aberto .erp .sidebar-erp {
+    transform: translateX(0);
+    box-shadow: 0 0 50px rgba(0, 0, 0, 0.65);
+  }
+  html.menu-mobile-aberto .erp .veu-menu {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(0, 0, 0, 0.55);
+  }
+  /* Gaveta aberta trava a rolagem do fundo: rolar a tela por baixo do menu
+     faz a pessoa perder o lugar onde estava. */
+  html.menu-mobile-aberto body {
+    overflow: hidden;
+  }
+  .erp .abrir-menu {
+    display: inline-flex !important;
+  }
+
+  .erp .topbar-erp {
+    height: 62px !important;
+    padding: 0 13px !important;
+    gap: 10px !important;
+  }
+  /* O topo foi desenhado para uma linha de 1440px: ícone da tela, título,
+     subtítulo, busca de 308px, alertas e usuário por extenso. Nos 393px do
+     iPhone tudo isso se sobrepunha — o título por cima da busca, "7 alertas"
+     cortado na borda. No celular fica o essencial: menu, título, alertas e a
+     inicial de quem está logado. */
+  .erp .busca-topo,
+  .erp .icone-da-tela,
+  .erp .subtitulo-da-tela,
+  .erp .nome-do-usuario {
+    display: none !important;
+  }
+  .erp .usuario-do-topo {
+    padding-left: 0 !important;
+    border-left: 0 !important;
+    gap: 6px !important;
+  }
+  .erp .topbar-erp h1 {
+    font-size: 17px !important;
+  }
+  .erp .conteudo-erp {
+    padding: 15px 13px 44px !important;
+  }
+  /* O respiro do iPhone com barra inferior: sem isto o último botão da tela
+     fica embaixo do indicador de gesto. */
+  .erp .conteudo-erp {
+    padding-bottom: calc(44px + env(safe-area-inset-bottom)) !important;
+  }
+
+  /* Qualquer arranjo de duas colunas vira uma. As classes existem porque o
+     arranjo é style inline e a media query precisa vencer nesse ponto. */
+  .erp .empilha-1180,
+  .erp .empilha-1320,
+  .erp .empilha-900 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Alvo de toque: 44px é o mínimo que a Apple recomenda, e o ERP tem muito
+     botão de 28px desenhado para mouse. */
+  .erp button,
+  .erp a[role='button'] {
+    touch-action: manipulation;
+  }
+
+  /* Tabela larga rola DENTRO do cartão, nunca empurrando a página. */
+  .erp table {
+    font-size: 12px;
+  }
+}
+
+/* iPad em retrato (768–1024): a barra continua visível, mas recolhida — o
+   conteúdo é o que importa numa tela dessas. */
+@media (min-width: 901px) and (max-width: 1024px) {
+  .erp .conteudo-erp {
+    padding: 18px 16px 40px !important;
+  }
+}
+
+/* A página nunca rola na horizontal: quem rola é o cartão que precisa. */
+.erp {
+  overflow-x: hidden;
+}
+
+@media (max-width: 900px) {
+  /* Modal centrado: 40px de respiro de cada lado num iPhone deixa o cartão
+     com 310px. No celular ele encosta nas bordas e ganha a tela. */
+  [data-camada='modal'] {
+    padding: 12px !important;
+  }
+
+  /* A gaveta inferior (a ficha do pedido) começa na borda: no celular a barra
+     lateral não ocupa espaço no fluxo, e `left: var(--sidebar-w)` deixaria um
+     vão preto de 244px do lado esquerdo. */
+  .erp[role='dialog'],
+  section.erp[role='dialog'] {
+    left: 0 !important;
+  }
+
+  /* O botão do Gerente sobe acima do indicador de gesto do iPhone. */
+  .erp .botao-ouro[aria-label='Abrir o Gerente'] {
+    bottom: calc(18px + env(safe-area-inset-bottom)) !important;
+  }
+}
+
 /* ── Portal de devoluções ───────────────────────────────────────────────────
    Mobile-first de verdade: no celular a coluna ocupa a tela inteira; no
    desktop ela vira um cartão centrado mais largo, com respiro — sem isso o

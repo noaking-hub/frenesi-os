@@ -41,8 +41,29 @@ export function Sidebar({ origem }: { origem: 'supabase' | 'fixtures' }) {
     if (atual) setAbertos((s) => ({ ...s, [atual.id]: true }))
   }, [pathname])
 
+  /**
+   * No celular o menu é gaveta, e navegar FECHA a gaveta.
+   *
+   * O estado mora numa classe no `<html>`, e não em React, porque quem abre é
+   * o botão da Topbar — outro componente, irmão deste. Contexto para um
+   * booleano que só a folha de estilo lê seria cerimônia; a classe é lida
+   * pelas media queries e some no desktop sozinha.
+   */
+  useEffect(() => {
+    document.documentElement.classList.remove('menu-mobile-aberto')
+  }, [pathname])
+
   return (
+    <>
+    {/* O véu só existe no celular, e é ele que devolve o toque fora do menu:
+        gaveta sem como fechar prende quem abriu por engano. */}
+    <div
+      className="veu-menu"
+      aria-hidden
+      onClick={() => document.documentElement.classList.remove('menu-mobile-aberto')}
+    />
     <aside
+      className="sidebar-erp"
       style={{
         width: recolhida ? 62 : 244,
         flex: 'none',
@@ -183,6 +204,7 @@ export function Sidebar({ origem }: { origem: 'supabase' | 'fixtures' }) {
         )}
       </div>
     </aside>
+    </>
   )
 }
 
