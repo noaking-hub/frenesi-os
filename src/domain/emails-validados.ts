@@ -789,7 +789,7 @@ export const HTML_VALIDADO_PAGAMENTO = `<!DOCTYPE html>
                 <td align="center" class="pad" style="padding:26px 50px 0 50px;">
                   <div style="font-family:Georgia,'Times New Roman',serif; font-size:38px; line-height:48px; mso-line-height-rule:exactly; color:#241F18;">{nome}, recebemos seu pagamento</div>
                   <div style="font-family:Georgia,'Times New Roman',serif; font-size:24px; line-height:32px; font-style:italic; mso-line-height-rule:exactly; color:#8A6A2F; padding-top:8px;">pedido confirmado</div>
-                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:15px; line-height:25px; mso-line-height-rule:exactly; color:#6B6355; padding-top:20px;">Seu pagamento foi aprovado e o pedido entrou na fila de preparo. Cada frasco &eacute; envasado &agrave; m&atilde;o, um a um &mdash; por isso levamos at&eacute; 3 dias &uacute;teis para postar. Voc&ecirc; recebe outro e-mail com o c&oacute;digo de rastreio assim que ele sair daqui.</div>
+                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:15px; line-height:25px; mso-line-height-rule:exactly; color:#6B6355; padding-top:20px;">Seu pagamento foi aprovado e o pedido j&aacute; entrou na fila de preparo. O prazo para postagem &eacute; de at&eacute; 3 dias &uacute;teis. Assim que o pedido for enviado, voc&ecirc; receber&aacute; outro e-mail com o c&oacute;digo de rastreio para acompanhar a entrega.</div>
                 </td>
               </tr>
 
