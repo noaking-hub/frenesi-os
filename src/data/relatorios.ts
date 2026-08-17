@@ -397,8 +397,13 @@ async function clientesRecorrentes(f: FiltrosRelatorio): Promise<ResultadoRelato
 }
 
 async function clientesInativos(f: FiltrosRelatorio): Promise<ResultadoRelatorio> {
-  // Inatividade não é filtrável por janela — ela É a janela. Aqui a data
-  // escolhida vira o corte: "quem não compra desde <de>".
+  // Inatividade não é filtrável por janela — ela É a janela.
+  //
+  // Aqui o INÍCIO do período vira o corte: "quem não compra desde <de>". O
+  // fim é ignorado de propósito; "parado entre 01/08 e 17/08" não quer dizer
+  // nada. Com "Tudo" escolhido não há início, e aí o padrão é 90 dias — o
+  // ponto em que um cliente de perfume deixa de estar comprando e passa a
+  // estar sumido.
   const hoje = hojeEmSaoPaulo()
   const corte = f.de ?? new Date(new Date(`${hoje}T12:00:00`).getTime() - 90 * 86_400_000).toISOString().slice(0, 10)
 
@@ -1393,7 +1398,7 @@ export const RELATORIOS: DefinicaoRelatorio[] = [
     usaData: true,
     usaUf: true,
     usaBusca: true,
-    notaDaData: 'sem comprar desde esta data (padrão: 90 dias)',
+    notaDaData: 'o INÍCIO do período é o corte: quem não compra desde essa data (com "Tudo", 90 dias)',
   },
   {
     id: 'aniversariantes',
