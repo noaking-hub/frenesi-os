@@ -441,6 +441,16 @@ export function ModeloEmail({
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 9 }}>
             <Rotulo>Prévia — exatamente o que o cliente recebe</Rotulo>
             {tipo === 'envio' ? (
+              <>
+                {/* Rótulo explícito: sem ele o seletor parecia decoração, e a
+                    prévia com "Correios" passava a impressão de que o e-mail
+                    era fixo nessa transportadora. */}
+                <span
+                  className="font-sans"
+                  style={{ fontSize: 10.5, color: 'var(--color-terciario)', whiteSpace: 'nowrap' }}
+                >
+                  ver com:
+                </span>
               <select
                 value={transportadoraPrevia ?? ''}
                 onChange={(e) => setTransportadoraPrevia(e.target.value || null)}
@@ -461,6 +471,7 @@ export function ModeloEmail({
                   </option>
                 ))}
               </select>
+              </>
             ) : null}
             <div style={{ flex: 1 }} />
             <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>

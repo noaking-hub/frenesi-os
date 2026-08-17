@@ -23,6 +23,22 @@ export function credenciaisEmail() {
   }
 }
 
+/**
+ * A URL PÚBLICA do ERP — a que os e-mails usam para servir imagem.
+ *
+ * A logomarca e os ícones das redes precisam de endereço absoluto: cliente de
+ * e-mail não tem "origem". Ela vem de `URL`, que a Netlify define com o
+ * domínio principal do site (e não com a URL do deploy, que muda a cada
+ * publicação e deixaria a logo quebrada nos e-mails antigos).
+ */
+export function siteDoErp(): string {
+  const bruto =
+    process.env.URL?.trim() ||
+    process.env.NEXT_PUBLIC_URL?.trim() ||
+    'https://erp.frenesiperfumes.com.br'
+  return bruto.replace(/\/+$/, '')
+}
+
 export function emailConfigurado(): boolean {
   const { chave, remetente } = credenciaisEmail()
   return Boolean(chave && remetente)
@@ -77,7 +93,15 @@ export async function entregar(m: Entrega): Promise<{ id: string }> {
       from: remetente,
       to: [m.para],
       subject: m.assunto,
-      html: m.html,
+      // `{site}` resolvido AQUI, e não em cada remetente.
+      //
+      // A logomarca dos modelos é servida pelo próprio ERP, o que exige um
+      // endereço absoluto no HTML. Deixar essa substituição a cargo de quem
+      // chama já custou uma logo quebrada: três dos remetentes aplicavam,
+      // os avisos de pedido e de devolução não — e ninguém percebia, porque a
+      // logo vinha de um CDN de terceiro que não precisava disso. Uma vez
+      // aqui vale para todos, inclusive os que forem escritos amanhã.
+      html: m.html.split('{site}').join(siteDoErp()),
       ...(responder ? { reply_to: responder } : {}),
       ...(m.descadastrar
         ? {

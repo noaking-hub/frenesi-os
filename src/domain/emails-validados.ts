@@ -54,7 +54,7 @@ export const HTML_VALIDADO_CARRINHO = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:44px 40px 0 40px;">
-                  <img src="https://cdn.brandfetch.io/frenesiperfumes.com.br/w/172/h/36/theme/light/fallback/404/type/logo?c=1id1bN_oGG366WGvBYf" width="172" alt="FRENESI" style="display:block; width:172px; height:auto; border:0;" />
+                  <img src="{site}/assets/frenesi-logo-email.png" width="172" alt="FRENESI" style="display:block; width:172px; height:auto; border:0;" />
                 </td>
               </tr>
 
@@ -141,7 +141,7 @@ export const HTML_VALIDADO_CARRINHO = `<!DOCTYPE html>
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#8A6A2F;">UM INCENTIVO PARA VOLTAR</div>
                         <div style="font-family:Georgia,'Times New Roman',serif; font-size:26px; line-height:34px; mso-line-height-rule:exactly; color:#241F18; padding-top:14px;">{desconto}% de desconto com o c&oacute;digo</div>
                         <div style="padding-top:18px;">
-                          <span style="display:inline-block; font-family:'Courier New',Courier,monospace; font-size:22px; line-height:28px; mso-line-height-rule:exactly; letter-spacing:7px; color:#5E4A1E; border:1px dashed #D8C49B; border-radius:8px; padding:12px 28px;">{cupom}</span>
+                          <span style="display:inline-block; font-family:'Courier New',Courier,monospace; font-size:26px; font-weight:bold; line-height:32px; mso-line-height-rule:exactly; letter-spacing:7px; color:#EFD18C; background-color:#241F18; border:2px solid #B08D4B; border-radius:10px; padding:16px 32px;">{cupom}</span>
                         </div>
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#6B6355; padding-top:16px;">V&aacute;lido por apenas <strong style="color:#5E4A1E;">48 horas</strong> &nbsp;&middot;&nbsp; aplique no checkout</div>
                       </td>
@@ -254,7 +254,7 @@ export const HTML_VALIDADO_GIFT = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:44px 40px 0 40px;">
-                  <img src="https://cdn.brandfetch.io/frenesiperfumes.com.br/w/172/h/36/theme/light/fallback/404/type/logo?c=1id1bN_oGG366WGvBYf" width="172" alt="FRENESI" style="display:block; width:172px; height:auto; border:0;" />
+                  <img src="{site}/assets/frenesi-logo-email.png" width="172" alt="FRENESI" style="display:block; width:172px; height:auto; border:0;" />
                 </td>
               </tr>
 
@@ -291,7 +291,7 @@ export const HTML_VALIDADO_GIFT = `<!DOCTYPE html>
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#8A6A2F;">O SEU PRESENTE</div>
                         <div style="font-family:Georgia,'Times New Roman',serif; font-size:26px; line-height:34px; mso-line-height-rule:exactly; color:#241F18; padding-top:14px;">{desconto}% de desconto com o c&oacute;digo</div>
                         <div style="padding-top:18px;">
-                          <span style="display:inline-block; font-family:'Courier New',Courier,monospace; font-size:22px; line-height:28px; mso-line-height-rule:exactly; letter-spacing:7px; color:#5E4A1E; border:1px dashed #D8C49B; border-radius:8px; padding:12px 28px;">{cupom}</span>
+                          <span style="display:inline-block; font-family:'Courier New',Courier,monospace; font-size:26px; font-weight:bold; line-height:32px; mso-line-height-rule:exactly; letter-spacing:7px; color:#EFD18C; background-color:#241F18; border:2px solid #B08D4B; border-radius:10px; padding:16px 32px;">{cupom}</span>
                         </div>
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#6B6355; padding-top:16px;">Seu presente &eacute; v&aacute;lido por <strong style="color:#5E4A1E;">{validade} dias</strong> &nbsp;&middot;&nbsp; aplique no checkout</div>
                       </td>
@@ -415,7 +415,7 @@ export const HTML_VALIDADO_CASHBACK = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:44px 40px 0 40px;">
-                  <img src="https://cdn.brandfetch.io/frenesiperfumes.com.br/w/172/h/36/theme/light/fallback/404/type/logo?c=1id1bN_oGG366WGvBYf" width="172" alt="FRENESI" style="display:block; width:172px; height:auto; border:0;" />
+                  <img src="{site}/assets/frenesi-logo-email.png" width="172" alt="FRENESI" style="display:block; width:172px; height:auto; border:0;" />
                 </td>
               </tr>
 
@@ -452,7 +452,7 @@ export const HTML_VALIDADO_CASHBACK = `<!DOCTYPE html>
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#8A6A2F;">O SEU SALDO</div>
                         <div style="font-family:Georgia,'Times New Roman',serif; font-size:26px; line-height:34px; mso-line-height-rule:exactly; color:#241F18; padding-top:14px;">Voc&ecirc; tem para usar agora</div>
                         <div style="padding-top:18px;">
-                          <span style="display:inline-block; font-family:Georgia,'Times New Roman',serif; font-size:36px; line-height:44px; mso-line-height-rule:exactly; color:#5E4A1E; border:1px dashed #D8C49B; border-radius:8px; padding:14px 36px;">{saldo}</span>
+                          <span style="display:inline-block; font-family:Georgia,'Times New Roman',serif; font-size:38px; line-height:46px; mso-line-height-rule:exactly; color:#EFD18C; background-color:#241F18; border:2px solid #B08D4B; border-radius:10px; padding:18px 40px;">{saldo}</span>
                         </div>
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#6B6355; padding-top:16px;">V&aacute;lido at&eacute; <strong style="color:#5E4A1E;">{validade}</strong> &nbsp;&middot;&nbsp; o desconto entra sozinho no checkout</div>
                       </td>
@@ -587,7 +587,7 @@ export const HTML_VALIDADO_ENVIO = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:44px 40px 0 40px;">
-                  <img src="https://cdn.brandfetch.io/frenesiperfumes.com.br/w/172/h/36/theme/light/fallback/404/type/logo?c=1id1bN_oGG366WGvBYf" width="172" alt="FRENESI" style="display:block; width:172px; height:auto; border:0;" />
+                  <img src="{site}/assets/frenesi-logo-email.png" width="172" alt="FRENESI" style="display:block; width:172px; height:auto; border:0;" />
                 </td>
               </tr>
 
@@ -624,7 +624,7 @@ export const HTML_VALIDADO_ENVIO = `<!DOCTYPE html>
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#8A6A2F;">C&Oacute;DIGO DE RASTREIO</div>
                         <div style="font-family:Georgia,'Times New Roman',serif; font-size:26px; line-height:34px; mso-line-height-rule:exactly; color:#241F18; padding-top:14px;">{transportadora}</div>
                         <div style="padding-top:18px;">
-                          <span class="cod" style="display:inline-block; font-family:'Courier New',Courier,monospace; font-size:30px; line-height:38px; letter-spacing:3px; mso-line-height-rule:exactly; color:#5E4A1E; border:1px dashed #D8C49B; border-radius:8px; padding:14px 30px;">{codigo}</span>
+                          <span class="cod" style="display:inline-block; font-family:'Courier New',Courier,monospace; font-size:31px; font-weight:bold; line-height:40px; letter-spacing:3px; mso-line-height-rule:exactly; color:#EFD18C; background-color:#241F18; border:2px solid #B08D4B; border-radius:10px; padding:18px 34px;">{codigo}</span>
                         </div>
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#6B6355; padding-top:16px;">Toque no bot&atilde;o abaixo &mdash; a p&aacute;gina abre com o c&oacute;digo j&aacute; preenchido</div>
                       </td>
@@ -759,7 +759,7 @@ export const HTML_VALIDADO_ENTREGUE = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:44px 40px 0 40px;">
-                  <img src="https://cdn.brandfetch.io/frenesiperfumes.com.br/w/172/h/36/theme/light/fallback/404/type/logo?c=1id1bN_oGG366WGvBYf" width="172" alt="FRENESI" style="display:block; width:172px; height:auto; border:0;" />
+                  <img src="{site}/assets/frenesi-logo-email.png" width="172" alt="FRENESI" style="display:block; width:172px; height:auto; border:0;" />
                 </td>
               </tr>
 
@@ -936,7 +936,7 @@ export const HTML_VALIDADO_DEVOLUCAO_ABERTA = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:44px 40px 0 40px;">
-                  <img src="https://cdn.brandfetch.io/frenesiperfumes.com.br/w/172/h/36/theme/light/fallback/404/type/logo?c=1id1bN_oGG366WGvBYf" width="172" alt="FRENESI" style="display:block; width:172px; height:auto; border:0;" />
+                  <img src="{site}/assets/frenesi-logo-email.png" width="172" alt="FRENESI" style="display:block; width:172px; height:auto; border:0;" />
                 </td>
               </tr>
 
@@ -973,7 +973,7 @@ export const HTML_VALIDADO_DEVOLUCAO_ABERTA = `<!DOCTYPE html>
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#8A6A2F;">PROTOCOLO DA DEVOLU&Ccedil;&Atilde;O</div>
                         <div style="font-family:Georgia,'Times New Roman',serif; font-size:26px; line-height:34px; mso-line-height-rule:exactly; color:#241F18; padding-top:14px;">Pedido {pedido}</div>
                         <div style="padding-top:18px;">
-                          <span class="cod" style="display:inline-block; font-family:'Courier New',Courier,monospace; font-size:30px; line-height:38px; letter-spacing:3px; mso-line-height-rule:exactly; color:#5E4A1E; border:1px dashed #D8C49B; border-radius:8px; padding:14px 30px;">{protocolo}</span>
+                          <span class="cod" style="display:inline-block; font-family:'Courier New',Courier,monospace; font-size:31px; font-weight:bold; line-height:40px; letter-spacing:3px; mso-line-height-rule:exactly; color:#EFD18C; background-color:#241F18; border:2px solid #B08D4B; border-radius:10px; padding:18px 34px;">{protocolo}</span>
                         </div>
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#6B6355; padding-top:16px;">Guarde este n&uacute;mero &mdash; &eacute; por ele que acompanhamos o seu caso</div>
                       </td>
@@ -1109,7 +1109,7 @@ export const HTML_VALIDADO_DEVOLUCAO_APROVADA = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:44px 40px 0 40px;">
-                  <img src="https://cdn.brandfetch.io/frenesiperfumes.com.br/w/172/h/36/theme/light/fallback/404/type/logo?c=1id1bN_oGG366WGvBYf" width="172" alt="FRENESI" style="display:block; width:172px; height:auto; border:0;" />
+                  <img src="{site}/assets/frenesi-logo-email.png" width="172" alt="FRENESI" style="display:block; width:172px; height:auto; border:0;" />
                 </td>
               </tr>
 
@@ -1146,7 +1146,7 @@ export const HTML_VALIDADO_DEVOLUCAO_APROVADA = `<!DOCTYPE html>
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#8A6A2F;">C&Oacute;DIGO DE POSTAGEM REVERSA</div>
                         <div style="font-family:Georgia,'Times New Roman',serif; font-size:26px; line-height:34px; mso-line-height-rule:exactly; color:#241F18; padding-top:14px;">Ag&ecirc;ncia dos Correios</div>
                         <div style="padding-top:18px;">
-                          <span class="cod" style="display:inline-block; font-family:'Courier New',Courier,monospace; font-size:30px; line-height:38px; letter-spacing:3px; mso-line-height-rule:exactly; color:#5E4A1E; border:1px dashed #D8C49B; border-radius:8px; padding:14px 30px;">{reverso}</span>
+                          <span class="cod" style="display:inline-block; font-family:'Courier New',Courier,monospace; font-size:31px; font-weight:bold; line-height:40px; letter-spacing:3px; mso-line-height-rule:exactly; color:#EFD18C; background-color:#241F18; border:2px solid #B08D4B; border-radius:10px; padding:18px 34px;">{reverso}</span>
                         </div>
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#6B6355; padding-top:16px;">Apresente este c&oacute;digo no balc&atilde;o da ag&ecirc;ncia</div>
                       </td>
@@ -1279,7 +1279,7 @@ export const HTML_VALIDADO_DEVOLUCAO_CONCLUIDA = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:44px 40px 0 40px;">
-                  <img src="https://cdn.brandfetch.io/frenesiperfumes.com.br/w/172/h/36/theme/light/fallback/404/type/logo?c=1id1bN_oGG366WGvBYf" width="172" alt="FRENESI" style="display:block; width:172px; height:auto; border:0;" />
+                  <img src="{site}/assets/frenesi-logo-email.png" width="172" alt="FRENESI" style="display:block; width:172px; height:auto; border:0;" />
                 </td>
               </tr>
 
@@ -1316,7 +1316,7 @@ export const HTML_VALIDADO_DEVOLUCAO_CONCLUIDA = `<!DOCTYPE html>
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#8A6A2F;">RESOLU&Ccedil;&Atilde;O DA DEVOLU&Ccedil;&Atilde;O</div>
                         <div style="font-family:Georgia,'Times New Roman',serif; font-size:26px; line-height:34px; mso-line-height-rule:exactly; color:#241F18; padding-top:14px;">{resolucao}</div>
                         <div style="padding-top:18px;">
-                          <span class="cod" style="display:inline-block; font-family:'Courier New',Courier,monospace; font-size:30px; line-height:38px; letter-spacing:3px; mso-line-height-rule:exactly; color:#5E4A1E; border:1px dashed #D8C49B; border-radius:8px; padding:14px 30px;">{destaque}</span>
+                          <span class="cod" style="display:inline-block; font-family:'Courier New',Courier,monospace; font-size:31px; font-weight:bold; line-height:40px; letter-spacing:3px; mso-line-height-rule:exactly; color:#EFD18C; background-color:#241F18; border:2px solid #B08D4B; border-radius:10px; padding:18px 34px;">{destaque}</span>
                         </div>
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#6B6355; padding-top:16px;">{nota}</div>
                       </td>
@@ -1453,7 +1453,7 @@ export const HTML_VALIDADO_DEVOLUCAO_NOVAS_FOTOS = `<!DOCTYPE html>
 
               <tr>
                 <td align="center" class="pad" style="padding:44px 40px 0 40px;">
-                  <img src="https://cdn.brandfetch.io/frenesiperfumes.com.br/w/172/h/36/theme/light/fallback/404/type/logo?c=1id1bN_oGG366WGvBYf" width="172" alt="FRENESI" style="display:block; width:172px; height:auto; border:0;" />
+                  <img src="{site}/assets/frenesi-logo-email.png" width="172" alt="FRENESI" style="display:block; width:172px; height:auto; border:0;" />
                 </td>
               </tr>
 
@@ -1490,7 +1490,7 @@ export const HTML_VALIDADO_DEVOLUCAO_NOVAS_FOTOS = `<!DOCTYPE html>
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:4px; color:#8A6A2F;">O QUE PRECISAMOS</div>
                         <div style="font-family:Georgia,'Times New Roman',serif; font-size:26px; line-height:34px; mso-line-height-rule:exactly; color:#241F18; padding-top:14px;">{resolucao}</div>
                         <div style="padding-top:18px;">
-                          <span class="cod" style="display:inline-block; font-family:'Courier New',Courier,monospace; font-size:30px; line-height:38px; letter-spacing:3px; mso-line-height-rule:exactly; color:#5E4A1E; border:1px dashed #D8C49B; border-radius:8px; padding:14px 30px;">{destaque}</span>
+                          <span class="cod" style="display:inline-block; font-family:'Courier New',Courier,monospace; font-size:31px; font-weight:bold; line-height:40px; letter-spacing:3px; mso-line-height-rule:exactly; color:#EFD18C; background-color:#241F18; border:2px solid #B08D4B; border-radius:10px; padding:18px 34px;">{destaque}</span>
                         </div>
                         <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#6B6355; padding-top:16px;">{nota}</div>
                       </td>

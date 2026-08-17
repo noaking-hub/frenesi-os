@@ -103,7 +103,10 @@ describe('e-mail de envio', () => {
     // do portal de devoluções: e-mail escuro no meio de uma lista clara vira
     // mancha preta, e o ouro some em tela de celular com pouca luz.
     const { html } = emailEnvio(base)
-    expect(html).toContain('cdn.brandfetch.io')
+    // A logomarca é servida pelo PRÓPRIO ERP. Vinha de um CDN de terceiro e
+    // quebrou no dia em que a variante clara do arquivo deixou de existir lá
+    // — o e-mail chegava com o retângulo de imagem quebrada no cabeçalho.
+    expect(html).toContain('/assets/frenesi-logo-email.png')
     expect(html).toContain('background-color:#EDE6DA')
     expect(html).not.toContain('#070605')
     expect(html).toContain('marca/icon-instagram.png')
@@ -159,7 +162,10 @@ describe('e-mail de entrega', () => {
       transportadora: 'Correios',
     })
     expect(assunto).toContain('YP-1')
-    expect(html).toContain('cdn.brandfetch.io')
+    // A logomarca é servida pelo PRÓPRIO ERP. Vinha de um CDN de terceiro e
+    // quebrou no dia em que a variante clara do arquivo deixou de existir lá
+    // — o e-mail chegava com o retângulo de imagem quebrada no cabeçalho.
+    expect(html).toContain('/assets/frenesi-logo-email.png')
     expect(html).toContain('Rafael, seu pedido chegou')
     expect(html).toContain('ENTREGA CONFIRMADA')
     expect(html).toContain('href="https://frenesiperfumes.com.br"')
