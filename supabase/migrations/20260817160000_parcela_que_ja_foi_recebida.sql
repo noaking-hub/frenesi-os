@@ -279,6 +279,13 @@ begin
   -- existiram no banco de origem e daria à conciliação três candidatos falsos
   -- para a mesma linha.
   v_modelo.chave_externa := null;
+  -- ATENÇÃO, LEITOR: esta decisão foi REVERTIDA em
+  -- 20260817180000_parcela_nao_perde_o_pedido — a partir de lá a parcela HERDA
+  -- o `pedido_id` do pai. O raciocínio abaixo estava errado (o "mesmo motivo"
+  -- vale para a `chave_externa`, e só para ela) e custava ao dono o cliente e
+  -- os itens na ficha das parcelas. O texto fica como estava, porque é o que
+  -- rodou; o porquê da reversão está no arquivo novo.
+  --
   -- `pedido_id` fica com o pai pelo mesmo motivo — e porque mudá-lo aqui
   -- alteraria o comportamento de todo parcelamento já feito, sem que ninguém
   -- tenha pedido. A venda manual, que nasce parcelada, passa o pedido pelo

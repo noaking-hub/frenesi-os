@@ -1149,17 +1149,33 @@ function DialogoParcelar({
   // Entrada e saída falam línguas diferentes: "recebido" numa despesa é "pago".
   const movimentados = lancamento.tipo === 'entrada' ? 'recebidos' : 'pagos'
   /*
-   * O aviso de saldo é montado aqui, e não no meio do JSX, porque são três
-   * frases condicionais: o que muda no lançamento, o que muda no saldo
-   * calculado e o que acontece (ou não) com o saldo exibido. Sem a conta —
-   * fora do provedor de listas — sobra a primeira, que continua verdadeira.
+   * Desmarcar recebimento nem sempre derruba saldo, e essa diferença precisa
+   * aparecer no texto — não só no número.
+   *
+   * Lançamento com `recebido` e sem `baixado_em` é dinheiro que nenhuma view de
+   * saldo soma (regra 1 de `efeitoDoParcelamento`). Na base real são três, e
+   * todos parceláveis: LC-00013, LC-00014 e LC-00018, R$ 669,00 / R$ 200,00 /
+   * R$ 150,00 de baixa parcial no Sicoob. Parcelar qualquer um deles com as
+   * frases fixas de queda anunciava "o saldo cai" com o calculado exibindo o
+   * MESMO número duas vezes — e ainda mandava conferir o "Calculado pelo ERP",
+   * que também não se mexe. Prévia que erra a explicação queima a confiança nos
+   * números que ela acerta.
+   */
+  const mexeEmSaldo = Boolean(
+    efeito && (efeito.variacaoNoCalculado !== 0 || efeito.variacaoNoDisponivel !== 0),
+  )
+  /*
+   * O aviso é montado aqui, e não no meio do JSX, porque são três frases
+   * condicionais: o que muda no lançamento, o que muda no saldo calculado e o
+   * que acontece (ou não) com o saldo exibido. Sem a conta — fora do provedor
+   * de listas — sobra a primeira, que continua verdadeira.
    */
   const avisoDeSaldo: string[] = []
   if (efeito && devolveDinheiro) {
     avisoDeSaldo.push(
       `O ERP tem ${brl(lancamento.recebido)} marcados como ${movimentados} neste lançamento e passa a ter ${brl(recebidoAgora)} — ${brl(lancamento.recebido - recebidoAgora)} a menos, que é o dinheiro que ainda não entrou.`,
     )
-    if (conta) {
+    if (conta && mexeEmSaldo) {
       const calculadoDepois = conta.saldoCalculado + efeito.variacaoNoCalculado
       avisoDeSaldo.push(
         `Saldo calculado de ${conta.nome}: ${brl(conta.saldoCalculado)} → ${brl(calculadoDepois)}.`,
@@ -1168,6 +1184,10 @@ function DialogoParcelar({
         efeito.variacaoNoDisponivel === 0 && conta.saldoInformadoPara
           ? `O saldo exibido em Contas e Caixas (${brl(conta.saldoDisponivel)}) NÃO muda: ele foi informado à mão para ${diaPt(conta.saldoInformadoPara)} e só soma baixas posteriores a essa data. Quem cai é o número da conferência, "${ROTULO_ORIGEM_SALDO.calculado}".`
           : `O saldo exibido de ${conta.nome} vai de ${brl(conta.saldoDisponivel)} para ${brl(conta.saldoDisponivel + efeito.variacaoNoDisponivel)}.`,
+      )
+    } else if (conta) {
+      avisoDeSaldo.push(
+        `Nenhum saldo de ${conta.nome} se mexe: este recebimento está gravado sem data de baixa, e conta só soma linha baixada — ele nunca chegou a entrar nos ${brl(conta.saldoDisponivel)} exibidos nem no calculado.`,
       )
     }
   }
@@ -1290,7 +1310,9 @@ function DialogoParcelar({
                 }}
               >
                 <span className="font-sans" style={{ fontSize: 11.5, fontWeight: 600, color: COR.atencao }}>
-                  {`O saldo ${conta ? `de ${conta.nome} ` : ''}muda com este parcelamento`}
+                  {mexeEmSaldo
+                    ? `O saldo ${conta ? `de ${conta.nome} ` : ''}muda com este parcelamento`
+                    : 'Este parcelamento desmarca dinheiro que já estava fora dos saldos'}
                 </span>
                 {avisoDeSaldo.map((frase) => (
                   <span
@@ -1305,8 +1327,9 @@ function DialogoParcelar({
                   className="font-sans"
                   style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
                 >
-                  A queda é o conserto, não um efeito colateral: esse dinheiro não tinha entrado. Ele
-                  volta ao saldo quando a parcela em aberto for baixada.
+                  {mexeEmSaldo
+                    ? 'A queda é o conserto, não um efeito colateral: esse dinheiro não tinha entrado. Ele volta ao saldo quando a parcela em aberto for baixada.'
+                    : 'O conserto é no lançamento, não no caixa: o dinheiro entra no saldo no dia em que a parcela for baixada com data.'}
                 </span>
               </div>
             )}
