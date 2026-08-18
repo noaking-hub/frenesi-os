@@ -31,6 +31,7 @@ export function PesquisaCliente({ historicoInicial }: { historicoInicial: Pesqui
   const [frenesi, setFrenesi] = useState<ReferenciaFrenesi[]>([])
   const [historico, setHistorico] = useState(historicoInicial)
   const [buscando, setBuscando] = useState(false)
+  const [desatualizada, setDesatualizada] = useState(false)
   // Rodada mais nova cala a antiga: sem isto, duas buscas seguidas misturavam
   // vitrines de perfumes diferentes na mesma tela.
   const rodadaRef = useRef(0)
@@ -44,6 +45,7 @@ export function PesquisaCliente({ historicoInicial }: { historicoInicial: Pesqui
     setTermo(limpo)
     setPalavra(p)
     setBuscando(true)
+    setDesatualizada(false)
     setFrenesi([])
     setVitrines(Object.fromEntries(CONCORRENTES.map((c) => [c.chave, { estado: 'buscando' }])))
 
@@ -51,8 +53,16 @@ export function PesquisaCliente({ historicoInicial }: { historicoInicial: Pesqui
       if (rodadaRef.current === rodada && r.ok) setFrenesi(r.frenesi)
     })
 
+    // Uma retentativa por loja: soluço de rede não pode custar a vitrine.
+    const comRetentativa = (chave: string) =>
+      pesquisarLoja(chave, limpo).catch(
+        () => new Promise<Awaited<ReturnType<typeof pesquisarLoja>>>((resolve, reject) => {
+          setTimeout(() => pesquisarLoja(chave, limpo).then(resolve, reject), 800)
+        }),
+      )
+
     const chamadas = CONCORRENTES.map((c) =>
-      pesquisarLoja(c.chave, limpo)
+      comRetentativa(c.chave)
         .then((r): EstadoVitrine =>
           r.ok ? { estado: 'pronta', vitrine: r.vitrine } : { estado: 'falhou', erro: r.erro },
         )
@@ -68,6 +78,10 @@ export function PesquisaCliente({ historicoInicial }: { historicoInicial: Pesqui
     void Promise.all(chamadas).then(async (resultados) => {
       if (rodadaRef.current !== rodada) return
       setBuscando(false)
+      // TODAS rejeitadas é outra doença: quase sempre a aba é de antes de um
+      // deploy e as actions que ela conhece não existem mais no servidor.
+      // Recarregar resolve — e é isso que a tela precisa dizer.
+      setDesatualizada(resultados.every((r) => r.estado.estado === 'falhou'))
       // O histórico fecha a rodada — e se a gravação falhar, a tela já
       // mostrou os preços: ninguém fica sem resposta por causa de memória.
       try {
@@ -151,6 +165,27 @@ export function PesquisaCliente({ historicoInicial }: { historicoInicial: Pesqui
               </button>
             ))}
           </div>
+        </section>
+      )}
+
+      {desatualizada && (
+        <section
+          style={{
+            ...cartaoSecao,
+            border: `1px solid ${COR.atencao}`,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <span className="font-sans" style={{ fontSize: 12.5, color: 'var(--color-corrente)', flex: '1 1 240px' }}>
+            Nenhuma consulta chegou ao servidor — o ERP provavelmente foi atualizado enquanto esta
+            aba estava aberta. Recarregue a página e pesquise de novo.
+          </span>
+          <BotaoOuro altura={32} onClick={() => window.location.reload()}>
+            Recarregar
+          </BotaoOuro>
         </section>
       )}
 
