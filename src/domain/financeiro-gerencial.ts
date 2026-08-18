@@ -649,6 +649,13 @@ export function avaliarVenda(v: {
   dispensada?: boolean
   /** Pedido cancelado não é venda: não há o que conciliar nele. */
   cancelada?: boolean
+  /**
+   * Ainda existem parcelas com vencimento à frente (Pix parcelado da
+   * Pagaleve). Crédito parcial DENTRO do cronograma não é divergência — é a
+   * venda amortizando no prazo combinado. Chamar isso de "precisa de ação"
+   * foi o que encheu a fila de alarme falso duas vezes.
+   */
+  parcelasACaminho?: boolean
 }): { status: StatusVenda; liquidoEsperado: number; diferenca: number } {
   const liquidoEsperado = arredonda(v.bruto - v.taxaEsperada)
 
@@ -674,6 +681,14 @@ export function avaliarVenda(v: {
   const diferenca = arredonda(v.liquidoRecebido - liquidoEsperado)
   if (Math.abs(diferenca) <= TOLERANCIA) {
     return { status: 'conciliada', liquidoEsperado, diferenca: 0 }
+  }
+
+  // Recebeu MENOS mas o cronograma ainda não terminou: as parcelas que
+  // faltam explicam a diferença, e a venda só volta a ser pendência se a
+  // última parcela vencer sem liquidar. Recebeu MAIS não tem parcela que
+  // explique — segue para a régua de divergência.
+  if (diferenca < 0 && v.parcelasACaminho) {
+    return { status: 'aguardando', liquidoEsperado, diferenca }
   }
 
   // Taxa maior que a contratada explica a diferença: é problema de taxa, não

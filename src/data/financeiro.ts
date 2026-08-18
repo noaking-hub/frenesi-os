@@ -1484,6 +1484,30 @@ export async function carregarConciliacao(): Promise<PainelConciliacao> {
   const totais = zerado()
   const vendas: VendaConciliada[] = []
 
+  // O cronograma da Pagaleve, por pedido: a última parcela ainda não
+  // liquidada. Crédito parcial com parcela futura é venda amortizando no
+  // prazo — não pendência. A margem de 7 dias cobre o atraso normal entre o
+  // vencimento e o repasse aparecer no extrato; passada ela, a venda volta a
+  // cobrar ação de verdade.
+  const MARGEM_PARCELA_DIAS = 7
+  const diasDepois = (data: string, dias: number): string => {
+    const t = Date.parse(`${data}T12:00:00Z`)
+    return Number.isFinite(t) ? new Date(t + dias * 86_400_000).toISOString().slice(0, 10) : data
+  }
+  const ultimaParcelaPendente = new Map<string, string>()
+  {
+    const { data: pendentes } = await supabaseServer()
+      .from('pagaleve_parcelas')
+      .select('pedido_id, prevista_para')
+      .is('liquidada_em', null)
+      .not('pedido_id', 'is', null)
+      .limit(2000)
+    for (const p of (pendentes ?? []) as { pedido_id: string; prevista_para: string | null }[]) {
+      const atual = ultimaParcelaPendente.get(p.pedido_id) ?? ''
+      if ((p.prevista_para ?? '') > atual) ultimaParcelaPendente.set(p.pedido_id, p.prevista_para ?? '')
+    }
+  }
+
   for (const r of data) {
     if (!r.pedidos) continue
     const bruto = Number(r.bruto_gateway ?? r.pedidos.valor)
@@ -1509,6 +1533,15 @@ export async function carregarConciliacao(): Promise<PainelConciliacao> {
     const foraDosGatewaysIntegrados = !r.meio && !r.pedidos.gateway
     const prazoVencido = compradoEm < iso(foraDosGatewaysIntegrados ? -PRAZO_PAGALEVE_DIAS : -5)
 
+    // O cronograma importado manda mais que o prazo genérico: enquanto a
+    // última parcela pendente (mais a margem) não vencer, a venda está
+    // amortizando — vale para o Pix parcelado, cujo `meio` gravado tirava a
+    // venda da regra antiga de prazo e a jogava em "valor divergente".
+    const ultimaPendente = ultimaParcelaPendente.get(r.pedido_id)
+    const parcelasACaminho =
+      ultimaPendente !== undefined &&
+      (ultimaPendente === '' || hoje <= diasDepois(ultimaPendente, MARGEM_PARCELA_DIAS))
+
     const { status, liquidoEsperado, diferenca } = avaliarVenda({
       bruto,
       taxaEsperada,
@@ -1518,7 +1551,8 @@ export async function carregarConciliacao(): Promise<PainelConciliacao> {
       liquidoRecebido: recebido,
       pagamentoConfirmado: r.pedidos.pagamento === 'pago',
       estornada: r.pedidos.situacao === 'cancelado',
-      prazoVencido,
+      prazoVencido: parcelasACaminho ? false : prazoVencido,
+      parcelasACaminho,
     })
 
     totais[status].qtd += 1

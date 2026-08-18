@@ -435,3 +435,42 @@ describe('competências', () => {
     expect(competenciaPorExtenso('2026-08')).toBe('agosto de 2026')
   })
 })
+
+describe('parcelado com parcelas a caminho', () => {
+  it('crédito parcial dentro do cronograma é aguardando, não divergência', () => {
+    const r = avaliarVenda({
+      bruto: 168.18,
+      taxaEsperada: 2.25,
+      taxaReal: 2.25,
+      liquidoRecebido: 53.81,
+      pagamentoConfirmado: true,
+      parcelasACaminho: true,
+    })
+    expect(r.status).toBe('aguardando')
+    expect(r.diferenca).toBeCloseTo(-112.12, 2)
+  })
+
+  it('cronograma encerrado sem completar volta a cobrar ação', () => {
+    const r = avaliarVenda({
+      bruto: 168.18,
+      taxaEsperada: 2.25,
+      taxaReal: 2.25,
+      liquidoRecebido: 53.81,
+      pagamentoConfirmado: true,
+      parcelasACaminho: false,
+    })
+    expect(r.status).toBe('valor_divergente')
+  })
+
+  it('receber MAIS que o esperado nunca se esconde atrás de parcela futura', () => {
+    const r = avaliarVenda({
+      bruto: 100,
+      taxaEsperada: 2,
+      taxaReal: 2,
+      liquidoRecebido: 120,
+      pagamentoConfirmado: true,
+      parcelasACaminho: true,
+    })
+    expect(r.status).toBe('valor_divergente')
+  })
+})
