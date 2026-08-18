@@ -279,3 +279,85 @@ export async function cancelarCompraACaminho(
   if (error) return { ok: false, erro: error.message }
   return { ok: true }
 }
+
+export type RespostaLoteDoItem =
+  | { ok: true; loteId: string; frascos: number }
+  | { ok: false; erro: string }
+
+/**
+ * Cria o(s) lote(s) de um item RECEBIDO com os dados que a compra já tem.
+ *
+ * A pendência "falta registrar a compra do frasco" mandava o operador para a
+ * tela de lotes redigitar perfume, volume, custo e fornecedor — quatro campos
+ * que este item já conhece. Redigitar não é só trabalho: é a chance de o
+ * custo por ml divergir entre a compra e o lote sem ninguém notar.
+ *
+ * Um lote POR FRASCO recebido, cada um com o custo unitário da compra — é o
+ * modelo do estoque, um frasco físico por lote. O primeiro lote é vinculado
+ * ao item na hora, fechando a pendência; os demais ficam à mão no seletor
+ * "virou o lote" dos outros itens da mesma compra.
+ */
+export async function criarLoteDoItemRecebido(itemId: string): Promise<RespostaLoteDoItem> {
+  if (!supabaseConfigurado()) return { ok: false, erro: 'O Supabase precisa estar configurado.' }
+
+  const sb = supabaseServer()
+  const { data: item, error } = await sb
+    .from('compras_a_caminho_itens')
+    .select(
+      'id, base_id, volume_ml, quantidade, quantidade_recebida, custo_unitario, lote_id, ' +
+        'compras_a_caminho(fornecedor)',
+    )
+    .eq('id', itemId)
+    .maybeSingle()
+  if (error) return { ok: false, erro: error.message }
+  if (!item) return { ok: false, erro: 'Item não encontrado.' }
+
+  const i = item as unknown as {
+    base_id: string | null
+    volume_ml: number | string | null
+    quantidade: number | null
+    quantidade_recebida: number | null
+    custo_unitario: number | string | null
+    lote_id: string | null
+    compras_a_caminho: { fornecedor: string | null } | null
+  }
+
+  if (i.lote_id) return { ok: false, erro: 'Este item já virou lote.' }
+  if (!i.base_id) {
+    return { ok: false, erro: 'Cadastre o perfume no catálogo primeiro — sem ele não há onde pendurar o lote.' }
+  }
+  const volumeMl = Number(i.volume_ml)
+  const custoUnitario = Number(i.custo_unitario)
+  if (!(volumeMl > 0)) return { ok: false, erro: 'A compra não diz o volume do frasco — edite a compra e informe.' }
+  if (!(custoUnitario > 0)) return { ok: false, erro: 'A compra não diz o custo do frasco — edite a compra e informe.' }
+
+  const frascos = Math.max(1, Number(i.quantidade_recebida ?? i.quantidade ?? 1))
+  const fornecedor = i.compras_a_caminho?.fornecedor?.trim() || 'Compra a caminho'
+  const operador = await operadorAtual()
+
+  const lotes: string[] = []
+  for (let n = 0; n < frascos; n++) {
+    const { data: loteId, error: erroLote } = await sb.rpc('registrar_compra', {
+      p_base_id: i.base_id,
+      p_volume_ml: volumeMl,
+      p_custo_total: custoUnitario,
+      p_fornecedor: fornecedor,
+      p_operador: operador,
+    })
+    if (erroLote) {
+      // Falha no meio do laço não desfaz o que já entrou: lote registrado é
+      // estoque de verdade; o erro diz quantos ficaram e o vínculo ajuda a
+      // conferir.
+      return {
+        ok: false,
+        erro: `${erroLote.message || 'Falha ao registrar o lote.'}${lotes.length ? ` (${lotes.length} de ${frascos} lote(s) já registrados)` : ''}`,
+      }
+    }
+    lotes.push(String(loteId))
+  }
+
+  const vinculo = await ligarItemAoLote(itemId, lotes[0])
+  if (!vinculo.ok) return { ok: false, erro: `Lote criado (${lotes[0]}), mas o vínculo falhou: ${vinculo.erro}` }
+
+  return { ok: true, loteId: lotes[0], frascos }
+}

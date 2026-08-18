@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 
 import {
   cancelarCompraACaminho,
+  criarLoteDoItemRecebido,
   ligarItemAoLote,
   receberItem,
   salvarCompraACaminho,
@@ -37,6 +38,12 @@ export async function marcarRecebido(itemId: string, quantidade: number, ocorren
 
 export async function vincularLote(itemId: string, loteId: string | null) {
   const r = await ligarItemAoLote(itemId, loteId)
+  if (r.ok) atualizarTela()
+  return r
+}
+
+export async function registrarFrascoDoItem(itemId: string) {
+  const r = await criarLoteDoItemRecebido(itemId)
   if (r.ok) atualizarTela()
   return r
 }

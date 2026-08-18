@@ -32,7 +32,9 @@ import {
   type PerfumeBase,
 } from '@/domain'
 
-import { cancelarCompra, marcarRecebido, salvarCompra, vincularLote } from './actions'
+import { cancelarCompra, marcarRecebido, salvarCompra, vincularLote,
+  registrarFrascoDoItem,
+} from './actions'
 
 /**
  * Compras a caminho: o que já foi comprado e ainda não chegou.
@@ -473,8 +475,35 @@ function LinhaDoItem({ item, lotes }: { item: ItemDaCompra; lotes: Lote[] }) {
             {pendencia === 'falta registrar a compra do frasco para criar o lote' && (
               <>
                 {' — '}
+                {/* A compra já sabe perfume, volume, custo e fornecedor: o
+                    clique registra o lote com esses dados e vincula na hora,
+                    em vez de mandar redigitar tudo na tela de lotes. */}
+                <button
+                  type="button"
+                  disabled={pendente}
+                  onClick={() =>
+                    iniciar(async () => {
+                      setErro(null)
+                      const r = await registrarFrascoDoItem(item.id)
+                      if (!r.ok) setErro(r.erro)
+                    })
+                  }
+                  style={{
+                    border: 0,
+                    padding: 0,
+                    background: 'transparent',
+                    color: COR.ouro,
+                    textDecoration: 'underline',
+                    textUnderlineOffset: 3,
+                    fontSize: 11.5,
+                    cursor: pendente ? 'wait' : 'pointer',
+                  }}
+                >
+                  {pendente ? 'registrando…' : 'registrar com os dados da compra'}
+                </button>
+                {' ou '}
                 <Link href="/estoque/lotes" style={{ color: COR.ouro, textDecoration: 'underline' }}>
-                  registrar compra do frasco
+                  registrar manualmente
                 </Link>
               </>
             )}
