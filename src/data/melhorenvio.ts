@@ -342,7 +342,8 @@ export async function codigosDoMelhorEnvio(limite = 80): Promise<string[]> {
     // pega o que foi POSTADO lá apesar de cotado em outro lugar — a descoberta
     // grava a transportadora real em rastreio_servico (J&T/Total Express,
     // Buslog), e é por ela que estes envios entram na varredura.
-    .or('servico_frete.ilike.ME*,rastreio_servico.ilike.*express*,rastreio_servico.ilike.*buslog*')
+    // "jet" é como a companhia vem nomeada na conta real ("JeT"), sem o "&".
+    .or('servico_frete.ilike.ME*,rastreio_servico.ilike.*express*,rastreio_servico.ilike.*buslog*,rastreio_servico.ilike.*jet*')
     .order('rastreio_lido_em', { ascending: true, nullsFirst: true })
     .limit(limite)
   if (error) throw error
