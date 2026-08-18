@@ -67,6 +67,7 @@ export default async function Carrinhos() {
   // de fato saiu.
   const ultimoEnvio: Record<string, string> = {}
   let historico: EnvioFeito[] = []
+  let recuperacao: { enviados: number; contatados: number; recuperados: number; receita: number } | null = null
   if (supabaseConfigurado()) {
     const { data } = await supabaseServer()
       .from('recuperacoes_carrinho')
@@ -89,6 +90,49 @@ export default async function Carrinhos() {
       cupom: r.cupom,
       enviadoEm: r.enviado_em,
     }))
+
+    // A conta que fecha o módulo: e-mail de recuperação que virou pedido
+    // PAGO do mesmo endereço em até 7 dias é carrinho recuperado. A janela é
+    // atribuição, não certeza — mas é a mesma régua todo dia, e régua
+    // constante é o que faz o número servir para decidir.
+    const corte30 = Date.now() - 30 * 86_400_000
+    const envios30 = linhas.filter((r) => Date.parse(r.enviado_em) >= corte30)
+    const porCarrinho = new Map<string, { email: string; em: number }>()
+    // `linhas` vem do mais novo para o mais velho; sobrescrever deixa o
+    // PRIMEIRO toque de cada carrinho, que é de onde a janela conta.
+    for (const r of envios30) {
+      porCarrinho.set(r.carrinho_id, { email: r.email.toLowerCase(), em: Date.parse(r.enviado_em) })
+    }
+    if (porCarrinho.size > 0) {
+      const { data: pagos } = await supabaseServer()
+        .from('pedidos')
+        .select('valor, comprado_em, clientes(email)')
+        .eq('pagamento', 'pago')
+        .gte('comprado_em', new Date(corte30).toISOString())
+        .limit(2000)
+      const pedidos = ((pagos ?? []) as unknown as { valor: string; comprado_em: string; clientes: { email: string | null } | null }[])
+        .map((p) => ({
+          valor: Number(p.valor),
+          em: Date.parse(p.comprado_em),
+          email: (p.clientes?.email ?? '').toLowerCase(),
+        }))
+        .filter((p) => p.email && Number.isFinite(p.em))
+      let recuperados = 0
+      let receita = 0
+      for (const { email, em } of porCarrinho.values()) {
+        const pedido = pedidos.find((x) => x.email === email && x.em >= em && x.em <= em + 7 * 86_400_000)
+        if (pedido) {
+          recuperados++
+          receita += pedido.valor
+        }
+      }
+      recuperacao = {
+        enviados: envios30.length,
+        contatados: porCarrinho.size,
+        recuperados,
+        receita: Math.round(receita * 100) / 100,
+      }
+    }
   }
 
   const modelo = await lerModeloEmail('carrinho')
@@ -100,6 +144,7 @@ export default async function Carrinhos() {
       emailPronto={emailConfigurado()}
       modelo={modelo}
       historico={historico}
+      recuperacao={recuperacao}
     />
   )
 }

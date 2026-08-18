@@ -62,6 +62,7 @@ export function CarrinhosCliente({
   emailPronto,
   modelo,
   historico,
+  recuperacao,
 }: {
   carrinhos: Carrinho[]
   /** carrinho_id → ISO do último e-mail de recuperação enviado. */
@@ -69,6 +70,8 @@ export function CarrinhosCliente({
   emailPronto: boolean
   modelo: ModeloEmailRecuperacao
   historico: EnvioFeito[]
+  /** Enviados/recuperados/receita dos últimos 30 dias, pela régua de 7 dias. */
+  recuperacao: { enviados: number; contatados: number; recuperados: number; receita: number } | null
 }) {
   const [periodo, setPeriodo] = useState<Periodo>('Últimos 30 dias')
   const [ordem, setOrdem] = useState<Ordem>('Mais recentes')
@@ -82,9 +85,7 @@ export function CarrinhosCliente({
   const [aviso, setAviso] = useState<{ tom: 'ok' | 'erro'; texto: string } | null>(null)
   const [enviandoId, setEnviandoId] = useState<string | null>(null)
   const [enviandoUm, iniciarTransicao] = useTransition()
-  const [progresso, setProgresso] = useState<string | null>(null)
-  const [enviandoMassa, setEnviandoMassa] = useState(false)
-  const enviando = enviandoUm || enviandoMassa
+  const enviando = enviandoUm
   const router = useRouter()
 
   const pct = Math.max(1, Math.min(90, Math.round(parseNum(cupomPct) || 10)))
@@ -145,72 +146,7 @@ export function CarrinhosCliente({
       router.refresh()
     })
 
-  /**
-   * O lote grande vai pela rota de API, em rodadas: cada chamada processa o
-   * que couber no tempo do servidor e devolve o resto — a tela repete com a
-   * fila restante e mostra o progresso. Uma Server Action aqui travaria a
-   * navegação da aba por minutos.
-   */
-  const enviarEmMassa = async (ids: string[]) => {
-    setAviso(null)
-    setEnviandoMassa(true)
-    const total = ids.length
-    const soma = {
-      enviados: 0,
-      jaContatados: 0,
-      semEmail: 0,
-      descadastrados: 0,
-      falhas: [] as { quem: string; erro: string }[],
-    }
-    let fila = ids
-    try {
-      let rodadas = 0
-      while (fila.length > 0 && rodadas < 50) {
-        rodadas++
-        setProgresso(
-          `Enviando… ${soma.enviados} de ${total} já saíram · ${fila.length} na fila (meio segundo por e-mail — pode deixar a tela aberta)`,
-        )
-        const resposta = await fetch('/api/crm/recuperacao', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids: fila, cupom }),
-        })
-        const r = (await resposta.json()) as
-          | {
-              ok: true
-              resultado: {
-                enviados: string[]
-                jaContatados: number
-                semEmail: number
-                descadastrados: number
-                falhas: { quem: string; erro: string }[]
-                naoProcessados: string[]
-              }
-            }
-          | { ok: false; erro: string }
-        if (!r.ok) {
-          setAviso({ tom: 'erro', texto: r.erro })
-          return
-        }
-        soma.enviados += r.resultado.enviados.length
-        soma.jaContatados += r.resultado.jaContatados
-        soma.semEmail += r.resultado.semEmail
-        soma.descadastrados += r.resultado.descadastrados ?? 0
-        soma.falhas.push(...r.resultado.falhas)
-        fila = r.resultado.naoProcessados ?? []
-      }
-      setAviso(resumoDoResultado(soma))
-    } catch (e) {
-      setAviso({
-        tom: 'erro',
-        texto: `O envio parou no meio (${e instanceof Error ? e.message : String(e)}). Pode clicar de novo: quem já recebeu é pulado automaticamente.`,
-      })
-    } finally {
-      setEnviandoMassa(false)
-      setProgresso(null)
-      router.refresh()
-    }
-  }
+
 
   // O instante de referência é fixado por render de lista, não por linha —
   // horas é derivado uma vez e reutilizado por filtro, ordenação e badge.
@@ -258,6 +194,31 @@ export function CarrinhosCliente({
       hint: 'Deixaram WhatsApp ou e-mail',
       tom: comContato.length ? 'ok' : 'neutro',
     },
+    // O resultado da recuperação, não só o funil: e-mail que virou pedido
+    // pago do mesmo endereço em até 7 dias conta como recuperado.
+    ...(recuperacao
+      ? ([
+          {
+            label: 'E-mails enviados · 30d',
+            valor: String(recuperacao.enviados),
+            hint: `${recuperacao.contatados} carrinho(s) contatado(s)`,
+          },
+          {
+            label: 'Carrinhos recuperados · 30d',
+            valor: String(recuperacao.recuperados),
+            hint: recuperacao.contatados
+              ? `${Math.round((recuperacao.recuperados / recuperacao.contatados) * 100)}% dos contatados viraram pedido pago em até 7 dias`
+              : 'Nenhum contatado no período',
+            tom: recuperacao.recuperados ? 'ok' : 'neutro',
+          },
+          {
+            label: 'Receita recuperada · 30d',
+            valor: brl(recuperacao.receita),
+            hint: 'Pedidos pagos após o toque de recuperação',
+            tom: recuperacao.receita ? 'ouro' : 'neutro',
+          },
+        ] as Kpi[])
+      : []),
   ]
 
   const colunas: Coluna<(typeof visiveis)[number]>[] = [
@@ -417,11 +378,6 @@ export function CarrinhosCliente({
 
   // O alvo do envio em massa: quem está no recorte, tem e-mail e não foi
   // contatado nos últimos 7 dias.
-  const alvoEmMassa = visiveis.filter((c) => {
-    if (!c.email) return false
-    const enviadoEm = ultimoEnvio[c.id]
-    return !enviadoEm || Date.now() - new Date(enviadoEm).getTime() >= 7 * 86_400_000
-  })
 
   const chip = (ativo: boolean): React.CSSProperties => ({
     height: 31,
@@ -643,47 +599,6 @@ export function CarrinhosCliente({
               </label>
             )}
             <div style={{ flex: 1 }} />
-            <button
-              type="button"
-              disabled={enviando || alvoEmMassa.length === 0}
-              onClick={() => {
-                const descricaoCupom =
-                  cupom?.tipo === 'fixo'
-                    ? ` com o cupom ${cupom.codigo} (${cupom.pct}%)`
-                    : cupom?.tipo === 'unico'
-                      ? ` com cupom ÚNICO de ${cupom.pct}% por cliente (criado na Yampi, uso único, validade de ${plural(cupom.validadeDias, 'dia', 'dias')})`
-                      : ' sem cupom'
-                const avisoVolume =
-                  alvoEmMassa.length > 90
-                    ? ' Atenção: o plano gratuito do Resend envia 100 e-mails por dia — acima disso é preciso o plano pago, senão o excedente falha.'
-                    : ''
-                if (
-                  window.confirm(
-                    `Enviar o e-mail de recuperação para ${plural(alvoEmMassa.length, 'carrinho', 'carrinhos')} do recorte atual${descricaoCupom}? O envio roda em rodadas com progresso na tela.${avisoVolume}`,
-                  )
-                ) {
-                  void enviarEmMassa(alvoEmMassa.map((c) => c.id))
-                }
-              }}
-              className="botao-ouro font-sans hover:brightness-[1.07]"
-              style={{
-                height: 36,
-                padding: '0 17px',
-                fontWeight: 700,
-                fontSize: 11.5,
-                lineHeight: 1,
-                borderRadius: 9,
-                whiteSpace: 'nowrap',
-                cursor: enviando ? 'wait' : alvoEmMassa.length === 0 ? 'not-allowed' : 'pointer',
-                opacity: enviando || alvoEmMassa.length === 0 ? 0.5 : 1,
-              }}
-            >
-              {enviandoMassa
-                ? 'Enviando em rodadas…'
-                : enviando
-                  ? 'Enviando…'
-                  : `Enviar para ${alvoEmMassa.length} do recorte`}
-            </button>
           </div>
         ) : (
           <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
@@ -697,15 +612,12 @@ export function CarrinhosCliente({
 
         {emailPronto && (
           <span className="font-sans" style={{ fontSize: 10, lineHeight: 1.5, color: 'rgba(242,237,227,.38)', textWrap: 'pretty' }}>
-            {`Quem recebeu e-mail nos últimos 7 dias é pulado no envio em massa — insistir queima o remetente. ${alvoEmMassa.length} de ${visiveis.length} do recorte estão elegíveis agora.`}
+            Os toques automáticos cuidam do envio em massa — horas e cupom de cada toque ficam em
+            Configurações → Notificações. O botão E-mail de cada linha é o reenvio pontual, com o
+            cupom escolhido acima; quem recebeu nos últimos 7 dias só recebe de novo por ele.
           </span>
         )}
 
-        {progresso && (
-          <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.5, color: COR.ouro, textWrap: 'pretty' }}>
-            {progresso}
-          </span>
-        )}
 
         {aviso && (
           <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.5, color: aviso.tom === 'ok' ? COR.ok : COR.erro, textWrap: 'pretty' }}>
