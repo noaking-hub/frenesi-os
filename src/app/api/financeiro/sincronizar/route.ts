@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { sincronizarEnvios } from '@/app/(erp)/pedidos/actions'
 import { cotarPrazosDeEntrega, frenetConfigurada, varrerRastreiosFrenet } from '@/data/frenet'
-import { codigosDoMelhorEnvio, melhorEnvioConectado, rastrearNoMelhorEnvio } from '@/data/melhorenvio'
+import { codigosDoMelhorEnvio, descobrirEnviosDoMelhorEnvio, melhorEnvioConectado, rastrearNoMelhorEnvio } from '@/data/melhorenvio'
 import { atualizarExtratoMp, mercadoPagoConfigurado } from '@/data/mercadopago'
 import { baixarEstoqueDosFaturados } from '@/data/baixa-estoque'
 import { pagaleveConfigurada } from '@/data/pagaleve'
@@ -367,6 +367,21 @@ export async function POST(req: Request) {
   // Melhor Envio cobre os 22% que a Frenet não vê. Só roda depois de alguém
   // ter autorizado no navegador — sem token guardado não há o que consultar.
   if (grupo('logistica') && await melhorEnvioConectado()) {
+    // ANTES da varredura de códigos: a descoberta é quem PÕE o código no
+    // pedido quando a etiqueta foi comprada direto no Melhor Envio e a Yampi
+    // ficou em "faturado" (frete grátis postado pela J&T/Total em vez da
+    // Jadlog cotada). Descoberto aqui, o pedido vira "enviado", o aviso ao
+    // cliente sai no próximo pulso e o código já entra na varredura abaixo.
+    try {
+      const d = await descobrirEnviosDoMelhorEnvio()
+      relatorio.descobertaMelhorEnvio = {
+        etiquetasExaminadas: d.examinadas,
+        pedidosCasados: d.casados,
+        ambiguas: d.ambiguas,
+      }
+    } catch (e) {
+      relatorio.descobertaMelhorEnvio = { erro: mensagemDe(e) }
+    }
     try {
       const r = await rastrearNoMelhorEnvio(await codigosDoMelhorEnvio(80))
       relatorio.rastreioMelhorEnvio = {

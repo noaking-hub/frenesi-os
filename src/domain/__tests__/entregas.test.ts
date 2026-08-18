@@ -43,6 +43,21 @@ describe('identificação da transportadora', () => {
     })
   })
 
+  it('código inequívoco vence o rótulo do checkout: frete grátis Jadlog postado na J&T', () => {
+    // Caso real (SH-1921/1922): o frete grátis sai COTADO como Jadlog, mas o
+    // dono compra a etiqueta na transportadora melhor do dia. O código de 15
+    // dígitos é da J&T — nomear Jadlog mandaria o cliente procurar o pacote
+    // no site errado.
+    expect(identificarFrete('FRENET_JADLOG_PACKAGE_F_3', '888030880405092')).toEqual({
+      transportadora: 'J&T Express',
+      gateway: 'Melhor Envio',
+    })
+    expect(identificarFrete('FRENET_JADLOG_PACKAGE_F_3', 'AP331906566BR')).toEqual({
+      transportadora: 'Correios',
+      gateway: 'Frenet',
+    })
+  })
+
   it('sem serviço nenhum, o código ainda entrega a transportadora', () => {
     // Metade da base é anterior ao ERP e veio sem `shipment_service`.
     expect(identificarFrete(null, 'AP331906566BR').transportadora).toBe('Correios')

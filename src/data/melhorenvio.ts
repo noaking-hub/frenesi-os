@@ -335,12 +335,130 @@ export async function codigosDoMelhorEnvio(limite = 80): Promise<string[]> {
   if (!supabaseConfigurado()) return []
   const { data, error } = await supabaseServer()
     .from('pedidos')
-    .select('rastreio, servico_frete, rastreio_lido_em')
+    .select('rastreio, servico_frete, rastreio_servico, rastreio_lido_em')
     .not('rastreio', 'is', null)
     .is('entregue_em', null)
-    .ilike('servico_frete', 'ME%')
+    // O rótulo ME% pega o que foi COTADO no Melhor Envio. A segunda metade
+    // pega o que foi POSTADO lá apesar de cotado em outro lugar — a descoberta
+    // grava a transportadora real em rastreio_servico (J&T/Total Express,
+    // Buslog), e é por ela que estes envios entram na varredura.
+    .or('servico_frete.ilike.ME*,rastreio_servico.ilike.*express*,rastreio_servico.ilike.*buslog*')
     .order('rastreio_lido_em', { ascending: true, nullsFirst: true })
     .limit(limite)
   if (error) throw error
   return ((data ?? []) as { rastreio: string }[]).map((p) => p.rastreio)
+}
+
+export interface DescobertaMelhorEnvio {
+  /** Etiquetas com código examinadas nas listas de postadas/entregues. */
+  examinadas: number
+  casados: { pedido: string; codigo: string; transportadora: string | null }[]
+  /** Cliente com MAIS de um pedido aberto: adivinhar arriscaria o código errado. */
+  ambiguas: number
+}
+
+/**
+ * Descobre postagens feitas no Melhor Envio que a Yampi ainda não conhece.
+ *
+ * O caso real que motivou isto: o frete grátis sai COTADO como Jadlog no
+ * checkout, mas o dono contrata a transportadora que estiver melhor no dia
+ * (J&T, Total Express...) e compra a etiqueta direto no Melhor Envio. A Yampi
+ * fica em "faturado" para sempre — sem track_code, o ERP nunca marcava o
+ * pedido como enviado e o e-mail de rastreio nunca saía. Aqui a etiqueta
+ * postada é casada com o pedido aberto pelo e-mail/CPF do destinatário, e o
+ * pedido avança sozinho, com a transportadora REAL e não a do rótulo.
+ */
+export async function descobrirEnviosDoMelhorEnvio(): Promise<DescobertaMelhorEnvio> {
+  const resultado: DescobertaMelhorEnvio = { examinadas: 0, casados: [], ambiguas: 0 }
+  if (!supabaseConfigurado()) return resultado
+
+  // Postadas E entregues: uma entrega rápida pode acontecer antes de a
+  // descoberta rodar, e a etiqueta some da lista de postadas.
+  const paginas = await Promise.all([
+    chamar<{ data?: unknown }>('/api/v2/me/orders?status=posted'),
+    chamar<{ data?: unknown }>('/api/v2/me/orders?status=delivered'),
+  ])
+  const etiquetas = paginas.flatMap((p) =>
+    Array.isArray(p.data) ? (p.data as Record<string, unknown>[]) : [],
+  )
+  if (!etiquetas.length) return resultado
+
+  const sb = supabaseServer()
+  const JANELA_MS = 60 * 86_400_000
+  const desde = new Date(Date.now() - JANELA_MS).toISOString()
+  const { data, error } = await sb
+    .from('pedidos')
+    .select('id, comprado_em, entrega_local, clientes(email, cpf)')
+    .is('rastreio', null)
+    .in('envio', ['nao_iniciado', 'aguardando_envio'])
+    .gte('comprado_em', desde)
+  if (error) throw error
+  const abertos = (
+    (data ?? []) as unknown as {
+      id: string
+      comprado_em: string
+      entrega_local: boolean | null
+      clientes: { email: string | null; cpf: string | null } | null
+    }[]
+  ).filter((p) => !p.entrega_local)
+  if (!abertos.length) return resultado
+
+  const digitos = (s: string | null | undefined) => (s ?? '').replace(/\D/g, '')
+
+  for (const e of etiquetas) {
+    const codigo = texto(campo(e, ['tracking']))
+    if (!codigo) continue
+    // Etiqueta sem data ou de outra época não casa: a lista de entregues traz
+    // histórico antigo, e o e-mail do cliente casaria a etiqueta de junho com
+    // o pedido novo de agosto.
+    const compradaEm = texto(campo(e, ['paid_at', 'generated_at', 'created_at']))
+    const quando = compradaEm ? new Date(compradaEm).getTime() : Number.NaN
+    if (!Number.isFinite(quando) || Date.now() - quando > JANELA_MS) continue
+    resultado.examinadas++
+
+    const destino = (e.to ?? {}) as Record<string, unknown>
+    const emailDestino = texto(campo(destino, ['email']))?.toLowerCase() ?? null
+    const cpfDestino = digitos(texto(campo(destino, ['document'])))
+    if (!emailDestino && !cpfDestino) continue
+
+    const candidatos = abertos.filter((p) => {
+      // A etiqueta é comprada DEPOIS do pedido; uma hora de folga cobre relógio.
+      if (new Date(p.comprado_em).getTime() - 3_600_000 > quando) return false
+      const c = p.clientes
+      if (!c) return false
+      const casaEmail = Boolean(emailDestino && c.email && c.email.trim().toLowerCase() === emailDestino)
+      const casaCpf = Boolean(cpfDestino && c.cpf && digitos(c.cpf) === cpfDestino)
+      return casaEmail || casaCpf
+    })
+    if (candidatos.length === 0) continue
+    if (candidatos.length > 1) {
+      resultado.ambiguas++
+      continue
+    }
+
+    const alvo = candidatos[0]
+    const servico = (e.service ?? null) as Record<string, unknown> | null
+    const companhia = servico ? ((campo(servico, ['company']) ?? null) as Record<string, unknown> | null) : null
+    const transportadora =
+      (companhia ? texto(campo(companhia, ['name'])) : null) ??
+      (servico ? texto(campo(servico, ['name'])) : null)
+
+    const { error: erroGravacao } = await sb
+      .from('pedidos')
+      .update({
+        rastreio: codigo,
+        ...(transportadora ? { rastreio_servico: transportadora } : {}),
+        envio: 'enviado',
+        situacao: 'enviado',
+      })
+      .eq('id', alvo.id)
+      // O guarda repete o filtro da leitura: se outra rotina preencheu o
+      // rastreio neste meio-tempo, esta descoberta não sobrescreve.
+      .is('rastreio', null)
+    if (!erroGravacao) {
+      resultado.casados.push({ pedido: alvo.id, codigo, transportadora })
+      abertos.splice(abertos.indexOf(alvo), 1)
+    }
+  }
+  return resultado
 }

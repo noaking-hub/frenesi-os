@@ -140,6 +140,7 @@ interface LinhaPedidoAviso {
   rastreio: string | null
   servico_frete: string | null
   rastreio_url: string | null
+  rastreio_servico: string | null
   entrega_local: boolean | null
   clientes: { nome: string | null; email: string | null } | null
 }
@@ -185,7 +186,7 @@ export async function enviarAvisosDePedido(opcoes?: {
   const sb = supabaseServer()
   const { data, error } = await sb
     .from('pedidos')
-    .select('id, pagamento, envio, valor, rastreio, servico_frete, rastreio_url, entrega_local, clientes(nome, email)')
+    .select('id, pagamento, envio, valor, rastreio, servico_frete, rastreio_url, rastreio_servico, entrega_local, clientes(nome, email)')
     .gte('comprado_em', desde)
     // Pedido PAGO entra mesmo sem ter saído — sem isto, "pedido pago" seria um
     // evento ligado que não avisa ninguém, e o silêncio pareceria
@@ -523,7 +524,18 @@ async function mensagemDoAviso(
   modelo: ModeloEnvio,
   destinoDeTeste: string | null,
 ) {
-  const { transportadora } = identificarFrete(pedido.servico_frete, pedido.rastreio)
+  // A transportadora DESCOBERTA (gravada em rastreio_servico pela postagem no
+  // Melhor Envio ou pela leitura da Frenet) fala mais alto que o rótulo do
+  // checkout: frete grátis sai cotado como Jadlog e viaja pela J&T quando o
+  // preço do dia compensa — nomear a errada manda o cliente procurar o pacote
+  // no lugar errado.
+  const descoberta = pedido.rastreio_servico
+    ? identificarFrete(pedido.rastreio_servico, pedido.rastreio)
+    : null
+  const { transportadora } =
+    descoberta && descoberta.transportadora !== 'Não informada'
+      ? descoberta
+      : identificarFrete(pedido.servico_frete, pedido.rastreio)
   const nome = transportadora === 'Não informada' ? null : transportadora
   // A coluna gravada pela importação decide; o rótulo MOTOBOY no serviço é o
   // reforço para o histórico anterior à convenção.

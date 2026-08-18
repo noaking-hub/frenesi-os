@@ -543,12 +543,17 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
   // devolveria para "pago".
   const { data: jaGravados } = await supabaseServer()
     .from('pedidos')
-    .select('id, situacao, producao_em')
+    .select('id, situacao, producao_em, rastreio')
     .in('id', pedidos.map((p) => `YP-${p.number}`))
   const anterior = new Map(
-    ((jaGravados ?? []) as { id: string; situacao: string | null; producao_em: string | null }[]).map(
-      (l) => [l.id, l],
-    ),
+    (
+      (jaGravados ?? []) as {
+        id: string
+        situacao: string | null
+        producao_em: string | null
+        rastreio: string | null
+      }[]
+    ).map((l) => [l.id, l]),
   )
 
   let entregues = 0
@@ -559,6 +564,12 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
     const endereco = enderecoDe(p)
     if (entregue) entregues++
     const email = p.customer?.data?.email?.trim().toLowerCase()
+    // O código que a Yampi não tem, ela não apaga: o frete grátis postado por
+    // fora (etiqueta comprada direto no Melhor Envio) chega pelo caminho da
+    // descoberta, e a Yampi segue "faturado" sem track_code. Sem esta guarda,
+    // o pulso de 5 minutos zerava o rastreio descoberto e o pedido voltava de
+    // "enviado" para "aguardando envio" — e o aviso ao cliente nunca saía.
+    const rastreio = p.track_code ?? anterior.get(`YP-${p.number}`)?.rastreio ?? null
 
     return {
       id: `YP-${p.number}`,
@@ -568,7 +579,7 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
       frete: numero(p.value_shipment),
       cashback: 0,
       pagamento: situacaoDoPedido(p),
-      envio: envioYampi(alias, nome, entregue, p.track_code),
+      envio: envioYampi(alias, nome, entregue, rastreio),
       // O alias CRU vai junto: derivação corrigida depois vale um UPDATE, e
       // não uma reimportação da Yampi inteira.
       status_yampi: [alias, nome].filter(Boolean).join(' · ') || null,
@@ -578,13 +589,13 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
       entrega_local: ehEntregaLocal({
         servicoFrete: p.shipment_service,
         destino: endereco ? [endereco.city, endereco.state].filter(Boolean).join(' · ') : null,
-        rastreio: p.track_code,
+        rastreio,
       }),
       situacao: situacaoDeUmPedido({
         statusYampi: `${alias} ${nome}`,
         pagamento: situacaoDoPedido(p),
         entregue,
-        rastreio: p.track_code,
+        rastreio,
         atual: (anterior.get(`YP-${p.number}`)?.situacao ?? null) as SituacaoPedido | null,
         producaoEm: anterior.get(`YP-${p.number}`)?.producao_em ?? null,
       }),
@@ -595,7 +606,7 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
       // escrita aqui de propósito: ela pertence a quem viu o fato — o
       // escaneamento da transportadora, a Shopify ou a confirmação em mãos.
       entrega_prevista_em: dataYampi(p.date_delivery),
-      rastreio: p.track_code,
+      rastreio,
       // O serviço diz por qual plataforma o envio foi emitido (Frenet ou
       // Melhor Envio) — a Yampi não informa a plataforma diretamente.
       servico_frete: p.shipment_service ?? null,

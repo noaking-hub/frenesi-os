@@ -143,6 +143,68 @@ describe('pesquisa de mercado', () => {
     expect(cartoes[0].preco).toBe(34.9)
   })
 
+  it('Nuvemshop com preço longe da âncora: o data-product-price em centavos vence', () => {
+    // A The Gregs e a Eau de Léon escrevem o preço a ~8 mil caracteres da
+    // âncora (srcset gigante no meio) — o corte curto deixava o card sem
+    // valor. E o span riscado "de R$ 2.899,00" não pode vencer o atual.
+    const respiro = '<span class="x"></span>'.repeat(300)
+    const html = `
+      <a href="https://thegregsexclusive.com/produtos/sospiro-vibrato-edp-unissex-100ml/" title="SOSPIRO VIBRATO EDP - UNISSEX 100ML" class="js-product-item-image-link-private">
+        <img src="//acdn-us.mitiendanube.com/products/vibrato-480-0.webp" />
+      </a>
+      ${respiro}
+      <div class="item-price-container">
+        <span class="js-price-display item-price font-weight-bold" data-product-price="275405">R$2.754,05</span>
+        <span class="js-compare-price-display price-compare">R$2.899,00</span>
+      </div>`
+    const [c] = extrairCartoes(html, 'https://thegregsexclusive.com')
+    expect(c.titulo).toBe('SOSPIRO VIBRATO EDP - UNISSEX 100ML')
+    expect(c.preco).toBe(2754.05)
+  })
+
+  it('Eau de Léon: o "R$0,00" escondido do compare não engole o preço real', () => {
+    const respiro = '<div class="y"></div>'.repeat(300)
+    const html = `
+      <a href="https://eaudeleon.com.br/produtos/sospiro-vibrato-eau-de-parfum-decant/" title="Sospiro - Vibrato Eau de Parfum (decant)" class="js-product-item-image-link-private">
+        <img src="//acdn-us.mitiendanube.com/products/sospiro-vibrato-480-0.webp" />
+      </a>
+      ${respiro}
+      <span class="js-price-display price-compare" style="display:none;">R$0,00</span>
+      <span class="js-price-display item-price" data-product-price="8190">R$81,90</span>`
+    const [c] = extrairCartoes(html, 'https://eaudeleon.com.br')
+    expect(c.preco).toBe(81.9)
+  })
+
+  it('Gabi: span de preço vazio, o valor vem do JSON googleItems pelo id do produto', () => {
+    // Na Gabi o servidor manda <span class="js-price-display"></span> VAZIO —
+    // é o JavaScript da loja que preenche. O único preço da página está no
+    // JSON de Analytics dentro de um <script>, casado pelo data-product.
+    const html = `
+      <a href="https://www.gabiperfumes.com.br/produtos/vibrato-eau-de-parfum-sospiro-decant-17iqo/" title="Vibrato Eau de Parfum – Sospiro (Decant)" class="js-product-item-image-link-private">
+        <img src="data:image/gif;base64,x" data-srcset="//cdn.gabi.com/v-240-0.webp 240w, //cdn.gabi.com/v-1024-1024.webp 1024w" />
+      </a>
+      <span class="js-price-display h4 font-large"></span>
+      <div class="botao-sacola js-open-variants" data-product="326651321"></div>
+      <script>
+        const googleItems = [{"info":{"item_id":"1460026519","item_brand":"Sospiro","item_name":"Vibrato Eau de Parfum – Sospiro (Decant) (2 ml)","item_variant":"2 ml","price":75,"item_category":"DECANTS"},"source":{"product_id":"326651321","variant_id":"1460026519"}}];
+      </script>`
+    const [c] = extrairCartoes(html, 'https://gabiperfumes.com.br')
+    expect(c.titulo).toBe('Vibrato Eau de Parfum – Sospiro (Decant)')
+    expect(c.preco).toBe(75)
+    expect(c.imagem).toBe('https://cdn.gabi.com/v-1024-1024.webp')
+  })
+
+  it('sem id no card, o título como prefixo do item_name ainda resgata o preço', () => {
+    const html = `
+      <a href="/produtos/vibrato-decant/" title="Vibrato Eau de Parfum – Sospiro (Decant)" class="js-product-item-link"></a>
+      <span class="js-price-display"></span>
+      <script>
+        var googleItems = [{"info":{"item_name":"Vibrato Eau de Parfum – Sospiro (Decant) (5 ml)","price":150},"source":{"product_id":"1"}},{"info":{"item_name":"Vibrato Eau de Parfum – Sospiro (Decant) (2 ml)","price":75},"source":{"product_id":"1"}}];
+      </script>`
+    const [c] = extrairCartoes(html, 'https://loja.com')
+    expect(c.preco).toBe(75)
+  })
+
   it('calcula o R$/ml quando o título anuncia o volume', () => {
     expect(mlDoTitulo('Decant Invictus 5ml')).toBe(5)
     expect(mlDoTitulo('Invictus 100 ml')).toBe(100)

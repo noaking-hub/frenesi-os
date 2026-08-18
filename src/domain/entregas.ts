@@ -65,6 +65,20 @@ export function identificarFrete(
   rastreio: string | null | undefined,
 ): { transportadora: string; gateway: GatewayFrete } {
   const s = (servico ?? '').toLowerCase()
+  // O código INEQUÍVOCO manda antes do rótulo: o rótulo diz o que foi COTADO
+  // no checkout, não quem levou o pacote. O frete grátis sai cotado como
+  // Jadlog e é postado na J&T (ou nos Correios) quando o preço do dia
+  // compensa — o custo é do dono, a transportadora é escolha dele na hora.
+  const codigoCru = (rastreio ?? '').trim()
+  if (/^\d{15}$/.test(codigoCru)) {
+    return { transportadora: 'J&T Express', gateway: 'Melhor Envio' }
+  }
+  if (/^[A-Z]{2}\d{9}BR$/i.test(codigoCru) && !/correio|sedex/.test(s)) {
+    return {
+      transportadora: 'Correios',
+      gateway: /^me[_ ]/i.test((servico ?? '').trim()) ? 'Melhor Envio' : 'Frenet',
+    }
+  }
   // `pac` sem \b dos dois lados: o rótulo real é FRENET_PAC_03298, e depois de
   // "pac" vem "_" — que é caractere de palavra, então `pac\b` NUNCA casava e o
   // rótulo cru vazava para a tela como se fosse nome de empresa.

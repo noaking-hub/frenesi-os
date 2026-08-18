@@ -98,6 +98,79 @@ function melhorPreco(trecho: string): number | null {
   return candidatos[0].valor
 }
 
+// O preço atual que a Nuvemshop grava no atributo, em CENTAVOS:
+// data-product-price="8190" é R$ 81,90. O span riscado do "de/por" não tem o
+// atributo, então ler daqui já ignora a promoção sem pesar nada.
+const RE_PRECO_ATRIBUTO = /data-product-price=["'](\d+)["']/i
+
+/**
+ * Preços publicados nas "ilhas de dados" dos scripts — o JSON `googleItems`
+ * que a Nuvemshop injeta para o Analytics. Na Gabi Perfumes os spans de preço
+ * vêm VAZIOS do servidor (é o JavaScript da loja que os preenche), e este
+ * JSON é o único lugar da página onde o valor existe. Precisa rodar no HTML
+ * CRU: a limpeza de `<script>` da extração apagaria a única fonte.
+ */
+export function precosDeIlhasDeDados(htmlCru: string): {
+  porProduto: Map<string, number>
+  porNome: { nome: string; preco: number }[]
+} {
+  const porProduto = new Map<string, number>()
+  const porNome: { nome: string; preco: number }[] = []
+  const ilhas = /googleItems\s*=\s*(\[[\s\S]{0,40000}?\])\s*;/g
+  let m: RegExpExecArray | null
+  while ((m = ilhas.exec(htmlCru)) !== null) {
+    let itens: unknown
+    try {
+      itens = JSON.parse(m[1])
+    } catch {
+      continue
+    }
+    if (!Array.isArray(itens)) continue
+    for (const item of itens as { info?: { price?: unknown; item_name?: unknown }; source?: { product_id?: unknown } }[]) {
+      const preco = Number(item?.info?.price)
+      if (!Number.isFinite(preco) || preco <= 0) continue
+      const id = item?.source?.product_id ? String(item.source.product_id) : ''
+      const nome = typeof item?.info?.item_name === 'string' ? item.info.item_name : ''
+      if (id) {
+        const atual = porProduto.get(id)
+        // Entre variantes do mesmo produto, vale a mais barata — é o "a
+        // partir de" que a vitrine da loja também mostra.
+        if (atual === undefined || preco < atual) porProduto.set(id, preco)
+      }
+      if (nome) porNome.push({ nome, preco })
+    }
+  }
+  return { porProduto, porNome }
+}
+
+/**
+ * O preço de um card, na ordem do mais confiável: o atributo em centavos da
+ * Nuvemshop, o JSON de Analytics casado pelo id do produto que aparece no
+ * próprio card (data-product / add_to_cart / stock-product), e só então a
+ * leitura ponderada do texto — que continua sendo o caminho das lojas que
+ * escrevem "R$ 34,90" direto no HTML.
+ */
+function precoDoCard(
+  cardInteiro: string,
+  vizinhanca: string,
+  porProduto: Map<string, number>,
+): number | null {
+  const attr = cardInteiro.match(RE_PRECO_ATRIBUTO)
+  if (attr) {
+    const centavos = Number.parseInt(attr[1], 10)
+    if (Number.isFinite(centavos) && centavos > 0) return centavos / 100
+  }
+  const id =
+    cardInteiro.match(/data-product=["'](\d+)["']/i) ??
+    cardInteiro.match(/name=["']add_to_cart["'][^>]*value=["'](\d+)["']/i) ??
+    cardInteiro.match(/stock-product-(\d+)/i)
+  if (id) {
+    const preco = porProduto.get(id[1])
+    if (preco !== undefined) return preco
+  }
+  return melhorPreco(vizinhanca)
+}
+
 function absoluta(href: string | null, dominio: string): string | null {
   if (!href) return null
   if (/^https?:\/\//i.test(href)) return href
@@ -123,23 +196,44 @@ const semTags = (s: string) => s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').t
  * e a imagem prefere `srcset`/`data-src`, porque o `src` da Nuvemshop é o
  * placeholder do lazy-load.
  */
-function extrairCartoesNuvemshop(html: string, dominio: string): CartaoDeProduto[] {
+function extrairCartoesNuvemshop(
+  html: string,
+  dominio: string,
+  precosPorProduto: Map<string, number>,
+): CartaoDeProduto[] {
   const cardRe = /<a([^>]+class=["'][^"']*product[^"']*["'][^>]*)>/gi
   // Todas as aberturas primeiro: o card de um produto termina onde começa o
   // do vizinho — sem o corte, o preço de um vazava para o outro (foi assim
   // que a Gabi mostrou R$ 15,00 num decant que não custa isso).
-  const aberturas: { index: number; tag: string }[] = []
+  const aberturas: { index: number; tag: string; href: string | null }[] = []
   let m: RegExpExecArray | null
-  while ((m = cardRe.exec(html)) !== null) aberturas.push({ index: m.index, tag: m[1] })
+  while ((m = cardRe.exec(html)) !== null) {
+    const hrefM = m[1].match(/href=["']([^"']+)["']/i)
+    aberturas.push({ index: m.index, tag: m[1], href: hrefM ? hrefM[1] : null })
+  }
 
   const itens: CartaoDeProduto[] = []
   for (let i = 0; i < aberturas.length; i++) {
-    const { index, tag } = aberturas[i]
-    const fim = Math.min(aberturas[i + 1]?.index ?? index + 2600, index + 2600)
-    const chunk = html.slice(index, fim)
+    const { index, tag, href } = aberturas[i]
+    // O card acaba na PRÓXIMA âncora de OUTRO produto — a âncora do título do
+    // mesmo produto (mesmo href) não encerra nada. O card inteiro da
+    // Nuvemshop passa de 14 mil caracteres (srcset gigante + formulário de
+    // variantes), e era o corte curto que deixava a The Gregs sem preço: o
+    // data-product-price mora no fim do card.
+    let fim = Math.min(html.length, index + 30000)
+    for (let j = i + 1; j < aberturas.length; j++) {
+      if (aberturas[j].href && aberturas[j].href !== href) {
+        fim = Math.min(fim, aberturas[j].index)
+        break
+      }
+    }
+    const cardInteiro = html.slice(index, fim)
+    // Título, imagem e leitura de "R$" no texto continuam olhando só o
+    // começo do card: é ali que eles moram, e um trecho longo demais deixaria
+    // o preço do banner da loja vazar para dentro do card.
+    const chunk = cardInteiro.slice(0, 2600)
 
-    const hrefM = tag.match(/href=["']([^"']+)["']/i)
-    const url = absoluta(hrefM ? hrefM[1] : null, dominio)
+    const url = absoluta(href, dominio)
     if (!url) continue
     const caminho = url.split('?')[0].toLowerCase()
     if (!caminho.includes('/products/') && !caminho.includes('/produto')) continue
@@ -150,7 +244,12 @@ function extrairCartoesNuvemshop(html: string, dominio: string): CartaoDeProduto
       chunk.match(/<h\d[^>]*class=["'][^"']*product[^"']*title[^"']*["'][^>]*>([\s\S]*?)<\/h\d>/i)
     const titulo = semTags(tituloM ? tituloM[1] : '').slice(0, 240)
 
-    itens.push({ titulo, url, preco: melhorPreco(chunk), imagem: imagemDoTrecho(chunk, dominio) })
+    itens.push({
+      titulo,
+      url,
+      preco: precoDoCard(cardInteiro, chunk, precosPorProduto),
+      imagem: imagemDoTrecho(chunk, dominio),
+    })
   }
   return itens
 }
@@ -191,6 +290,9 @@ function imagemDoTrecho(trecho: string, dominio: string): string | null {
 }
 
 export function extrairCartoes(htmlCru: string, dominio: string): CartaoDeProduto[] {
+  // ANTES da limpeza: os preços da Gabi só existem dentro de um <script>.
+  const ilhas = precosDeIlhasDeDados(htmlCru)
+
   const html = htmlCru
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
@@ -201,7 +303,7 @@ export function extrairCartoes(htmlCru: string, dominio: string): CartaoDeProdut
   // A passada da Nuvemshop vem PRIMEIRO: o dedup preserva a primeira
   // ocorrência, e é ela que traz o título do atributo e a imagem certa do
   // lazy-load. As âncoras genéricas complementam para Shopify e afins.
-  const itens: CartaoDeProduto[] = extrairCartoesNuvemshop(html, dominio)
+  const itens: CartaoDeProduto[] = extrairCartoesNuvemshop(html, dominio, ilhas.porProduto)
 
   const ancoras = /<a\b[^>]*href=['"]([^'"]*\/(?:products|produtos?)\/[^'"]+)['"][^>]*>([\s\S]{0,1600}?)<\/a>/gi
   let m: RegExpExecArray | null
@@ -249,6 +351,22 @@ export function extrairCartoes(htmlCru: string, dominio: string): CartaoDeProdut
     if (visto.preco === null && it.preco !== null) visto.preco = it.preco
     if (!visto.imagem && it.imagem) visto.imagem = it.imagem
   }
+
+  // Quem ficou sem preço ainda tem uma chance: o nome do card como prefixo do
+  // item_name das ilhas de dados ("Vibrato Eau de Parfum – Sospiro (Decant)"
+  // casa com "... (Decant) (2 ml)"). Entre as variantes, vale a mais barata.
+  for (const cartao of porUrl.values()) {
+    if (cartao.preco !== null) continue
+    const alvo = semAcento(cartao.titulo)
+    if (alvo.length < 5) continue
+    let menor: number | null = null
+    for (const { nome, preco } of ilhas.porNome) {
+      if (!semAcento(nome).startsWith(alvo)) continue
+      if (menor === null || preco < menor) menor = preco
+    }
+    cartao.preco = menor
+  }
+
   return [...porUrl.values()].slice(0, 80)
 }
 
