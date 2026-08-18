@@ -6,6 +6,7 @@ import { codigosDoMelhorEnvio, descobrirEnviosDoMelhorEnvio, melhorEnvioConectad
 import { atualizarExtratoMp, descobrirDestinoDosPayouts, mercadoPagoConfigurado } from '@/data/mercadopago'
 import { baixarEstoqueDosFaturados } from '@/data/baixa-estoque'
 import { pagaleveConfigurada } from '@/data/pagaleve'
+import { registrarSaudeDaRotina } from '@/data/saude-das-rotinas'
 import { importarPagaleve } from '@/data/pagaleve-importacao'
 import {
   aplicarEstoqueCalculado,
@@ -612,6 +613,9 @@ export async function POST(req: Request) {
   }
   relatorio.etapa = etapa ?? 'tudo'
   relatorio.duracaoMs = Date.now() - inicio
+  // O diário de bordo: é ele que deixa a vigília acusar o MESMO erro se
+  // repetindo em rodadas seguidas — a resposta HTTP sozinha o pg_net descarta.
+  await registrarSaudeDaRotina(`sincronizar:${etapa ?? 'tudo'}`, relatorio, Date.now() - inicio)
   return NextResponse.json(relatorio)
 }
 

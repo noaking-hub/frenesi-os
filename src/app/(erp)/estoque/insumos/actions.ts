@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { OPERADOR } from '@/data/operador'
+import { operadorAtual } from '@/data/operador'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { brl } from '@/domain'
 
@@ -33,7 +33,7 @@ export async function comprarInsumo(
     p_unidades: Math.round(unidades),
     p_custo_total: custoTotal,
     p_fornecedor: fornecedor.trim() || null,
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
   })
   if (error) return { ok: false, erro: error.message }
 
@@ -56,7 +56,7 @@ export async function ajustarInsumo(
     p_insumo_id: insumoId,
     p_unidades: Math.round(unidades),
     p_motivo: motivo.trim(),
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
   })
   if (error) return { ok: false, erro: error.message }
 
@@ -268,7 +268,7 @@ async function regravarRazao(
     p_saldo: recalculo.saldo,
     p_custo: recalculo.custoUnitario,
     p_trilha: opcoes.trilha,
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
     p_tipo_trilha: TIPO_TRILHA,
   })
   if (erroAplicar) return { ok: false, erro: erroAplicar.message }
@@ -342,7 +342,7 @@ export async function editarMovimentoInsumo(
     ref: observacao || null,
     custo_unitario: custo,
     descricao: descricaoDoMovimento(original.tipo, quantidade, custo, observacao),
-    responsavel: OPERADOR,
+    responsavel: await operadorAtual(),
   }
 
   return regravarRazao(
@@ -350,7 +350,7 @@ export async function editarMovimentoInsumo(
     razao.map((l) => (l.id === movimentoId ? corrigida : l)),
     {
       alteradas: [movimentoId],
-      trilha: `Lançamento corrigido · ${resumoDaLinha(original)} → ${resumoDaLinha(corrigida)} · por ${OPERADOR}`,
+      trilha: `Lançamento corrigido · ${resumoDaLinha(original)} → ${resumoDaLinha(corrigida)} · por ${await operadorAtual()}`,
     },
   )
 }
@@ -382,7 +382,7 @@ export async function excluirMovimentoInsumo(
     razao.filter((l) => l.id !== movimentoId),
     {
       excluidas: [movimentoId],
-      trilha: `Lançamento excluído · "${original.descricao}" (${resumoDaLinha(original)}) · por ${OPERADOR}`,
+      trilha: `Lançamento excluído · "${original.descricao}" (${resumoDaLinha(original)}) · por ${await operadorAtual()}`,
     },
   )
 }
@@ -440,8 +440,8 @@ export async function editarInsumo(
     unidades: 0,
     saldo_anterior: insumo.unidades,
     saldo: insumo.unidades,
-    descricao: `Cadastro corrigido · ${mudancas.join(' · ')} · por ${OPERADOR}`,
-    responsavel: OPERADOR,
+    descricao: `Cadastro corrigido · ${mudancas.join(' · ')} · por ${await operadorAtual()}`,
+    responsavel: await operadorAtual(),
   })
   if (erroTrilha) return { ok: false, erro: erroTrilha.message }
 

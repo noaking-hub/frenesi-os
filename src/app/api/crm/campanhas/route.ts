@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { rodarCampanhas } from '@/data/campanhas'
+import { registrarSaudeDaRotina } from '@/data/saude-das-rotinas'
 
 /**
  * A rodada automática das campanhas de relacionamento.
@@ -40,10 +41,12 @@ export async function POST(pedido: Request) {
       apenasDispensar: url.searchParams.get('dispensar') === '1',
       somente: url.searchParams.get('campanha') ?? undefined,
     })
+    await registrarSaudeDaRotina('campanhas', { resultados })
     return NextResponse.json({ ok: true, quando: new Date().toISOString(), resultados })
   } catch (e) {
     const erro = e instanceof Error ? e.message : String(e)
     console.error('[campanhas] rodada falhou:', erro)
+    await registrarSaudeDaRotina('campanhas', { erro })
     return NextResponse.json({ ok: false, erro }, { status: 500 })
   }
 }

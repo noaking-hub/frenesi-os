@@ -69,13 +69,13 @@ export default async function Notificacoes({
       tom: avisosDeDevolucaoLigados() ? 'ok' : 'neutro',
     },
     {
-      // A régua é a do Resend: 100 por dia e 3.000 por mês no plano atual.
+      // Plano pago do Resend, sem teto diário — o número é volume, não régua.
       // A contagem é do log do ERP — testes e reenvios manuais feitos direto
       // no Resend não passam por aqui, então lá o número pode ser um pouco
       // maior.
       label: 'E-mails enviados',
-      valor: `${num(resumo.enviadosHoje)}/100 hoje`,
-      hint: `${num(resumo.enviadosMes)}/3.000 no mês · ${num(resumo.enviados)} em 30 dias · ${num(resumo.falhas)} falharam`,
+      valor: `${num(resumo.enviadosHoje)} hoje`,
+      hint: `${num(resumo.enviadosMes)} no mês · ${num(resumo.enviados)} em 30 dias · ${num(resumo.falhas)} falharam`,
       tom: resumo.falhas > 0 ? 'erro' : 'ouro',
     },
     {

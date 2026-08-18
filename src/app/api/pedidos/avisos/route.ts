@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { enviarAvisosDePedido } from '@/data/notificacoes'
+import { registrarSaudeDaRotina } from '@/data/saude-das-rotinas'
 import { mensagemDe } from '@/data/shopify'
 
 /**
@@ -44,6 +45,7 @@ export async function POST(req: Request) {
     // Vinte por rodada: com a pausa de 600 ms entre envios, são ~12 segundos
     // de trabalho — metade do tempo da função, com folga para o resto.
     const r = await enviarAvisosDePedido({ limite: 20 })
+    await registrarSaudeDaRotina('avisos-de-pedido', r)
     return NextResponse.json(
       r.desligado
         ? {
@@ -54,6 +56,7 @@ export async function POST(req: Request) {
         : { ok: true, candidatos: r.candidatos, enviados: r.enviados, falhas: r.falhas },
     )
   } catch (e) {
+    await registrarSaudeDaRotina('avisos-de-pedido', { erro: mensagemDe(e) })
     return NextResponse.json({ ok: false, erro: mensagemDe(e) }, { status: 500 })
   }
 }

@@ -1,0 +1,27 @@
+# A trava de qualidade antes do deploy pago.
+#
+# Todo push na main vira build na Netlify. Este workflow não impede o deploy
+# (são sistemas separados), mas deixa o X vermelho no commit quando tipo ou
+# teste quebra — e é grátis em repositório público. Segredo nenhum entra aqui:
+# os testes são de domínio puro e rodam sem banco e sem API externa.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Tipos
+        run: npx tsc --noEmit
+      - name: Testes
+        run: npx vitest run

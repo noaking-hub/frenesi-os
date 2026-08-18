@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { OPERADOR } from '@/data/operador'
+import { operadorAtual } from '@/data/operador'
 import { mensagemDe } from '@/data/shopify'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import type { EstadoOcorrencia, TipoOcorrencia } from '@/domain'
@@ -28,7 +28,7 @@ export async function varrerParados(): Promise<Resposta<{ novas: number }>> {
 
   const { data, error } = await supabaseServer().rpc('varrer_ocorrencias', {
     p_dias: 15,
-    p_responsavel: OPERADOR,
+    p_responsavel: await operadorAtual(),
     p_janela_dias: 90,
   })
   if (error) {
@@ -55,7 +55,7 @@ export async function registrarOcorrencia(dados: {
     p_tipo: dados.tipo,
     p_acao: dados.acao,
     p_prazo_dias: dados.prazoDias,
-    p_responsavel: OPERADOR,
+    p_responsavel: await operadorAtual(),
     p_origem: 'Manual',
   })
   if (error) {

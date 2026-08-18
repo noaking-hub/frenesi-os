@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { OPERADOR } from '@/data/operador'
+import { operadorAtual } from '@/data/operador'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 
 export type RespostaCompra = { ok: true; loteId: string } | { ok: false; erro: string }
@@ -31,7 +31,7 @@ export async function registrarCompra(dados: {
     p_volume_ml: dados.volumeMl,
     p_custo_total: dados.custoTotal,
     p_fornecedor: dados.fornecedor.trim(),
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
   })
   if (error) {
     console.error('[compras] registrar_compra falhou:', error)
@@ -57,7 +57,7 @@ export async function encerrarLote(loteId: string): Promise<RespostaEncerramento
 
   const { data, error } = await supabaseServer().rpc('encerrar_lote', {
     p_lote_id: loteId,
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
   })
   if (error) {
     console.error('[lotes] encerrar_lote falhou:', error)
@@ -84,7 +84,7 @@ export async function estornarCompra(loteId: string): Promise<RespostaEstorno> {
 
   const { error } = await supabaseServer().rpc('estornar_compra', {
     p_lote_id: loteId,
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
   })
   if (error) {
     console.error('[lotes] estornar_compra falhou:', error)
@@ -125,7 +125,7 @@ export async function registrarSaidaLote(dados: {
     p_motivo: dados.motivo.trim(),
     p_unidades: dados.unidades ?? null,
     p_variante: dados.variante ?? null,
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
   })
   if (error) {
     console.error('[lotes] registrar_saida_lote falhou:', error)
@@ -160,7 +160,7 @@ export async function editarSaidaLote(dados: {
     p_saida_id: dados.saidaId,
     p_ml: dados.volumeMl,
     p_motivo: dados.motivo.trim(),
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
   })
   if (error) {
     console.error('[lotes] editar_saida_lote falhou:', error)
@@ -180,7 +180,7 @@ export async function estornarSaidaLote(saidaId: string): Promise<RespostaSaida>
 
   const { data, error } = await supabaseServer().rpc('estornar_saida_lote', {
     p_saida_id: saidaId,
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
   })
   if (error) {
     console.error('[lotes] estornar_saida_lote falhou:', error)
@@ -208,7 +208,7 @@ export async function ajustarPerdaParametro(perdaPct: number): Promise<RespostaP
 
   const { error } = await supabaseServer().rpc('ajustar_perda_parametro', {
     p_perda_pct: Number(perdaPct.toFixed(3)),
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
   })
   if (error) {
     console.error('[lotes] ajustar_perda_parametro falhou:', error)

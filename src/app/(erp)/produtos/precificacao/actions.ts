@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { OPERADOR } from '@/data/operador'
+import { operadorAtual } from '@/data/operador'
 import { aplicarPrecosShopify, mensagemDe, type AlvoPreco } from '@/data/shopify'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { PARAMETROS_PADRAO, calcularPreco } from '@/domain'
@@ -158,6 +158,7 @@ export async function publicarPrecos(itens: PrecoAPublicar[]): Promise<RespostaP
     // antes/depois, autor, origem e o veredito do retorno. Recusa também é
     // fato — inclusive a do piso, que nem saiu do ERP.
     const motivoDe = new Map(ignoradas.map((g) => [g.variante, g.motivo]))
+    const operador = await operadorAtual()
     const auditoria = itens.map((i) => {
       const rotulo = `${produtoDe.get(i.baseId)?.nome ?? i.baseId} · ${i.variante} ml`
       const divergente = divergentes.find((d) => d.variante === rotulo)
@@ -167,7 +168,7 @@ export async function publicarPrecos(itens: PrecoAPublicar[]): Promise<RespostaP
         variante: i.variante,
         preco_anterior: varianteDe.get(`${i.baseId}|${i.variante}`)?.precoAtual ?? null,
         preco_novo: i.preco,
-        usuario: OPERADOR,
+        usuario: operador,
         origem: 'precificacao',
         resultado: recusa ? 'recusado' : divergente ? 'divergente' : 'confirmado',
         detalhe: recusa ?? (divergente ? `a loja gravou ${divergente.gravado.toFixed(2)}` : null),

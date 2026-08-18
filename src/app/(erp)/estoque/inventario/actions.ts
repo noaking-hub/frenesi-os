@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { OPERADOR } from '@/data/operador'
+import { operadorAtual } from '@/data/operador'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 
 export type Resposta<T = object> = ({ ok: true } & T) | { ok: false; erro: string }
@@ -25,7 +25,7 @@ export async function abrirInventario(
   if (bloqueio) return bloqueio
 
   const { data, error } = await supabaseServer().rpc('abrir_inventario', {
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
     p_somente_com_volume: somenteComVolume,
   })
   if (error) {
@@ -53,7 +53,7 @@ export async function registrarContagem(
     p_inventario_id: inventarioId,
     p_base_id: baseId,
     p_contado_ml: contadoMl,
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
   })
   if (error) {
     console.error('[inventario] registrar_contagem falhou:', error)
@@ -82,7 +82,7 @@ export async function confirmarInventario(
 
   const { data, error } = await supabaseServer().rpc('fechar_inventario', {
     p_inventario_id: inventarioId,
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
     p_parcial: parcial,
   })
   if (error) {

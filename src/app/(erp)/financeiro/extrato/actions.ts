@@ -13,7 +13,7 @@ import {
   sondarRelatorios,
 } from '@/data/mercadopago'
 import type { RelatorioDisponivel } from '@/data/mercadopago'
-import { OPERADOR } from '@/data/operador'
+import { operadorAtual } from '@/data/operador'
 import { mensagemDe } from '@/data/shopify'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { casarObservacao, indexarPedidos } from '@/domain'
@@ -251,7 +251,7 @@ export async function classificarLinha(
     p_chave: chave,
     p_categoria: categoria,
     p_descricao: descricao,
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
   })
   if (error) {
     console.error('[extrato] classificar_extrato falhou:', error)
@@ -299,7 +299,7 @@ export async function classificarRecebimentos(contaId: string): Promise<Resposta
   const { data, error } = await supabaseServer().rpc('classificar_recebimentos', {
     p_origem: 'mercadopago',
     p_conta_id: contaId,
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
   })
   if (error) {
     console.error('[extrato] classificar_recebimentos falhou:', error)

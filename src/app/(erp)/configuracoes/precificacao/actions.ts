@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { OPERADOR } from '@/data/operador'
+import { operadorAtual } from '@/data/operador'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { sobraParaProduto } from '@/domain'
 import type { ParametrosPrecificacao } from '@/domain'
@@ -49,7 +49,7 @@ export async function salvarParametros(v: ParametrosPrecificacao): Promise<Respo
     p_antifraude: v.antifraude,
     p_perda_pct: v.perdaPct,
     p_margem_alvo: v.margemAlvo,
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
     p_ads_mensal: v.adsMensal ?? null,
   })
   if (error) {
@@ -85,7 +85,7 @@ export async function ajustarAds(adsPct: number, gastoMensal: number): Promise<R
   const { error } = await supabaseServer().rpc('ajustar_ads_parametro', {
     p_ads_pct: Number(adsPct.toFixed(3)),
     p_ads_mensal: Number(gastoMensal.toFixed(2)),
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
   })
   if (error) {
     console.error('[parametros] ajustar_ads_parametro falhou:', error)
@@ -114,7 +114,7 @@ export async function ajustarIntermediador(pct: number): Promise<RespostaAds> {
 
   const { error } = await supabaseServer().rpc('ajustar_intermediador_parametro', {
     p_intermediador_pct: Number(pct.toFixed(3)),
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
   })
   if (error) {
     console.error('[parametros] ajustar_intermediador_parametro falhou:', error)
@@ -140,7 +140,7 @@ export async function ajustarPix(descontoPct: number, fatiaPct: number): Promise
   const { error } = await supabaseServer().rpc('ajustar_pix_parametro', {
     p_desconto_pct: Number(descontoPct.toFixed(3)),
     p_fatia_pct: Number(fatiaPct.toFixed(3)),
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
   })
   if (error) {
     console.error('[parametros] ajustar_pix_parametro falhou:', error)

@@ -69,6 +69,10 @@ export interface EstadoDaOperacao {
   pedidosAtual: number
   pedidosAnterior: number
   rotuloDoPeriodo: string
+  /** Pedidos pagos há mais de 3 dias sem código de rastreio (envio local fora). */
+  expedicaoAtrasada?: { qtd: number; valor: number; maisAntigoDias: number }
+  /** Rotinas automáticas com o MESMO ponto falhando em rodadas seguidas. */
+  rotinasDoentes?: { rotina: string; onde: string; rodadasSeguidas: number; ultimoErro: string }[]
 }
 
 const PESO: Record<Severidade, number> = { critico: 0, alto: 1, medio: 2, informativo: 3 }
@@ -219,6 +223,48 @@ export function prioridadesDe(e: EstadoDaOperacao): Prioridade[] {
         proximaAcao: { texto: 'Ver o relatório', href: '/relatorios' },
       })
     }
+  }
+
+  // ── Expedição ────────────────────────────────────────────────────────────
+  // Pedido pago sem rastreio além do SLA de 72 h é cliente esperando algo que
+  // ninguém está vendo — foi assim que 8 envios postados pela Frenet ficaram
+  // invisíveis por dias: pacote na transportadora, tela em "não processado".
+  if (e.expedicaoAtrasada && e.expedicaoAtrasada.qtd > 0) {
+    const x = e.expedicaoAtrasada
+    fila.push({
+      id: 'expedicao-atrasada',
+      titulo: 'Pedidos pagos sem rastreio além do prazo de expedição',
+      severidade: x.maisAntigoDias >= 7 ? 'critico' : 'alto',
+      impactoFinanceiro: x.valor,
+      impactoOperacional: `${x.qtd} ${x.qtd === 1 ? 'pedido pago' : 'pedidos pagos'} há mais de 3 dias sem código no ERP.`,
+      urgencia: `O mais antigo espera há ${x.maisAntigoDias} ${x.maisAntigoDias === 1 ? 'dia' : 'dias'}. Se já foi postado por fora, falta faturar na Yampi com o código.`,
+      confianca: {
+        nivel: 'alta',
+        motivo: 'Pedidos pagos sem rastreio registrado; entrega local excluída.',
+      },
+      responsavel: 'Operação',
+      proximaAcao: { texto: 'Ver os pedidos', href: '/pedidos' },
+    })
+  }
+
+  // ── Saúde das rotinas ────────────────────────────────────────────────────
+  // O mesmo ponto falhando em rodadas seguidas é integração quebrada — e
+  // rotina que falha em silêncio é pior que desligada, porque parece cobrir.
+  if (e.rotinasDoentes && e.rotinasDoentes.length > 0) {
+    const pior = e.rotinasDoentes[0]
+    const pontos = e.rotinasDoentes.slice(0, 3).map((d) => `${d.rotina} · ${d.onde}`)
+    const sobra = e.rotinasDoentes.length - pontos.length
+    fila.push({
+      id: 'rotina-com-erro',
+      titulo: 'Rotina automática falhando repetidamente',
+      severidade: 'alto',
+      impactoFinanceiro: null,
+      impactoOperacional: `${pontos.join(', ')}${sobra > 0 ? ` e mais ${sobra}` : ''}.`,
+      urgencia: `O mesmo erro se repete há ${pior.rodadasSeguidas} rodadas: ${pior.ultimoErro.slice(0, 120)}`,
+      confianca: { nivel: 'alta', motivo: 'Relatórios das próprias rodadas, persistidos a cada execução.' },
+      responsavel: 'Dono',
+      proximaAcao: { texto: 'Ver as integrações', href: '/configuracoes/integracoes' },
+    })
   }
 
   // ── Higiene do dado ──────────────────────────────────────────────────────

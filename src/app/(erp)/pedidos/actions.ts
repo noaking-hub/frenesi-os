@@ -2,7 +2,7 @@
 
 import { confirmarEntregaLocal } from '@/data/baixa-estoque'
 import { eventosDoPedido, frenetConfigurada, rastrearPedidos } from '@/data/frenet'
-import { OPERADOR } from '@/data/operador'
+import { operadorAtual } from '@/data/operador'
 import type { EventoTransportadora } from '@/domain'
 import { INTERVALO_PADRAO_DIAS, MAX_PARCELAS, MIN_PARCELAS } from '@/domain'
 
@@ -310,7 +310,7 @@ export async function sincronizarEnvios(opcoes: { prazoMs?: number } = {}): Prom
 export async function confirmarEntregaEmMaos(
   pedidoId: string,
 ): Promise<{ ok: true; mlConsumido: number; shopify: string | null } | { ok: false; erro: string }> {
-  const r = await confirmarEntregaLocal(pedidoId, OPERADOR)
+  const r = await confirmarEntregaLocal(pedidoId, await operadorAtual())
   if (!r.ok) return r
 
   let shopify: string | null = null
@@ -585,7 +585,7 @@ export async function registrarVendaManual(dados: {
     p_ocorrido_em: `${dados.ocorridoEm}T12:00:00Z`,
     p_cliente_nome: dados.clienteNome.trim() || null,
     p_observacao: dados.observacao.trim() || null,
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
     p_cliente_email: email || null,
     p_parcelas: parcelas,
     p_intervalo_dias: Math.round(dados.intervaloDias) || INTERVALO_PADRAO_DIAS,

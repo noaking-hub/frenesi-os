@@ -3,6 +3,8 @@ import 'server-only'
 import { carregarConciliacao, carregarLancamentos, carregarVisaoFinanceira } from '@/data/financeiro'
 import { carregarPainelPrincipal } from '@/data/painel'
 import { carregarEstoque, carregarFilaDeEnvase } from '@/data/consultas'
+import { rotinasComErroPersistente } from '@/data/saude-das-rotinas'
+import { supabaseServer } from '@/data/supabase'
 import { briefingDe, prioridadesDe, resumoDaFila, type Briefing, type Prioridade } from '@/domain'
 
 /**
@@ -40,14 +42,17 @@ export interface CentralDoGerente {
 export async function carregarCentralDoGerente(): Promise<CentralDoGerente> {
   // As seis leituras são independentes: em série levariam a soma dos tempos, e
   // a Central abre junto com a tela.
-  const [visao, painel, conciliacao, estoque, lancamentos, envase] = await Promise.all([
-    carregarVisaoFinanceira(),
-    carregarPainelPrincipal('30d'),
-    carregarConciliacao(),
-    carregarEstoque(),
-    carregarLancamentos(),
-    carregarFilaDeEnvase(),
-  ])
+  const [visao, painel, conciliacao, estoque, lancamentos, envase, expedicaoAtrasada, rotinasDoentes] =
+    await Promise.all([
+      carregarVisaoFinanceira(),
+      carregarPainelPrincipal('30d'),
+      carregarConciliacao(),
+      carregarEstoque(),
+      carregarLancamentos(),
+      carregarFilaDeEnvase(),
+      expedicaoAlemDoPrazo(),
+      rotinasComErroPersistente(),
+    ])
 
   // A distinção já vem pronta do domínio e é reaproveitada, não recalculada:
   // `aguardando` é a venda ainda dentro do prazo do gateway, `sem_credito` é a
@@ -90,6 +95,8 @@ export async function carregarCentralDoGerente(): Promise<CentralDoGerente> {
     pedidosAtual: painel.atual.pedidos,
     pedidosAnterior: painel.anterior.pedidos,
     rotuloDoPeriodo: painel.janela.rotulo,
+    expedicaoAtrasada,
+    rotinasDoentes,
   }
 
   const itens = prioridadesDe(estado)
@@ -118,6 +125,45 @@ export async function carregarCentralDoGerente(): Promise<CentralDoGerente> {
       'Envase',
     ],
     apuradoEm: new Date().toISOString(),
+  }
+}
+
+/**
+ * Pedidos pagos além do SLA de expedição (72 h) sem código de rastreio.
+ *
+ * Entrega local fica fora (não tem rastreio por natureza) e a janela para
+ * trás é de 45 dias — mais velho que isso é caso encerrado por outro caminho,
+ * não fila de expedição.
+ */
+async function expedicaoAlemDoPrazo(): Promise<{
+  qtd: number
+  valor: number
+  maisAntigoDias: number
+}> {
+  const vazio = { qtd: 0, valor: 0, maisAntigoDias: 0 }
+  try {
+    const agora = Date.now()
+    const { data, error } = await supabaseServer()
+      .from('pedidos')
+      .select('valor, comprado_em')
+      .eq('pagamento', 'pago')
+      .is('rastreio', null)
+      .in('envio', ['nao_iniciado', 'aguardando_envio'])
+      .eq('entrega_local', false)
+      .lt('comprado_em', new Date(agora - 72 * 3_600_000).toISOString())
+      .gte('comprado_em', new Date(agora - 45 * 86_400_000).toISOString())
+    if (error) throw error
+    const linhas = (data ?? []) as { valor: string; comprado_em: string }[]
+    if (!linhas.length) return vazio
+    const maisAntigo = Math.min(...linhas.map((l) => Date.parse(l.comprado_em)))
+    return {
+      qtd: linhas.length,
+      valor: arredondar(linhas.reduce((a, l) => a + Number(l.valor), 0)),
+      maisAntigoDias: Math.floor((agora - maisAntigo) / 86_400_000),
+    }
+  } catch (e) {
+    console.error('[prioridades] leitura de expedição falhou:', e)
+    return vazio
   }
 }
 

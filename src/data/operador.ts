@@ -34,11 +34,6 @@ export async function operadorAtual(): Promise<string> {
  */
 export const SISTEMA = 'Sistema'
 
-/**
- * @deprecated Use `operadorAtual()`. Continua exportada porque cinquenta
- * pontos do ERP ainda a importam de forma síncrona, e trocá-los todos de uma
- * vez seria um diff grande demais para revisar com cuidado. O valor deixou de
- * ser um nome de pessoa: quem não sabe quem fez agora diz 'Sistema' em vez de
- * apontar para alguém.
- */
-export const OPERADOR = SISTEMA
+// A constante `OPERADOR` foi aposentada: os 41 pontos que a importavam
+// passaram a chamar `operadorAtual()`, e a auditoria voltou a nomear quem
+// de fato clicou — ou 'Sistema', quando ninguém clicou.

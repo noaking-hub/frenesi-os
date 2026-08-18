@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { OPERADOR } from '@/data/operador'
+import { operadorAtual } from '@/data/operador'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 
 export type Resposta<T = object> = ({ ok: true } & T) | { ok: false; erro: string }
@@ -38,7 +38,7 @@ export async function conciliarRepasse(pedidoId: string, recebido: number): Prom
     p_pedido_id: pedidoId,
     p_recebido: recebido,
     p_quando: null,
-    p_operador: OPERADOR,
+    p_operador: await operadorAtual(),
   })
   if (error) {
     console.error('[financeiro] conciliar_repasse falhou:', error)

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { carregarCentralDoGerente } from '@/data/assessor/prioridades'
+import { limparSaudeAntiga } from '@/data/saude-das-rotinas'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 
 /**
@@ -78,6 +79,9 @@ export async function POST(req: Request) {
   if (erroDoRegistro) {
     console.error('[gerente] não consegui registrar a vigília:', erroDoRegistro.message)
   }
+
+  // Faxina do diário de saúde das rotinas: 30 dias bastam para diagnóstico.
+  await limparSaudeAntiga()
 
   return NextResponse.json(relatorio)
 }

@@ -237,3 +237,45 @@ describe('resumoDaFila', () => {
     )
   })
 })
+
+describe('expedição atrasada e saúde das rotinas', () => {
+  it('pedido pago sem rastreio além do SLA entra na fila', () => {
+    const f = prioridadesDe({
+      ...CALMO,
+      expedicaoAtrasada: { qtd: 8, valor: 1200, maisAntigoDias: 5 },
+    })
+    const item = f.find((p) => p.id === 'expedicao-atrasada')
+    expect(item?.severidade).toBe('alto')
+    expect(item?.impactoFinanceiro).toBe(1200)
+    expect(item?.impactoOperacional).toContain('8 pedidos pagos')
+  })
+
+  it('mais antigo com 7+ dias vira crítico; sem atraso não entra', () => {
+    const f = prioridadesDe({
+      ...CALMO,
+      expedicaoAtrasada: { qtd: 1, valor: 200, maisAntigoDias: 9 },
+    })
+    expect(f.find((p) => p.id === 'expedicao-atrasada')?.severidade).toBe('critico')
+    expect(
+      prioridadesDe({ ...CALMO, expedicaoAtrasada: { qtd: 0, valor: 0, maisAntigoDias: 0 } }),
+    ).toEqual([])
+  })
+
+  it('rotina com o mesmo erro em rodadas seguidas entra como alto', () => {
+    const f = prioridadesDe({
+      ...CALMO,
+      rotinasDoentes: [
+        {
+          rotina: 'sincronizar:logistica',
+          onde: 'rastreioMelhorEnvio',
+          rodadasSeguidas: 5,
+          ultimoErro: 'O Melhor Envio respondeu 422',
+        },
+      ],
+    })
+    const item = f.find((p) => p.id === 'rotina-com-erro')
+    expect(item?.severidade).toBe('alto')
+    expect(item?.urgencia).toContain('5 rodadas')
+    expect(item?.impactoOperacional).toContain('sincronizar:logistica · rastreioMelhorEnvio')
+  })
+})
