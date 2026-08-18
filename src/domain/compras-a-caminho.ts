@@ -112,6 +112,52 @@ export function resumoDaCompra(c: CompraACaminho): ResumoDaCompra {
   }
 }
 
+/**
+ * Quanto dinheiro ainda está na estrada.
+ *
+ * Conta só o que NÃO chegou, e só o que tem preço. É a resposta para "quanto
+ * eu tenho investido esperando" — diferente do custo da compra, que inclui o
+ * que já está na prateleira. O frete fica de fora de propósito: ele é da
+ * compra inteira e ratear por frasco inventaria uma precisão que o número não
+ * tem.
+ */
+export function investidoAguardando(c: CompraACaminho): number {
+  if (c.canceladaEm) return 0
+  return (
+    Math.round(
+      c.itens.reduce((a, i) => a + faltamDoItem(i) * (i.custoUnitario ?? 0), 0) * 100,
+    ) / 100
+  )
+}
+
+/**
+ * Quantos ml ainda vão entrar.
+ *
+ * Para uma casa de decants o frasco é embalagem; o estoque real é volume. Dois
+ * frascos de 100 ml e dez de 5 ml são "doze frascos" e são mundos diferentes.
+ */
+export function mlAguardando(c: CompraACaminho): number {
+  if (c.canceladaEm) return 0
+  return c.itens.reduce((a, i) => a + faltamDoItem(i) * (i.volumeMl ?? 0), 0)
+}
+
+/** Volume total da compra, chegado ou não. */
+export function mlDaCompra(c: CompraACaminho): number {
+  return c.itens.reduce((a, i) => a + i.quantidade * (i.volumeMl ?? 0), 0)
+}
+
+/**
+ * Custo por ml previsto do item — o número que decide o preço de venda.
+ *
+ * Nulo quando falta preço ou volume: um custo por ml chutado contamina a
+ * precificação inteira, e é melhor não mostrar nada do que mostrar um número
+ * que alguém vai usar.
+ */
+export function custoPorMlPrevisto(i: ItemDaCompra): number | null {
+  if (i.custoUnitario === null || !i.volumeMl) return null
+  return Math.round((i.custoUnitario / i.volumeMl) * 100) / 100
+}
+
 /** Estado da compra inteira, para a etiqueta da listagem. */
 export type EstadoDaCompra = 'cancelada' | 'aguardando' | 'parcial' | 'recebida' | 'atrasada'
 

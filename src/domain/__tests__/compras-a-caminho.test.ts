@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest'
 
 import {
   estadoDaChegada,
+  custoPorMlPrevisto,
   estadoDaCompra,
   faltamDoItem,
+  investidoAguardando,
+  mlAguardando,
+  mlDaCompra,
   pendenciaDoItem,
   problemasDaCompra,
   resumoDaCompra,
@@ -165,5 +169,50 @@ describe('validação do cadastro', () => {
     expect(problemasDaCompra({ ...base, itens: [{ descricao: 'X', quantidade: 0 }] })).toContain(
       'A quantidade de cada item precisa ser pelo menos 1.',
     )
+  })
+})
+
+describe('dinheiro e volume na estrada', () => {
+  it('investido aguardando conta só o que NÃO chegou', () => {
+    // A pergunta é "quanto tenho parado esperando", não "quanto custou a
+    // compra": o que já está na prateleira saiu da espera.
+    const c = compra({
+      itens: [
+        item({ id: 'a', quantidade: 10, quantidadeRecebida: 4, custoUnitario: 400 }),
+        item({ id: 'b', quantidade: 2, quantidadeRecebida: 0, custoUnitario: 150 }),
+      ],
+    })
+    expect(investidoAguardando(c)).toBe(2700) // 6×400 + 2×150
+  })
+
+  it('item sem preço não vira zero disfarçado no total', () => {
+    // Ele simplesmente não soma — e o cartão da tela diz que há item sem preço.
+    const c = compra({ itens: [item({ custoUnitario: null, quantidade: 3 })] })
+    expect(investidoAguardando(c)).toBe(0)
+  })
+
+  it('compra cancelada não conta como dinheiro na estrada', () => {
+    expect(investidoAguardando(compra({ canceladaEm: '2026-08-05' }))).toBe(0)
+    expect(mlAguardando(compra({ canceladaEm: '2026-08-05' }))).toBe(0)
+  })
+
+  it('ml a caminho é o estoque real, não a contagem de frascos', () => {
+    // Dois de 100 ml e dez de 5 ml são doze frascos e mundos diferentes.
+    const c = compra({
+      itens: [
+        item({ id: 'a', quantidade: 2, volumeMl: 100, quantidadeRecebida: 0 }),
+        item({ id: 'b', quantidade: 10, volumeMl: 5, quantidadeRecebida: 0 }),
+      ],
+    })
+    expect(mlAguardando(c)).toBe(250)
+    expect(mlDaCompra(c)).toBe(250)
+  })
+
+  it('custo por ml some quando falta preço ou volume', () => {
+    // Número chutado aqui contamina a precificação inteira.
+    expect(custoPorMlPrevisto(item({ custoUnitario: 400, volumeMl: 100 }))).toBe(4)
+    expect(custoPorMlPrevisto(item({ custoUnitario: null }))).toBeNull()
+    expect(custoPorMlPrevisto(item({ volumeMl: null }))).toBeNull()
+    expect(custoPorMlPrevisto(item({ volumeMl: 0 }))).toBeNull()
   })
 })

@@ -17,8 +17,11 @@ import {
   ROTULO_DA_COMPRA,
   brl,
   estadoDaChegada,
+  custoPorMlPrevisto,
   estadoDaCompra,
   faltamDoItem,
+  investidoAguardando,
+  mlAguardando,
   parseNum,
   pendenciaDoItem,
   resumoDaCompra,
@@ -102,14 +105,23 @@ export function ACaminhoCliente({
 
   const totais = useMemo(() => {
     const abertas = comEstado.filter((x) => x.estado !== 'recebida' && x.estado !== 'cancelada')
+    const itensAbertos = abertas.flatMap((x) => x.compra.itens)
     return {
       compras: abertas.length,
       atrasadas: comEstado.filter((x) => x.estado === 'atrasada').length,
       frascos: abertas.reduce((a, x) => a + x.resumo.frascosFaltando, 0),
+      investido: abertas.reduce((a, x) => a + investidoAguardando(x.compra), 0),
+      ml: abertas.reduce((a, x) => a + mlAguardando(x.compra), 0),
       semCadastro: comEstado.reduce((a, x) => a + x.resumo.semCadastro, 0),
       prontos: comEstado.reduce((a, x) => a + x.resumo.prontosParaLote, 0),
+      // O total em dinheiro é honesto sobre a própria cobertura: item sem
+      // preço não vira zero silencioso, ele é contado e dito.
+      semPreco: itensAbertos.filter((i) => i.custoUnitario === null && faltamDoItem(i) > 0).length,
+      fornecedores: new Set(abertas.map((x) => x.compra.fornecedor)).size,
     }
   }, [comEstado])
+
+  const custoMedioMl = totais.ml > 0 ? totais.investido / totais.ml : null
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -131,25 +143,52 @@ export function ACaminhoCliente({
         </div>
       </div>
 
+      {/* O dinheiro primeiro, e em destaque: é a pergunta que se faz ao abrir
+          esta tela. Os contadores de trabalho pendente vêm depois, e só
+          aparecem quando há trabalho — cartão zerado ocupa o mesmo espaço de
+          um cartão urgente e ensina a não olhar para nenhum. */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <Cartao rotulo="Compras em aberto" valor={String(totais.compras)} />
-        <Cartao rotulo="Frascos que faltam chegar" valor={String(totais.frascos)} />
         <Cartao
-          rotulo="Atrasadas"
-          valor={String(totais.atrasadas)}
-          tom={totais.atrasadas > 0 ? 'atencao' : 'neutro'}
+          rotulo="Investido a caminho"
+          valor={brl(totais.investido)}
+          tom="ouro"
+          destaque
+          dica={
+            totais.semPreco > 0
+              ? `${totais.semPreco} ${totais.semPreco === 1 ? 'item sem preço fora' : 'itens sem preço fora'} desta conta`
+              : 'custo dos frascos que ainda não chegaram'
+          }
         />
         <Cartao
-          rotulo="Chegaram, falta cadastrar"
-          valor={String(totais.semCadastro)}
-          tom={totais.semCadastro > 0 ? 'info' : 'neutro'}
-          dica="perfume que ainda não existe no catálogo"
+          rotulo="Volume a caminho"
+          valor={`${totais.ml.toLocaleString('pt-BR')} ml`}
+          destaque
+          dica={custoMedioMl !== null ? `${brl(custoMedioMl)} por ml em média` : undefined}
         />
         <Cartao
-          rotulo="Prontos para virar lote"
-          valor={String(totais.prontos)}
-          tom={totais.prontos > 0 ? 'ok' : 'neutro'}
+          rotulo="Frascos que faltam"
+          valor={String(totais.frascos)}
+          dica={`em ${totais.compras} ${totais.compras === 1 ? 'compra' : 'compras'} de ${totais.fornecedores} ${totais.fornecedores === 1 ? 'fornecedor' : 'fornecedores'}`}
         />
+        {totais.atrasadas > 0 && (
+          <Cartao rotulo="Atrasadas" valor={String(totais.atrasadas)} tom="atencao" />
+        )}
+        {totais.semCadastro > 0 && (
+          <Cartao
+            rotulo="Chegaram, falta cadastrar"
+            valor={String(totais.semCadastro)}
+            tom="info"
+            dica="perfume que ainda não existe no catálogo"
+          />
+        )}
+        {totais.prontos > 0 && (
+          <Cartao
+            rotulo="Prontos para virar lote"
+            valor={String(totais.prontos)}
+            tom="ok"
+            dica="registre a compra do frasco"
+          />
+        )}
       </div>
 
       {visiveis.length === 0 ? (
@@ -198,31 +237,40 @@ function Cartao({
   valor,
   tom = 'neutro',
   dica,
+  destaque = false,
 }: {
   rotulo: string
   valor: string
-  tom?: 'ok' | 'atencao' | 'info' | 'neutro'
+  tom?: 'ok' | 'atencao' | 'info' | 'neutro' | 'ouro'
   dica?: string
+  destaque?: boolean
 }) {
   return (
     <div
       style={{
-        flex: '1 1 168px',
-        border: '1px solid rgba(255,255,255,.08)',
+        flex: destaque ? '1 1 230px' : '1 1 168px',
+        border: `1px solid ${destaque ? 'rgba(239,209,140,.22)' : 'rgba(255,255,255,.08)'}`,
         borderRadius: 10,
-        padding: '12px 14px',
-        background: 'rgba(255,255,255,.02)',
+        padding: '13px 15px',
+        background: destaque ? 'rgba(239,209,140,.05)' : 'rgba(255,255,255,.02)',
       }}
     >
       <Rotulo>{rotulo}</Rotulo>
       <div
         className="font-mono"
-        style={{ fontSize: 24, lineHeight: '30px', color: COR[tom], paddingTop: 4 }}
+        style={{
+          fontSize: destaque ? 27 : 23,
+          lineHeight: destaque ? '34px' : '29px',
+          color: COR[tom],
+          paddingTop: 5,
+        }}
       >
         {valor}
       </div>
       {dica && (
-        <div style={{ fontSize: 10.5, color: 'var(--color-terciario)', paddingTop: 2 }}>{dica}</div>
+        <div style={{ fontSize: 10.5, lineHeight: '15px', color: 'var(--color-terciario)', paddingTop: 3 }}>
+          {dica}
+        </div>
       )}
     </div>
   )
@@ -408,6 +456,7 @@ function LinhaDoItem({ item, lotes }: { item: ItemDaCompra; lotes: Lote[] }) {
           {item.quantidade} comprado{item.quantidade > 1 ? 's' : ''}
           {faltam > 0 ? ` · faltam ${faltam}` : ''}
           {item.custoUnitario !== null ? ` · ${brl(item.custoUnitario)} cada` : ''}
+          {custoPorMlPrevisto(item) !== null ? ` · ${brl(custoPorMlPrevisto(item)!)}/ml` : ''}
           {item.recebidoEm ? ` · recebido em ${dataBr(item.recebidoEm)}` : ''}
         </div>
         {pendencia && (
