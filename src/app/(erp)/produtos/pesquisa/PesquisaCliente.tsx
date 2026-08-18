@@ -1,47 +1,98 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useRef, useState } from 'react'
 
 import { BotaoOuro, Rotulo, TituloSecao } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
-import { brl, precoPorMl, type CartaoDeProduto } from '@/domain'
-import type { PesquisaAnterior, PesquisaDeMercado } from '@/data/pesquisa-de-mercado'
+import { CONCORRENTES, brl, precoPorMl, primeiraPalavra, type CartaoDeProduto } from '@/domain'
+import type { PesquisaAnterior, ReferenciaFrenesi, VitrineDaLoja } from '@/data/pesquisa-de-mercado'
 
-import { pesquisar } from './actions'
+import { pesquisarLoja, registrarRodada, reguaDaCasa } from './actions'
 
 /**
  * Pesquisa de mercado — o price-lab dentro do ERP.
  *
- * Digita-se o perfume, e as seis lojas concorrentes respondem lado a lado,
- * com a referência da FRENESI no topo: comparar sem a própria régua é olhar
- * preço sem saber se está caro. A busca usa a primeira palavra, como a
- * ferramenta original — é o que captura as variações de volume e edição.
+ * Digita-se o perfume e as seis lojas concorrentes são consultadas em
+ * PARALELO, uma chamada por loja: cada vitrine aparece assim que a loja
+ * responde, e uma fora do ar não atrasa as outras. A rodada toda numa chamada
+ * só encostava no teto da função do servidor — e o estouro virava página de
+ * erro no celular.
  */
+
+type EstadoVitrine =
+  | { estado: 'buscando' }
+  | { estado: 'pronta'; vitrine: VitrineDaLoja }
+  | { estado: 'falhou'; erro: string }
 
 export function PesquisaCliente({ historicoInicial }: { historicoInicial: PesquisaAnterior[] }) {
   const [termo, setTermo] = useState('')
-  const [pesquisa, setPesquisa] = useState<PesquisaDeMercado | null>(null)
+  const [palavra, setPalavra] = useState<string | null>(null)
+  const [vitrines, setVitrines] = useState<Record<string, EstadoVitrine>>({})
+  const [frenesi, setFrenesi] = useState<ReferenciaFrenesi[]>([])
   const [historico, setHistorico] = useState(historicoInicial)
-  const [erro, setErro] = useState<string | null>(null)
-  const [buscando, iniciar] = useTransition()
+  const [buscando, setBuscando] = useState(false)
+  // Rodada mais nova cala a antiga: sem isto, duas buscas seguidas misturavam
+  // vitrines de perfumes diferentes na mesma tela.
+  const rodadaRef = useRef(0)
 
   const buscar = (t: string) => {
     const limpo = t.trim()
-    if (!limpo || buscando) return
+    const p = primeiraPalavra(limpo)
+    if (!p || buscando) return
+    const rodada = ++rodadaRef.current
+
     setTermo(limpo)
-    setErro(null)
-    iniciar(async () => {
-      const r = await pesquisar(limpo)
-      if (!r.ok) {
-        setErro(r.erro)
-        return
+    setPalavra(p)
+    setBuscando(true)
+    setFrenesi([])
+    setVitrines(Object.fromEntries(CONCORRENTES.map((c) => [c.chave, { estado: 'buscando' }])))
+
+    void reguaDaCasa(limpo).then((r) => {
+      if (rodadaRef.current === rodada && r.ok) setFrenesi(r.frenesi)
+    })
+
+    const chamadas = CONCORRENTES.map((c) =>
+      pesquisarLoja(c.chave, p)
+        .then((r): EstadoVitrine =>
+          r.ok ? { estado: 'pronta', vitrine: r.vitrine } : { estado: 'falhou', erro: r.erro },
+        )
+        .catch((): EstadoVitrine => ({ estado: 'falhou', erro: 'a consulta não respondeu' }))
+        .then((estado) => {
+          if (rodadaRef.current === rodada) {
+            setVitrines((atual) => ({ ...atual, [c.chave]: estado }))
+          }
+          return { chave: c.chave, estado }
+        }),
+    )
+
+    void Promise.all(chamadas).then(async (resultados) => {
+      if (rodadaRef.current !== rodada) return
+      setBuscando(false)
+      // O histórico fecha a rodada — e se a gravação falhar, a tela já
+      // mostrou os preços: ninguém fica sem resposta por causa de memória.
+      try {
+        const resumo = resultados.map((r) => ({
+          chave: r.chave,
+          cartoes: r.estado.estado === 'pronta' ? r.estado.vitrine.cartoes : [],
+          erro:
+            r.estado.estado === 'pronta'
+              ? r.estado.vitrine.erro
+              : r.estado.estado === 'falhou'
+                ? r.estado.erro
+                : null,
+        }))
+        setHistorico(await registrarRodada(limpo, p, resumo))
+      } catch {
+        // memória é coadjuvante
       }
-      setPesquisa(r.pesquisa)
-      setHistorico(r.historico)
     })
   }
 
-  const totalAchado = pesquisa?.vitrines.reduce((s, v) => s + v.cartoes.length, 0) ?? 0
+  const prontas = Object.values(vitrines).filter((v) => v.estado !== 'buscando').length
+  const totalAchado = Object.values(vitrines).reduce(
+    (s, v) => s + (v.estado === 'pronta' ? v.vitrine.cartoes.length : 0),
+    0,
+  )
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -64,17 +115,15 @@ export function PesquisaCliente({ historicoInicial }: { historicoInicial: Pesqui
           style={{ ...campo, flex: '1 1 260px', height: 38 }}
         />
         <BotaoOuro altura={38} desabilitado={buscando || !termo.trim()} onClick={() => buscar(termo)}>
-          {buscando ? 'Pesquisando…' : 'Pesquisar preços'}
+          {buscando ? `Pesquisando… ${prontas}/${CONCORRENTES.length}` : 'Pesquisar preços'}
         </BotaoOuro>
       </div>
       <div style={{ fontSize: 11, color: 'var(--color-terciario)', marginTop: -8 }}>
         A busca usa a primeira palavra do nome — é o que captura todas as variações de volume.
       </div>
 
-      {erro && <div style={{ fontSize: 12.5, color: COR.erro }}>{erro}</div>}
-
       {/* Histórico */}
-      {!pesquisa && historico.length > 0 && (
+      {palavra === null && historico.length > 0 && (
         <section style={cartaoSecao}>
           <Rotulo>Pesquisas recentes</Rotulo>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', paddingTop: 8 }}>
@@ -105,25 +154,19 @@ export function PesquisaCliente({ historicoInicial }: { historicoInicial: Pesqui
         </section>
       )}
 
-      {buscando && (
-        <div style={{ fontSize: 12.5, color: 'var(--color-secundario)' }}>
-          Consultando as seis lojas em paralelo — leva alguns segundos…
-        </div>
-      )}
-
-      {pesquisa && !buscando && (
+      {palavra !== null && (
         <>
           {/* A régua da casa */}
-          {pesquisa.frenesi.length > 0 && (
+          {frenesi.length > 0 && (
             <section style={{ ...cartaoSecao, border: '1px solid rgba(239,209,140,.35)' }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
                 <Rotulo>Na FRENESI</Rotulo>
                 <span style={{ fontSize: 11, color: 'var(--color-terciario)' }}>
-                  como estamos vendendo “{pesquisa.palavra}” hoje
+                  como estamos vendendo “{palavra}” hoje
                 </span>
               </div>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', paddingTop: 10 }}>
-                {pesquisa.frenesi.map((f, i) => (
+                {frenesi.map((f, i) => (
                   <div
                     key={i}
                     style={{
@@ -158,59 +201,76 @@ export function PesquisaCliente({ historicoInicial }: { historicoInicial: Pesqui
             </section>
           )}
 
-          <div style={{ fontSize: 11.5, color: 'var(--color-terciario)' }}>
-            {totalAchado} produto{totalAchado === 1 ? '' : 's'} encontrado
-            {totalAchado === 1 ? '' : 's'} para “{pesquisa.palavra}”.
-          </div>
+          {!buscando && (
+            <div style={{ fontSize: 11.5, color: 'var(--color-terciario)' }}>
+              {totalAchado} produto{totalAchado === 1 ? '' : 's'} encontrado
+              {totalAchado === 1 ? '' : 's'} para “{palavra}”.
+            </div>
+          )}
 
-          {/* Uma vitrine por concorrente */}
-          {pesquisa.vitrines.map((v) => (
-            <section key={v.chave} style={cartaoSecao}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-                <span className="font-serif" style={{ fontSize: 15.5, fontWeight: 600 }}>
-                  {v.nome}
-                </span>
-                <span style={{ fontSize: 11, color: 'var(--color-terciario)' }}>
-                  {v.cartoes.length} resultado{v.cartoes.length === 1 ? '' : 's'}
-                </span>
-                <a
-                  href={v.busca}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="hover:text-ouro"
-                  style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--color-secundario)', textDecoration: 'underline' }}
-                >
-                  abrir busca no site ↗
-                </a>
-              </div>
+          {/* Uma vitrine por concorrente, na ordem fixa das lojas */}
+          {CONCORRENTES.map((c) => {
+            const v = vitrines[c.chave]
+            return (
+              <section key={c.chave} style={cartaoSecao}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+                  <span className="font-serif" style={{ fontSize: 15.5, fontWeight: 600 }}>
+                    {c.nome}
+                  </span>
+                  {v?.estado === 'pronta' && (
+                    <span style={{ fontSize: 11, color: 'var(--color-terciario)' }}>
+                      {v.vitrine.cartoes.length} resultado{v.vitrine.cartoes.length === 1 ? '' : 's'}
+                    </span>
+                  )}
+                  <a
+                    href={`${c.dominio}/search?q=${encodeURIComponent(palavra)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="hover:text-ouro"
+                    style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--color-secundario)', textDecoration: 'underline' }}
+                  >
+                    abrir busca no site ↗
+                  </a>
+                </div>
 
-              {v.erro && (
-                <div style={{ fontSize: 12, color: COR.atencao, paddingTop: 8 }}>
-                  Não foi possível ler esta loja agora: {v.erro}
-                </div>
-              )}
-              {!v.erro && v.cartoes.length === 0 && (
-                <div style={{ fontSize: 12, color: 'var(--color-terciario)', paddingTop: 8 }}>
-                  Nenhum resultado para “{pesquisa.palavra}” nesta loja.
-                </div>
-              )}
+                {(!v || v.estado === 'buscando') && (
+                  <div style={{ fontSize: 12, color: 'var(--color-terciario)', paddingTop: 8 }}>
+                    Consultando…
+                  </div>
+                )}
+                {v?.estado === 'falhou' && (
+                  <div style={{ fontSize: 12, color: COR.atencao, paddingTop: 8 }}>
+                    Não foi possível ler esta loja agora: {v.erro}
+                  </div>
+                )}
+                {v?.estado === 'pronta' && v.vitrine.erro && (
+                  <div style={{ fontSize: 12, color: COR.atencao, paddingTop: 8 }}>
+                    Não foi possível ler esta loja agora: {v.vitrine.erro}
+                  </div>
+                )}
+                {v?.estado === 'pronta' && !v.vitrine.erro && v.vitrine.cartoes.length === 0 && (
+                  <div style={{ fontSize: 12, color: 'var(--color-terciario)', paddingTop: 8 }}>
+                    Nenhum resultado para “{palavra}” nesta loja.
+                  </div>
+                )}
 
-              {v.cartoes.length > 0 && (
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
-                    gap: 10,
-                    paddingTop: 12,
-                  }}
-                >
-                  {v.cartoes.map((c) => (
-                    <Cartao key={c.url} c={c} />
-                  ))}
-                </div>
-              )}
-            </section>
-          ))}
+                {v?.estado === 'pronta' && v.vitrine.cartoes.length > 0 && (
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+                      gap: 10,
+                      paddingTop: 12,
+                    }}
+                  >
+                    {v.vitrine.cartoes.map((cartao) => (
+                      <Cartao key={cartao.url} c={cartao} />
+                    ))}
+                  </div>
+                )}
+              </section>
+            )
+          })}
         </>
       )}
     </div>

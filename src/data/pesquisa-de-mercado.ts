@@ -1,10 +1,8 @@
 import 'server-only'
 
 import {
-  CONCORRENTES,
   extrairCartoes,
   filtrarERanquear,
-  primeiraPalavra,
   urlDeBusca,
   type CartaoDeProduto,
   type Concorrente,
@@ -14,12 +12,14 @@ import { operadorAtual } from './operador'
 import { supabaseConfigurado, supabaseServer } from './supabase'
 
 /**
- * A pesquisa de mercado que roda no servidor: busca a página de cada
- * concorrente, extrai os cartões e devolve tudo numa passada.
+ * A pesquisa de mercado que roda no servidor: busca a página de UM
+ * concorrente por chamada, extrai os cartões e devolve.
  *
- * As seis lojas são consultadas EM PARALELO com prazo individual — a função
- * da Netlify corta perto de 26 s, e uma loja fora do ar não pode custar a
- * rodada. Loja que falha volta com o erro escrito, nunca em silêncio.
+ * Uma loja por invocação de propósito: a primeira versão consultava as seis
+ * numa server action só, e a soma — partida fria, seis buscas, banco —
+ * encostava no teto da função da Netlify; quando estourava, o navegador
+ * recebia o 502 como página de erro. Fatiado, cada chamada fica folgada, o
+ * resultado chega progressivo e loja fora do ar custa só a própria vitrine.
  */
 
 const PRAZO_POR_LOJA_MS = 9_000
@@ -39,15 +39,6 @@ export interface ReferenciaFrenesi {
   imagem: string | null
   variante: string
   preco: number
-}
-
-export interface PesquisaDeMercado {
-  termo: string
-  palavra: string
-  vitrines: VitrineDaLoja[]
-  /** Como a FRENESI está vendendo o mesmo perfume, para a régua ficar na tela. */
-  frenesi: ReferenciaFrenesi[]
-  executadaEm: string
 }
 
 async function paginaDeBusca(url: string, referer: string): Promise<string> {
@@ -111,7 +102,7 @@ async function sugestaoShopify(c: Concorrente, palavra: string): Promise<CartaoD
   }
 }
 
-async function vitrineDoConcorrente(c: Concorrente, palavra: string): Promise<VitrineDaLoja> {
+export async function vitrineDoConcorrente(c: Concorrente, palavra: string): Promise<VitrineDaLoja> {
   const busca = urlDeBusca(c, palavra)
   const base: VitrineDaLoja = {
     chave: c.chave,
@@ -142,7 +133,7 @@ async function vitrineDoConcorrente(c: Concorrente, palavra: string): Promise<Vi
 }
 
 /** Como a FRENESI vende o mesmo perfume — a régua do comparativo. */
-async function referenciaFrenesi(palavra: string): Promise<ReferenciaFrenesi[]> {
+export async function referenciaFrenesi(palavra: string): Promise<ReferenciaFrenesi[]> {
   if (!supabaseConfigurado() || !palavra) return []
   const { data } = await supabaseServer()
     .from('perfumes_base')
@@ -169,49 +160,38 @@ async function referenciaFrenesi(palavra: string): Promise<ReferenciaFrenesi[]> 
   )
 }
 
-export async function pesquisarMercado(termo: string): Promise<PesquisaDeMercado> {
-  const palavra = primeiraPalavra(termo)
-  if (!palavra) throw new Error('Diga o nome do perfume a pesquisar.')
-
-  const [vitrines, frenesi] = await Promise.all([
-    Promise.all(CONCORRENTES.map((c) => vitrineDoConcorrente(c, palavra))),
-    referenciaFrenesi(palavra),
-  ])
-
-  const pesquisa: PesquisaDeMercado = {
-    termo: termo.trim(),
-    palavra,
-    vitrines,
-    frenesi,
-    executadaEm: new Date().toISOString(),
-  }
-
-  // O histórico não pode derrubar a pesquisa: quem pediu quer os preços.
+/**
+ * Grava a pesquisa no histórico — chamada UMA vez por rodada, quando as seis
+ * vitrines já responderam. Nunca derruba nada: histórico é memória, não
+ * requisito.
+ */
+export async function registrarPesquisa(
+  termo: string,
+  palavra: string,
+  vitrines: Pick<VitrineDaLoja, 'chave' | 'cartoes' | 'erro'>[],
+): Promise<void> {
   try {
-    if (supabaseConfigurado()) {
-      await supabaseServer()
-        .from('pesquisas_de_mercado')
-        .insert({
-          termo: pesquisa.termo,
-          palavra,
-          resultados: vitrines.map((v) => ({
-            chave: v.chave,
-            total: v.cartoes.length,
-            menor_preco: v.cartoes.reduce<number | null>(
-              (min, c) => (c.preco !== null && (min === null || c.preco < min) ? c.preco : min),
-              null,
-            ),
-            erro: v.erro,
-          })),
-          total: vitrines.reduce((s, v) => s + v.cartoes.length, 0),
-          executada_por: await operadorAtual(),
-        })
-    }
+    if (!supabaseConfigurado()) return
+    await supabaseServer()
+      .from('pesquisas_de_mercado')
+      .insert({
+        termo: termo.trim(),
+        palavra,
+        resultados: vitrines.map((v) => ({
+          chave: v.chave,
+          total: v.cartoes.length,
+          menor_preco: v.cartoes.reduce<number | null>(
+            (min, c) => (c.preco !== null && (min === null || c.preco < min) ? c.preco : min),
+            null,
+          ),
+          erro: v.erro,
+        })),
+        total: vitrines.reduce((s, v) => s + v.cartoes.length, 0),
+        executada_por: await operadorAtual(),
+      })
   } catch (e) {
     console.error('[pesquisa-de-mercado] histórico não gravado:', e)
   }
-
-  return pesquisa
 }
 
 export interface PesquisaAnterior {
