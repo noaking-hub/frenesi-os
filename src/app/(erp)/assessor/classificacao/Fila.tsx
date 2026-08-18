@@ -32,6 +32,11 @@ export interface SugestaoNaTela {
   origem: string
   exigeRevisao: boolean
   motivo: string
+  quando: string | null
+  conta: string | null
+  favorecido: string | null
+  /** Falso só para transferência própria e crédito de venda. */
+  classificavel: boolean
 }
 
 type Filtro = 'todos' | 'sugeridos' | 'revisao' | 'sem_sugestao'
@@ -47,7 +52,11 @@ export function Fila({
 }) {
   const router = useRouter()
   const [marcados, setMarcados] = useState<Set<string>>(new Set())
-  const [filtro, setFiltro] = useState<Filtro>('sugeridos')
+  // Abrir numa aba vazia parece tela quebrada: começa na primeira que tem
+  // conteúdo — quem só tem movimentos sem sugestão cai direto neles.
+  const [filtro, setFiltro] = useState<Filtro>(() =>
+    sugestoes.some((s) => s.categoriaId && !s.exigeRevisao) ? 'sugeridos' : 'todos',
+  )
   const [categoriaAlvo, setCategoriaAlvo] = useState('')
   const [ocupado, setOcupado] = useState(false)
   const [aviso, setAviso] = useState<{ ok: boolean; texto: string; loteId?: string } | null>(null)
@@ -83,7 +92,7 @@ export function Fila({
   }
 
   function marcarVisiveis() {
-    const classificaveis = visiveis.filter((s) => s.categoriaId).map((s) => s.id)
+    const classificaveis = visiveis.filter((s) => s.classificavel).map((s) => s.id)
     setMarcados((antes) =>
       classificaveis.every((id) => antes.has(id)) ? new Set() : new Set(classificaveis),
     )
@@ -231,7 +240,7 @@ export function Fila({
               cursor: 'pointer',
             }}
           >
-            Marcar / desmarcar os {visiveis.filter((s) => s.categoriaId).length} classificáveis desta aba
+            Marcar / desmarcar os {visiveis.filter((s) => s.classificavel).length} classificáveis desta aba
           </button>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -354,8 +363,16 @@ function Linha({
   marcado: boolean
   aoAlternar: () => void
 }) {
-  const bloqueado = !s.categoriaId
-  const tom: TomUi = bloqueado ? 'neutro' : s.exigeRevisao ? 'atencao' : 'ok'
+  // Bloqueado é SÓ o que classificar duplicaria (transferência própria e
+  // crédito de venda). Sem sugestão não é bloqueio: é um movimento esperando
+  // a categoria vir de quem sabe — marca, escolhe no rodapé e aplica.
+  const bloqueado = !s.classificavel
+  const tom: TomUi = bloqueado ? 'neutro' : s.exigeRevisao ? 'atencao' : s.categoriaId ? 'ok' : 'neutro'
+  const detalhes = [
+    s.quando ? `${s.quando.slice(8, 10)}/${s.quando.slice(5, 7)}` : null,
+    s.conta,
+    s.favorecido,
+  ].filter(Boolean)
 
   return (
     <div
@@ -392,19 +409,24 @@ function Linha({
         {marcado && <Ico n="check" tamanho={11} />}
       </button>
 
-      <span
-        className="font-sans"
-        style={{
-          flex: 1,
-          minWidth: 200,
-          fontSize: 12,
-          color: 'var(--color-tinta)',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-        }}
-        title={s.descricao}
-      >
-        {s.descricao}
+      <span style={{ flex: 1, minWidth: 200, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span
+          className="font-sans"
+          style={{
+            fontSize: 12,
+            color: 'var(--color-tinta)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+          title={s.descricao}
+        >
+          {s.descricao}
+        </span>
+        {detalhes.length > 0 && (
+          <span className="font-sans" style={{ fontSize: 10.5, color: 'rgba(242,237,227,.42)' }}>
+            {detalhes.join(' · ')}
+          </span>
+        )}
       </span>
 
       <Num tamanho={12} tom={s.tipo === 'entrada' ? 'ok' : undefined}>
@@ -413,7 +435,9 @@ function Linha({
       </Num>
 
       <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 130 }}>
-        <Etiqueta>{bloqueado ? 'Não classificável' : 'Sugestão'}</Etiqueta>
+        <Etiqueta>
+          {bloqueado ? 'Não classificável' : s.categoriaId ? 'Sugestão' : 'Sem sugestão'}
+        </Etiqueta>
         <span className="font-sans" style={{ fontSize: 11.5, color: TINTA[tom] }}>
           {s.categoria ?? '—'}
           {s.categoriaId && s.origem === 'historico' && (
@@ -429,7 +453,13 @@ function Linha({
         title={s.motivo}
         style={{ color: TINTA[tom], display: 'grid', placeItems: 'center', flex: 'none' }}
       >
-        <Ico n={bloqueado ? 'cadeado' : s.exigeRevisao ? 'alerta' : 'check-circulo'} tamanho={14} />
+        {bloqueado ? (
+          <Ico n="cadeado" tamanho={14} />
+        ) : s.exigeRevisao ? (
+          <Ico n="alerta" tamanho={14} />
+        ) : s.categoriaId ? (
+          <Ico n="check-circulo" tamanho={14} />
+        ) : null}
       </span>
     </div>
   )

@@ -40,6 +40,7 @@ interface LinhaDeLancamento {
   pedido_id: string | null
   competencia: string
   conta_id: string | null
+  ocorrido_em: string | null
 }
 
 export async function lerRegrasDeClassificacao(): Promise<RegraDeClassificacao[]> {
@@ -102,12 +103,17 @@ export async function lerHistoricoDeClassificacao(): Promise<ClassificacaoAnteri
   }))
 }
 
-export async function lerMovimentosSemCategoria(limite = 200): Promise<MovimentoParaClassificar[]> {
+export type MovimentoDaFila = MovimentoParaClassificar & {
+  ocorridoEm: string | null
+  contaId: string | null
+}
+
+export async function lerMovimentosSemCategoria(limite = 200): Promise<MovimentoDaFila[]> {
   if (!supabaseConfigurado()) return []
   const { data, error } = await supabaseServer()
     .from('lancamentos')
     .select(
-      'id, descricao, favorecido, tipo, valor, categoria_id, categoria, transferencia_id, pedido_id, competencia, conta_id',
+      'id, descricao, favorecido, tipo, valor, categoria_id, categoria, transferencia_id, pedido_id, competencia, conta_id, ocorrido_em',
     )
     .is('categoria_id', null)
     .is('cancelado_em', null)
@@ -123,11 +129,28 @@ export async function lerMovimentosSemCategoria(limite = 200): Promise<Movimento
     valor: Number(l.valor),
     transferenciaId: l.transferencia_id ? String(l.transferencia_id) : null,
     pedidoId: l.pedido_id ? String(l.pedido_id) : null,
+    // Contexto para a fila: sem data e conta, a linha é uma frase solta —
+    // ninguém classifica "Compra paga pela conta" sem saber quando e por onde.
+    ocorridoEm: l.ocorrido_em ? String(l.ocorrido_em) : null,
+    contaId: l.conta_id ? String(l.conta_id) : null,
   }))
 }
 
 export interface AnaliseDeClassificacao {
-  sugestoes: (Sugestao & { descricao: string; valor: number; tipo: 'entrada' | 'saida' })[]
+  sugestoes: (Sugestao & {
+    descricao: string
+    valor: number
+    tipo: 'entrada' | 'saida'
+    quando: string | null
+    conta: string | null
+    favorecido: string | null
+    /**
+     * Falso só para transferência entre contas próprias e crédito de venda —
+     * classificá-los contaria o mesmo dinheiro duas vezes. "Sem sugestão" NÃO
+     * é o mesmo que isso: movimento sem histórico se classifica à mão.
+     */
+    classificavel: boolean
+  })[]
   resumo: ReturnType<typeof resumirLote>
   politica: { modo: string; limiar: number; tetoValor: number; escritaLiberada: boolean }
 }
@@ -165,6 +188,10 @@ export async function analisarLancamentos(limite = 200): Promise<AnaliseDeClassi
       descricao: m?.descricao ?? '',
       valor: m?.valor ?? 0,
       tipo: m?.tipo ?? ('saida' as const),
+      quando: m?.ocorridoEm ?? null,
+      conta: m?.contaId ?? null,
+      favorecido: m?.favorecido ?? null,
+      classificavel: !m?.transferenciaId && !m?.pedidoId,
     }
   })
 

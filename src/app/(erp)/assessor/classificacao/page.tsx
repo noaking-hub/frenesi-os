@@ -1,4 +1,4 @@
-import { CabecalhoPagina, GradeIndicadores, Indicador, Painel, Pilha, Pilula } from '@/components/erp/ui'
+import { GradeIndicadores, Indicador, Painel, Pilha, Pilula } from '@/components/erp/ui'
 import { analisarLancamentos, lerCategoriasAtivas } from '@/data/assessor/financeiro'
 import { escritaLiberada } from '@/data/assessor/motor'
 import { brl } from '@/domain'
@@ -29,23 +29,18 @@ export default async function TelaDeClassificacao() {
   ])
 
   const r = analise.resumo
-  const semSugestaoMasClassificavel = analise.sugestoes.filter(
-    (s) => !s.categoriaId && !s.motivo.toLowerCase().includes('transferência') && !s.motivo.includes('pedido'),
-  ).length
+  const naoClassificaveis = analise.sugestoes.filter((s) => !s.classificavel).length
 
+  // O cabeçalho é um só, o do shell — repetir título e subtítulo aqui fazia a
+  // tela abrir dizendo a mesma coisa duas vezes. O que sobrevive é a pílula
+  // de estado da escrita, encostada à direita.
   return (
     <Pilha gap={18}>
-      <CabecalhoPagina
-        trilha="Meu Assessor"
-        titulo="Fila de classificação"
-        subtitulo="Movimentos financeiros sem categoria, com a sugestão do ERP e o motivo dela. Você confere, marca e aplica — o modelo não participa desta decisão."
-        icone="recibo"
-        acao={
-          <Pilula icone={escrita ? 'check-circulo' : 'cadeado'} tom={escrita ? 'ok' : 'atencao'}>
-            {escrita ? `Modo ${analise.politica.modo}` : 'Escrita desligada'}
-          </Pilula>
-        }
-      />
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <Pilula icone={escrita ? 'check-circulo' : 'cadeado'} tom={escrita ? 'ok' : 'atencao'}>
+          {escrita ? `Modo ${analise.politica.modo}` : 'Escrita desligada'}
+        </Pilula>
+      </div>
 
       <GradeIndicadores conectada minimo={190}>
         <Indicador
@@ -77,7 +72,7 @@ export default async function TelaDeClassificacao() {
           icone="transferir"
           tom="info"
           rotulo="Não classificáveis"
-          valor={String(r.semSugestao - semSugestaoMasClassificavel)}
+          valor={String(naoClassificaveis)}
           nota="transferências e créditos de venda — contá-los duplicaria o resultado"
         />
       </GradeIndicadores>
@@ -104,6 +99,10 @@ export default async function TelaDeClassificacao() {
             origem: s.origem,
             exigeRevisao: s.exigeRevisao,
             motivo: s.motivo,
+            quando: s.quando,
+            conta: s.conta,
+            favorecido: s.favorecido,
+            classificavel: s.classificavel,
           }))}
           categorias={categorias}
           escritaLiberada={escrita}
