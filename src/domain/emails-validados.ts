@@ -968,7 +968,6 @@ export const HTML_VALIDADO_ENTREGUE = `<!DOCTYPE html>
                         <div style="padding-top:18px;">
                           <span style="display:inline-block; font-family:Georgia,'Times New Roman',serif; font-size:34px; line-height:42px; mso-line-height-rule:exactly; color:#5E4A1E; border:1px dashed #D8C49B; border-radius:8px; padding:12px 34px;">&#10003; Recebido</span>
                         </div>
-                        <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#6B6355; padding-top:16px;">Se algo n&atilde;o estiver como voc&ecirc; esperava, responda este e-mail</div>
                       </td>
                     </tr>
                   </table>
@@ -995,7 +994,6 @@ export const HTML_VALIDADO_ENTREGUE = `<!DOCTYPE html>
               <tr>
                 <td align="center" class="pad" style="padding:32px 50px 0 50px;">
                   <div style="font-family:Georgia,'Times New Roman',serif; font-size:19px; line-height:26px; font-style:italic; mso-line-height-rule:exactly; color:#8A6A2F;">Obrigado por comprar com a gente.</div>
-                  <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:22px; mso-line-height-rule:exactly; color:#6B6355; padding-top:10px;">Se gostou, conta pra gente &mdash; e se n&atilde;o gostou, conta tamb&eacute;m.</div>
                 </td>
               </tr>
 
