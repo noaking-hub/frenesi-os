@@ -1329,6 +1329,22 @@ export async function descobrirDestinoDosPayouts(limite = 8): Promise<RodadaDest
     .filter((l) => !(l.observacao ?? '').startsWith('Contraparte'))
     .slice(0, limite)
 
+  // Enquanto houver saque sem resposta, a rodada também sonda as fontes de
+  // EXTRATO que podem nomear o destinatário: o informe bancário e as colunas
+  // configuráveis do relatório de liberações. O painel do gateway mostra CNPJ
+  // e razão social no comprovante — o dado existe do lado deles; o que está
+  // sendo descoberto aqui é qual porta a API abre para ele.
+  if (fila.length) {
+    for (const caminho of [
+      '/v1/account/bank_report/list',
+      '/v1/account/bank_report/config',
+      '/v1/account/release_report/config',
+    ]) {
+      const r = await texto(caminho)
+      rodada.amostras.push({ caminho, metodo: 'GET', status: r.status, corpo: r.corpo.slice(0, 1200) })
+    }
+  }
+
   const resolver = async (id: string, categoria: string): Promise<boolean> => {
     const { data: r, error: erro } = await sb.rpc('resolver_destino_do_payout', {
       p_id: id,
