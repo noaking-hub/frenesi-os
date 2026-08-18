@@ -142,6 +142,16 @@ export const NAV: GrupoNav[] = [
         subtitulo: 'A foto do perfume vira imagem de catálogo, com o decant em cena',
         icone: 'faisca',
       },
+      // Veio do projeto frenesi-price-lab: o preço do perfume nas lojas
+      // concorrentes, lado a lado com o nosso.
+      {
+        id: 'pesquisa',
+        label: 'Pesquisa de mercado',
+        href: '/produtos/pesquisa',
+        pronta: true,
+        subtitulo: 'O preço do perfume nas seis lojas concorrentes, lado a lado',
+        icone: 'tendencia',
+      },
     ],
   },
   {
