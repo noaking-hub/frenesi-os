@@ -7,7 +7,7 @@ import { emailConfigurado, entregar } from '@/data/email'
 import { lerModeloEmail } from '@/data/modelo-email'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { criarCupomYampi, lerCarrinhosYampi } from '@/data/yampi-crm'
-import { aplicarSite, emailRecuperacao } from '@/domain'
+import { aplicarSite, emailRecuperacao, imagemDoCatalogoParaItem } from '@/domain'
 
 /**
  * Como o cupom entra no envio: um código fixo já publicado, ou um código
@@ -136,6 +136,16 @@ export async function enviarEmailsCarrinho(
   const agora = Date.now()
   const inicio = Date.now()
   const modelo = await lerModeloEmail('carrinho')
+  // A Yampi não manda a foto do item no carrinho; o catálogo tem quase todas
+  // (a mesma miniatura da confirmação de pagamento). Uma leitura por rodada.
+  let catalogo: { nome: string; imagem: string | null }[] = []
+  if (sb) {
+    const { data: bases } = await sb.from('perfumes_base').select('nome, imagem_url').limit(1000)
+    catalogo = ((bases ?? []) as { nome: string; imagem_url: string | null }[]).map((p) => ({
+      nome: p.nome,
+      imagem: p.imagem_url,
+    }))
+  }
   // A lista de descadastro é lida UMA vez: uma consulta por destinatário
   // seriam mil idas ao banco, e é justamente o envio em massa que não pode
   // escapar do filtro.
@@ -220,7 +230,10 @@ export async function enviarEmailsCarrinho(
       {
         nome: carrinho.cliente,
         itens: carrinho.itens,
-        imagens: carrinho.imagens,
+        // O que a Yampi mandou tem precedência; o catálogo cobre o resto.
+        imagens: carrinho.itens.map(
+          (rotulo, i) => carrinho.imagens[i] ?? imagemDoCatalogoParaItem(rotulo, catalogo),
+        ),
         valor: carrinho.valor,
         linkCheckout: carrinho.link ?? process.env.LOJA_URL ?? null,
         cupom: cupomDoEmail,

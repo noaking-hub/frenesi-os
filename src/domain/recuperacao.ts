@@ -15,6 +15,37 @@ import {
  * entendem; classe e flexbox morrem no Gmail.
  */
 
+/**
+ * A foto de um item do carrinho, casada com o CATÁLOGO pelo nome.
+ *
+ * A Yampi não manda a imagem no payload do carrinho, mas o item carrega o
+ * nome exato do produto da loja — e o catálogo tem a miniatura de quase
+ * todos (é a mesma que a confirmação de pagamento usa). O casamento é por
+ * prefixo, com o nome MAIS LONGO vencendo: "Polo Black Masculino…" não pode
+ * casar com "Polo Masculino…" só porque os dois começam com Polo.
+ */
+export function imagemDoCatalogoParaItem(
+  rotulo: string,
+  catalogo: { nome: string; imagem: string | null }[],
+): string | null {
+  const alvo = semAcentoMinusculo(rotulo.replace(/^\d+\s*[×x]\s*/, ''))
+  if (!alvo) return null
+  let melhor: { tamanho: number; imagem: string | null } | null = null
+  for (const c of catalogo) {
+    const nome = semAcentoMinusculo(c.nome)
+    if (!nome || !alvo.startsWith(nome)) continue
+    if (!melhor || nome.length > melhor.tamanho) melhor = { tamanho: nome.length, imagem: c.imagem }
+  }
+  return melhor?.imagem ?? null
+}
+
+const semAcentoMinusculo = (s: string) =>
+  (s || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim()
+
 export interface DadosEmailCarrinho {
   /** Nome do cliente como veio do checkout; null vira saudação neutra. */
   nome: string | null

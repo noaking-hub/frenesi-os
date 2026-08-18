@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { aplicarSite, emailRecuperacao } from '..'
+import { aplicarSite, emailRecuperacao, imagemDoCatalogoParaItem } from '..'
 
 describe('e-mail de recuperação de carrinho', () => {
   const base = {
@@ -149,5 +149,38 @@ describe('aplicarSite', () => {
 
   it('sem URL conhecida, o caminho fica relativo em vez de literal', () => {
     expect(aplicarSite('{site}/marca/x.png', null)).toBe('/marca/x.png')
+  })
+})
+
+describe('imagem do catálogo para o item do carrinho', () => {
+  const catalogo = [
+    { nome: 'La Vie Est Belle Feminino Eau de Parfum (Decant)', imagem: 'https://cdn/lvb.jpg' },
+    { nome: 'La Vie Est Belle Iris Absolu Feminino Eau de Parfum (Decant)', imagem: 'https://cdn/iris.jpg' },
+    { nome: 'Miss Dior Feminino Eau de Parfum (Decant)', imagem: 'https://cdn/miss.jpg' },
+  ]
+
+  it('casa pelo prefixo do nome, ignorando o volume no fim', () => {
+    expect(
+      imagemDoCatalogoParaItem('La Vie Est Belle Feminino Eau de Parfum (Decant) 3ml', catalogo),
+    ).toBe('https://cdn/lvb.jpg')
+  })
+
+  it('o nome mais longo vence: a variação não cai na base', () => {
+    expect(
+      imagemDoCatalogoParaItem(
+        'La Vie Est Belle Iris Absolu Feminino Eau de Parfum (Decant) 5ml',
+        catalogo,
+      ),
+    ).toBe('https://cdn/iris.jpg')
+  })
+
+  it('ignora o prefixo de quantidade "2× " e acentos', () => {
+    expect(
+      imagemDoCatalogoParaItem('2× Miss Dior Feminino Eau de Parfum (Decant) 3ml', catalogo),
+    ).toBe('https://cdn/miss.jpg')
+  })
+
+  it('sem casamento, sem invenção', () => {
+    expect(imagemDoCatalogoParaItem('Produto que não temos 5ml', catalogo)).toBeNull()
   })
 })
