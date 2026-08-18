@@ -196,7 +196,7 @@ export async function POST(req: Request) {
     try {
       const q = await importarRespostasDoQuiz()
       relatorio.quiz = q.erro
-        ? { erro: q.erro }
+        ? { erro: q.erro, tabelasEncontradas: q.tabelasEncontradas }
         : { tabela: q.tabela, lidas: q.lidas, gravadas: q.gravadas }
     } catch (e) {
       relatorio.quiz = { erro: mensagemDe(e) }

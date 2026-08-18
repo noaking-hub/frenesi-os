@@ -86,6 +86,8 @@ export interface ImportacaoDoQuiz {
   lidas: number
   gravadas: number
   erro?: string
+  /** O que a descoberta viu — é o diagnóstico quando a detecção falha. */
+  tabelasEncontradas?: string[]
 }
 
 /**
@@ -99,13 +101,16 @@ export async function importarRespostasDoQuiz(): Promise<ImportacaoDoQuiz> {
     return { tabela: null, lidas: 0, gravadas: 0, erro: 'quiz não configurado' }
   }
   try {
-    const alvo = tabelaDeRespostas(await tabelasDoQuiz())
+    const tabelas = await tabelasDoQuiz()
+    const alvo = tabelaDeRespostas(tabelas)
     if (!alvo) {
+      // O schema visto vai junto: sem ele o erro manda procurar às cegas.
       return {
         tabela: null,
         lidas: 0,
         gravadas: 0,
         erro: 'nenhuma tabela com coluna de e-mail — defina QUIZ_TABELA com o nome certo',
+        tabelasEncontradas: tabelas.map((t) => `${t.tabela}(${t.colunas.slice(0, 12).join(', ')})`),
       }
     }
 
