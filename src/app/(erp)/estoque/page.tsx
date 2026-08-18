@@ -96,6 +96,9 @@ export default async function PerfumesBase() {
         {/* Esta tela é leitura: quem move estoque é a compra, a produção e o
             inventário. Os atalhos levam até quem executa, em vez de fingir
             que a ação acontece aqui. */}
+        <LinkSecundario href="/estoque/a-caminho" altura={34}>
+          Compras a caminho
+        </LinkSecundario>
         <LinkSecundario href="/estoque/lotes" altura={34}>
           Registrar compra de frasco
         </LinkSecundario>

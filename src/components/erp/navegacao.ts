@@ -142,6 +142,10 @@ export const NAV: GrupoNav[] = [
       { id: 'derivados', label: 'Produtos derivados', href: '/estoque/derivados', pronta: true },
       { id: 'movimentacoes', label: 'Movimentações', href: '/estoque/movimentacoes', pronta: true },
       { id: 'lotes', label: 'Lotes e perda real', href: '/estoque/lotes', pronta: true },
+      // Antes do lote existe o intervalo entre comprar e receber, que o ERP
+      // não enxergava — e que vive logo acima de "Lotes" porque é o passo
+      // anterior a ele na vida real.
+      { id: 'a-caminho', label: 'Compras a caminho', href: '/estoque/a-caminho', pronta: true },
       { id: 'sync', label: 'Sincronia Shopify', href: '/estoque/sincronia', pronta: true },
       { id: 'inventario', label: 'Inventário', href: '/estoque/inventario', pronta: true },
       // Frasco, válvula e tampa: o decant não sai só com perfume.

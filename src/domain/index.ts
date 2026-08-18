@@ -1,6 +1,7 @@
 export * from './types'
 export * from './format'
 export * from './contraparte'
+export * from './compras-a-caminho'
 export * from './regras-de-envio'
 export * from './fracionamento'
 export * from './precificacao'
