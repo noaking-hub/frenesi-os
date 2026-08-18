@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import { BotaoOuro, Rotulo, TituloSecao } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
@@ -370,7 +371,10 @@ function PainelVariacoes({ cartao, aoFechar }: { cartao: CartaoDeProduto; aoFech
     }
   }, [cartao.url])
 
-  return (
+  // Portal no <body>: dentro do shell, um ancestral com transform vira o
+  // "containing block" do position:fixed e o painel abria lá embaixo,
+  // obrigando a rolar até ele. No body, fixed é fixed — centro da janela.
+  return createPortal(
     <div
       onClick={aoFechar}
       style={{
@@ -487,7 +491,8 @@ function PainelVariacoes({ cartao, aoFechar }: { cartao: CartaoDeProduto; aoFech
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

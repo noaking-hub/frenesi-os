@@ -555,6 +555,7 @@ async function mensagemDoAviso(
           total: Number(pedido.valor ?? 0),
           ...(await resumoDaCompra(aviso.pedidoId)),
           cashback: await cashbackDaCompra(aviso.pedidoId, aviso.email),
+          entregaLocal,
         })
       : aviso.evento === 'pedido_entregue'
       ? emailEntregue({ nome: aviso.cliente, pedido: aviso.pedidoId, transportadora: nome, entregaLocal })

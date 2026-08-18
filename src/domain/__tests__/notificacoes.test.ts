@@ -6,6 +6,7 @@ import {
   emailDevolucaoConcluida,
   emailEntregue,
   emailEnvio,
+  emailPagamento,
   paginaDeRastreio,
 } from '..'
 import type { PedidoNotificavel } from '..'
@@ -236,5 +237,18 @@ describe('e-mail de devolução concluída', () => {
     expect(html).toContain('efetuado pelo mesmo meio usado no pagamento')
     expect(html).not.toContain('estorno no cartão')
     expect(html).not.toContain('por Pix')
+  })
+})
+
+describe('confirmação de pagamento para entrega local', () => {
+  it('fala em preparo de 24h e motoboy, sem prazo de postagem nem rastreio', () => {
+    const local = emailPagamento({ nome: 'João', pedido: 'YP-1', total: 97, entregaLocal: true })
+    expect(local.html).toContain('motoboy')
+    expect(local.html).toContain('24 horas')
+    expect(local.html).not.toContain('postagem')
+    expect(local.html).not.toContain('rastreio')
+
+    const comum = emailPagamento({ nome: 'João', pedido: 'YP-1', total: 97 })
+    expect(comum.html).toContain('postagem')
   })
 })

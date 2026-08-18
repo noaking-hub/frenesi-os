@@ -543,6 +543,20 @@ function blocoDeCashback(c: CashbackGanho): string {
 `
 }
 
+/**
+ * O trecho do modelo validado que fala de POSTAGEM — é ele que troca quando a
+ * entrega é local: não há postagem, o preparo leva até 24 horas e quem
+ * entrega é o motoboy, em mãos.
+ */
+const PRAZO_PAGO_POSTAGEM =
+  'O prazo para postagem &eacute; de at&eacute; 3 dias &uacute;teis. Assim que o pedido for ' +
+  'enviado, voc&ecirc; receber&aacute; outro e-mail com o c&oacute;digo de rastreio para ' +
+  'acompanhar a entrega.'
+const PRAZO_PAGO_LOCAL =
+  'O preparo leva at&eacute; 24 horas e a entrega &eacute; feita em m&atilde;os pelo nosso ' +
+  'motoboy, no endere&ccedil;o do pedido. Assim que o pedido sair para entrega, voc&ecirc; ' +
+  'receber&aacute; outro e-mail avisando.'
+
 export function emailPagamento(d: {
   nome: string | null
   pedido: string
@@ -552,11 +566,17 @@ export function emailPagamento(d: {
   frete?: number | null
   /** Lido da carteira na hora do envio; ausente, o bloco não aparece. */
   cashback?: CashbackGanho | null
+  /** Entrega por motoboy: sem postagem, sem código de rastreio. */
+  entregaLocal?: boolean
 }): { assunto: string; html: string } {
   const nome = d.nome?.trim().split(/\s+/)[0] || 'Olá'
   const itens = d.itens ?? []
 
-  const html = HTML_VALIDADO_PAGAMENTO.split('{resumo}')
+  const base = d.entregaLocal
+    ? HTML_VALIDADO_PAGAMENTO.split(PRAZO_PAGO_POSTAGEM).join(PRAZO_PAGO_LOCAL)
+    : HTML_VALIDADO_PAGAMENTO
+
+  const html = base.split('{resumo}')
     .join(
       itens.length > 0
         ? resumoDaCompra(itens, Number(d.frete ?? 0), d.total)
