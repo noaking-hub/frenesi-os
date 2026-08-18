@@ -82,12 +82,78 @@ const semTags = (s: string) => s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').t
  * preço prefere o valor cheio ao da parcela: "3x de R$ 24,90" perto do número
  * derruba a confiança daquele match.
  */
+/**
+ * A extração da Nuvemshop, fiel ao scan-nuvem do price-lab: o HTML é quebrado
+ * pelos cards de produto (âncoras com classe `product`), o título vem do
+ * atributo `title` — o texto visível da âncora costuma ser só "ver produto" —
+ * e a imagem prefere `srcset`/`data-src`, porque o `src` da Nuvemshop é o
+ * placeholder do lazy-load.
+ */
+function extrairCartoesNuvemshop(html: string, dominio: string): CartaoDeProduto[] {
+  const cardRe = /<a([^>]+class=["'][^"']*product[^"']*["'][^>]*)>/gi
+  const itens: CartaoDeProduto[] = []
+
+  let m: RegExpExecArray | null
+  while ((m = cardRe.exec(html)) !== null) {
+    const tag = m[1]
+    // O card inteiro (título visível, preço, imagem) mora logo depois da
+    // abertura da âncora; 2.600 caracteres cobrem os temas da plataforma.
+    const chunk = html.slice(m.index, m.index + 2600)
+
+    const hrefM = tag.match(/href=["']([^"']+)["']/i)
+    const url = absoluta(hrefM ? hrefM[1] : null, dominio)
+    if (!url) continue
+    const caminho = url.split('?')[0].toLowerCase()
+    if (!caminho.includes('/products/') && !caminho.includes('/produto')) continue
+
+    const tituloM =
+      tag.match(/title=["']([^"']+)["']/i) ||
+      chunk.match(/title=["']([^"']+)["']/i) ||
+      chunk.match(/<h\d[^>]*class=["'][^"']*product[^"']*title[^"']*["'][^>]*>([\s\S]*?)<\/h\d>/i)
+    const titulo = semTags(tituloM ? tituloM[1] : '').slice(0, 240)
+
+    const recorte = chunk.slice(0, 2400)
+    const precoM =
+      recorte.match(/R\$\s*\d{1,3}(?:\.\d{3})*,\d{2}/i) || recorte.match(/\d+,\d{2}(?=<)/i)
+    const preco = precoM ? precoDoTexto(precoM[0]) : null
+
+    let imagem: string | null = null
+    const imgTag = recorte.match(/<img[^>]+>/i)
+    if (imgTag) {
+      const t = imgTag[0]
+      const srcset = t.match(/\ssrcset=["']([^"']+)["']/i)
+      if (srcset) {
+        const maior = srcset[1]
+          .split(',')
+          .map((s) => s.trim().match(/(\S+)\s+(\d+)w/))
+          .filter((x): x is RegExpMatchArray => Boolean(x))
+          .sort((a, b) => Number(b[2]) - Number(a[2]))[0]
+        if (maior) imagem = absoluta(maior[1], dominio)
+      }
+      if (!imagem) {
+        const dataSrc = t.match(/\sdata-src=["']([^"']+)["']/i)
+        if (dataSrc) imagem = absoluta(dataSrc[1], dominio)
+      }
+      if (!imagem) {
+        const src = t.match(/\ssrc=["']([^"']+)["']/i)
+        if (src && !/data:image|placeholder|blank|1x1/i.test(src[1])) imagem = absoluta(src[1], dominio)
+      }
+    }
+
+    itens.push({ titulo, url, preco, imagem })
+  }
+  return itens
+}
+
 export function extrairCartoes(htmlCru: string, dominio: string): CartaoDeProduto[] {
   const html = htmlCru
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
 
-  const itens: CartaoDeProduto[] = []
+  // A passada da Nuvemshop vem PRIMEIRO: o dedup preserva a primeira
+  // ocorrência, e é ela que traz o título do atributo e a imagem certa do
+  // lazy-load. As âncoras genéricas complementam para Shopify e afins.
+  const itens: CartaoDeProduto[] = extrairCartoesNuvemshop(html, dominio)
 
   const ancoras = /<a\b[^>]*href=['"]([^'"]*\/(?:products|produtos?)\/[^'"]+)['"][^>]*>([\s\S]{0,1600}?)<\/a>/gi
   let m: RegExpExecArray | null
@@ -158,26 +224,33 @@ function cartaoGenerico(titulo: string): boolean {
 }
 
 /**
- * Filtra pelo termo e ordena por relevância.
+ * Filtra pelo TERMO INTEIRO e ordena por relevância.
  *
- * O score é o do price-lab: a palavra no título vale mais que na URL, decant
- * e volumes pequenos ganham reforço (é o mercado da FRENESI), e preços fora
- * da realidade — abaixo de R$ 10 ou acima de R$ 1.500 — perdem pontos por
- * cheirarem a placeholder ou kit. Empate resolve pelo preço, do menor.
+ * A loja é buscada pela primeira palavra — é o que captura as variações —,
+ * mas o filtro respeita o que foi digitado: quem escreve "Polo Black" não
+ * quer a família Polo inteira. Se existir cartão com TODAS as palavras no
+ * título, só eles ficam; sem nenhum, vale o recorte da primeira palavra,
+ * como o price-lab fazia. O filtro olha só o TÍTULO (URL trazia âncoras
+ * "ver produto" sem nome), e título vazio não vira cartão.
+ *
+ * O score é o do price-lab: decant e volumes pequenos ganham reforço (é o
+ * mercado da FRENESI) e preços fora da realidade perdem pontos. Empate
+ * resolve pelo preço, do menor.
  */
-export function filtrarERanquear(cartoes: CartaoDeProduto[], palavra: string): CartaoDeProduto[] {
-  const w = semAcento(palavra)
-  if (!w) return []
+export function filtrarERanquear(cartoes: CartaoDeProduto[], termo: string): CartaoDeProduto[] {
+  const palavras = semAcento(termo).split(/\s+/).filter(Boolean)
+  if (!palavras.length) return []
+  const primeira = palavras[0]
 
   const score = (c: CartaoDeProduto): number => {
     const t = semAcento(c.titulo)
     let s = 0
-    if (t.includes(w)) s += 10
+    if (palavras.every((p) => t.includes(p))) s += 12
+    if (t.includes(primeira)) s += 10
     if (/\bdecant\b/.test(t)) s += 4
     if (/\b5 ?ml\b/.test(t)) s += 3
     if (/\b(10|15) ?ml\b/.test(t)) s += 1
     if (/\bedp\b|eau de parfum/.test(t)) s += 1
-    if (semAcento(c.url).includes(w)) s += 2
     if (c.preco !== null) {
       if (c.preco < 10) s -= 3
       if (c.preco > 1500) s -= 3
@@ -185,16 +258,23 @@ export function filtrarERanquear(cartoes: CartaoDeProduto[], palavra: string): C
     return s
   }
 
-  return cartoes
+  const aproveitaveis = cartoes
+    .filter((c) => c.titulo.trim().length > 2)
     .filter((c) => !cartaoGenerico(c.titulo))
-    .filter((c) => semAcento(c.titulo).includes(w) || semAcento(c.url).includes(w))
-    .sort((a, b) => {
-      const diff = score(b) - score(a)
-      if (diff !== 0) return diff
-      if (a.preco === null) return 1
-      if (b.preco === null) return -1
-      return a.preco - b.preco
-    })
+    .filter((c) => semAcento(c.titulo).includes(primeira))
+
+  const exatos = aproveitaveis.filter((c) => {
+    const t = semAcento(c.titulo)
+    return palavras.every((p) => t.includes(p))
+  })
+
+  return (exatos.length ? exatos : aproveitaveis).sort((a, b) => {
+    const diff = score(b) - score(a)
+    if (diff !== 0) return diff
+    if (a.preco === null) return 1
+    if (b.preco === null) return -1
+    return a.preco - b.preco
+  })
 }
 
 /** O volume que o título anuncia — "Decant 5ml" → 5. */

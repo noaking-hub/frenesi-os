@@ -77,11 +77,39 @@ describe('pesquisa de mercado', () => {
     ])
   })
 
-  it('acha o termo também na URL, com acento normalizado', () => {
+  it('com mais de uma palavra, o refino manda: "Polo Black" não é a família Polo', () => {
     const cartoes = [
-      { titulo: 'Decant 5ml', url: 'https://l/products/hypnotic-poison', preco: 39.9, imagem: null },
+      { titulo: 'Polo Blue Decant 5ml', url: 'https://l/products/a', preco: 30, imagem: null },
+      { titulo: 'Polo Black Decant 5ml', url: 'https://l/products/b', preco: 28, imagem: null },
+      { titulo: 'Polo Sport Decant 5ml', url: 'https://l/products/c', preco: 27, imagem: null },
+      { titulo: 'Polo Black Decant 10ml', url: 'https://l/products/d', preco: 52, imagem: null },
     ]
-    expect(filtrarERanquear(cartoes, 'Hypnôtic')).toHaveLength(1)
+    const r = filtrarERanquear(cartoes, 'Polo Black')
+    expect(r.map((c) => c.titulo)).toEqual(['Polo Black Decant 5ml', 'Polo Black Decant 10ml'])
+    // Sem nenhum cartão com todas as palavras, vale o recorte da primeira.
+    expect(filtrarERanquear(cartoes, 'Polo Inexistente')).toHaveLength(4)
+  })
+
+  it('âncora sem nome ("ver produto") não vira cartão', () => {
+    const cartoes = [
+      { titulo: 'ver produto', url: 'https://l/products/polo-black', preco: 58, imagem: null },
+      { titulo: '', url: 'https://l/products/polo-blue', preco: 58, imagem: null },
+    ]
+    expect(filtrarERanquear(cartoes, 'Polo')).toHaveLength(0)
+  })
+
+  it('extração Nuvemshop: título no atributo, imagem no data-src do lazy-load', () => {
+    const html = `
+      <a href="/products/polo-black-5ml" class="item-link product-link" title="Polo Black Decant 5ml">
+        <img src="data:image/gif;base64,x" data-src="//cdn.loja.com/polo-black.jpg" />
+        ver produto
+      </a>
+      <span class="preco">R$ 34,90</span>`
+    const cartoes = extrairCartoes(html, 'https://loja.com.br')
+    expect(cartoes).toHaveLength(1)
+    expect(cartoes[0].titulo).toBe('Polo Black Decant 5ml')
+    expect(cartoes[0].imagem).toBe('https://cdn.loja.com/polo-black.jpg')
+    expect(cartoes[0].preco).toBe(34.9)
   })
 
   it('calcula o R$/ml quando o título anuncia o volume', () => {

@@ -52,7 +52,7 @@ export function PesquisaCliente({ historicoInicial }: { historicoInicial: Pesqui
     })
 
     const chamadas = CONCORRENTES.map((c) =>
-      pesquisarLoja(c.chave, p)
+      pesquisarLoja(c.chave, limpo)
         .then((r): EstadoVitrine =>
           r.ok ? { estado: 'pronta', vitrine: r.vitrine } : { estado: 'falhou', erro: r.erro },
         )
@@ -162,7 +162,7 @@ export function PesquisaCliente({ historicoInicial }: { historicoInicial: Pesqui
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
                 <Rotulo>Na FRENESI</Rotulo>
                 <span style={{ fontSize: 11, color: 'var(--color-terciario)' }}>
-                  como estamos vendendo “{palavra}” hoje
+                  como estamos vendendo “{termo}” hoje
                 </span>
               </div>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', paddingTop: 10 }}>
@@ -189,7 +189,7 @@ export function PesquisaCliente({ historicoInicial }: { historicoInicial: Pesqui
                     )}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                       <span className="font-sans" style={{ fontSize: 11.5, fontWeight: 600 }}>
-                        {f.nome} · {f.variante}
+                        {f.nome} · {/^\d+$/.test(f.variante) ? `${f.variante} ml` : f.variante}
                       </span>
                       <span className="font-mono" style={{ fontSize: 12, color: COR.ouro, fontWeight: 700 }}>
                         {brl(f.preco)}

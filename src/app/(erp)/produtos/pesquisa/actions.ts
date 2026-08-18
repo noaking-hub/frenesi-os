@@ -18,14 +18,15 @@ import {
  */
 export async function pesquisarLoja(
   chave: string,
-  palavra: string,
+  termo: string,
 ): Promise<{ ok: true; vitrine: VitrineDaLoja } | { ok: false; erro: string }> {
   const c = CONCORRENTES.find((x) => x.chave === chave)
   if (!c) return { ok: false, erro: 'Loja desconhecida.' }
-  const p = primeiraPalavra(palavra)
-  if (!p) return { ok: false, erro: 'Diga o nome do perfume a pesquisar.' }
+  if (!primeiraPalavra(termo)) return { ok: false, erro: 'Diga o nome do perfume a pesquisar.' }
   try {
-    return { ok: true, vitrine: await vitrineDoConcorrente(c, p) }
+    // O termo INTEIRO segue adiante: a loja é buscada pela primeira palavra,
+    // mas o filtro respeita tudo que foi digitado.
+    return { ok: true, vitrine: await vitrineDoConcorrente(c, termo) }
   } catch (e) {
     return { ok: false, erro: e instanceof Error ? e.message : String(e) }
   }

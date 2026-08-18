@@ -3,6 +3,7 @@ import 'server-only'
 import {
   extrairCartoes,
   filtrarERanquear,
+  primeiraPalavra,
   urlDeBusca,
   type CartaoDeProduto,
   type Concorrente,
@@ -102,7 +103,10 @@ async function sugestaoShopify(c: Concorrente, palavra: string): Promise<CartaoD
   }
 }
 
-export async function vitrineDoConcorrente(c: Concorrente, palavra: string): Promise<VitrineDaLoja> {
+export async function vitrineDoConcorrente(c: Concorrente, termo: string): Promise<VitrineDaLoja> {
+  // A LOJA é buscada pela primeira palavra (captura as variações); o FILTRO
+  // respeita o termo inteiro — "Polo Black" não é a família Polo completa.
+  const palavra = primeiraPalavra(termo)
   const busca = urlDeBusca(c, palavra)
   const base: VitrineDaLoja = {
     chave: c.chave,
@@ -114,9 +118,9 @@ export async function vitrineDoConcorrente(c: Concorrente, palavra: string): Pro
   }
   try {
     const html = await paginaDeBusca(busca, c.dominio)
-    let cartoes = filtrarERanquear(extrairCartoes(html, c.dominio), palavra)
+    let cartoes = filtrarERanquear(extrairCartoes(html, c.dominio), termo)
     if (!cartoes.length) {
-      cartoes = filtrarERanquear(await sugestaoShopify(c, palavra), palavra)
+      cartoes = filtrarERanquear(await sugestaoShopify(c, palavra), termo)
     }
     return { ...base, cartoes }
   } catch (e) {
@@ -133,14 +137,17 @@ export async function vitrineDoConcorrente(c: Concorrente, palavra: string): Pro
 }
 
 /** Como a FRENESI vende o mesmo perfume — a régua do comparativo. */
-export async function referenciaFrenesi(palavra: string): Promise<ReferenciaFrenesi[]> {
-  if (!supabaseConfigurado() || !palavra) return []
-  const { data } = await supabaseServer()
+export async function referenciaFrenesi(termo: string): Promise<ReferenciaFrenesi[]> {
+  const palavras = termo.trim().split(/\s+/).filter(Boolean)
+  if (!supabaseConfigurado() || !palavras.length) return []
+  // TODAS as palavras digitadas entram no recorte: "Polo Black" devolvia a
+  // família Polo inteira e a régua virava um paredão de cartões.
+  let consulta = supabaseServer()
     .from('perfumes_base')
     .select('nome, imagem_url, produtos_derivados(variante, preco_praticado)')
-    .ilike('nome', `%${palavra}%`)
     .eq('ativo', true)
-    .limit(6)
+  for (const p of palavras) consulta = consulta.ilike('nome', `%${p}%`)
+  const { data } = await consulta.limit(6)
 
   const linhas = (data ?? []) as unknown as {
     nome: string
