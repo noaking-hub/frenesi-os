@@ -67,6 +67,26 @@ export function ehACasa(pedaco: string): boolean {
  * rotina de enriquecimento tenta de novo noutra rodada, com outra fonte. Um
  * palpite gravado impediria essa segunda chance para sempre.
  */
+/**
+ * A categoria de despesa que a contraparte do saque denuncia sozinha.
+ *
+ * O extrato do Mercado Pago descreve todo saque como "Transferência para
+ * conta bancária" — pagar o Google e repassar para o Inter saem idênticos.
+ * Quando a API entrega o NOME de quem recebeu, alguns nomes decidem sem
+ * ajuda: "Google Brasil Internet Ltda" é tráfego pago, não transferência.
+ * Só entram aqui os inequívocos; qualquer outro nome devolve null e a
+ * decisão continua sendo de quem opera.
+ */
+export function categoriaPelaContraparte(nome: string | null | undefined): string | null {
+  const t = achatarNome(nome ?? '')
+  if (!t) return null
+  if (/\bgoogle\b/.test(t)) return 'google-ads-trafego-pago'
+  if (/\bmeta\b|facebook|\binstagram\b/.test(t)) return 'meta-ads-trafego-pago'
+  if (/tiktok/.test(t)) return 'marketing-e-ads'
+  if (/melhor envio|etiqueta/.test(t)) return 'frete'
+  return null
+}
+
 export function contraparteDe(bruto: string | null | undefined): string {
   if (!bruto) return ''
   const pedacos = bruto

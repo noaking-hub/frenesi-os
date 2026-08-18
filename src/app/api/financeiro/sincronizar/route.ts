@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { sincronizarEnvios } from '@/app/(erp)/pedidos/actions'
 import { cotarPrazosDeEntrega, frenetConfigurada, varrerRastreiosFrenet } from '@/data/frenet'
 import { codigosDoMelhorEnvio, descobrirEnviosDoMelhorEnvio, melhorEnvioConectado, rastrearNoMelhorEnvio } from '@/data/melhorenvio'
-import { atualizarExtratoMp, mercadoPagoConfigurado } from '@/data/mercadopago'
+import { atualizarExtratoMp, descobrirDestinoDosPayouts, mercadoPagoConfigurado } from '@/data/mercadopago'
 import { baixarEstoqueDosFaturados } from '@/data/baixa-estoque'
 import { pagaleveConfigurada } from '@/data/pagaleve'
 import { importarPagaleve } from '@/data/pagaleve-importacao'
@@ -465,6 +465,25 @@ export async function POST(req: Request) {
     }
   } catch (e) {
     relatorio.repassesConciliados = { erro: mensagemDe(e) }
+  }
+
+  // E o saque conta quem recebeu. O extrato descreve todo payout como
+  // "Transferência para conta bancária" — o pagamento do Google ADS e o
+  // repasse para o Inter saem idênticos, e a fila de destino pedia que o
+  // operador adivinhasse. A API do gateway sabe mais do que o relatório: o
+  // que ela nomear com clareza (Google, Meta, etiquetas do Melhor Envio) é
+  // resolvido como despesa na hora; o resto ganha a contraparte anotada na
+  // observação, para a decisão humana deixar de ser às cegas.
+  if (grupo('financeiro') && mercadoPagoConfigurado()) try {
+    const d = await descobrirDestinoDosPayouts()
+    relatorio.destinoDosPayouts = {
+      examinados: d.examinados,
+      resolvidos: d.resolvidos,
+      anotados: d.anotados,
+      ...(d.amostras.length ? { amostras: d.amostras } : {}),
+    }
+  } catch (e) {
+    relatorio.destinoDosPayouts = { erro: mensagemDe(e) }
   }
 
   // Venda anterior ao primeiro extrato que existe não é pendência: é

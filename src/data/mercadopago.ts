@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { contraparteDe } from '@/domain'
+import { categoriaPelaContraparte, contraparteDe } from '@/domain'
 
 import {
   casarPagamento,
@@ -1273,4 +1273,136 @@ async function listarRelatorios(): Promise<ArquivoRelatorio[]> {
   } catch {
     return []
   }
+}
+
+// ── Destino dos saques: perguntar ao próprio gateway ───────────────────────
+
+export interface RodadaDestinoPayouts {
+  examinados: number
+  resolvidos: { lancamento: string; contraparte: string; categoria: string }[]
+  /** Contraparte descoberta mas sem categoria óbvia: anotada na observação. */
+  anotados: { lancamento: string; contraparte: string }[]
+  /**
+   * As respostas cruas dos caminhos sondados para o PRIMEIRO saque da rodada.
+   * É por elas que o mapeamento se corrige sobre fato — o mesmo método dos
+   * relatórios: a documentação descreve o caso geral, não esta conta.
+   */
+  amostras: RespostaCrua[]
+}
+
+/**
+ * Pergunta ao Mercado Pago quem recebeu cada saque da fila de destino.
+ *
+ * O extrato descreve todo saque como "Transferência para conta bancária" — o
+ * pagamento do Google ADS e o repasse para o Inter saem idênticos, e a fila
+ * pedia que o operador adivinhasse. Mas o movimento tem um id, e a API sabe
+ * mais do que o relatório mostra. Quando a contraparte volta com nome que se
+ * explica sozinho (Google, Meta, Melhor Envio), o saque é resolvido como
+ * despesa na hora, pela mesma função atômica da tela; quando volta um nome
+ * que não decide nada, ele é ANOTADO na observação — a fila continua, mas
+ * quem abrir deixa de decidir às cegas.
+ */
+export async function descobrirDestinoDosPayouts(limite = 8): Promise<RodadaDestinoPayouts> {
+  const rodada: RodadaDestinoPayouts = { examinados: 0, resolvidos: [], anotados: [], amostras: [] }
+  if (!supabaseConfigurado() || !mercadoPagoConfigurado()) return rodada
+
+  const sb = supabaseServer()
+  const { data, error } = await sb
+    .from('lancamentos')
+    .select('id, chave_externa, descricao, observacao')
+    .eq('aguarda_destino', true)
+    .is('cancelado_em', null)
+    .order('ocorrido_em', { ascending: false })
+    .limit(60)
+  if (error) throw error
+
+  const fila = (
+    (data ?? []) as {
+      id: string
+      chave_externa: string | null
+      descricao: string | null
+      observacao: string | null
+    }[]
+  )
+    // Quem já tem a contraparte anotada só espera a decisão humana — sondar
+    // de novo a cada rodada gastaria a API para reescrever a mesma nota.
+    .filter((l) => !(l.observacao ?? '').startsWith('Contraparte'))
+    .slice(0, limite)
+
+  const resolver = async (id: string, categoria: string): Promise<boolean> => {
+    const { data: r, error: erro } = await sb.rpc('resolver_destino_do_payout', {
+      p_id: id,
+      p_conta_destino: null,
+      p_categoria_id: categoria,
+      p_operador: 'API do Mercado Pago',
+    })
+    if (erro) {
+      console.error('[financeiro] destino do payout não gravado:', erro)
+      return false
+    }
+    return Boolean((r as { ok?: boolean } | null)?.ok)
+  }
+
+  let primeiro = true
+  for (const l of fila) {
+    // A própria descrição às vezes decide ("Compra de etiquetas de envio").
+    const pelaDescricao = categoriaPelaContraparte(l.descricao)
+    if (pelaDescricao) {
+      rodada.examinados++
+      if (await resolver(l.id, pelaDescricao)) {
+        rodada.resolvidos.push({ lancamento: l.id, contraparte: l.descricao ?? '', categoria: pelaDescricao })
+      }
+      continue
+    }
+
+    const idMovimento = (l.chave_externa ?? l.id).match(/:(\d{6,}):payout:/)?.[1]
+    if (!idMovimento) continue
+    rodada.examinados++
+
+    const caminhos = [
+      `/v1/payments/${idMovimento}`,
+      `/v1/transfers/${idMovimento}`,
+      `/v1/withdrawals/${idMovimento}`,
+      `/v1/account/movements/${idMovimento}`,
+    ]
+    let contraparte: string | null = null
+    for (const caminho of caminhos) {
+      const r = await texto(caminho)
+      if (primeiro) rodada.amostras.push({ caminho, metodo: 'GET', status: r.status, corpo: r.corpo.slice(0, 700) })
+      if (r.status !== 200) continue
+      let objeto: unknown
+      try {
+        objeto = JSON.parse(r.corpo)
+      } catch {
+        continue
+      }
+      if (!objeto || typeof objeto !== 'object') continue
+      // O mesmo leitor de nome dos pagamentos, com a mesma limpeza: o nome da
+      // própria casa não é contraparte de nada.
+      const nome = contraparteDe(nomeDaContraparte(objeto as Record<string, unknown>))
+      if (nome) {
+        contraparte = nome
+        break
+      }
+    }
+    primeiro = false
+    if (!contraparte) continue
+
+    const categoria = categoriaPelaContraparte(contraparte)
+    if (categoria) {
+      if (await resolver(l.id, categoria)) {
+        rodada.resolvidos.push({ lancamento: l.id, contraparte, categoria })
+      }
+      continue
+    }
+    if (!(l.observacao ?? '').trim()) {
+      const { error: erroNota } = await sb
+        .from('lancamentos')
+        .update({ observacao: `Contraparte (API do gateway): ${contraparte}` })
+        .eq('id', l.id)
+        .eq('aguarda_destino', true)
+      if (!erroNota) rodada.anotados.push({ lancamento: l.id, contraparte })
+    }
+  }
+  return rodada
 }

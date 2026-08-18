@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { contraparteDe, ehACasa } from '../contraparte'
+import { categoriaPelaContraparte, contraparteDe, ehACasa } from '../contraparte'
 
 /**
  * O bug que originou este arquivo: o dono abriu os lançamentos e viu a razão
@@ -45,5 +45,21 @@ describe('contraparte do Mercado Pago', () => {
 
   it('preserva quem sobra quando há mais de um lado de fora', () => {
     expect(contraparteDe('Fornecedor A | Fornecedor B')).toBe('Fornecedor A | Fornecedor B')
+  })
+})
+
+describe('categoria pela contraparte do saque', () => {
+  it('nomes inequívocos decidem sozinhos', () => {
+    expect(categoriaPelaContraparte('Google Brasil Internet Ltda')).toBe('google-ads-trafego-pago')
+    expect(categoriaPelaContraparte('FACEBOOK SERVIÇOS ONLINE DO BRASIL LTDA')).toBe('meta-ads-trafego-pago')
+    expect(categoriaPelaContraparte('Compra de etiquetas de envio')).toBe('frete')
+    expect(categoriaPelaContraparte('MELHOR ENVIO TECNOLOGIA LTDA')).toBe('frete')
+  })
+
+  it('nome que não decide devolve null — a fila continua sendo de quem opera', () => {
+    expect(categoriaPelaContraparte('BCO INTER S.A.')).toBeNull()
+    expect(categoriaPelaContraparte('Metalurgica Souza LTDA')).toBeNull()
+    expect(categoriaPelaContraparte('')).toBeNull()
+    expect(categoriaPelaContraparte(null)).toBeNull()
   })
 })
