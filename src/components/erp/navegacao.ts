@@ -132,6 +132,16 @@ export const NAV: GrupoNav[] = [
     telas: [
       { id: 'catalogo', label: 'Catálogo', href: '/produtos', pronta: true },
       { id: 'precificacao', label: 'Precificação', href: '/produtos/precificacao', pronta: true },
+      // Veio do projeto gerador-frenesi: monta a foto de catálogo do perfume
+      // com o frasco de decant, direto no navegador.
+      {
+        id: 'gerador',
+        label: 'Gerador de imagens',
+        href: '/produtos/gerador',
+        pronta: true,
+        subtitulo: 'A foto do perfume vira imagem de catálogo, com o decant em cena',
+        icone: 'faisca',
+      },
     ],
   },
   {
