@@ -449,6 +449,19 @@ export async function POST(req: Request) {
     relatorio.extratoEmCaixa = { erro: mensagemDe(e) }
   }
 
+  // E as regras do dono valem na hora: lançamento recém-convertido que casa
+  // com uma regra ativa (descrição ou favorecido) já nasce categorizado.
+  // "Compra de etiquetas" entrou sem categoria duas vezes no dia em que onze
+  // iguais tinham sido classificadas à mão — a regra existia, ninguém a
+  // aplicava fora da tela.
+  if (grupo('financeiro')) try {
+    const { data, error } = await supabaseServer().rpc('aplicar_regras_de_categoria')
+    if (error) throw error
+    relatorio.regrasDeCategoria = data ?? { aplicadas: 0 }
+  } catch (e) {
+    relatorio.regrasDeCategoria = { erro: mensagemDe(e) }
+  }
+
   // E o repasse aprende com o extrato. A tela de Conciliação lê `repasses`,
   // que só a rotina do Mercado Pago preenchia; tudo o que entrou pelo extrato
   // continuava marcado "pago sem crédito" mesmo com o dinheiro na conta e o
