@@ -3,6 +3,7 @@ import 'server-only'
 import { emailConfigurado } from './email'
 import { frenetConfigurada } from './frenet'
 import { melhorEnvioConfigurado } from './melhorenvio'
+import { quizConfigurado, resumoDoQuiz } from './quiz'
 import { mercadoPagoConfigurado } from './mercadopago'
 import { shopifyConfigurada } from './shopify'
 import { supabaseConfigurado, supabaseServer } from './supabase'
@@ -149,6 +150,20 @@ export async function estadoDasIntegracoes(): Promise<EstadoIntegracao[]> {
       testavel: false,
     },
     {
+      id: 'quiz',
+      sigla: 'QZ',
+      nome: 'Curadoria Olfativa (quiz)',
+      papel: 'Dados',
+      configurada: quizConfigurado(),
+      faltando: falta('quiz', 'QUIZ_SUPABASE_URL', 'QUIZ_SUPABASE_SERVICE_KEY'),
+      detalhe: quizConfigurado()
+        ? await detalheDoQuiz()
+        : 'Respostas do quiz importadas de hora em hora e cruzadas com os clientes por e-mail.',
+      ultimaAtividade: atividades.quiz,
+      atividade: 'última resposta importada',
+      testavel: false,
+    },
+    {
       id: 'olist',
       sigla: 'OL',
       nome: 'Olist ERP',
@@ -169,6 +184,7 @@ interface Atividades {
   shopify: string | null
   mercadopago: string | null
   rastreio: string | null
+  quiz: string | null
 }
 
 /** Últimos fatos produzidos por cada integração. Nada de ping inventado. */
@@ -178,11 +194,12 @@ async function ultimasAtividades(): Promise<Atividades> {
     shopify: null,
     mercadopago: null,
     rastreio: null,
+    quiz: null,
   }
   if (!supabaseConfigurado()) return vazio
 
   const sb = supabaseServer()
-  const [pedido, sincronia, extratoMp, rastreio] = await Promise.all([
+  const [pedido, sincronia, extratoMp, rastreio, quiz] = await Promise.all([
     sb.from('pedidos').select('comprado_em').order('comprado_em', { ascending: false }).limit(1),
     sb
       .from('sincronizacoes')
@@ -200,6 +217,11 @@ async function ultimasAtividades(): Promise<Atividades> {
       .select('criado_em')
       .order('criado_em', { ascending: false })
       .limit(1),
+    sb
+      .from('quiz_respostas')
+      .select('importado_em')
+      .order('importado_em', { ascending: false })
+      .limit(1),
   ])
 
   return {
@@ -207,5 +229,23 @@ async function ultimasAtividades(): Promise<Atividades> {
     shopify: sincronia.data?.[0]?.executada_em ?? null,
     mercadopago: extratoMp.data?.[0]?.lido_em ?? null,
     rastreio: rastreio.data?.[0]?.criado_em ?? null,
+    quiz: quiz.data?.[0]?.importado_em ?? null,
   }
+}
+
+/**
+ * O placar da curadoria dentro do card: quantos responderam, quantos viraram
+ * cliente e a receita atribuída (pedido pago do mesmo e-mail DEPOIS da
+ * resposta — atribuição, não certeza).
+ */
+async function detalheDoQuiz(): Promise<string> {
+  const r = await resumoDoQuiz()
+  if (r.respostas === 0) {
+    return 'Configurado. A primeira importação sai na próxima rodada de hora em hora.'
+  }
+  const receita = r.receitaAtribuida.toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+  return (
+    `${r.respostas} respostas importadas (${r.comEmail} com e-mail) · ` +
+    `${r.viraramClientes} viraram clientes · R$ ${receita} em pedidos pagos após a resposta.`
+  )
 }

@@ -6,6 +6,7 @@ import { codigosDoMelhorEnvio, descobrirEnviosDoMelhorEnvio, melhorEnvioConectad
 import { atualizarExtratoMp, descobrirDestinoDosPayouts, mercadoPagoConfigurado } from '@/data/mercadopago'
 import { baixarEstoqueDosFaturados } from '@/data/baixa-estoque'
 import { pagaleveConfigurada } from '@/data/pagaleve'
+import { importarRespostasDoQuiz, quizConfigurado } from '@/data/quiz'
 import { registrarSaudeDaRotina } from '@/data/saude-das-rotinas'
 import { importarPagaleve } from '@/data/pagaleve-importacao'
 import {
@@ -189,6 +190,19 @@ export async function POST(req: Request) {
   // Vir antes da conciliação pelo extrato é seguro: aquela só preenche linha
   // com `recebido` nulo, e toda venda da Pagaleve sai daqui com `recebido`
   // escrito — nem que seja zero, quando ainda não houve crédito.
+  // Curadoria Olfativa: as respostas do quiz entram junto com as vendas —
+  // são a mesma pergunta ("quem é esse cliente?") vinda de outra porta.
+  if (grupo('vendas') && quizConfigurado()) {
+    try {
+      const q = await importarRespostasDoQuiz()
+      relatorio.quiz = q.erro
+        ? { erro: q.erro }
+        : { tabela: q.tabela, lidas: q.lidas, gravadas: q.gravadas }
+    } catch (e) {
+      relatorio.quiz = { erro: mensagemDe(e) }
+    }
+  }
+
   if (grupo('vendas') && pagaleveConfigurada()) {
     try {
       const p = await importarPagaleve({ gravar: true, janelaDePedidosDias: JANELA_PAGALEVE_DIAS })
