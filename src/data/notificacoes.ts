@@ -954,22 +954,34 @@ export async function resumoDeNotificacoes(): Promise<ResumoNotificacoes> {
   const zero: ResumoNotificacoes = { enviados: 0, dispensados: 0, falhas: 0, emCurso: 0 }
   if (!supabaseConfigurado()) return zero
 
+  // A contagem é do SERVIDOR. O PostgREST devolve no máximo 1.000 linhas por
+  // resposta, e o log passou disso — só a carga inicial de dispensados tem
+  // 1.5 mil. Trazer linhas para contar aqui mostrava "5 enviados" num mês em
+  // que saíram 73: a amostra truncada vinha dominada pelos dispensados.
   const desde = new Date(Date.now() - 30 * 86_400_000).toISOString()
-  const { data, error } = await supabaseServer()
-    .from('notificacoes_enviadas')
-    .select('estado')
-    .gte('criado_em', desde)
-    .limit(5000)
-  if (error) return zero
-
-  const contagem = { ...zero }
-  for (const l of (data ?? []) as { estado: string }[]) {
-    if (l.estado === 'enviado') contagem.enviados++
-    else if (l.estado === 'dispensado') contagem.dispensados++
-    else if (l.estado === 'falhou') contagem.falhas++
-    else contagem.emCurso++
+  const sb = supabaseServer()
+  const conta = async (estado?: string): Promise<number> => {
+    let q = sb
+      .from('notificacoes_enviadas')
+      .select('id', { count: 'exact', head: true })
+      .gte('criado_em', desde)
+    if (estado) q = q.eq('estado', estado)
+    const { count, error } = await q
+    if (error) throw error
+    return count ?? 0
   }
-  return contagem
+
+  try {
+    const [total, enviados, dispensados, falhas] = await Promise.all([
+      conta(),
+      conta('enviado'),
+      conta('dispensado'),
+      conta('falhou'),
+    ])
+    return { enviados, dispensados, falhas, emCurso: Math.max(0, total - enviados - dispensados - falhas) }
+  } catch {
+    return zero
+  }
 }
 
 /**
