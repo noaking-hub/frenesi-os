@@ -405,6 +405,7 @@ export function ExtratoCliente({
       chave: 'descricao',
       titulo: 'Movimento',
       largura: 'minmax(0,1fr)',
+      identidade: true,
       render: (l) => (
         <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
           <span

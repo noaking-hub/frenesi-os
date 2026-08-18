@@ -385,6 +385,28 @@
   }
 }
 
+/* ── Tabela → cartões no celular ────────────────────────────────────────────
+   Abaixo de 900px a grade some e cada linha vira um cartão empilhado
+   (identidade no topo, pares rótulo → valor embaixo). Tabela rolando na
+   horizontal informa, mas não opera — no dedo, o cartão é o que funciona. */
+.erp .tabela-cartoes {
+  display: none;
+}
+@media (max-width: 900px) {
+  .erp .tabela-grade {
+    display: none;
+  }
+  .erp .tabela-cartoes {
+    display: block;
+  }
+  /* Bloco que ocupa duas colunas na ficha do pedido volta a ocupar uma: num
+     grid de coluna única, o `span 2` criava uma trilha implícita e esmagava
+     os blocos vizinhos em metade da tela. */
+  .erp .bloco-largo {
+    grid-column: auto !important;
+  }
+}
+
 /* iPad em retrato (768–1024): a barra continua visível, mas recolhida — o
    conteúdo é o que importa numa tela dessas. */
 @media (min-width: 901px) and (max-width: 1024px) {

@@ -585,6 +585,7 @@ function TabelaDevolucoes({
         overflow: 'hidden',
       }}
     >
+      <div className="tabela-grade">
       <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 330px)', minHeight: 220 }}>
         <div style={{ minWidth: 1240 }}>
           <div
@@ -794,6 +795,72 @@ function TabelaDevolucoes({
             )
           })}
         </div>
+      </div>
+      </div>
+
+      {/* ── Cartões do celular ─────────────────────────────────────────────
+          Uma devolução por cartão: protocolo + status, cliente, motivo,
+          valor e prazo. O reverso e o resto moram na ficha, a um toque. */}
+      <div className="tabela-cartoes" style={{ maxHeight: 'calc(100vh - 300px)', overflowY: 'auto' }}>
+        {itens.length === 0 && (
+          <p
+            className="font-sans"
+            style={{ padding: '40px 20px', textAlign: 'center', fontSize: 12, color: 'var(--color-terciario)' }}
+          >
+            {vazio}
+          </p>
+        )}
+        {itens.map((d) => {
+          const status = statusDe(d)
+          const emFoco = aberto === d.id
+          return (
+            <div
+              key={d.id}
+              data-linha={d.id}
+              tabIndex={0}
+              onClick={() => aoAbrir(d.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && e.target === e.currentTarget) aoAbrir(d.id)
+              }}
+              style={{
+                padding: '12px 14px',
+                borderTop: '1px solid var(--color-borda-sutil)',
+                borderLeft: `2px solid ${emFoco ? COR.ouro : 'transparent'}`,
+                background: emFoco ? 'rgba(239,209,140,.08)' : 'transparent',
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span
+                  className="font-mono"
+                  style={{ fontSize: 12, fontWeight: 700, color: COR.ouro, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                >
+                  {d.id}
+                </span>
+                <span style={{ marginLeft: 'auto' }}>
+                  <Pilula tom={TOM_STATUS[status]}>{status}</Pilula>
+                </span>
+              </div>
+
+              <div style={{ paddingTop: 7 }}>
+                <Dupla principal={d.cliente} secundaria={`${d.pedidoId} · aberta ${d.abertura}`} />
+              </div>
+              <div style={{ paddingTop: 6 }}>
+                <Dupla principal={d.motivo} secundaria={d.comentario} />
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, paddingTop: 8 }}>
+                <span className="font-mono" style={{ fontSize: 12, fontWeight: 600 }}>{brl(d.valor)}</span>
+                <span
+                  className="font-sans"
+                  style={{ marginLeft: 'auto', fontSize: 10.5, color: d.prazoOk ? COR.ok : COR.atencao }}
+                >
+                  {d.prazo}
+                </span>
+              </div>
+            </div>
+          )
+        })}
       </div>
     </section>
   )

@@ -271,6 +271,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       chave: 'desc',
       titulo: 'Descrição',
       largura: 'minmax(0,1fr)',
+      identidade: true,
       /*
        * A descrição inteira é o link que abre o detalhe.
        *
@@ -346,6 +347,8 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       chave: 'tipo',
       titulo: 'Tipo',
       largura: '92px',
+      // No cartão do celular a direção já aparece na cor do valor e no status.
+      secundaria: true,
       render: ({ lancamento: l }) => (
         <Chip tom={l.tipo === 'entrada' ? 'ok' : 'erro'} contorno>
           {l.tipo === 'entrada' ? '↑ A receber' : '↓ A pagar'}
@@ -382,6 +385,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       chave: 'conta',
       titulo: 'Conta',
       largura: '112px',
+      secundaria: true,
       render: ({ lancamento: l }) => (
         <span
           className="font-sans"
@@ -444,6 +448,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
       chave: 'origem',
       titulo: 'Origem',
       largura: '86px',
+      secundaria: true,
       // "Extrato Mercado Pago" não cabe e saía cortado no meio da palavra. A
       // conta já está na coluna ao lado, então o que esta coluna informa é a
       // procedência: veio do extrato do banco ou foi digitado à mão. O nome

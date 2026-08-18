@@ -455,6 +455,7 @@ function TabelaOcorrencias({
         overflow: 'hidden',
       }}
     >
+      <div className="tabela-grade">
       <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 330px)', minHeight: 200 }}>
         <div style={{ minWidth: 1240 }}>
           <div
@@ -642,6 +643,115 @@ function TabelaOcorrencias({
             )
           })}
         </div>
+      </div>
+      </div>
+
+      {/* ── Cartões do celular ─────────────────────────────────────────────
+          Uma ocorrência por cartão, com o select de estado no rodapé — mudar
+          o estado é a ação principal da tela e continua a um toque. */}
+      <div className="tabela-cartoes" style={{ maxHeight: 'calc(100vh - 300px)', overflowY: 'auto' }}>
+        {itens.length === 0 && (
+          <p
+            className="font-sans"
+            style={{ padding: '40px 20px', textAlign: 'center', fontSize: 12, color: 'var(--color-terciario)' }}
+          >
+            {vazio}
+          </p>
+        )}
+        {itens.map((o) => {
+          const estado = estadoDe(o)
+          const alem = diasAlemDoPrazo(o)
+          const aberta = estado !== 'resolvida'
+          return (
+            <div
+              key={o.id}
+              data-linha={o.id}
+              style={{
+                padding: '12px 14px',
+                borderTop: '1px solid var(--color-borda-sutil)',
+                borderLeft: `2px solid ${aberta ? (alem ? COR.erro : COR.atencao) : 'transparent'}`,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span className="font-mono" style={{ fontSize: 12, fontWeight: 700, color: COR.ouro }}>
+                  {o.id}
+                </span>
+                <span style={{ marginLeft: 'auto' }}>
+                  <Pilula tom={TOM_ESTADO[estado]}>{ROTULO_ESTADO_OCORRENCIA[estado]}</Pilula>
+                </span>
+              </div>
+
+              <div style={{ paddingTop: 7 }}>
+                <Dupla principal={o.cliente} secundaria={`${o.pedidoId} · ${o.destino}`} />
+              </div>
+              <div style={{ paddingTop: 6 }}>
+                <Dupla
+                  principal={
+                    <span style={{ color: COR[TOM_TIPO[o.tipo]], fontWeight: 600 }}>
+                      {ROTULO_OCORRENCIA[o.tipo]}
+                    </span>
+                  }
+                  secundaria={
+                    alem
+                      ? `${plural(alem, 'dia', 'dias')} além do prazo`
+                      : 'dentro do prazo da transportadora'
+                  }
+                />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, paddingTop: 8 }}>
+                <Dupla
+                  principal={o.transportadora || '—'}
+                  secundaria={
+                    <span className="font-mono" style={{ fontSize: 10, color: 'rgba(239,209,140,.5)' }}>
+                      {o.rastreio || 'sem código'}
+                    </span>
+                  }
+                />
+                <Dupla
+                  principal={
+                    <span className="font-mono" style={{ fontSize: 11 }}>{brl(o.valor)}</span>
+                  }
+                  secundaria={`aberta há ${plural(o.dias, 'dia', 'dias')}`}
+                />
+              </div>
+
+              <p
+                className="font-sans"
+                style={{ margin: 0, paddingTop: 8, fontSize: 11, lineHeight: 1.45, color: 'var(--color-secundario)' }}
+              >
+                {o.acao}
+              </p>
+
+              <div style={{ paddingTop: 9 }}>
+                <select
+                  value={estado}
+                  disabled={pendente || !ligado}
+                  onChange={(e) => aoMover(o, e.target.value as EstadoOcorrencia)}
+                  className="font-sans"
+                  style={{
+                    height: 32,
+                    width: '100%',
+                    padding: '0 8px',
+                    border: '1px solid rgba(255,255,255,.11)',
+                    background: 'rgba(255,255,255,.03)',
+                    borderRadius: 7,
+                    color: 'var(--color-corrente)',
+                    fontSize: 11,
+                    outline: 0,
+                    opacity: pendente ? 0.5 : 1,
+                    cursor: ligado ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  {ESTADOS.map((e) => (
+                    <option key={e} value={e}>
+                      {ROTULO_ESTADO_OCORRENCIA[e]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )
+        })}
       </div>
     </section>
   )

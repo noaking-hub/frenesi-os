@@ -226,6 +226,7 @@ export default async function Conciliacao({
       chave: 'pedido',
       titulo: 'Pedido',
       largura: 'minmax(120px,1fr)',
+      identidade: true,
       render: (v) => (
         <Link
           href={urlDe(v.pedidoId, pagina)}
@@ -260,6 +261,7 @@ export default async function Conciliacao({
       chave: 'prevista',
       titulo: 'Tarifa prevista',
       largura: '96px',
+      secundaria: true,
       alinhamento: 'right',
       render: (v) => (
         <span style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
@@ -285,6 +287,7 @@ export default async function Conciliacao({
       chave: 'real',
       titulo: 'Tarifa real',
       largura: '96px',
+      secundaria: true,
       alinhamento: 'right',
       render: (v) =>
         v.taxaReal === null ? (
@@ -322,6 +325,7 @@ export default async function Conciliacao({
       chave: 'credito',
       titulo: 'Data de crédito',
       largura: '104px',
+      secundaria: true,
       render: (v) =>
         v.recebidoEm ? (
           <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

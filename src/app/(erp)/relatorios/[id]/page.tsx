@@ -161,6 +161,7 @@ export default async function TelaDeRelatorio({
             overflow: 'hidden',
           }}
         >
+          <div className="tabela-grade">
           <div style={{ overflowX: 'auto' }}>
             <table
               className="font-sans"
@@ -225,6 +226,71 @@ export default async function TelaDeRelatorio({
                 ))}
               </tbody>
             </table>
+          </div>
+          </div>
+
+          {/* ── Cartões do celular ─────────────────────────────────────────
+              O relatório é genérico, então o cartão também é: a primeira
+              coluna vira o topo e as demais viram pares rótulo → valor. */}
+          <div className="tabela-cartoes">
+            {linhas.map((linha, i) => {
+              const [primeira, ...demais] = resultado.colunas
+              return (
+                <div
+                  key={i}
+                  style={{ padding: '11px 14px', borderBottom: '1px solid rgba(255,255,255,.04)' }}
+                >
+                  <div
+                    className="font-sans"
+                    style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--color-corrente)', paddingBottom: 7 }}
+                  >
+                    {formatar(linha[primeira.chave], primeira)}
+                  </div>
+                  {demais.map((c) => {
+                    const numerica = c.tipo !== 'texto' && c.tipo !== 'data'
+                    const negativo = numerica && Number(linha[c.chave]) < 0
+                    return (
+                      <div
+                        key={c.chave}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'baseline',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                          padding: '2px 0',
+                        }}
+                      >
+                        <span
+                          className="font-sans"
+                          style={{
+                            flexShrink: 0,
+                            fontSize: 9,
+                            fontWeight: 600,
+                            letterSpacing: '.1em',
+                            textTransform: 'uppercase',
+                            color: 'var(--color-terciario)',
+                          }}
+                        >
+                          {c.rotulo}
+                        </span>
+                        <span
+                          className={numerica ? 'font-mono' : 'font-sans'}
+                          style={{
+                            minWidth: 0,
+                            overflow: 'hidden',
+                            textAlign: 'right',
+                            fontSize: 12,
+                            color: negativo ? 'var(--color-erro)' : 'var(--color-corrente)',
+                          }}
+                        >
+                          {formatar(linha[c.chave], c)}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })}
           </div>
 
           <div

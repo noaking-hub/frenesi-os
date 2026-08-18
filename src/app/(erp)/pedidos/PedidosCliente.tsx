@@ -747,7 +747,9 @@ function TabelaPedidos({
     >
       {/* Rolagem interna: é ela que faz o cabeçalho sticky funcionar — preso
           a um contêiner que só rola na horizontal, ele nunca grudava — e que
-          impede 612 linhas de esticarem a página inteira. */}
+          impede 612 linhas de esticarem a página inteira. No celular esta
+          grade some e entram os cartões logo abaixo. */}
+      <div className="tabela-grade">
       <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 330px)', minHeight: 220 }}>
         <div style={{ minWidth: 1280 }}>
           <div
@@ -965,6 +967,95 @@ function TabelaPedidos({
             )
           })}
         </div>
+      </div>
+      </div>
+
+      {/* ── Cartões do celular ─────────────────────────────────────────────
+          Um pedido por cartão: número + valor no topo, cliente, as duas
+          pílulas de estado, envio e prazo. Data e canal ficam de fora — no
+          dedo, o que decide é estado e prazo; o resto mora na ficha. */}
+      <div className="tabela-cartoes" style={{ maxHeight: 'calc(100vh - 300px)', overflowY: 'auto' }}>
+        {itens.length === 0 && (
+          <p
+            className="font-sans"
+            style={{ padding: '40px 20px', textAlign: 'center', fontSize: 12, color: 'var(--color-terciario)' }}
+          >
+            {vazio}
+          </p>
+        )}
+        {itens.map((v) => {
+          const marcado = selecionados.has(v.p.id)
+          const emFoco = aberto === v.p.id
+          return (
+            <div
+              key={v.p.id}
+              data-linha={v.p.id}
+              tabIndex={0}
+              onClick={() => aoAbrir(v.p.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && e.target === e.currentTarget) aoAbrir(v.p.id)
+              }}
+              style={{
+                padding: '12px 14px',
+                borderTop: '1px solid var(--color-borda-sutil)',
+                borderLeft: `2px solid ${emFoco ? COR.ouro : 'transparent'}`,
+                background: emFoco
+                  ? 'rgba(239,209,140,.08)'
+                  : marcado
+                    ? 'rgba(239,209,140,.07)'
+                    : 'transparent',
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span onClick={(e) => e.stopPropagation()}>
+                  <Caixa
+                    marcada={marcado}
+                    aoMarcar={() => aoMarcar(v.p.id)}
+                    rotulo={`Selecionar ${v.p.id}`}
+                  />
+                </span>
+                <span
+                  className="font-mono"
+                  style={{ fontSize: 12, fontWeight: 700, color: COR.ouro, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                >
+                  {v.p.id}
+                </span>
+                <span className="font-mono" style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                  {brl(v.p.valor)}
+                </span>
+              </div>
+
+              <div style={{ paddingTop: 7 }}>
+                <Dupla principal={v.p.cliente} secundaria={v.p.destino || '—'} />
+              </div>
+              {v.divergencia && (
+                <div className="font-sans" style={{ paddingTop: 4, fontSize: 10.5, color: COR.erro }}>
+                  {v.divergencia}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', paddingTop: 9 }}>
+                <Pilula tom={TOM_PAGAMENTO[v.p.pagamento]}>{ROTULO_PAGAMENTO[v.p.pagamento]}</Pilula>
+                <Pilula tom={v.status.tom}>{v.status.rotulo}</Pilula>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, paddingTop: 9 }}>
+                <Dupla
+                  principal={nomeDoEnvio(v)}
+                  secundaria={
+                    v.p.rastreio
+                      ? v.p.rastreio
+                      : v.p.entregaLocal
+                        ? 'Motoboy · sem código'
+                        : 'Sem código'
+                  }
+                />
+                <CelulaPrazo v={v} />
+              </div>
+            </div>
+          )
+        })}
       </div>
 
       <footer

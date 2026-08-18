@@ -168,6 +168,7 @@ export default async function Extrato({ searchParams }: { searchParams: Promise<
       chave: 'movimento',
       titulo: 'Movimento',
       largura: 'minmax(0,1fr)',
+      identidade: true,
       render: (l) => (
         <Celula
           principal={l.descricao}
@@ -181,6 +182,7 @@ export default async function Extrato({ searchParams }: { searchParams: Promise<
       chave: 'origem',
       titulo: 'Origem',
       largura: '148px',
+      secundaria: true,
       render: (l) => (
         <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           <TileMarca nome={`${l.contaNome} ${l.origem}`} tamanho={24} />

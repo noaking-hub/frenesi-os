@@ -737,6 +737,7 @@ function TabelaEnvios({
         overflow: 'hidden',
       }}
     >
+      <div className="tabela-grade">
       <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 330px)', minHeight: 220 }}>
         <div style={{ minWidth: 1280 }}>
           <div
@@ -984,6 +985,127 @@ function TabelaEnvios({
             )
           })}
         </div>
+      </div>
+      </div>
+
+      {/* ── Cartões do celular ─────────────────────────────────────────────
+          Um envio por cartão: número + status no topo, cliente, transporte e
+          rastreio, o último evento e o botão de baixa quando ele existe. */}
+      <div className="tabela-cartoes" style={{ maxHeight: 'calc(100vh - 300px)', overflowY: 'auto' }}>
+        {itens.length === 0 && (
+          <p
+            className="font-sans"
+            style={{ padding: '40px 20px', textAlign: 'center', fontSize: 12, color: 'var(--color-terciario)' }}
+          >
+            {vazio}
+          </p>
+        )}
+        {itens.map((v) => {
+          const marcado = selecionados.has(v.p.id)
+          const emFoco = aberto === v.p.id
+          const quando = dataHora(v.log.desde) ?? dataHora(v.p.rastreioLidoEm)
+          return (
+            <div
+              key={v.p.id}
+              data-linha={v.p.id}
+              tabIndex={0}
+              onClick={() => aoAbrir(v.p.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && e.target === e.currentTarget) aoAbrir(v.p.id)
+              }}
+              style={{
+                padding: '12px 14px',
+                borderTop: '1px solid var(--color-borda-sutil)',
+                borderLeft: `2px solid ${emFoco ? COR.ouro : 'transparent'}`,
+                background: emFoco
+                  ? 'rgba(239,209,140,.08)'
+                  : marcado
+                    ? 'rgba(239,209,140,.07)'
+                    : 'transparent',
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span onClick={(e) => e.stopPropagation()}>
+                  <Caixa
+                    marcada={marcado}
+                    aoMarcar={() => aoMarcar(v.p.id)}
+                    rotulo={`Selecionar ${v.p.id}`}
+                  />
+                </span>
+                <span
+                  className="font-mono"
+                  style={{ fontSize: 12, fontWeight: 700, color: COR.ouro, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                >
+                  {v.p.id}
+                </span>
+                <span style={{ marginLeft: 'auto' }}>
+                  <Pilula tom={TOM_LOGISTICO[v.log.status]}>{ROTULO_LOGISTICO[v.log.status]}</Pilula>
+                </span>
+              </div>
+
+              <div style={{ paddingTop: 7 }}>
+                <Dupla principal={v.p.cliente} secundaria={v.p.destino || '—'} />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, paddingTop: 9 }}>
+                <Dupla
+                  principal={
+                    v.p.entregaLocal ? 'Entrega local' : (v.p.transportadora ?? 'Não identificada')
+                  }
+                  secundaria={
+                    v.p.entregaLocal ? 'Motoboy' : (servicoLegivel(v.p.servicoFrete) ?? v.p.gateway)
+                  }
+                />
+                <Dupla
+                  principal={
+                    v.p.rastreio ? (
+                      <span className="font-mono" style={{ fontSize: 10.5 }}>{v.p.rastreio}</span>
+                    ) : (
+                      'Sem código'
+                    )
+                  }
+                  secundaria={quando ? `Atualizado: ${quando}` : 'Sem leitura ainda'}
+                />
+              </div>
+
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingTop: 9 }}
+              >
+                {v.p.entregaShopifyEm || (!v.aguardaBaixa && v.p.situacao === 'entregue' && v.p.shopifyNumero) ? (
+                  <Pilula tom="ok">Baixado na loja</Pilula>
+                ) : v.aguardaBaixa ? (
+                  <button
+                    type="button"
+                    onClick={() => aoBaixar(v.p.id)}
+                    disabled={pendente || !shopifyLigada}
+                    className="font-sans"
+                    style={{
+                      height: 30,
+                      padding: '0 12px',
+                      border: '1px solid rgba(239,209,140,.35)',
+                      background: 'rgba(239,209,140,.09)',
+                      color: COR.ouro,
+                      fontWeight: 600,
+                      fontSize: 11,
+                      borderRadius: 7,
+                      cursor: pendente ? 'wait' : 'pointer',
+                      whiteSpace: 'nowrap',
+                      opacity: shopifyLigada ? 1 : 0.4,
+                    }}
+                  >
+                    Marcar entregue
+                  </button>
+                ) : !v.p.shopifyNumero ? (
+                  <Pilula tom="neutro">Sem par na loja</Pilula>
+                ) : (
+                  <Pilula tom="neutro">Aberto na loja</Pilula>
+                )}
+              </div>
+            </div>
+          )
+        })}
       </div>
 
       <footer

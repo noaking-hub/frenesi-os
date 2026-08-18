@@ -237,6 +237,9 @@ export function FichaDoPedido({
           padding: '4px 26px 0',
           borderBottom: '1px solid var(--color-borda-sutil)',
           flex: 'none',
+          // Nos 393px do iPhone as cinco abas não cabem: a régua rola na
+          // horizontal dentro de si mesma, sem quebrar linha.
+          overflowX: 'auto',
         }}
       >
         {ABAS.map((a) => (
@@ -250,6 +253,8 @@ export function FichaDoPedido({
             style={{
               height: 34,
               padding: '0 13px',
+              flex: 'none',
+              whiteSpace: 'nowrap',
               border: 0,
               borderBottom: `2px solid ${a === aba ? COR.ouro : 'transparent'}`,
               marginBottom: -1,
@@ -773,11 +778,13 @@ export function Bloco({
 }) {
   return (
     <section
+      className={largo ? 'bloco-largo' : undefined}
       style={largo ? { gridColumn: 'span 2', minWidth: 0 } : { minWidth: 0 }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
         <TituloBloco>{titulo}</TituloBloco>
         <div
+          className={largo ? 'empilha-900' : undefined}
           style={
             largo
               ? {

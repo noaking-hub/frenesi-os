@@ -1085,6 +1085,10 @@ export interface ColunaUi<T> {
   titulo: ReactNode
   largura: string
   alinhamento?: 'left' | 'right' | 'center'
+  /** Coluna dispensável no celular: some quando a linha vira cartão. */
+  secundaria?: boolean
+  /** Vira o topo do cartão no celular. Sem marcação, é a primeira coluna. */
+  identidade?: boolean
   render: (item: T) => ReactNode
 }
 
@@ -1118,6 +1122,8 @@ export function TabelaUi<T>({
   const grid = colunas.map((c) => c.largura).join(' ')
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      {/* No desktop, a grade; no celular ela some e entram os cartões. */}
+      <div className="tabela-grade">
       <div style={{ overflowX: 'auto' }}>
         <div style={{ minWidth: larguraMinima }}>
           <div
@@ -1178,6 +1184,53 @@ export function TabelaUi<T>({
           })}
         </div>
       </div>
+      </div>
+
+      {/* ── Cartões do celular ─────────────────────────────────────────────
+          Uma linha por cartão: a coluna-identidade no topo, as demais como
+          pares rótulo → valor. As `secundaria` ficam de fora. */}
+      <div className="tabela-cartoes">
+        {itens.length === 0 && vazio}
+        {itens.map((item) => {
+          const faixa = faixaDe?.(item) ?? null
+          const marcado = selecionadoDe?.(item) ?? false
+          const identidade = colunas.find((c) => c.identidade) ?? colunas[0]
+          const detalhes = colunas.filter((c) => c !== identidade && !c.secundaria)
+          return (
+            <div
+              key={chaveDe(item)}
+              style={{
+                padding: '11px 4px 11px 10px',
+                borderBottom: '1px solid rgba(255,255,255,.04)',
+                borderLeft: `2px solid ${marcado ? TINTA.ouro : faixa ? TINTA[faixa] : 'transparent'}`,
+                background: marcado ? 'rgba(233,197,131,.055)' : undefined,
+              }}
+            >
+              <div style={{ minWidth: 0, paddingBottom: detalhes.length ? 8 : 0 }}>
+                {identidade.render(item)}
+              </div>
+              {detalhes.map((c) => (
+                <div
+                  key={c.chave}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    padding: '3px 0',
+                  }}
+                >
+                  <Etiqueta style={{ flexShrink: 0 }}>{c.titulo}</Etiqueta>
+                  <span style={{ minWidth: 0, overflow: 'hidden', textAlign: 'right' }}>
+                    {c.render(item)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )
+        })}
+      </div>
+
       {rodape}
     </div>
   )

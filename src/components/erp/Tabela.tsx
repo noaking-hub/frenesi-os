@@ -8,6 +8,10 @@ export interface Coluna<T> {
   /** Largura da coluna no grid. `1fr` para a coluna elástica. */
   largura: string
   alinhamento?: 'left' | 'right'
+  /** Coluna dispensável no celular: some quando a linha vira cartão. */
+  secundaria?: boolean
+  /** Vira o topo do cartão no celular. Sem marcação, é a primeira coluna. */
+  identidade?: boolean
   render: (item: T) => ReactNode
 }
 
@@ -54,8 +58,9 @@ export function Tabela<T>({
     >
       {cabecalho}
 
-      {/* Em tela estreita a tabela rola na horizontal dentro do card, em vez
-          de esmagar as colunas até virarem ruído. */}
+      {/* No desktop, a grade; no celular ela some e entram os CARTÕES logo
+          abaixo — tabela rolando na horizontal não funciona no dedo. */}
+      <div className="tabela-grade">
       <div style={{ overflowX: 'auto' }}>
       <div style={{ minWidth: 660 }}>
       <div
@@ -145,6 +150,81 @@ export function Tabela<T>({
         )
       })}
       </div>
+      </div>
+      </div>
+
+      {/* ── Cartões do celular ─────────────────────────────────────────────
+          A mesma lista, uma linha por cartão: a primeira coluna é a
+          identidade e vira o topo; as demais viram pares rótulo → valor. As
+          marcadas como `secundaria` ficam de fora — no dedo, menos é mais. */}
+      <div className="tabela-cartoes">
+        {itens.length === 0 && vazio}
+        {itens.map((item) => {
+          const bandeira = bandeiraDe?.(item) ?? null
+          const selecionado = selecionadoDe?.(item) ?? false
+          const identidade = colunas.find((c) => c.identidade) ?? colunas[0]
+          const detalhes = colunas.filter((c) => c !== identidade && !c.secundaria)
+          const estilo: CSSProperties = {
+            width: '100%',
+            display: 'block',
+            padding: '13px 15px',
+            border: 0,
+            borderTop: '1px solid var(--color-borda-sutil)',
+            borderLeft: `2px solid ${bandeira ? COR[bandeira] : 'transparent'}`,
+            background: selecionado ? 'rgba(239,209,140,.06)' : 'transparent',
+            textAlign: 'left',
+          }
+          const conteudo = (
+            <>
+              <div style={{ minWidth: 0, paddingBottom: detalhes.length ? 9 : 0 }}>
+                {identidade.render(item)}
+              </div>
+              {detalhes.map((c) => (
+                <div
+                  key={c.chave}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    padding: '3px 0',
+                  }}
+                >
+                  <span
+                    className="font-sans"
+                    style={{
+                      flexShrink: 0,
+                      fontWeight: 600,
+                      fontSize: 9,
+                      letterSpacing: '.1em',
+                      textTransform: 'uppercase',
+                      color: 'var(--color-terciario)',
+                    }}
+                  >
+                    {c.titulo}
+                  </span>
+                  <span style={{ minWidth: 0, overflow: 'hidden', textAlign: 'right' }}>
+                    {c.render(item)}
+                  </span>
+                </div>
+              ))}
+            </>
+          )
+          return aoClicar ? (
+            <button
+              key={chaveDe(item)}
+              type="button"
+              onClick={() => aoClicar(item)}
+              style={{ ...estilo, cursor: 'pointer' }}
+            >
+              {conteudo}
+            </button>
+          ) : (
+            <div key={chaveDe(item)} style={estilo}>
+              {conteudo}
+            </div>
+          )
+        })}
       </div>
 
       {rodape}
