@@ -184,17 +184,28 @@ export async function salvarCompraACaminho(
     .not('id', 'in', `(${mantidos.length ? mantidos.join(',') : '00000000-0000-0000-0000-000000000000'})`)
   if (erroApagar) return { ok: false, erro: erroApagar.message }
 
-  const linhas = c.itens.map((i) => ({
-    ...(i.id ? { id: i.id } : {}),
+  // Existentes e novos vão em chamadas SEPARADAS de propósito: num lote só, o
+  // PostgREST uniformiza as chaves de todas as linhas, e o item novo iria com
+  // `id: null` explícito — que atropela o default do banco e estoura o NOT
+  // NULL. Foi exatamente assim que a Yampi apagou 24 vínculos.
+  const corpoDoItem = (i: CompraParaGravar['itens'][number]) => ({
     compra_id: id,
     base_id: i.baseId || null,
     descricao: i.descricao.trim(),
     volume_ml: i.volumeMl,
     quantidade: i.quantidade,
     custo_unitario: i.custoUnitario,
-  }))
-  const { error: erroItens } = await sb.from('compras_a_caminho_itens').upsert(linhas)
-  if (erroItens) return { ok: false, erro: erroItens.message }
+  })
+  const existentes = c.itens.filter((i) => i.id).map((i) => ({ id: i.id!, ...corpoDoItem(i) }))
+  const novos = c.itens.filter((i) => !i.id).map(corpoDoItem)
+  if (existentes.length) {
+    const { error: erroItens } = await sb.from('compras_a_caminho_itens').upsert(existentes)
+    if (erroItens) return { ok: false, erro: erroItens.message }
+  }
+  if (novos.length) {
+    const { error: erroItens } = await sb.from('compras_a_caminho_itens').insert(novos)
+    if (erroItens) return { ok: false, erro: erroItens.message }
+  }
 
   return { ok: true, id: id! }
 }
