@@ -3,6 +3,7 @@ import 'server-only'
 import {
   ASSUNTO,
   ROTULO_EVENTO,
+  apenasOAtual,
   avisosDe,
   emailDevolucaoAberta,
   emailDevolucaoAprovada,
@@ -194,21 +195,46 @@ export async function enviarAvisosDePedido(opcoes?: {
   if (error) throw error
 
   const pendentes: { aviso: AvisoPendente; pedido: LinhaPedidoAviso }[] = []
+  const ultrapassados: AvisoPendente[] = []
   for (const p of (data ?? []) as unknown as LinhaPedidoAviso[]) {
     const email = p.clientes?.email?.trim()
     if (!email) continue
-    for (const aviso of avisosDe({
-      id: p.id,
-      email,
-      cliente: p.clientes?.nome ?? '',
-      pagamento: p.pagamento as 'pago' | 'pendente' | 'divergente',
-      envio: p.envio as 'enviado' | 'entregue',
-      rastreio: p.rastreio,
-      notaFiscal: null,
-    })) {
-      pendentes.push({ aviso, pedido: p })
-    }
+    // Só o aviso do estado ATUAL sai; os anteriores que porventura nunca
+    // saíram viram dispensados. "Seu pedido foi enviado" para quem já recebeu
+    // não informa — denuncia o atraso.
+    const { enviar, dispensar } = apenasOAtual(
+      avisosDe({
+        id: p.id,
+        email,
+        cliente: p.clientes?.nome ?? '',
+        pagamento: p.pagamento as 'pago' | 'pendente' | 'divergente',
+        envio: p.envio as 'enviado' | 'entregue',
+        rastreio: p.rastreio,
+        notaFiscal: null,
+      }),
+    )
+    for (const aviso of enviar) pendentes.push({ aviso, pedido: p })
+    ultrapassados.push(...dispensar)
   }
+
+  // Os ultrapassados entram no log agora, com o motivo escrito — upsert com
+  // ignoreDuplicates, então quem já foi enviado ou dispensado não muda.
+  if (ultrapassados.length && !teste) {
+    await sb.from('notificacoes_enviadas').upsert(
+      ultrapassados.map((aviso) => ({
+        chave: aviso.chave,
+        pedido_id: aviso.pedidoId,
+        evento: aviso.evento,
+        destinatario: aviso.email,
+        assunto: '(não enviado)',
+        estado: 'dispensado',
+        motivo: 'o pedido já tinha passado deste estado quando o aviso seria enviado',
+        concluido_em: new Date().toISOString(),
+      })),
+      { onConflict: 'chave', ignoreDuplicates: true },
+    )
+  }
+
   if (pendentes.length === 0) return { ...vazio, desligado }
 
   /**
@@ -307,10 +333,29 @@ export async function enviarAvisosDePedido(opcoes?: {
     return r
   }
 
+  // Quem já está no log sai da fila ANTES do corte de `limite`. Sem isto, a
+  // fatia era tomada pelos avisos mais novos — todos já enviados — e o
+  // pendente na posição 21 esperava para sempre: foi assim que oito envios
+  // ficaram dias sem o e-mail de rastreio, com a rotina respondendo
+  // "candidatos: 0" a cada cinco minutos.
+  const chavesDoEscopo = doEscopo.map(({ aviso }) => aviso.chave)
+  const jaRegistradas = new Set<string>()
+  for (let i = 0; i < chavesDoEscopo.length; i += 200) {
+    const { data: parte, error: erroLog } = await sb
+      .from('notificacoes_enviadas')
+      .select('chave')
+      .in('chave', chavesDoEscopo.slice(i, i + 200))
+    if (erroLog) throw erroLog
+    for (const l of (parte ?? []) as { chave: string }[]) jaRegistradas.add(l.chave)
+  }
+  const novos = doEscopo.filter(({ aviso }) => !jaRegistradas.has(aviso.chave))
+  if (novos.length === 0) return { ...vazio, desligado }
+
   // Reserva em lote: a chave primária decide quem manda. `ignoreDuplicates`
-  // devolve só as linhas que ESTA rodada conseguiu inserir — as demais já
-  // estavam no log, seja como enviadas, dispensadas ou em curso.
-  const reserva = doEscopo.slice(0, limite)
+  // devolve só as linhas que ESTA rodada conseguiu inserir — as demais
+  // entraram no log entre a leitura acima e agora, e ficam com quem chegou
+  // primeiro.
+  const reserva = novos.slice(0, limite)
   const { data: ganhas, error: erroReserva } = await sb
     .from('notificacoes_enviadas')
     .upsert(
