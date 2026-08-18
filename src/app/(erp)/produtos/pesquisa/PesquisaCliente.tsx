@@ -402,6 +402,10 @@ function PainelVariacoes({ cartao, aoFechar }: { cartao: CartaoDeProduto; aoFech
           display: 'flex',
           flexDirection: 'column',
           gap: 12,
+          // Cor explícita: o portal nasce no <body>, fora da árvore que dava
+          // a cor do texto — sem isto o nome da variação herdava um tom
+          // escuro ilegível sobre o fundo escuro.
+          color: 'var(--color-corrente)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
@@ -414,7 +418,10 @@ function PainelVariacoes({ cartao, aoFechar }: { cartao: CartaoDeProduto; aoFech
             />
           )}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="font-sans" style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3 }}>
+            <div
+              className="font-sans"
+              style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3, color: 'var(--color-corrente)' }}
+            >
               {cartao.titulo}
             </div>
             <a
@@ -469,7 +476,7 @@ function PainelVariacoes({ cartao, aoFechar }: { cartao: CartaoDeProduto; aoFech
                     opacity: v.disponivel ? 1 : 0.55,
                   }}
                 >
-                  <span className="font-sans" style={{ flex: 1, fontSize: 12.5 }}>
+                  <span className="font-sans" style={{ flex: 1, fontSize: 12.5, color: 'var(--color-corrente)' }}>
                     {v.nome}
                   </span>
                   {!v.disponivel && (
