@@ -1392,7 +1392,8 @@ export interface ResultadoEnvios {
  * pedido como enviado, dispara o e-mail de confirmação de envio com o código,
  * e faz o rastreio aparecer no histórico da conta.
  *
- * `notifyCustomer` é o ponto todo: sem ele o status muda mas ninguém avisa.
+ * `notifyCustomer` vai SEMPRE false: quem escreve para o cliente é o ERP, e
+ * só ele — a Shopify muda o status e guarda o rastreio na conta, calada.
  *
  * `prazoMs` limita o tempo de rodada: cada pedido custa 2 a 4 chamadas à
  * Shopify, e a Netlify mata a função em ~26 s sem devolver resposta nenhuma —
