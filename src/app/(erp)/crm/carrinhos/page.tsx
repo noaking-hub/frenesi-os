@@ -1,11 +1,11 @@
 import { EstadoVazio, FaixaAlerta } from '@/components/erp/primitivos'
 import { emailConfigurado } from '@/data/email'
-import { lerModeloEmail } from '@/data/modelo-email'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { yampiConfigurada } from '@/data/yampi'
 import { lerCarrinhosYampi, type CarrinhoYampi } from '@/data/yampi-crm'
+import { metricasDeRecuperacao, type MetricasRecuperacao } from '@/domain'
 
-import { CarrinhosCliente, type EnvioFeito } from './CarrinhosCliente'
+import { CarrinhosCliente } from './CarrinhosCliente'
 
 export const dynamic = 'force-dynamic'
 
@@ -63,87 +63,52 @@ export default async function Carrinhos() {
   }
 
   // Quando cada carrinho recebeu e-mail pela última vez — é o que separa
-  // "enviar" de "insistir" na tela — e os últimos envios, para auditar o que
-  // de fato saiu.
+  // "enviar" de "insistir" na tela — e o placar da recuperação automática.
   const ultimoEnvio: Record<string, string> = {}
-  let historico: EnvioFeito[] = []
-  let recuperacao: { enviados: number; contatados: number; recuperados: number; receita: number } | null = null
+  let recuperacao: MetricasRecuperacao | null = null
   if (supabaseConfigurado()) {
+    const agora = Date.now()
+    // 8 semanas de gráfico + 7 dias de janela de atribuição.
+    const corte = new Date(agora - 63 * 86_400_000).toISOString()
     const { data } = await supabaseServer()
       .from('recuperacoes_carrinho')
-      .select('carrinho_id, email, assunto, cupom, enviado_em')
+      .select('carrinho_id, email, cupom, enviado_em')
       .order('enviado_em', { ascending: false })
-      .limit(2000)
+      .limit(4000)
     const linhas = (data ?? []) as {
       carrinho_id: string
       email: string
-      assunto: string
       cupom: string | null
       enviado_em: string
     }[]
     for (const r of linhas) {
       if (!ultimoEnvio[r.carrinho_id]) ultimoEnvio[r.carrinho_id] = r.enviado_em
     }
-    historico = linhas.slice(0, 20).map((r) => ({
-      email: r.email,
-      assunto: r.assunto,
-      cupom: r.cupom,
-      enviadoEm: r.enviado_em,
-    }))
 
-    // A conta que fecha o módulo: e-mail de recuperação que virou pedido
-    // PAGO do mesmo endereço em até 7 dias é carrinho recuperado. A janela é
-    // atribuição, não certeza — mas é a mesma régua todo dia, e régua
-    // constante é o que faz o número servir para decidir.
-    const corte30 = Date.now() - 30 * 86_400_000
-    const envios30 = linhas.filter((r) => Date.parse(r.enviado_em) >= corte30)
-    const porCarrinho = new Map<string, { email: string; em: number }>()
-    // `linhas` vem do mais novo para o mais velho; sobrescrever deixa o
-    // PRIMEIRO toque de cada carrinho, que é de onde a janela conta.
-    for (const r of envios30) {
-      porCarrinho.set(r.carrinho_id, { email: r.email.toLowerCase(), em: Date.parse(r.enviado_em) })
-    }
-    if (porCarrinho.size > 0) {
-      const { data: pagos } = await supabaseServer()
-        .from('pedidos')
-        .select('valor, comprado_em, clientes(email)')
-        .eq('pagamento', 'pago')
-        .gte('comprado_em', new Date(corte30).toISOString())
-        .limit(2000)
-      const pedidos = ((pagos ?? []) as unknown as { valor: string; comprado_em: string; clientes: { email: string | null } | null }[])
-        .map((p) => ({
-          valor: Number(p.valor),
-          em: Date.parse(p.comprado_em),
-          email: (p.clientes?.email ?? '').toLowerCase(),
-        }))
-        .filter((p) => p.email && Number.isFinite(p.em))
-      let recuperados = 0
-      let receita = 0
-      for (const { email, em } of porCarrinho.values()) {
-        const pedido = pedidos.find((x) => x.email === email && x.em >= em && x.em <= em + 7 * 86_400_000)
-        if (pedido) {
-          recuperados++
-          receita += pedido.valor
-        }
-      }
-      recuperacao = {
-        enviados: envios30.length,
-        contatados: porCarrinho.size,
-        recuperados,
-        receita: Math.round(receita * 100) / 100,
-      }
-    }
+    const { data: pagos } = await supabaseServer()
+      .from('pedidos')
+      .select('valor, comprado_em, clientes(email)')
+      .eq('pagamento', 'pago')
+      .gte('comprado_em', corte)
+      .limit(4000)
+    const pedidos = ((pagos ?? []) as unknown as { valor: string; comprado_em: string; clientes: { email: string | null } | null }[])
+      .map((p) => ({ valor: Number(p.valor), compradoEm: p.comprado_em, email: p.clientes?.email ?? '' }))
+      .filter((p) => p.email)
+
+    recuperacao = metricasDeRecuperacao(
+      linhas
+        .filter((r) => r.enviado_em >= corte)
+        .map((r) => ({ carrinhoId: r.carrinho_id, email: r.email, enviadoEm: r.enviado_em, cupom: r.cupom })),
+      pedidos,
+      agora,
+    )
   }
-
-  const modelo = await lerModeloEmail('carrinho')
 
   return (
     <CarrinhosCliente
       carrinhos={leitura.carrinhos.map((c) => ({ ...c, whatsapp: linkWhatsApp(c) }))}
       ultimoEnvio={ultimoEnvio}
       emailPronto={emailConfigurado()}
-      modelo={modelo}
-      historico={historico}
       recuperacao={recuperacao}
     />
   )

@@ -548,3 +548,156 @@ export function emailCashback(
 </html>`
   return { assunto, html }
 }
+
+// ── Métricas da recuperação ────────────────────────────────────────────────
+
+export interface EnvioDeRecuperacao {
+  carrinhoId: string
+  email: string
+  /** ISO. */
+  enviadoEm: string
+  cupom: string | null
+}
+
+export interface PedidoPagoParaMetrica {
+  email: string
+  /** ISO. */
+  compradoEm: string
+  valor: number
+}
+
+export interface MetricasRecuperacao {
+  /** Janela dos cards: últimos 30 dias. */
+  enviados: number
+  contatados: number
+  recuperados: number
+  receita: number
+  /** Conversões atribuídas ao toque que FECHOU (o último antes do pedido). */
+  porToque: { toque: number; enviados: number; conversoes: number }[]
+  /** Carrinho contado como "com cupom" quando algum toque da janela levou um. */
+  cupom: {
+    com: { contatados: number; recuperados: number }
+    sem: { contatados: number; recuperados: number }
+  }
+  /** Oito semanas, da mais antiga para a atual, pela data do ENVIO. */
+  semanas: { inicio: string; enviados: number; conversoes: number }[]
+}
+
+const JANELA_ATRIBUICAO_MS = 7 * 86_400_000
+const JANELA_CARDS_MS = 30 * 86_400_000
+
+/**
+ * A conta inteira da recuperação, pura: entram os envios e os pedidos pagos,
+ * sai o placar.
+ *
+ * A régua de "recuperado" é atribuição por janela — pedido PAGO do mesmo
+ * e-mail em até 7 dias depois de um toque —, não certeza; o que a torna útil
+ * é ser a MESMA todo dia. O toque é o ordinal do envio por carrinho (o
+ * primeiro e-mail é o 1º toque), e a conversão pertence ao último toque antes
+ * do pedido: foi ele que fechou.
+ */
+export function metricasDeRecuperacao(
+  envios: EnvioDeRecuperacao[],
+  pedidos: PedidoPagoParaMetrica[],
+  agoraMs: number,
+): MetricasRecuperacao {
+  const vazio: MetricasRecuperacao = {
+    enviados: 0,
+    contatados: 0,
+    recuperados: 0,
+    receita: 0,
+    porToque: [],
+    cupom: { com: { contatados: 0, recuperados: 0 }, sem: { contatados: 0, recuperados: 0 } },
+    semanas: [],
+  }
+  if (!envios.length) return vazio
+
+  const pagos = pedidos
+    .map((p) => ({ email: p.email.trim().toLowerCase(), em: Date.parse(p.compradoEm), valor: p.valor }))
+    .filter((p) => p.email && Number.isFinite(p.em))
+    .sort((a, b) => a.em - b.em)
+
+  // Envios por carrinho, do mais antigo para o mais novo: o índice é o toque.
+  const porCarrinho = new Map<string, { email: string; em: number; cupom: string | null; toque: number }[]>()
+  for (const e of [...envios].sort((a, b) => Date.parse(a.enviadoEm) - Date.parse(b.enviadoEm))) {
+    const em = Date.parse(e.enviadoEm)
+    if (!Number.isFinite(em)) continue
+    const lista = porCarrinho.get(e.carrinhoId) ?? []
+    lista.push({ email: e.email.trim().toLowerCase(), em, cupom: e.cupom, toque: lista.length + 1 })
+    porCarrinho.set(e.carrinhoId, lista)
+  }
+
+  const resultado = { ...vazio, cupom: { com: { contatados: 0, recuperados: 0 }, sem: { contatados: 0, recuperados: 0 } } }
+  const toques = new Map<number, { enviados: number; conversoes: number }>()
+  const semanas = new Map<string, { enviados: number; conversoes: number }>()
+  const inicioCards = agoraMs - JANELA_CARDS_MS
+  const inicioSemanas = agoraMs - 8 * 7 * 86_400_000
+
+  const segunda = (ms: number): string => {
+    const d = new Date(ms)
+    const dia = (d.getUTCDay() + 6) % 7
+    const inicio = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - dia))
+    return inicio.toISOString().slice(0, 10)
+  }
+
+  for (const lista of porCarrinho.values()) {
+    // A conversão do carrinho: o primeiro pedido pago do e-mail dentro da
+    // janela de QUALQUER toque; a autoria é do último toque antes dele.
+    const email = lista[0].email
+    let conversao: { em: number; valor: number } | null = null
+    for (const p of pagos) {
+      if (p.email !== email) continue
+      const coberto = lista.some((t) => p.em >= t.em && p.em <= t.em + JANELA_ATRIBUICAO_MS)
+      if (coberto) {
+        conversao = { em: p.em, valor: p.valor }
+        break
+      }
+    }
+    const autor = conversao
+      ? [...lista].reverse().find((t) => t.em <= conversao.em) ?? lista[0]
+      : null
+
+    for (const t of lista) {
+      if (t.em >= inicioCards) resultado.enviados++
+      if (t.em >= inicioSemanas) {
+        const chave = segunda(t.em)
+        const s = semanas.get(chave) ?? { enviados: 0, conversoes: 0 }
+        s.enviados++
+        if (autor && autor === t) s.conversoes++
+        semanas.set(chave, s)
+      }
+      const reg = toques.get(t.toque) ?? { enviados: 0, conversoes: 0 }
+      reg.enviados++
+      if (autor && autor === t) reg.conversoes++
+      toques.set(t.toque, reg)
+    }
+
+    const naJanela = lista.some((t) => t.em >= inicioCards)
+    if (!naJanela) continue
+    resultado.contatados++
+    const comCupom = lista.some((t) => t.em >= inicioCards && t.cupom)
+    const balde = comCupom ? resultado.cupom.com : resultado.cupom.sem
+    balde.contatados++
+    if (conversao && conversao.em >= inicioCards) {
+      resultado.recuperados++
+      resultado.receita = Math.round((resultado.receita + conversao.valor) * 100) / 100
+      balde.recuperados++
+    }
+  }
+
+  resultado.porToque = [...toques.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .slice(0, 4)
+    .map(([toque, r]) => ({ toque, ...r }))
+
+  // Oito colunas SEMPRE: semana sem envio aparece zerada, senão o gráfico
+  // esconde justamente o buraco que interessa ver.
+  const colunas: { inicio: string; enviados: number; conversoes: number }[] = []
+  for (let i = 7; i >= 0; i--) {
+    const chave = segunda(agoraMs - i * 7 * 86_400_000)
+    colunas.push({ inicio: chave, ...(semanas.get(chave) ?? { enviados: 0, conversoes: 0 }) })
+  }
+  resultado.semanas = colunas
+
+  return resultado
+}

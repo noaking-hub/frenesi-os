@@ -5,25 +5,16 @@ import { useRouter } from 'next/navigation'
 import { useMemo, useState, useTransition } from 'react'
 
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
-import { Badge, Rotulo, TituloSecao } from '@/components/erp/primitivos'
+import { Badge, TituloSecao } from '@/components/erp/primitivos'
 import { Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR, type Tom } from '@/components/erp/tokens'
 import type { CarrinhoYampi } from '@/data/yampi-crm'
-import { brl, parseNum, plural } from '@/domain'
-import type { ModeloEmailRecuperacao } from '@/domain'
+import { brl, plural } from '@/domain'
+import type { MetricasRecuperacao } from '@/domain'
 
-import { enviarEmailsCarrinho, type CupomEnvio } from './actions'
-import { ModeloEmail } from '../emails/ModeloEmail'
+import { enviarEmailsCarrinho } from './actions'
 
 type Carrinho = CarrinhoYampi & { whatsapp: string | null }
-
-/** Um e-mail que de fato saiu — a linha do histórico de auditoria. */
-export interface EnvioFeito {
-  email: string
-  assunto: string
-  cupom: string | null
-  enviadoEm: string
-}
 
 type Periodo = 'Últimos 7 dias' | 'Últimos 30 dias' | 'Todos'
 const PERIODOS: { rotulo: Periodo; dias: number | null }[] = [
@@ -60,49 +51,22 @@ export function CarrinhosCliente({
   carrinhos,
   ultimoEnvio,
   emailPronto,
-  modelo,
-  historico,
   recuperacao,
 }: {
   carrinhos: Carrinho[]
   /** carrinho_id → ISO do último e-mail de recuperação enviado. */
   ultimoEnvio: Record<string, string>
   emailPronto: boolean
-  modelo: ModeloEmailRecuperacao
-  historico: EnvioFeito[]
-  /** Enviados/recuperados/receita dos últimos 30 dias, pela régua de 7 dias. */
-  recuperacao: { enviados: number; contatados: number; recuperados: number; receita: number } | null
+  /** O placar da recuperação automática — cards de 30 dias + desempenho. */
+  recuperacao: MetricasRecuperacao | null
 }) {
   const [periodo, setPeriodo] = useState<Periodo>('Últimos 30 dias')
   const [ordem, setOrdem] = useState<Ordem>('Mais recentes')
   const [soComContato, setSoComContato] = useState(false)
-  const [modoCupom, setModoCupom] = useState<'sem' | 'fixo' | 'unico'>('sem')
-  const [cupomCodigo, setCupomCodigo] = useState('')
-  const [cupomPct, setCupomPct] = useState('10')
-  const [validadeDias, setValidadeDias] = useState('7')
-  const [editandoModelo, setEditandoModelo] = useState(false)
-  const [vendoHistorico, setVendoHistorico] = useState(false)
   const [aviso, setAviso] = useState<{ tom: 'ok' | 'erro'; texto: string } | null>(null)
   const [enviandoId, setEnviandoId] = useState<string | null>(null)
-  const [enviandoUm, iniciarTransicao] = useTransition()
-  const enviando = enviandoUm
+  const [enviando, iniciarTransicao] = useTransition()
   const router = useRouter()
-
-  const pct = Math.max(1, Math.min(90, Math.round(parseNum(cupomPct) || 10)))
-  const cupom: CupomEnvio | null =
-    modoCupom === 'fixo' && cupomCodigo.trim()
-      ? { tipo: 'fixo', codigo: cupomCodigo.trim().toUpperCase(), pct }
-      : modoCupom === 'unico'
-        ? { tipo: 'unico', pct, validadeDias: Math.max(1, Math.round(parseNum(validadeDias) || 7)) }
-        : null
-
-  // O que o modal de prévia mostra no lugar do cupom deste envio.
-  const cupomPrevia =
-    cupom?.tipo === 'fixo'
-      ? { codigo: cupom.codigo, pct: cupom.pct }
-      : cupom?.tipo === 'unico'
-        ? { codigo: `VOLTA${cupom.pct}-A7K2MB`, pct: cupom.pct }
-        : null
 
   const resumoDoResultado = (r: {
     enviados: number
@@ -128,7 +92,9 @@ export function CarrinhosCliente({
   const enviar = (ids: string[], forcar = false) =>
     iniciarTransicao(async () => {
       setAviso(null)
-      const r = await enviarEmailsCarrinho(ids, cupom, forcar)
+      // Reenvio pontual sem cupom — cupom é assunto dos toques automáticos,
+      // configurados em Configurações → Notificações.
+      const r = await enviarEmailsCarrinho(ids, null, forcar)
       setEnviandoId(null)
       if (!r.ok) {
         setAviso({ tom: 'erro', texto: r.erro })
@@ -325,7 +291,7 @@ export function CarrinhosCliente({
                   WhatsApp
                 </a>
               )}
-              {c.email && (
+              {emailPronto && c.email && (
                 <button
                   type="button"
                   disabled={enviando}
@@ -444,238 +410,14 @@ export function CarrinhosCliente({
         ))}
       </div>
 
-      <section
-        className="card-ouro"
-        style={{ borderRadius: 14, padding: '15px 17px', display: 'flex', flexDirection: 'column', gap: 11 }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <TituloSecao tamanho={13.5}>Recuperação por e-mail da marca</TituloSecao>
-          <span className="font-sans" style={{ fontSize: 10.5, lineHeight: 1.4, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
-            Preto e dourado, com os decants da pessoa e cupom opcional — no lugar do e-mail genérico da Yampi
-          </span>
-          <div style={{ flex: 1 }} />
-          <button
-            type="button"
-            onClick={() => setEditandoModelo(true)}
-            className="hover:border-ouro/40 font-sans"
-            style={{
-              height: 30,
-              padding: '0 13px',
-              border: '1px solid rgba(239,209,140,.3)',
-              background: 'rgba(239,209,140,.07)',
-              color: COR.ouro,
-              fontWeight: 600,
-              fontSize: 10.5,
-              lineHeight: 1,
-              borderRadius: 8,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            Ver e editar o modelo
-          </button>
-          <button
-            type="button"
-            onClick={() => setVendoHistorico((v) => !v)}
-            className="hover:border-ouro/40 font-sans"
-            style={{
-              height: 30,
-              padding: '0 13px',
-              border: '1px solid rgba(255,255,255,.12)',
-              background: vendoHistorico ? 'rgba(255,255,255,.06)' : 'transparent',
-              color: 'rgba(242,237,227,.7)',
-              fontWeight: 600,
-              fontSize: 10.5,
-              lineHeight: 1,
-              borderRadius: 8,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {`Últimos envios · ${historico.length}`}
-          </button>
-        </div>
+      {aviso && (
+        <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.5, color: aviso.tom === 'ok' ? COR.ok : COR.erro, textWrap: 'pretty' }}>
+          {aviso.texto}
+        </span>
+      )}
 
-        {emailPronto ? (
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-              <Rotulo>Cupom no e-mail</Rotulo>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {(
-                  [
-                    ['sem', 'Sem cupom'],
-                    ['fixo', 'Código fixo'],
-                    ['unico', 'Único por cliente'],
-                  ] as const
-                ).map(([chave, rotulo]) => {
-                  const ativo = modoCupom === chave
-                  return (
-                    <button
-                      key={chave}
-                      type="button"
-                      onClick={() => setModoCupom(chave)}
-                      className="hover:border-ouro/40 font-sans"
-                      style={{
-                        height: 34,
-                        padding: '0 12px',
-                        border: `1px solid ${ativo ? 'rgba(239,209,140,.45)' : 'rgba(255,255,255,.1)'}`,
-                        background: ativo ? 'rgba(239,209,140,.09)' : 'transparent',
-                        color: ativo ? COR.ouro : 'rgba(242,237,227,.6)',
-                        fontWeight: 600,
-                        fontSize: 10.5,
-                        lineHeight: 1,
-                        borderRadius: 8,
-                        cursor: 'pointer',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {rotulo}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-            {modoCupom === 'fixo' && (
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 170 }}>
-                <Rotulo>Código já publicado</Rotulo>
-                <input
-                  value={cupomCodigo}
-                  onChange={(e) => setCupomCodigo(e.target.value.toUpperCase())}
-                  placeholder="ex.: VOLTA10"
-                  className="font-mono focus:border-ouro/45"
-                  style={{
-                    height: 34,
-                    padding: '0 11px',
-                    border: '1px solid rgba(255,255,255,.12)',
-                    background: 'rgba(255,255,255,.04)',
-                    color: 'var(--color-corrente)',
-                    fontSize: 12,
-                    borderRadius: 8,
-                    outline: 'none',
-                  }}
-                />
-              </label>
-            )}
-            {modoCupom !== 'sem' && (
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 78 }}>
-                <Rotulo>%</Rotulo>
-                <input
-                  value={cupomPct}
-                  onChange={(e) => setCupomPct(e.target.value.replace(/[^0-9]/g, ''))}
-                  inputMode="numeric"
-                  className="font-mono focus:border-ouro/45"
-                  style={{
-                    height: 34,
-                    padding: '0 11px',
-                    border: '1px solid rgba(255,255,255,.12)',
-                    background: 'rgba(255,255,255,.04)',
-                    color: 'var(--color-corrente)',
-                    fontSize: 12,
-                    borderRadius: 8,
-                    outline: 'none',
-                  }}
-                />
-              </label>
-            )}
-            {modoCupom === 'unico' && (
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 110 }}>
-                <Rotulo>Validade (dias)</Rotulo>
-                <input
-                  value={validadeDias}
-                  onChange={(e) => setValidadeDias(e.target.value.replace(/[^0-9]/g, ''))}
-                  inputMode="numeric"
-                  className="font-mono focus:border-ouro/45"
-                  style={{
-                    height: 34,
-                    padding: '0 11px',
-                    border: '1px solid rgba(255,255,255,.12)',
-                    background: 'rgba(255,255,255,.04)',
-                    color: 'var(--color-corrente)',
-                    fontSize: 12,
-                    borderRadius: 8,
-                    outline: 'none',
-                  }}
-                />
-              </label>
-            )}
-            <div style={{ flex: 1 }} />
-          </div>
-        ) : (
-          <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
-            Para ativar: crie uma conta gratuita em resend.com, verifique o domínio da loja lá, e
-            adicione RESEND_API_KEY e EMAIL_REMETENTE (ex.: “FRENESI &lt;oi@seudominio.com.br&gt;”)
-            no .env.local e nas variáveis da Netlify. Opcional: EMAIL_RESPONDER_PARA (para onde vai a
-            resposta do cliente) e LOJA_URL (botão do e-mail quando o carrinho não traz link).
-            Enquanto isso, o WhatsApp de cada linha continua funcionando.
-          </span>
-        )}
-
-        {emailPronto && (
-          <span className="font-sans" style={{ fontSize: 10, lineHeight: 1.5, color: 'rgba(242,237,227,.38)', textWrap: 'pretty' }}>
-            Os toques automáticos cuidam do envio em massa — horas e cupom de cada toque ficam em
-            Configurações → Notificações. O botão E-mail de cada linha é o reenvio pontual, com o
-            cupom escolhido acima; quem recebeu nos últimos 7 dias só recebe de novo por ele.
-          </span>
-        )}
-
-
-        {aviso && (
-          <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.5, color: aviso.tom === 'ok' ? COR.ok : COR.erro, textWrap: 'pretty' }}>
-            {aviso.texto}
-          </span>
-        )}
-
-        {vendoHistorico && (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 7,
-              paddingTop: 11,
-              borderTop: '1px solid rgba(255,255,255,.07)',
-              maxHeight: 240,
-              overflowY: 'auto',
-            }}
-          >
-            {historico.length === 0 ? (
-              <span className="font-sans" style={{ fontSize: 11, color: 'var(--color-terciario)' }}>
-                Nenhum e-mail de recuperação enviado ainda.
-              </span>
-            ) : (
-              historico.map((h, i) => (
-                <span
-                  key={`${h.email}-${h.enviadoEm}-${i}`}
-                  style={{ display: 'grid', gridTemplateColumns: '104px minmax(0,1fr) auto', gap: 10, alignItems: 'baseline' }}
-                >
-                  <span className="font-mono" style={{ fontSize: 10, color: 'rgba(242,237,227,.45)', whiteSpace: 'nowrap' }}>
-                    {new Date(h.enviadoEm).toLocaleString('pt-BR', {
-                      day: '2-digit',
-                      month: '2-digit',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      timeZone: 'America/Sao_Paulo',
-                    })}
-                  </span>
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                    <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.3, color: 'rgba(242,237,227,.72)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {h.email}
-                    </span>
-                    <span className="font-sans" style={{ fontSize: 10, lineHeight: 1.3, color: 'rgba(242,237,227,.4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {h.assunto}
-                    </span>
-                  </span>
-                  <span className="font-mono" style={{ fontSize: 9.5, color: h.cupom ? 'rgba(239,209,140,.6)' : 'rgba(242,237,227,.3)', whiteSpace: 'nowrap' }}>
-                    {h.cupom ?? 'sem cupom'}
-                  </span>
-                </span>
-              ))
-            )}
-          </div>
-        )}
-      </section>
-
-      {editandoModelo && (
-        <ModeloEmail inicial={modelo} cupom={cupomPrevia} aoFechar={() => setEditandoModelo(false)} />
+      {recuperacao && recuperacao.semanas.some((s) => s.enviados > 0) && (
+        <DesempenhoRecuperacao metricas={recuperacao} />
       )}
 
       <Tabela
@@ -694,3 +436,131 @@ export function CarrinhosCliente({
     </div>
   )
 }
+
+const pctDe = (parte: number, todo: number): string =>
+  todo > 0 ? `${Math.round((parte / todo) * 100)}%` : '—'
+
+const ORDINAL = ['1º toque', '2º toque', '3º toque', '4º toque']
+
+function diaMes(iso: string): string {
+  return `${iso.slice(8, 10)}/${iso.slice(5, 7)}`
+}
+
+/**
+ * O placar da automação: qual toque fecha venda, se o cupom muda a taxa e o
+ * ritmo semanal. Só leitura — o envio em si roda sozinho pelas regras de
+ * Configurações → Notificações.
+ */
+function DesempenhoRecuperacao({ metricas }: { metricas: MetricasRecuperacao }) {
+  const rotuloBloco: React.CSSProperties = {
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: '.08em',
+    textTransform: 'uppercase',
+    color: 'rgba(242,237,227,.45)',
+  }
+  const celula: React.CSSProperties = { fontSize: 11, lineHeight: 1.3, color: 'rgba(242,237,227,.72)' }
+  const numero: React.CSSProperties = { fontSize: 11, lineHeight: 1.3, whiteSpace: 'nowrap', color: 'rgba(242,237,227,.72)' }
+
+  const maiorSemana = Math.max(1, ...metricas.semanas.map((s) => s.enviados))
+  const { com, sem } = metricas.cupom
+
+  return (
+    <section
+      className="card-ouro"
+      style={{ borderRadius: 14, padding: '15px 17px', display: 'flex', flexDirection: 'column', gap: 14 }}
+    >
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+        <TituloSecao tamanho={13.5}>Desempenho da recuperação</TituloSecao>
+        <span className="font-sans" style={{ fontSize: 10.5, lineHeight: 1.4, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
+          Os envios rodam sozinhos — aqui é o placar: conversão = pedido pago do mesmo e-mail em até 7 dias após o toque
+        </span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '14px 26px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+          <span className="font-sans" style={rotuloBloco}>Conversão por toque</span>
+          {metricas.porToque.map((t) => (
+            <span key={t.toque} style={{ display: 'grid', gridTemplateColumns: '64px 1fr auto', gap: 10, alignItems: 'baseline' }}>
+              <span className="font-sans" style={{ ...celula, fontWeight: 600, color: 'var(--color-corrente)' }}>
+                {ORDINAL[t.toque - 1] ?? `${t.toque}º toque`}
+              </span>
+              <span className="font-sans" style={celula}>
+                {`${plural(t.enviados, 'envio', 'envios')} · ${plural(t.conversoes, 'conversão', 'conversões')}`}
+              </span>
+              <span className="font-mono" style={{ ...numero, color: t.conversoes ? COR.ouro : 'rgba(242,237,227,.4)' }}>
+                {pctDe(t.conversoes, t.enviados)}
+              </span>
+            </span>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+          <span className="font-sans" style={rotuloBloco}>Efeito do cupom · 30d</span>
+          {([
+            ['Com cupom', com],
+            ['Sem cupom', sem],
+          ] as const).map(([rotulo, b]) => (
+            <span key={rotulo} style={{ display: 'grid', gridTemplateColumns: '76px 1fr auto', gap: 10, alignItems: 'baseline' }}>
+              <span className="font-sans" style={{ ...celula, fontWeight: 600, color: 'var(--color-corrente)' }}>{rotulo}</span>
+              <span className="font-sans" style={celula}>
+                {b.contatados
+                  ? `${plural(b.contatados, 'carrinho contatado', 'carrinhos contatados')} · ${b.recuperados} recuperado${b.recuperados === 1 ? '' : 's'}`
+                  : 'nenhum carrinho nesse grupo'}
+              </span>
+              <span className="font-mono" style={{ ...numero, color: b.recuperados ? COR.ouro : 'rgba(242,237,227,.4)' }}>
+                {pctDe(b.recuperados, b.contatados)}
+              </span>
+            </span>
+          ))}
+          <span className="font-sans" style={{ fontSize: 9.5, lineHeight: 1.4, color: 'rgba(242,237,227,.38)', textWrap: 'pretty' }}>
+            Compare as taxas antes de concluir — grupo pequeno oscila à toa.
+          </span>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+          <span className="font-sans" style={rotuloBloco}>Semana a semana</span>
+          <span className="font-sans" style={{ fontSize: 9.5, color: 'rgba(242,237,227,.4)' }}>
+            <span style={{ color: 'rgba(242,237,227,.55)' }}>■</span> envios{' '}
+            <span style={{ color: COR.ouro }}>■</span> conversões
+          </span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 8, alignItems: 'end' }}>
+          {metricas.semanas.map((s) => (
+            <div key={s.inicio} style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
+              <span className="font-mono" style={{ fontSize: 9.5, color: 'rgba(242,237,227,.55)', whiteSpace: 'nowrap' }}>
+                {s.enviados ? `${s.enviados} · ${s.conversoes}` : '—'}
+              </span>
+              <div style={{ display: 'flex', gap: 3, alignItems: 'flex-end', height: 52, width: '100%', justifyContent: 'center' }}>
+                <span
+                  aria-hidden
+                  style={{
+                    width: 12,
+                    height: Math.max(s.enviados ? 3 : 1, Math.round((s.enviados / maiorSemana) * 52)),
+                    background: 'rgba(242,237,227,.28)',
+                    borderRadius: 2,
+                  }}
+                />
+                <span
+                  aria-hidden
+                  style={{
+                    width: 12,
+                    height: Math.max(s.conversoes ? 3 : 1, Math.round((s.conversoes / maiorSemana) * 52)),
+                    background: s.conversoes ? COR.ouro : 'rgba(239,209,140,.14)',
+                    borderRadius: 2,
+                  }}
+                />
+              </div>
+              <span className="font-mono" style={{ fontSize: 9, color: 'rgba(242,237,227,.4)', whiteSpace: 'nowrap' }}>
+                {diaMes(s.inicio)}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+

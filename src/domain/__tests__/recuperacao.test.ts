@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { aplicarSite, emailRecuperacao, imagemDoCatalogoParaItem } from '..'
+import { aplicarSite, emailRecuperacao, imagemDoCatalogoParaItem, metricasDeRecuperacao } from '..'
 
 describe('e-mail de recuperação de carrinho', () => {
   const base = {
@@ -182,5 +182,87 @@ describe('imagem do catálogo para o item do carrinho', () => {
 
   it('sem casamento, sem invenção', () => {
     expect(imagemDoCatalogoParaItem('Produto que não temos 5ml', catalogo)).toBeNull()
+  })
+})
+
+describe('métricas da recuperação', () => {
+  const AGORA = Date.UTC(2026, 7, 18, 12) // ter 18/08/2026 12:00 UTC
+  const diasAtras = (n: number) => new Date(AGORA - n * 86_400_000).toISOString()
+  const envio = (
+    carrinhoId: string,
+    email: string,
+    dias: number,
+    cupom: string | null = null,
+  ) => ({ carrinhoId, email, enviadoEm: diasAtras(dias), cupom })
+  const pedido = (email: string, dias: number, valor = 100) => ({
+    email,
+    compradoEm: diasAtras(dias),
+    valor,
+  })
+
+  it('sem envios devolve tudo zerado e sem semanas', () => {
+    const m = metricasDeRecuperacao([], [pedido('a@b.c', 1)], AGORA)
+    expect(m.enviados).toBe(0)
+    expect(m.recuperados).toBe(0)
+    expect(m.semanas).toEqual([])
+  })
+
+  it('atribui a conversão ao ÚLTIMO toque antes do pedido', () => {
+    const m = metricasDeRecuperacao(
+      [envio('c1', 'ana@ex.com', 10), envio('c1', 'ana@ex.com', 3)],
+      [pedido('Ana@Ex.com ', 2, 180)],
+      AGORA,
+    )
+    expect(m.enviados).toBe(2)
+    expect(m.contatados).toBe(1)
+    expect(m.recuperados).toBe(1)
+    expect(m.receita).toBe(180)
+    expect(m.porToque).toEqual([
+      { toque: 1, enviados: 1, conversoes: 0 },
+      { toque: 2, enviados: 1, conversoes: 1 },
+    ])
+  })
+
+  it('pedido fora da janela de 7 dias não conta', () => {
+    const m = metricasDeRecuperacao(
+      [envio('c1', 'ana@ex.com', 10)],
+      [pedido('ana@ex.com', 1)],
+      AGORA,
+    )
+    expect(m.recuperados).toBe(0)
+    expect(m.receita).toBe(0)
+    expect(m.porToque).toEqual([{ toque: 1, enviados: 1, conversoes: 0 }])
+  })
+
+  it('separa carrinhos com e sem cupom nos baldes certos', () => {
+    const m = metricasDeRecuperacao(
+      [
+        envio('c1', 'ana@ex.com', 5, 'VOLTA10'),
+        envio('c2', 'bia@ex.com', 5),
+        envio('c3', 'clara@ex.com', 5, 'VOLTA10'),
+      ],
+      [pedido('ana@ex.com', 3)],
+      AGORA,
+    )
+    expect(m.cupom.com).toEqual({ contatados: 2, recuperados: 1 })
+    expect(m.cupom.sem).toEqual({ contatados: 1, recuperados: 0 })
+  })
+
+  it('gráfico tem SEMPRE 8 semanas, com as vazias zeradas', () => {
+    const m = metricasDeRecuperacao(
+      [envio('c1', 'ana@ex.com', 1)],
+      [pedido('ana@ex.com', 0, 90)],
+      AGORA,
+    )
+    expect(m.semanas).toHaveLength(8)
+    expect(m.semanas[0]).toEqual({ inicio: '2026-06-29', enviados: 0, conversoes: 0 })
+    expect(m.semanas[7]).toEqual({ inicio: '2026-08-17', enviados: 1, conversoes: 1 })
+  })
+
+  it('carrinho contatado só antes dos 30 dias fica fora dos cards mas entra no gráfico', () => {
+    const m = metricasDeRecuperacao([envio('c1', 'ana@ex.com', 40)], [], AGORA)
+    expect(m.contatados).toBe(0)
+    expect(m.enviados).toBe(0)
+    expect(m.semanas.reduce((a, s) => a + s.enviados, 0)).toBe(1)
   })
 })
