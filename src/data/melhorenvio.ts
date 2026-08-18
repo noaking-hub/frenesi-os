@@ -451,6 +451,10 @@ export async function descobrirEnviosDoMelhorEnvio(): Promise<DescobertaMelhorEn
         ...(transportadora ? { rastreio_servico: transportadora } : {}),
         envio: 'enviado',
         situacao: 'enviado',
+        // O momento em que o ERP SOUBE do envio. É por esta data que o aviso
+        // ao cliente entra na janela — um pedido de semanas atrás postado hoje
+        // é fato novo hoje, não notícia velha.
+        envio_visto_em: new Date().toISOString(),
       })
       .eq('id', alvo.id)
       // O guarda repete o filtro da leitura: se outra rotina preencheu o

@@ -187,7 +187,11 @@ export async function enviarAvisosDePedido(opcoes?: {
   const { data, error } = await sb
     .from('pedidos')
     .select('id, pagamento, envio, valor, rastreio, servico_frete, rastreio_url, rastreio_servico, entrega_local, clientes(nome, email)')
-    .gte('comprado_em', desde)
+    // A janela vale pela data do FATO: a compra, ou o momento em que o ERP
+    // soube do envio (`envio_visto_em`, carimbado pela descoberta do Melhor
+    // Envio). Sem a segunda porta, um pedido de julho postado em agosto caía
+    // fora da janela e o cliente nunca recebia o rastreio.
+    .or(`comprado_em.gte.${desde},envio_visto_em.gte.${desde}`)
     // Pedido PAGO entra mesmo sem ter saído — sem isto, "pedido pago" seria um
     // evento ligado que não avisa ninguém, e o silêncio pareceria
     // funcionamento normal. Pedido não pago e não enviado continua fora: não
