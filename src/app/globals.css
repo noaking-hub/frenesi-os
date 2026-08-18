@@ -405,6 +405,11 @@
   .erp .bloco-largo {
     grid-column: auto !important;
   }
+  /* A trilha lateral (Lançamentos, Conciliação) empilha embaixo do conteúdo:
+     320px de trilha nos 393px do iPhone deixavam 73px para a tela toda. */
+  .erp .trilha-erp {
+    grid-template-columns: 1fr !important;
+  }
 }
 
 /* iPad em retrato (768–1024): a barra continua visível, mas recolhida — o

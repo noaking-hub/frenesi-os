@@ -1359,6 +1359,10 @@ export function Colunas({
 }) {
   return (
     <div
+      // Abaixo de 900px as colunas EMPILHAM (via globals.css): quatro cartões
+      // lado a lado nos 393px do iPhone viravam tiras de 85px com os números
+      // vazando uns por cima dos outros.
+      className="empilha-900"
       style={{
         display: 'grid',
         gridTemplateColumns: proporcao,
