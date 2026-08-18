@@ -15,13 +15,14 @@ import {
   brl,
   type CashbackGanho,
   type ItemComprado,
+  ehEntregaLocal,
   identificarFrete,
   paginaDeRastreio,
   type AvisoPendente,
   type EventoNotificacao,
 } from '@/domain'
 
-import { extratoCashbackYampi } from './cashback'
+import { clienteYampiPorEmail, extratoCashbackYampi } from './cashback'
 import { emailConfigurado, entregar } from './email'
 import { lerModeloEmail } from './modelo-email'
 import { supabaseConfigurado, supabaseServer } from './supabase'
@@ -139,6 +140,7 @@ interface LinhaPedidoAviso {
   rastreio: string | null
   servico_frete: string | null
   rastreio_url: string | null
+  entrega_local: boolean | null
   clientes: { nome: string | null; email: string | null } | null
 }
 
@@ -183,7 +185,7 @@ export async function enviarAvisosDePedido(opcoes?: {
   const sb = supabaseServer()
   const { data, error } = await sb
     .from('pedidos')
-    .select('id, pagamento, envio, valor, rastreio, servico_frete, rastreio_url, clientes(nome, email)')
+    .select('id, pagamento, envio, valor, rastreio, servico_frete, rastreio_url, entrega_local, clientes(nome, email)')
     .gte('comprado_em', desde)
     // Pedido PAGO entra mesmo sem ter saído — sem isto, "pedido pago" seria um
     // evento ligado que não avisa ninguém, e o silêncio pareceria
@@ -472,7 +474,13 @@ async function cashbackDaCompra(
       .select('customer_id')
       .eq('email', email.trim().toLowerCase())
       .maybeSingle()
-    const customerId = (carteira as { customer_id: string } | null)?.customer_id
+    let customerId = (carteira as { customer_id: string } | null)?.customer_id ?? null
+    // Cliente NOVO ainda não tem linha no espelho — a varredura anda uma
+    // página por hora e pode demorar um dia até chegar nele. O crédito, porém,
+    // já está na Yampi minutos depois da aprovação: foi assim que a primeira
+    // compra da Letícia saiu sem o bloco enquanto a da Juliana, cliente
+    // antiga, saiu completo. Sem espelho, o id vem da API, por e-mail EXATO.
+    if (!customerId) customerId = await clienteYampiPorEmail(email)
     if (!customerId) return null
 
     const numero = pedidoId.replace(/^YP-/, '')
@@ -517,6 +525,11 @@ async function mensagemDoAviso(
 ) {
   const { transportadora } = identificarFrete(pedido.servico_frete, pedido.rastreio)
   const nome = transportadora === 'Não informada' ? null : transportadora
+  // A coluna gravada pela importação decide; o rótulo MOTOBOY no serviço é o
+  // reforço para o histórico anterior à convenção.
+  const entregaLocal =
+    Boolean(pedido.entrega_local) ||
+    ehEntregaLocal({ servicoFrete: pedido.servico_frete, destino: null, rastreio: pedido.rastreio })
 
   const conteudo =
     aviso.evento === 'pedido_pago'
@@ -528,14 +541,15 @@ async function mensagemDoAviso(
           cashback: await cashbackDaCompra(aviso.pedidoId, aviso.email),
         })
       : aviso.evento === 'pedido_entregue'
-      ? emailEntregue({ nome: aviso.cliente, pedido: aviso.pedidoId, transportadora: nome })
+      ? emailEntregue({ nome: aviso.cliente, pedido: aviso.pedidoId, transportadora: nome, entregaLocal })
       : emailEnvio(
           {
             nome: aviso.cliente,
             pedido: aviso.pedidoId,
             codigo: pedido.rastreio,
             transportadora: nome,
-            link: pedido.rastreio_url ?? paginaDeRastreio(nome, pedido.rastreio),
+            link: entregaLocal ? null : (pedido.rastreio_url ?? paginaDeRastreio(nome, pedido.rastreio)),
+            entregaLocal,
           },
           modelo,
         )

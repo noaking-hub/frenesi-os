@@ -314,7 +314,8 @@ async function rodarCarrinho(
     const res = envio.resultado
     for (const id of res.idsEnviados) {
       const chave = porChave.get(id)
-      if (chave) await concluir(chave, true)
+      // O corpo vai junto: sem ele a linha do log não tem "ver e-mail".
+      if (chave) await concluir(chave, true, '', res.corpos?.[id])
       r.enviados++
     }
     for (const f of res.falhas) {
@@ -387,7 +388,7 @@ async function rodarAniversario(
         pct: regra.cupomPct ?? 15,
         validadeDias: regra.cupomValidadeDias ?? 30,
       })
-      await concluir(chave, envio.ok, envio.ok ? '' : envio.erro)
+      await concluir(chave, envio.ok, envio.ok ? '' : envio.erro, envio.ok ? envio.corpo : undefined)
       if (envio.ok) r.enviados++
       else r.falhas.push(`${p.email}: ${envio.erro}`)
     } catch (e) {
@@ -434,7 +435,12 @@ async function rodarCashback(
     try {
       const envio = await enviarAvisoCashback([c.customerId])
       const ok = envio.ok && envio.resultado.enviados > 0
-      await concluir(chave, ok, ok ? '' : 'a função de envio não confirmou a entrega')
+      await concluir(
+        chave,
+        ok,
+        ok ? '' : 'a função de envio não confirmou a entrega',
+        ok && envio.ok ? envio.resultado.corpos?.[c.customerId] : undefined,
+      )
       if (ok) r.enviados++
       else r.falhas.push(`${c.email}: sem confirmação`)
     } catch (e) {

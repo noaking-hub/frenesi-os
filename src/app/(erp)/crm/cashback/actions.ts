@@ -45,6 +45,8 @@ export interface ResultadoAviso {
   /** Pulados por terem cancelado a inscrição. */
   descadastrados: number
   falhas: { quem: string; erro: string }[]
+  /** O HTML exatamente como saiu, por cliente avisado — para o log guardar. */
+  corpos: Record<string, string>
 }
 
 /**
@@ -78,7 +80,7 @@ export async function enviarAvisoCashback(
   const modelo = await lerModeloEmail('cashback')
   const site = process.env.URL ?? process.env.LOJA_URL ?? ''
   const loja = process.env.LOJA_URL ?? 'https://frenesiperfumes.com.br'
-  const resultado: ResultadoAviso = { enviados: 0, semEmail: 0, descadastrados: 0, falhas: [] }
+  const resultado: ResultadoAviso = { enviados: 0, semEmail: 0, descadastrados: 0, falhas: [], corpos: {} }
   const avisados: string[] = []
   // Uma leitura só da lista de descadastro: consulta por destinatário seriam
   // centenas de idas ao banco no meio de um envio em massa.
@@ -109,15 +111,17 @@ export async function enviarAvisoCashback(
       modelo,
     )
     const saida = linkDeDescadastro(c.email, site)
+    const htmlFinal = aplicarSite(html, site).split('{descadastrar}').join(saida)
     try {
       await entregar({
         para: c.email,
         assunto,
-        html: aplicarSite(html, site).split('{descadastrar}').join(saida),
+        html: htmlFinal,
         descadastrar: saida,
       })
       resultado.enviados++
       avisados.push(c.customer_id)
+      resultado.corpos[c.customer_id] = htmlFinal
     } catch (e) {
       resultado.falhas.push({
         quem: c.nome ?? c.email,

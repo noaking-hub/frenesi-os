@@ -51,6 +51,12 @@ export interface ResultadoRecuperacao {
    * lista até ela vir vazia, mostrando o progresso.
    */
   naoProcessados: string[]
+  /**
+   * O HTML exatamente como saiu, por carrinho enviado. É o que o log guarda
+   * para o "ver e-mail" — o corpo é arquivado no momento do envio, nunca
+   * redesenhado depois.
+   */
+  corpos: Record<string, string>
 }
 
 const pausa = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -125,6 +131,7 @@ export async function enviarEmailsCarrinho(
     naoEncontrados: [],
     falhas: [],
     naoProcessados: [],
+    corpos: {},
   }
   const agora = Date.now()
   const inicio = Date.now()
@@ -229,6 +236,7 @@ export async function enviarEmailsCarrinho(
       await entregar({ para: carrinho.email, assunto, html: htmlFinal, descadastrar: saida })
       resultado.enviados.push(carrinho.cliente ?? carrinho.email)
       resultado.idsEnviados.push(id)
+      resultado.corpos[id] = htmlFinal
       if (sb) {
         await sb.from('recuperacoes_carrinho').insert({
           carrinho_id: id,

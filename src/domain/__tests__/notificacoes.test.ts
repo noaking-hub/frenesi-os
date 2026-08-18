@@ -159,6 +159,27 @@ describe('e-mail de envio', () => {
     const { html } = emailEnvio({ ...base, nome: '<script>x</script>' })
     expect(html).not.toContain('<script>')
   })
+
+  it('entrega local fala em motoboy, sem transportadora nem código inventado', () => {
+    // O cliente de Muriaé lia "segue com a transportadora responsável" e um
+    // código chamado "a caminho" — modelo mentindo por falta de caso.
+    const { html } = emailEnvio({
+      ...base,
+      codigo: null,
+      transportadora: null,
+      link: null,
+      entregaLocal: true,
+    })
+    expect(html).toContain('motoboy')
+    expect(html).toContain('Motoboy')
+    expect(html).toContain('ENTREGA LOCAL')
+    expect(html).toContain('entrega em mãos')
+    expect(html).not.toContain('transportadora respons')
+    expect(html).not.toContain('a caminho</span>')
+    // O botão leva à conta do cliente, não a uma consulta de rastreio vazia.
+    expect(html).toContain('href="https://conta.frenesiperfumes.com.br"')
+    expect(html).toContain('ACOMPANHAR MEU PEDIDO')
+  })
 })
 
 describe('e-mail de entrega', () => {

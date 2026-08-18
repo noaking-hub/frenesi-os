@@ -55,7 +55,7 @@ export async function enviarPresente(dados: {
   nome: string
   pct: number
   validadeDias: number
-}): Promise<Resposta<{ cupom: string }>> {
+}): Promise<Resposta<{ cupom: string; corpo?: string }>> {
   if (!emailConfigurado()) {
     return {
       ok: false,
@@ -99,16 +99,18 @@ export async function enviarPresente(dados: {
     )
     const site = process.env.URL ?? process.env.LOJA_URL ?? ''
     const saida = linkDeDescadastro(dados.email, site)
+    const htmlFinal = aplicarSite(html, site).split('{descadastrar}').join(saida)
     await entregar({
       para: dados.email,
       assunto,
-      html: aplicarSite(html, site).split('{descadastrar}').join(saida),
+      html: htmlFinal,
       descadastrar: saida,
     })
     await registrarGiftback({ email: dados.email, cupom: codigo, canal: 'email' })
+    revalidatePath('/crm/giftback')
+    // O corpo volta para o log guardar — é o que abre no "ver e-mail".
+    return { ok: true, cupom: codigo, corpo: htmlFinal }
   } catch (e) {
     return { ok: false, erro: e instanceof Error ? e.message : String(e) }
   }
-  revalidatePath('/crm/giftback')
-  return { ok: true, cupom: codigo }
 }

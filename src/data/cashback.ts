@@ -243,6 +243,28 @@ async function retratoDoCliente(
   }
 }
 
+/**
+ * O id Yampi de um cliente, pelo e-mail, direto na API.
+ *
+ * Existe para a confirmação de pagamento do cliente NOVO: o crédito aparece
+ * na Yampi minutos depois da aprovação, mas a linha dele no espelho só nasce
+ * quando a varredura horária alcança a página dele — o que pode levar um dia.
+ * O casamento é por e-mail EXATO: resultado parecido não vira carteira.
+ */
+export async function clienteYampiPorEmail(email: string): Promise<string | null> {
+  if (!yampiConfigurada()) return null
+  const alvo = email.trim().toLowerCase()
+  const r = await chamarYampi<{ data?: Record<string, unknown>[] }>('/customers', {
+    q: alvo,
+    limit: '10',
+  })
+  const achado = (r.data ?? []).find(
+    (c) => typeof c.email === 'string' && c.email.trim().toLowerCase() === alvo,
+  )
+  const id = achado ? campo(achado, ['id']) : undefined
+  return id === undefined ? null : String(id)
+}
+
 /** Quantas carteiras são lidas ao mesmo tempo. */
 const CARTEIRAS_EM_PARALELO = 5
 

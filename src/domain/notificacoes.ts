@@ -184,6 +184,19 @@ const escapa = (t: string) =>
  * cliente ao menos volta para um lugar nosso, em vez de cair numa consulta
  * vazia que o faria concluir que o pedido se perdeu.
  */
+/**
+ * O texto da entrega LOCAL — pedido que sai em mãos, com o motoboy.
+ *
+ * Fixo de propósito, fora da Central de E-mails: o modelo editável fala de
+ * postagem, transportadora e primeiro registro, e nada disso existe numa
+ * entrega em mãos. Antes desta variante o cliente de entrega local lia
+ * "segue com a transportadora responsável" e um código chamado "a caminho" —
+ * modelo mentindo por falta de caso, não por falta de dado.
+ */
+const MENSAGEM_ENVIO_LOCAL =
+  'Seu pedido saiu para entrega com o nosso motoboy e será entregue em mãos, direto no seu endereço. ' +
+  'Entrega local não tem código de rastreio — qualquer dúvida, é só responder este e-mail.'
+
 export function emailEnvio(
   d: {
     nome: string | null
@@ -191,20 +204,23 @@ export function emailEnvio(
     codigo: string | null
     transportadora: string | null
     link: string | null
+    /** Pedido entregue em mãos pelo motoboy — muda o texto e o bloco central. */
+    entregaLocal?: boolean
   },
   modelo: ModeloEmailRecuperacao = MODELO_ENVIO_PADRAO,
 ): { assunto: string; html: string } {
   const nome = d.nome?.trim().split(/\s+/)[0] || 'Olá'
+  const local = Boolean(d.entregaLocal)
   // Sem transportadora identificada a frase não inventa uma: `identificarFrete`
   // devolve "Não informada" quando o rótulo do serviço não diz a empresa, e
   // quem chama converte isso em null. Nomear errado é pior do que não nomear —
   // o cliente vai procurar o pacote na transportadora errada.
-  const transportadora = d.transportadora ?? 'a transportadora responsável'
+  const transportadora = local ? 'Motoboy' : (d.transportadora ?? 'a transportadora responsável')
   const preenche = (t: string) =>
     t
       .split('{nome}').join(escapa(nome))
       .split('{pedido}').join(escapa(d.pedido))
-      .split('{codigo}').join(escapa(d.codigo ?? 'a caminho'))
+      .split('{codigo}').join(escapa(local ? 'entrega em mãos' : (d.codigo ?? 'a caminho')))
       .split('{transportadora}').join(escapa(transportadora))
 
   const assunto = preenche(modelo.assunto)
@@ -214,12 +230,21 @@ export function emailEnvio(
   // Sem isso a moldura validada trazia o texto cravado no HTML, e os campos
   // "Título" e "Mensagem" da Central de E-mails não mudavam nada — a operação
   // editava, salvava, e o cliente recebia a frase antiga.
-  const comTexto = (modelo.html || HTML_VALIDADO_ENVIO)
+  let comTexto = (modelo.html || HTML_VALIDADO_ENVIO)
     .split('{titulo}')
     .join(escapa(modelo.titulo))
     .split('{mensagem}')
-    .join(escapa(modelo.mensagem))
-  const html = preenche(comTexto).split('{link}').join(escapa(d.link ?? LOJA))
+    .join(escapa(local ? MENSAGEM_ENVIO_LOCAL : modelo.mensagem))
+  if (local) {
+    // O bloco central deixa de prometer rastreio: o rótulo vira ENTREGA
+    // LOCAL e o botão leva à conta do cliente, não a uma consulta vazia.
+    comTexto = comTexto
+      .split('C&Oacute;DIGO DE RASTREIO').join('ENTREGA LOCAL')
+      .split('ACOMPANHAR ENTREGA').join('ACOMPANHAR MEU PEDIDO')
+  }
+  const html = preenche(comTexto)
+    .split('{link}')
+    .join(escapa(d.link ?? (local ? CONTA_DO_CLIENTE : LOJA)))
   return { assunto, html }
 }
 
@@ -555,14 +580,17 @@ export function emailEntregue(d: {
   nome: string | null
   pedido: string
   transportadora: string | null
+  entregaLocal?: boolean
 }): { assunto: string; html: string } {
   const nome = d.nome?.trim().split(/\s+/)[0] || 'Olá'
+  // Na entrega local quem confirma é o nosso motoboy, não "a transportadora".
+  const quemEntregou = d.entregaLocal ? 'Nosso motoboy' : (d.transportadora ?? 'A transportadora')
   const html = HTML_VALIDADO_ENTREGUE.split('{nome}')
     .join(escapa(nome))
     .split('{pedido}')
     .join(escapa(d.pedido))
     .split('{transportadora}')
-    .join(escapa(d.transportadora ?? 'A transportadora'))
+    .join(escapa(quemEntregou))
     .split('{link}')
     .join(LOJA)
 
