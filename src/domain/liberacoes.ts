@@ -446,3 +446,41 @@ export function linhasDeLiberacao(extrato: ExtratoLiberacoes): LinhaExtratoBruta
     }
   })
 }
+
+/**
+ * Os destinos que o RODAPÉ de detalhe das retiradas nomeia, por id.
+ *
+ * O rodapé é outra tabela no fim do mesmo CSV (`include_withdrawal_at_end`):
+ * um cabeçalho próprio e uma linha por retirada, com o id do movimento e os
+ * dados de quem recebeu. O leitor é deliberadamente desconfiado — coluna de
+ * nome reconhecida pelo cabeçalho, id validado como número longo — porque um
+ * palpite aqui viraria classificação automática errada no caixa. Sem
+ * reconhecer, devolve vazio e o saque continua na fila, que é o desfecho
+ * honesto.
+ */
+export function destinosDoRodape(rodape: string[]): { fonte: string; nome: string }[] {
+  if (rodape.length < 2) return []
+  const sep = separadorDe(rodape[0])
+  const cabecalho = dividir(rodape[0], sep).map(normalizar)
+
+  const iNome = cabecalho.findIndex((c) =>
+    /holder|favorecido|beneficiar|titular|receiver|account_name|nome|name/.test(c),
+  )
+  if (iNome < 0) return []
+  const iFonte = cabecalho.findIndex((c) =>
+    /source|id_da_retirada|withdraw|id_operacao|movement|referencia/.test(c),
+  )
+
+  const destinos: { fonte: string; nome: string }[] = []
+  for (const linha of rodape.slice(1)) {
+    const campos = dividir(linha, sep)
+    const nome = (campos[iNome] ?? '').trim()
+    let fonte = iFonte >= 0 ? (campos[iFonte] ?? '').trim() : ''
+    if (!/^\d{6,}$/.test(fonte)) {
+      // Sem coluna de id reconhecida, vale o número longo que houver na linha.
+      fonte = campos.map((c) => c.trim()).find((c) => /^\d{9,}$/.test(c)) ?? ''
+    }
+    if (fonte && nome.length >= 3 && /[a-zA-ZÀ-ú]{3}/.test(nome)) destinos.push({ fonte, nome })
+  }
+  return destinos
+}

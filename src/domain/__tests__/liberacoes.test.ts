@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   descreverMovimento,
+  destinosDoRodape,
   lerLiberacoes,
   linhasDeLiberacao,
   movimentoInterno,
@@ -236,5 +237,24 @@ DETALHE_DA_RETIRADA;ID_DA_RETIRADA;STATUS;BANCO;FAVORECIDO
 
   it('arquivo sem rodapé segue como sempre, com rodapé vazio', () => {
     expect(lerLiberacoes(CSV_PT).rodape).toEqual([])
+  })
+})
+
+describe('destinos do rodapé', () => {
+  it('lê id e favorecido quando o cabeçalho se explica', () => {
+    const rodape = [
+      'DATA;ID_DA_RETIRADA;STATUS;BANCO;FAVORECIDO',
+      '17/08/2026;174328123882;pago;BCO XYZ;GOOGLE BRASIL INTERNET LTDA',
+      '18/08/2026;173477054135;pago;BCO ABC;JOSE DA SILVA MOTO EXPRESS',
+    ]
+    expect(destinosDoRodape(rodape)).toEqual([
+      { fonte: '174328123882', nome: 'GOOGLE BRASIL INTERNET LTDA' },
+      { fonte: '173477054135', nome: 'JOSE DA SILVA MOTO EXPRESS' },
+    ])
+  })
+
+  it('cabeçalho sem coluna de nome devolve vazio — palpite não vira classificação', () => {
+    expect(destinosDoRodape(['DATA;VALOR;STATUS', '17/08/2026;500,00;pago'])).toEqual([])
+    expect(destinosDoRodape([])).toEqual([])
   })
 })

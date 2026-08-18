@@ -5,6 +5,7 @@ import { categoriaPelaContraparte, contraparteDe } from '@/domain'
 import {
   casarPagamento,
   dataEmSaoPaulo,
+  destinosDoRodape,
   lerLiberacoes,
   linhasDeLiberacao,
   indexarPedidos,
@@ -1316,14 +1317,16 @@ export async function descobrirDestinoDosPayouts(limite = 8): Promise<RodadaDest
     .limit(60)
   if (error) throw error
 
-  const fila = (
-    (data ?? []) as {
-      id: string
-      chave_externa: string | null
-      descricao: string | null
-      observacao: string | null
-    }[]
-  )
+  const filaCompleta = (data ?? []) as {
+    id: string
+    chave_externa: string | null
+    descricao: string | null
+    observacao: string | null
+  }[]
+  const idDoMovimento = (l: { id: string; chave_externa: string | null }): string | null =>
+    (l.chave_externa ?? l.id).match(/:(\d{6,}):payout:/)?.[1] ?? null
+
+  const fila = filaCompleta
     // Quem já tem a contraparte anotada só espera a decisão humana — sondar
     // de novo a cada rodada gastaria a API para reescrever a mesma nota.
     .filter((l) => !(l.observacao ?? '').startsWith('Contraparte'))
@@ -1339,41 +1342,6 @@ export async function descobrirDestinoDosPayouts(limite = 8): Promise<RodadaDest
   // nascer sobre o formato real. O informe bancário ficou para trás: o PUT da
   // config dele responde 405 e a geração 404 — o produto não existe nesta
   // conta.
-  if (fila.length) {
-    const configCru = await texto('/v1/account/release_report/config')
-    let config: Record<string, unknown> | null = null
-    try {
-      config = JSON.parse(configCru.corpo) as Record<string, unknown>
-    } catch {
-      config = null
-    }
-    if (config && config.include_withdrawal_at_end !== true) {
-      const ligado = await sondar(
-        '/v1/account/release_report/config',
-        'PUT',
-        JSON.stringify({ ...config, include_withdrawal_at_end: true }),
-      )
-      rodada.amostras.push(ligado)
-    } else if (config) {
-      try {
-        const arquivos = await relatoriosDisponiveis()
-        const pronto = arquivos[0]
-        if (pronto?.arquivo) {
-          const csv = await texto(`/v1/account/release_report/${pronto.arquivo}`)
-          rodada.amostras.push({
-            caminho: pronto.arquivo,
-            metodo: 'GET',
-            status: csv.status,
-            // O detalhe das retiradas mora no FIM do arquivo.
-            corpo: csv.corpo.slice(-1600),
-          })
-        }
-      } catch {
-        /* amostra é diagnóstico; não pode derrubar a rodada */
-      }
-    }
-  }
-
   const resolver = async (id: string, categoria: string): Promise<boolean> => {
     const { data: r, error: erro } = await sb.rpc('resolver_destino_do_payout', {
       p_id: id,
@@ -1388,8 +1356,111 @@ export async function descobrirDestinoDosPayouts(limite = 8): Promise<RodadaDest
     return Boolean((r as { ok?: boolean } | null)?.ok)
   }
 
+  // As regras de categoria valem também aqui: quem cadastra "nome do
+  // motoboy → Frete" resolve os PRÓXIMOS saques para ele sem abrir a fila.
+  const { data: regrasCruas } = await sb
+    .from('regras_categoria')
+    .select('padrao, categoria_id')
+    .eq('ativa', true)
+    .limit(300)
+  const regras = ((regrasCruas ?? []) as { padrao: string | null; categoria_id: string | null }[])
+    .filter((r) => r.padrao && r.categoria_id)
+  const categoriaDoNome = (nome: string): string | null =>
+    categoriaPelaContraparte(nome) ??
+    regras.find((r) => nome.toLowerCase().includes(String(r.padrao).toLowerCase()))?.categoria_id ??
+    null
+
+  // O que já se sabe do destino, gravado no lançamento. Para nome que nenhuma
+  // regra decide, a nota é o produto: a fila deixa de ser às cegas.
+  const gravarDestino = async (
+    l: { id: string; descricao: string | null; observacao: string | null },
+    contraparte: string,
+  ): Promise<void> => {
+    const categoria = categoriaDoNome(contraparte)
+    if (categoria && (await resolver(l.id, categoria))) {
+      rodada.resolvidos.push({ lancamento: l.id, contraparte, categoria })
+      // O favorecido vira a descrição visível quando ela era o rótulo
+      // genérico do extrato.
+      if ((l.descricao ?? '').trim() === 'Transferência para conta bancária') {
+        await sb.from('lancamentos').update({ descricao: contraparte }).eq('id', l.id)
+      }
+      return
+    }
+    const nota = `Contraparte (relatório do gateway): ${contraparte}`
+    const atual = (l.observacao ?? '').trim()
+    // A nota só escreve sobre nada ou sobre nota anterior desta rotina —
+    // nunca sobre o que um operador anotou.
+    if (!atual || atual.startsWith('Contraparte')) {
+      const { error: erroNota } = await sb
+        .from('lancamentos')
+        .update({ observacao: nota })
+        .eq('id', l.id)
+        .eq('aguarda_destino', true)
+      if (!erroNota && atual !== nota) rodada.anotados.push({ lancamento: l.id, contraparte })
+    }
+  }
+
+  // A porta que restou para o destino é o RELATÓRIO POR RETIRADA: com
+  // `execute_after_withdrawal`, o gateway gera um arquivo a cada saque, e com
+  // `include_withdrawal_at_end` esse arquivo termina no rodapé de detalhe —
+  // o único lugar em que ele escreve para onde o dinheiro foi. O relatório
+  // manual comprovadamente ignora o rodapé, e a esteira de importação está
+  // protegida por construção: arquivo de janela curta nunca passa no
+  // `relatorioServe`. O fim do arquivo continua indo às amostras, cru.
+  if (fila.length) {
+    const configCru = await texto('/v1/account/release_report/config')
+    let config: Record<string, unknown> | null = null
+    try {
+      config = JSON.parse(configCru.corpo) as Record<string, unknown>
+    } catch {
+      config = null
+    }
+    if (
+      config &&
+      (config.include_withdrawal_at_end !== true || config.execute_after_withdrawal !== true)
+    ) {
+      const ligado = await sondar(
+        '/v1/account/release_report/config',
+        'PUT',
+        JSON.stringify({ ...config, include_withdrawal_at_end: true, execute_after_withdrawal: true }),
+      )
+      rodada.amostras.push(ligado)
+    } else if (config) {
+      try {
+        const arquivos = await relatoriosDisponiveis()
+        // O arquivo do SAQUE, não o encomendado pela esteira: o gerado por
+        // retirada não carrega o marcador "-manual-" no nome.
+        const doSaque = arquivos.find((a) => !a.arquivo.includes('-manual-')) ?? arquivos[0]
+        if (doSaque?.arquivo) {
+          const csv = await texto(`/v1/account/release_report/${doSaque.arquivo}`)
+          rodada.amostras.push({
+            caminho: doSaque.arquivo,
+            metodo: 'GET',
+            status: csv.status,
+            corpo: csv.corpo.slice(-1600),
+          })
+          if (csv.status === 200) {
+            const destinos = destinosDoRodape(lerLiberacoes(csv.corpo).rodape)
+            if (destinos.length) {
+              const porFonte = new Map(destinos.map((d) => [d.fonte, d.nome]))
+              for (const l of filaCompleta) {
+                const idMov = idDoMovimento(l)
+                const nome = idMov ? porFonte.get(idMov) : undefined
+                if (nome) await gravarDestino(l, contraparteDe(nome) || nome)
+              }
+            }
+          }
+        }
+      } catch {
+        /* amostra é diagnóstico; não pode derrubar a rodada */
+      }
+    }
+  }
+
   let primeiro = true
   for (const l of fila) {
+    // Já resolvido pelo rodapé nesta mesma rodada: nada a sondar.
+    if (rodada.resolvidos.some((r) => r.lancamento === l.id)) continue
     // A própria descrição às vezes decide ("Compra de etiquetas de envio").
     const pelaDescricao = categoriaPelaContraparte(l.descricao)
     if (pelaDescricao) {
