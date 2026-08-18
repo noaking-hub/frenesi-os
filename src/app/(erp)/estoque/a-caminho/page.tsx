@@ -14,6 +14,11 @@ import { ACaminhoCliente } from './ACaminhoCliente'
 export const dynamic = 'force-dynamic'
 
 export default async function ComprasACaminho() {
-  const [compras, bases] = await Promise.all([lerComprasACaminho(), repositorio().perfumesBase()])
-  return <ACaminhoCliente compras={compras} bases={bases} hoje={hojeEmSaoPaulo()} />
+  const repo = repositorio()
+  const [compras, bases, lotes] = await Promise.all([
+    lerComprasACaminho(),
+    repo.perfumesBase(),
+    repo.lotes(),
+  ])
+  return <ACaminhoCliente compras={compras} bases={bases} lotes={lotes} hoje={hojeEmSaoPaulo()} />
 }

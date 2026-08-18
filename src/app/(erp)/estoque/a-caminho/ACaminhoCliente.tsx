@@ -25,10 +25,11 @@ import {
   type CompraACaminho,
   type EstadoDaCompra,
   type ItemDaCompra,
+  type Lote,
   type PerfumeBase,
 } from '@/domain'
 
-import { cancelarCompra, marcarRecebido, salvarCompra } from './actions'
+import { cancelarCompra, marcarRecebido, salvarCompra, vincularLote } from './actions'
 
 /**
  * Compras a caminho: o que já foi comprado e ainda não chegou.
@@ -77,10 +78,12 @@ const rascunhoVazio = (): Rascunho => ({
 export function ACaminhoCliente({
   compras,
   bases,
+  lotes,
   hoje,
 }: {
   compras: CompraACaminho[]
   bases: PerfumeBase[]
+  lotes: Lote[]
   hoje: string
 }) {
   const [abertaId, setAbertaId] = useState<string | null>(null)
@@ -166,6 +169,7 @@ export function ACaminhoCliente({
               compra={compra}
               estado={estado}
               resumo={resumo}
+              lotes={lotes}
               aberta={abertaId === compra.id}
               aoAbrir={() => setAbertaId(abertaId === compra.id ? null : compra.id)}
               aoEditar={() => {
@@ -228,6 +232,7 @@ function CartaoDaCompra({
   compra,
   estado,
   resumo,
+  lotes,
   aberta,
   aoAbrir,
   aoEditar,
@@ -235,6 +240,7 @@ function CartaoDaCompra({
   compra: CompraACaminho
   estado: EstadoDaCompra
   resumo: ReturnType<typeof resumoDaCompra>
+  lotes: Lote[]
   aberta: boolean
   aoAbrir: () => void
   aoEditar: () => void
@@ -305,7 +311,7 @@ function CartaoDaCompra({
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {compra.itens.map((i) => (
-              <LinhaDoItem key={i.id} item={i} />
+              <LinhaDoItem key={i.id} item={i} lotes={lotes} />
             ))}
           </div>
 
@@ -356,11 +362,23 @@ function CartaoDaCompra({
   )
 }
 
-function LinhaDoItem({ item }: { item: ItemDaCompra }) {
+function LinhaDoItem({ item, lotes }: { item: ItemDaCompra; lotes: Lote[] }) {
   const [quantidade, setQuantidade] = useState(String(item.quantidadeRecebida))
   const [ocorrencia, setOcorrencia] = useState(item.ocorrencia ?? '')
   const [pendente, iniciar] = useTransition()
   const [erro, setErro] = useState<string | null>(null)
+
+  /**
+   * Os lotes que este item pode ter virado.
+   *
+   * Só os do MESMO perfume, e só os que entraram a partir do dia em que o
+   * frasco chegou: lote anterior à chegada é de outra compra, e oferecê-lo
+   * convidaria a amarrar o item ao lote errado — o que estragaria o custo por
+   * ml das duas compras de uma vez.
+   */
+  const candidatos = lotes.filter(
+    (l) => l.baseId === item.baseId && (!item.recebidoEm || l.entrada >= item.recebidoEm),
+  )
 
   const chegada = estadoDaChegada(item)
   const pendencia = pendenciaDoItem(item)
@@ -411,6 +429,61 @@ function LinhaDoItem({ item }: { item: ItemDaCompra }) {
                 </Link>
               </>
             )}
+          </div>
+        )}
+
+        {/* Registrado o lote lá, o item precisa poder dizer QUAL foi. Sem isto
+            a pendência ficaria na tela para sempre, mesmo com o trabalho
+            feito — e uma pendência que não sai ensina a ignorar a lista. */}
+        {pendencia === 'falta registrar a compra do frasco para criar o lote' && candidatos.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 8 }}>
+            <span style={{ fontSize: 11.5, color: 'var(--color-terciario)' }}>virou o lote</span>
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                if (!e.target.value) return
+                iniciar(async () => {
+                  setErro(null)
+                  const r = await vincularLote(item.id, e.target.value)
+                  if (!r.ok) setErro(r.erro)
+                })
+              }}
+              style={{ ...campo, width: 260 }}
+            >
+              <option value="">escolher o lote…</option>
+              {candidatos.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.id} · {l.volumeMl} ml · entrada {dataBr(l.entrada)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {item.loteId && (
+          <div style={{ fontSize: 11.5, color: COR.ok, paddingTop: 4 }}>
+            virou o lote <span className="font-mono">{item.loteId}</span>
+            {' · '}
+            <button
+              type="button"
+              onClick={() =>
+                iniciar(async () => {
+                  const r = await vincularLote(item.id, null)
+                  if (!r.ok) setErro(r.erro)
+                })
+              }
+              style={{
+                background: 'none',
+                border: 0,
+                padding: 0,
+                color: 'var(--color-terciario)',
+                fontSize: 11.5,
+                textDecoration: 'underline',
+                cursor: 'pointer',
+              }}
+            >
+              desfazer
+            </button>
           </div>
         )}
         {erro && <div style={{ fontSize: 11.5, color: COR.erro, paddingTop: 4 }}>{erro}</div>}
