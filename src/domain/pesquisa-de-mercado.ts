@@ -61,8 +61,42 @@ export function precoDoTexto(texto: string): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-const RE_PRECO = /R\$\s*(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})/gi
-const RE_PARCELA = /(x\s*de|sem\s+juros|parcela|vezes)/i
+// Tolera tags entre o "R$" e o número: The Gregs escreve "R$</span><span>199,90".
+const RE_PRECO_TOLERANTE = /R\$(?:\s|<[^>]{0,120}>){0,6}(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})/gi
+const RE_PARCELA = /(\d+\s*x\s*(?:de\s*)?R?\$?|x\s*de|sem\s+juros|parcela|vezes)/i
+const RE_PRECO_ANTIGO = /line-through|old[-_]?price|compare[-_]?at|preco[-_]?antigo|precoDe\b/i
+
+/**
+ * O preço de verdade de um trecho de card.
+ *
+ * Junta todos os candidatos e pesa cada um pelo entorno: perto de "10x de"
+ * ou "sem juros" é PARCELA (a Eau de Léon exibia R$ 27,30 de um perfume de
+ * R$ 273); perto de "line-through"/"compare-at" é o preço riscado da
+ * promoção. Vence o maior valor ponderado — a regra do price-lab, com os
+ * pesos que faltavam.
+ */
+function melhorPreco(trecho: string): number | null {
+  const candidatos: { valor: number; peso: number }[] = []
+  RE_PRECO_TOLERANTE.lastIndex = 0
+  let p: RegExpExecArray | null
+  while ((p = RE_PRECO_TOLERANTE.exec(trecho)) !== null) {
+    const valor = precoDoTexto(p[1])
+    if (valor === null) continue
+    const arredores = trecho.slice(
+      Math.max(0, p.index - 70),
+      Math.min(trecho.length, p.index + p[0].length + 70),
+    )
+    const peso = RE_PARCELA.test(arredores) ? 0.4 : RE_PRECO_ANTIGO.test(arredores) ? 0.6 : 1
+    candidatos.push({ valor, peso })
+  }
+  if (!candidatos.length) {
+    // Último recurso: número brasileiro colado numa tag — "34,90</span>".
+    const solto = trecho.match(/(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})(?=\s*<)/)
+    return solto ? precoDoTexto(solto[1]) : null
+  }
+  candidatos.sort((a, b) => b.valor * b.peso - a.valor * a.peso)
+  return candidatos[0].valor
+}
 
 function absoluta(href: string | null, dominio: string): string | null {
   if (!href) return null
@@ -91,14 +125,18 @@ const semTags = (s: string) => s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').t
  */
 function extrairCartoesNuvemshop(html: string, dominio: string): CartaoDeProduto[] {
   const cardRe = /<a([^>]+class=["'][^"']*product[^"']*["'][^>]*)>/gi
-  const itens: CartaoDeProduto[] = []
-
+  // Todas as aberturas primeiro: o card de um produto termina onde começa o
+  // do vizinho — sem o corte, o preço de um vazava para o outro (foi assim
+  // que a Gabi mostrou R$ 15,00 num decant que não custa isso).
+  const aberturas: { index: number; tag: string }[] = []
   let m: RegExpExecArray | null
-  while ((m = cardRe.exec(html)) !== null) {
-    const tag = m[1]
-    // O card inteiro (título visível, preço, imagem) mora logo depois da
-    // abertura da âncora; 2.600 caracteres cobrem os temas da plataforma.
-    const chunk = html.slice(m.index, m.index + 2600)
+  while ((m = cardRe.exec(html)) !== null) aberturas.push({ index: m.index, tag: m[1] })
+
+  const itens: CartaoDeProduto[] = []
+  for (let i = 0; i < aberturas.length; i++) {
+    const { index, tag } = aberturas[i]
+    const fim = Math.min(aberturas[i + 1]?.index ?? index + 2600, index + 2600)
+    const chunk = html.slice(index, fim)
 
     const hrefM = tag.match(/href=["']([^"']+)["']/i)
     const url = absoluta(hrefM ? hrefM[1] : null, dominio)
@@ -112,12 +150,7 @@ function extrairCartoesNuvemshop(html: string, dominio: string): CartaoDeProduto
       chunk.match(/<h\d[^>]*class=["'][^"']*product[^"']*title[^"']*["'][^>]*>([\s\S]*?)<\/h\d>/i)
     const titulo = semTags(tituloM ? tituloM[1] : '').slice(0, 240)
 
-    const recorte = chunk.slice(0, 2400)
-    const precoM =
-      recorte.match(/R\$\s*\d{1,3}(?:\.\d{3})*,\d{2}/i) || recorte.match(/\d+,\d{2}(?=<)/i)
-    const preco = precoM ? precoDoTexto(precoM[0]) : null
-
-    itens.push({ titulo, url, preco, imagem: imagemDoTrecho(recorte, dominio) })
+    itens.push({ titulo, url, preco: melhorPreco(chunk), imagem: imagemDoTrecho(chunk, dominio) })
   }
   return itens
 }
@@ -183,19 +216,7 @@ export function extrairCartoes(htmlCru: string, dominio: string): CartaoDeProdut
     const fim = Math.min(html.length, m.index + 1800)
     const contexto = html.slice(inicio, fim)
 
-    const precos: { valor: number; peso: number }[] = []
-    let p: RegExpExecArray | null
-    RE_PRECO.lastIndex = 0
-    while ((p = RE_PRECO.exec(contexto)) !== null) {
-      const arredores = contexto.slice(Math.max(0, p.index - 50), Math.min(contexto.length, p.index + 70))
-      const valor = precoDoTexto(p[0])
-      if (valor === null) continue
-      precos.push({ valor, peso: RE_PARCELA.test(arredores) ? 0.4 : 1 })
-    }
-    precos.sort((a, b) => b.valor * b.peso - a.valor * a.peso)
-    const preco = precos.length ? precos[0].valor : null
-
-    itens.push({ titulo, url, preco, imagem: imagemDoTrecho(contexto, dominio) })
+    itens.push({ titulo, url, preco: melhorPreco(contexto), imagem: imagemDoTrecho(contexto, dominio) })
   }
 
   if (!itens.length) {
@@ -208,10 +229,7 @@ export function extrairCartoes(htmlCru: string, dominio: string): CartaoDeProdut
       const url = absoluta(a[1], dominio)
       if (!url) continue
       const titulo = semTags(a[2]).slice(0, 240)
-      const pm = bloco.match(RE_PRECO)
-      const preco = pm ? precoDoTexto(pm[pm.length - 1]) : null
-      const img = bloco.match(/<img\b[^>]*src=['"]([^'"]+)['"][^>]*>/i)
-      itens.push({ titulo, url, preco, imagem: img ? absoluta(img[1], dominio) : null })
+      itens.push({ titulo, url, preco: melhorPreco(bloco), imagem: imagemDoTrecho(bloco, dominio) })
     }
   }
 

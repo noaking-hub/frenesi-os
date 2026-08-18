@@ -98,6 +98,37 @@ describe('pesquisa de mercado', () => {
     expect(filtrarERanquear(cartoes, 'Polo')).toHaveLength(0)
   })
 
+  it('parcela não é preço: "10x de R$ 27,30" perde para o R$ 273,00 cheio', () => {
+    const html = `
+      <a href="/products/vibrato-decant" class="product-link" title="Vibrato Decant 10ml">
+        <img data-src="//cdn.l.com/v.jpg" />
+      </a>
+      <span class="price">R$ 273,00</span>
+      <span class="installments">10x de R$ 27,30 sem juros</span>`
+    const [c] = extrairCartoes(html, 'https://loja.com')
+    expect(c.preco).toBe(273)
+  })
+
+  it('preço com tag entre o R$ e o número, como The Gregs escreve', () => {
+    const html = `
+      <a href="/products/vibrato-100" class="product-item" title="SOSPIRO VIBRATO EDP - UNISSEX 100ML">
+      </a>
+      <span class="money">R$</span><span>1.099,90</span>`
+    const [c] = extrairCartoes(html, 'https://loja.com')
+    expect(c.preco).toBe(1099.9)
+  })
+
+  it('o card termina onde começa o vizinho: preço de um não vaza para o outro', () => {
+    const html = `
+      <a href="/products/caro" class="product" title="Perfume Caro 100ml"></a>
+      <span>R$ 899,00</span>
+      <a href="/products/barato" class="product" title="Decant Barato 5ml"></a>
+      <span>R$ 29,90</span>`
+    const cartoes = extrairCartoes(html, 'https://loja.com')
+    expect(cartoes.find((c) => c.titulo.includes('Caro'))?.preco).toBe(899)
+    expect(cartoes.find((c) => c.titulo.includes('Barato'))?.preco).toBe(29.9)
+  })
+
   it('extração Nuvemshop: título no atributo, imagem no data-src do lazy-load', () => {
     const html = `
       <a href="/products/polo-black-5ml" class="item-link product-link" title="Polo Black Decant 5ml">
