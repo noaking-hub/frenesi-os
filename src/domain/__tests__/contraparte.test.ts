@@ -50,8 +50,8 @@ describe('contraparte do Mercado Pago', () => {
 
 describe('categoria pela contraparte do saque', () => {
   it('nomes inequívocos decidem sozinhos', () => {
-    expect(categoriaPelaContraparte('Google Brasil Internet Ltda')).toBe('google-ads-trafego-pago')
-    expect(categoriaPelaContraparte('FACEBOOK SERVIÇOS ONLINE DO BRASIL LTDA')).toBe('meta-ads-trafego-pago')
+    expect(categoriaPelaContraparte('Google Brasil Internet Ltda')).toBe('trafego-pago')
+    expect(categoriaPelaContraparte('FACEBOOK SERVIÇOS ONLINE DO BRASIL LTDA')).toBe('trafego-pago')
     expect(categoriaPelaContraparte('Compra de etiquetas de envio')).toBe('frete')
     expect(categoriaPelaContraparte('MELHOR ENVIO TECNOLOGIA LTDA')).toBe('frete')
   })

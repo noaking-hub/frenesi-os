@@ -80,9 +80,10 @@ export function ehACasa(pedaco: string): boolean {
 export function categoriaPelaContraparte(nome: string | null | undefined): string | null {
   const t = achatarNome(nome ?? '')
   if (!t) return null
-  if (/\bgoogle\b/.test(t)) return 'google-ads-trafego-pago'
-  if (/\bmeta\b|facebook|\binstagram\b/.test(t)) return 'meta-ads-trafego-pago'
-  if (/tiktok/.test(t)) return 'marketing-e-ads'
+  // Tráfego pago é UMA categoria, por decisão do dono: a DRE quer o custo do
+  // tráfego, não a plataforma. Quem diz a plataforma é o favorecido, gravado
+  // na descrição do lançamento.
+  if (/\bgoogle\b|\bmeta\b|facebook|\binstagram\b|tiktok/.test(t)) return 'trafego-pago'
   if (/melhor envio|etiqueta/.test(t)) return 'frete'
   return null
 }

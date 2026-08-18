@@ -1405,6 +1405,12 @@ export async function descobrirDestinoDosPayouts(limite = 8): Promise<RodadaDest
     if (categoria) {
       if (await resolver(l.id, categoria)) {
         rodada.resolvidos.push({ lancamento: l.id, contraparte, categoria })
+        // O favorecido vira a descrição visível quando ela era o rótulo
+        // genérico do extrato: "Transferência para conta bancária" descrevia
+        // errado uma despesa com dono conhecido.
+        if ((l.descricao ?? '').trim() === 'Transferência para conta bancária') {
+          await sb.from('lancamentos').update({ descricao: contraparte }).eq('id', l.id)
+        }
       }
       continue
     }
