@@ -5,7 +5,7 @@ import { carregarPainelPrincipal } from '@/data/painel'
 import { carregarEstoque, carregarFilaDeEnvase } from '@/data/consultas'
 import { rotinasComErroPersistente } from '@/data/saude-das-rotinas'
 import { supabaseServer } from '@/data/supabase'
-import { briefingDe, prioridadesDe, resumoDaFila, type Briefing, type Prioridade } from '@/domain'
+import { briefingDe, hojeEmSaoPaulo, prioridadesDe, resumoDaFila, type Briefing, type Prioridade } from '@/domain'
 
 /**
  * A Central do Gerente: prioridades, briefing e resumo executivo.
@@ -42,7 +42,7 @@ export interface CentralDoGerente {
 export async function carregarCentralDoGerente(): Promise<CentralDoGerente> {
   // As seis leituras são independentes: em série levariam a soma dos tempos, e
   // a Central abre junto com a tela.
-  const [visao, painel, conciliacao, estoque, lancamentos, envase, expedicaoAtrasada, rotinasDoentes] =
+  const [visao, painel, conciliacao, estoque, lancamentos, envase, expedicaoAtrasada, rotinasDoentes, lembretes] =
     await Promise.all([
       carregarVisaoFinanceira(),
       carregarPainelPrincipal('30d'),
@@ -52,6 +52,7 @@ export async function carregarCentralDoGerente(): Promise<CentralDoGerente> {
       carregarFilaDeEnvase(),
       expedicaoAlemDoPrazo(),
       rotinasComErroPersistente(),
+      lembretesVencidos(),
     ])
 
   // A distinção já vem pronta do domínio e é reaproveitada, não recalculada:
@@ -97,6 +98,7 @@ export async function carregarCentralDoGerente(): Promise<CentralDoGerente> {
     rotuloDoPeriodo: painel.janela.rotulo,
     expedicaoAtrasada,
     rotinasDoentes,
+    lembretes,
   }
 
   const itens = prioridadesDe(estado)
@@ -125,6 +127,29 @@ export async function carregarCentralDoGerente(): Promise<CentralDoGerente> {
       'Envase',
     ],
     apuradoEm: new Date().toISOString(),
+  }
+}
+
+/**
+ * Lembretes do dono cuja data chegou (fuso da operação) e seguem abertos.
+ *
+ * O lembrete fica na fila até alguém marcar `concluido_em` — a vigília fecha
+ * o alerta sozinha na rodada seguinte, como faz com tudo que sai da fila.
+ */
+async function lembretesVencidos(): Promise<{ id: number; assunto: string; detalhe: string | null }[]> {
+  try {
+    const { data, error } = await supabaseServer()
+      .from('gerente_lembretes')
+      .select('id, assunto, detalhe')
+      .is('concluido_em', null)
+      .lte('a_partir_de', hojeEmSaoPaulo())
+      .order('a_partir_de')
+      .limit(5)
+    if (error) throw error
+    return (data ?? []) as { id: number; assunto: string; detalhe: string | null }[]
+  } catch (e) {
+    console.error('[prioridades] leitura de lembretes falhou:', e)
+    return []
   }
 }
 

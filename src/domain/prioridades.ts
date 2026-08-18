@@ -73,6 +73,8 @@ export interface EstadoDaOperacao {
   expedicaoAtrasada?: { qtd: number; valor: number; maisAntigoDias: number }
   /** Rotinas automáticas com o MESMO ponto falhando em rodadas seguidas. */
   rotinasDoentes?: { rotina: string; onde: string; rodadasSeguidas: number; ultimoErro: string }[]
+  /** Lembretes do dono cuja data chegou e que ainda não foram concluídos. */
+  lembretes?: { id: number; assunto: string; detalhe: string | null }[]
 }
 
 const PESO: Record<Severidade, number> = { critico: 0, alto: 1, medio: 2, informativo: 3 }
@@ -264,6 +266,24 @@ export function prioridadesDe(e: EstadoDaOperacao): Prioridade[] {
       confianca: { nivel: 'alta', motivo: 'Relatórios das próprias rodadas, persistidos a cada execução.' },
       responsavel: 'Dono',
       proximaAcao: { texto: 'Ver as integrações', href: '/configuracoes/integracoes' },
+    })
+  }
+
+  // ── Lembretes do dono ────────────────────────────────────────────────────
+  // Compromisso com data que o próprio dono pediu para não esquecer. Entra
+  // como 'medio': acima do informativo (tem dono e pede conversa), abaixo do
+  // que custa dinheiro agora.
+  for (const l of e.lembretes ?? []) {
+    fila.push({
+      id: `lembrete-${l.id}`,
+      titulo: `Lembrete: ${l.assunto}`,
+      severidade: 'medio',
+      impactoFinanceiro: null,
+      impactoOperacional: l.detalhe ?? 'Sem detalhe registrado.',
+      urgencia: 'A data que você marcou chegou.',
+      confianca: { nivel: 'alta', motivo: 'Agendado pelo próprio dono, com data.' },
+      responsavel: 'Dono',
+      proximaAcao: { texto: 'Ver os alertas', href: '/assessor/alertas' },
     })
   }
 

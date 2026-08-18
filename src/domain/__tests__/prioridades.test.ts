@@ -279,3 +279,21 @@ describe('expedição atrasada e saúde das rotinas', () => {
     expect(item?.impactoOperacional).toContain('sincronizar:logistica · rastreioMelhorEnvio')
   })
 })
+
+describe('lembretes do dono', () => {
+  it('lembrete com data vencida entra como médio, com id estável', () => {
+    const f = prioridadesDe({
+      ...CALMO,
+      lembretes: [{ id: 7, assunto: 'Retomar a conversa do checkout', detalhe: 'Medir o custo da Yampi.' }],
+    })
+    const item = f.find((p) => p.id === 'lembrete-7')
+    expect(item?.severidade).toBe('medio')
+    expect(item?.titulo).toBe('Lembrete: Retomar a conversa do checkout')
+    expect(item?.impactoOperacional).toBe('Medir o custo da Yampi.')
+    expect(item?.responsavel).toBe('Dono')
+  })
+
+  it('sem lembretes, nada muda', () => {
+    expect(prioridadesDe({ ...CALMO, lembretes: [] })).toEqual([])
+  })
+})
