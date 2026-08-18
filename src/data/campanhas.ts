@@ -3,7 +3,7 @@ import 'server-only'
 import { enviarEmailsCarrinho } from '@/app/(erp)/crm/carrinhos/actions'
 import { enviarAvisoCashback } from '@/app/(erp)/crm/cashback/actions'
 import { enviarPresente } from '@/app/(erp)/crm/giftback/actions'
-import { hojeEmSaoPaulo, toqueDevido, type RegraDeEnvio } from '@/domain'
+import { avisoDevido, hojeEmSaoPaulo, toqueDevido, type RegraDeEnvio } from '@/domain'
 
 import { carteirasYampi } from './cashback'
 import { aniversariantes } from './giftback'
@@ -417,11 +417,16 @@ async function rodarCashback(
     const dias = Math.round(
       (new Date(`${c.expiraEm}T12:00:00Z`).getTime() - new Date(`${hoje}T12:00:00Z`).getTime()) / 86_400_000,
     )
-    if (!antecedencias.includes(dias)) continue
+    // Por faixa, não por data exata: quem cruzou a marca num dia em que a
+    // rotina não rodou ainda recebe o aviso — atrasado dentro da margem.
+    const devido = avisoDevido(antecedencias, dias)
+    if (devido === null) continue
 
     // A data de vencimento entra na chave: o mesmo cliente ganha crédito novo,
-    // com outro vencimento, e merece um aviso novo.
-    const chave = `cashback:${c.customerId}:${c.expiraEm}:${dias}`
+    // com outro vencimento, e merece um aviso novo. A ANTECEDÊNCIA (não o dia
+    // corrente) também entra: é ela que impede o aviso de 3 dias de repetir
+    // amanhã, quando `dias` cair para 2 e o devido continuar sendo o de 3.
+    const chave = `cashback:${c.customerId}:${c.expiraEm}:${devido}`
     r.candidatos++
 
     if (apenasDispensar) {

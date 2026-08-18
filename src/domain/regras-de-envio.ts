@@ -108,8 +108,8 @@ export function problemasDaRegra(r: RegraDeEnvio): string[] {
   if (r.campanha === 'cashback') {
     const lista = Array.isArray(r.diasAntes) ? r.diasAntes : []
     if (lista.length === 0) erros.push('Informe ao menos uma antecedência de aviso.')
-    if (lista.some((d) => !Number.isFinite(d) || d < 1 || d > LIMITES.diasAntes.max)) {
-      erros.push(`Cada aviso precisa cair entre 1 e ${LIMITES.diasAntes.max} dias antes do vencimento.`)
+    if (lista.some((d) => !Number.isFinite(d) || d < 0 || d > LIMITES.diasAntes.max)) {
+      erros.push(`Cada aviso precisa cair entre 0 (no dia) e ${LIMITES.diasAntes.max} dias antes do vencimento.`)
     }
     // Duas datas iguais mandariam dois e-mails no mesmo dia.
     if (new Set(lista).size !== lista.length) erros.push('Há antecedências repetidas na lista.')
@@ -151,4 +151,33 @@ export function toqueDevido(
     if (horasDesdeAbandono >= toques[i].horas) devido = i
   }
   return devido
+}
+
+/** Quantos dias de atraso um aviso de cashback ainda tolera antes de calar. */
+export const MARGEM_AVISO_DIAS = 3
+
+/**
+ * Qual aviso de vencimento este saldo merece HOJE — a antecedência, ou null.
+ *
+ * A conta é por faixa, não por data exata: exigir o dia certeiro fez clientes
+ * a 2 e 1 dia do vencimento ficarem sem aviso nenhum, porque a rotina não
+ * rodou (ou a regra não existia) no dia em que eles cruzaram a marca. Vale o
+ * aviso mais urgente já cruzado — com margem: um aviso de 15 dias entregue a
+ * 5 do vencimento chega tarde demais para ser esse aviso, e despejaria o
+ * acumulado no orçamento diário de e-mail. Quem ficou fora da margem entra no
+ * próximo aviso da régua normalmente.
+ *
+ * Saldo já vencido não recebe nada — lamentar por e-mail não devolve o crédito.
+ */
+export function avisoDevido(
+  antecedencias: number[],
+  diasParaVencer: number,
+  margemDias: number = MARGEM_AVISO_DIAS,
+): number | null {
+  if (!Number.isFinite(diasParaVencer) || diasParaVencer < 0) return null
+  const devido = antecedencias
+    .filter((a) => Number.isFinite(a) && a >= diasParaVencer)
+    .sort((a, b) => a - b)[0]
+  if (devido === undefined) return null
+  return devido - diasParaVencer <= margemDias ? devido : null
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { problemasDaRegra, toqueDevido, type RegraDeEnvio } from '../regras-de-envio'
+import { avisoDevido, problemasDaRegra, toqueDevido, type RegraDeEnvio } from '../regras-de-envio'
 
 const carrinho = (over: Partial<RegraDeEnvio> = {}): RegraDeEnvio => ({
   campanha: 'carrinho',
@@ -90,5 +90,51 @@ describe('qual toque este carrinho merece', () => {
   it('respeita o que já foi enviado', () => {
     expect(toqueDevido(r, 30, 1)).toBe(1)
     expect(toqueDevido(r, 30, 2)).toBeNull()
+  })
+})
+
+describe('aviso devido do cashback', () => {
+  const REGUA = [15, 3, 0]
+
+  it('no dia exato de cada marca, devolve a própria marca', () => {
+    expect(avisoDevido(REGUA, 15)).toBe(15)
+    expect(avisoDevido(REGUA, 3)).toBe(3)
+    expect(avisoDevido(REGUA, 0)).toBe(0)
+  })
+
+  it('quem cruzou a marca sem ser avisado recebe o aviso atrasado, dentro da margem', () => {
+    expect(avisoDevido(REGUA, 2)).toBe(3)
+    expect(avisoDevido(REGUA, 1)).toBe(3)
+    expect(avisoDevido(REGUA, 14)).toBe(15)
+  })
+
+  it('atraso além da margem cala o aviso — o próximo da régua cobre', () => {
+    expect(avisoDevido(REGUA, 5)).toBeNull()
+    expect(avisoDevido(REGUA, 11)).toBeNull()
+  })
+
+  it('saldo vencido ou sem data não recebe nada', () => {
+    expect(avisoDevido(REGUA, -1)).toBeNull()
+    expect(avisoDevido(REGUA, NaN)).toBeNull()
+  })
+
+  it('longe de qualquer marca, silêncio', () => {
+    expect(avisoDevido(REGUA, 30)).toBeNull()
+    expect(avisoDevido([], 3)).toBeNull()
+  })
+})
+
+describe('validação do aviso no dia (0)', () => {
+  const cashback = (dias: number[]): RegraDeEnvio => ({
+    campanha: 'cashback', nome: 'Cashback', ligada: false, yampiTambemEnvia: true,
+    observacao: null, atualizadaEm: null, atualizadaPor: null, diasAntes: dias,
+  })
+
+  it('aceita 0 na lista de antecedências', () => {
+    expect(problemasDaRegra(cashback([15, 3, 0]))).toEqual([])
+  })
+
+  it('continua recusando antecedência negativa', () => {
+    expect(problemasDaRegra(cashback([15, -1])).length).toBeGreaterThan(0)
   })
 })

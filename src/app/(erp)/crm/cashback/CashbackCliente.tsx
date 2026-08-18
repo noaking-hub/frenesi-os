@@ -81,6 +81,7 @@ export function CashbackCliente({
   const [periodo, setPeriodo] = useState<Periodo>(periodoInicial)
   const [metricas, setMetricas] = useState<MetricasCashback>(metricasIniciais)
   const [faixa, setFaixa] = useState<FaixaVencimento>('todos')
+  const [ordemVence, setOrdemVence] = useState<'asc' | 'desc' | null>(null)
   const [busca, setBusca] = useState('')
   const [marcados, setMarcados] = useState<Record<string, boolean>>({})
   const [sincronizando, setSincronizando] = useState(false)
@@ -129,20 +130,29 @@ export function CashbackCliente({
   }
 
   const termo = busca.trim().toLowerCase()
-  const visiveis = useMemo(
-    () =>
-      carteiras
-        .filter((c) => naFaixa(c, faixa))
-        .filter(
-          (c) =>
-            !termo ||
-            c.nome.toLowerCase().includes(termo) ||
-            (c.email ?? '').toLowerCase().includes(termo) ||
-            (c.telefone ?? '').includes(termo) ||
-            dataBr(c.expiraEm).includes(termo),
-        ),
-    [carteiras, faixa, termo],
-  )
+  const visiveis = useMemo(() => {
+    const lista = carteiras
+      .filter((c) => naFaixa(c, faixa))
+      .filter(
+        (c) =>
+          !termo ||
+          c.nome.toLowerCase().includes(termo) ||
+          (c.email ?? '').toLowerCase().includes(termo) ||
+          (c.telefone ?? '').includes(termo) ||
+          dataBr(c.expiraEm).includes(termo),
+      )
+    if (!ordemVence) return lista
+    // Sem vencimento vai para o fim nas duas direções — o clique na coluna é
+    // para enxergar urgência, e "sem data" não tem urgência para mostrar.
+    return [...lista].sort((a, b) => {
+      const da = diasAteVencer(a.expiraEm)
+      const db = diasAteVencer(b.expiraEm)
+      if (da === null && db === null) return 0
+      if (da === null) return 1
+      if (db === null) return -1
+      return ordemVence === 'asc' ? da - db : db - da
+    })
+  }, [carteiras, faixa, termo, ordemVence])
 
   const saldoTotal = carteiras.reduce((a, c) => a + c.saldo, 0)
   const proximo = carteiras
@@ -368,7 +378,31 @@ export function CashbackCliente({
     },
     {
       chave: 'vence',
-      titulo: 'Vence em',
+      // Cabeçalho clicável: crescente → decrescente → ordem original. `font`
+      // e `color` herdados para o botão vestir o estilo do cabeçalho da grade.
+      titulo: (
+        <button
+          type="button"
+          onClick={() => setOrdemVence((o) => (o === null ? 'asc' : o === 'asc' ? 'desc' : null))}
+          title="Ordenar por vencimento"
+          className="hover:brightness-150"
+          style={{
+            border: 0,
+            padding: 0,
+            background: 'transparent',
+            font: 'inherit',
+            letterSpacing: 'inherit',
+            textTransform: 'inherit',
+            color: ordemVence ? COR.ouro : 'inherit',
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+          }}
+        >
+          Vence em {ordemVence === 'asc' ? '▲' : ordemVence === 'desc' ? '▼' : '↕'}
+        </button>
+      ),
       largura: 'minmax(120px,.75fr)',
       alinhamento: 'right',
       render: (c) => {

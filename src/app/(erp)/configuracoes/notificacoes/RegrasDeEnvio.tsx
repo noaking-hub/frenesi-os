@@ -231,7 +231,7 @@ function CartaoDaRegra({ inicial }: { inicial: RegraDeEnvio }) {
                   lista[i] = Number(v) || 0
                   mexer({ diasAntes: lista })
                 }}
-                sufixo="dias antes"
+                sufixo="dias antes (0 = no dia)"
               />
             ))}
             <BotaoOuro
