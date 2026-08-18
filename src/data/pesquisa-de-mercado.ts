@@ -1,12 +1,16 @@
 import 'server-only'
 
 import {
+  CONCORRENTES,
   extrairCartoes,
+  extrairVariacoes,
+  extrairVariacoesShopify,
   filtrarERanquear,
   primeiraPalavra,
   urlDeBusca,
   type CartaoDeProduto,
   type Concorrente,
+  type VariacaoDeProduto,
 } from '@/domain'
 
 import { operadorAtual } from './operador'
@@ -180,4 +184,54 @@ export async function pesquisasAnteriores(limite = 12): Promise<PesquisaAnterior
   return ((data ?? []) as { id: string; termo: string; total: number; executada_em: string }[]).map(
     (l) => ({ id: l.id, termo: l.termo, total: l.total, executadaEm: l.executada_em }),
   )
+}
+
+export type RespostaVariacoes =
+  | { ok: true; variacoes: VariacaoDeProduto[] }
+  | { ok: false; erro: string }
+
+/**
+ * As variações (tamanho × preço) de um produto no site do concorrente.
+ *
+ * Só aceita URL das lojas pesquisadas: esta função busca na internet em nome
+ * do servidor, e aceitar URL livre seria um proxy aberto com o IP da loja.
+ * A fonte é o `LS.variants` da página (Nuvemshop, que é a plataforma das
+ * lojas sondadas); loja Shopify cai no `.js` do produto como plano B.
+ */
+export async function variacoesDoProduto(url: string): Promise<RespostaVariacoes> {
+  let alvo: URL
+  try {
+    alvo = new URL(url)
+  } catch {
+    return { ok: false, erro: 'Endereço de produto inválido.' }
+  }
+  const hospedeiro = alvo.hostname.replace(/^www\./, '')
+  const daPesquisa = CONCORRENTES.some((c) => {
+    const dominio = new URL(c.dominio).hostname.replace(/^www\./, '')
+    return hospedeiro === dominio || hospedeiro.endsWith(`.${dominio}`)
+  })
+  if (!daPesquisa) return { ok: false, erro: 'A URL não pertence a nenhuma loja pesquisada.' }
+
+  try {
+    const html = await paginaDeBusca(alvo.toString(), `${alvo.origin}/`)
+    const variacoes = extrairVariacoes(html)
+    if (variacoes.length) return { ok: true, variacoes }
+  } catch {
+    /* a página pode ter caído; o plano B ainda vale */
+  }
+
+  if (/\/products\//.test(alvo.pathname)) {
+    try {
+      const corpo = await paginaDeBusca(
+        `${alvo.origin}${alvo.pathname.replace(/\/$/, '')}.js`,
+        `${alvo.origin}/`,
+      )
+      const variacoes = extrairVariacoesShopify(corpo)
+      if (variacoes.length) return { ok: true, variacoes }
+    } catch {
+      /* sem .js também; a resposta honesta vem abaixo */
+    }
+  }
+
+  return { ok: false, erro: 'A loja não expôs as variações desta página — abra o produto no site.' }
 }

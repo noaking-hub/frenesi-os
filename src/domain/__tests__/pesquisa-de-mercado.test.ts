@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   CONCORRENTES,
   extrairCartoes,
+  extrairVariacoes,
+  extrairVariacoesShopify,
   filtrarERanquear,
   mlDoTitulo,
   precoDoTexto,
@@ -211,5 +213,32 @@ describe('pesquisa de mercado', () => {
     expect(mlDoTitulo('Invictus lacrado')).toBeNull()
     expect(precoPorMl({ titulo: 'Decant 5ml', url: '', preco: 34.9, imagem: null })).toBe(6.98)
     expect(precoPorMl({ titulo: 'sem volume', url: '', preco: 34.9, imagem: null })).toBeNull()
+  })
+})
+
+describe('variações do produto do concorrente', () => {
+  it('lê o LS.variants da página de produto Nuvemshop, com promoção valendo', () => {
+    const html = `<script>
+      LS.variants = [{"product_id":326651321,"price_short":"R$75,00","price_number":75,"price_number_raw":7500,"promotional_price_number":null,"has_promotional_price":false,"stock":4,"available":true,"option0":"2 ml","option1":null,"option2":null,"id":1460026519},{"product_id":326651321,"price_number":150,"promotional_price_number":129.9,"has_promotional_price":true,"stock":0,"available":false,"option0":"5 ml","option1":null,"option2":null,"id":1460026520}];
+    </script>`
+    expect(extrairVariacoes(html)).toEqual([
+      { nome: '2 ml', preco: 75, disponivel: true },
+      { nome: '5 ml', preco: 129.9, disponivel: false },
+    ])
+    expect(extrairVariacoes('<html>nada aqui</html>')).toEqual([])
+  })
+
+  it('plano B Shopify: o .js do produto traz preço em centavos', () => {
+    const corpo = JSON.stringify({
+      variants: [
+        { title: '5 ml', price: 3490, available: true },
+        { title: '10 ml', price: 5990, available: false },
+      ],
+    })
+    expect(extrairVariacoesShopify(corpo)).toEqual([
+      { nome: '5 ml', preco: 34.9, disponivel: true },
+      { nome: '10 ml', preco: 59.9, disponivel: false },
+    ])
+    expect(extrairVariacoesShopify('não é json')).toEqual([])
   })
 })

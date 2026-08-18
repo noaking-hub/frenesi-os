@@ -1,13 +1,13 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { BotaoOuro, Rotulo, TituloSecao } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
-import { CONCORRENTES, brl, precoPorMl, primeiraPalavra, type CartaoDeProduto } from '@/domain'
+import { CONCORRENTES, brl, precoPorMl, primeiraPalavra, type CartaoDeProduto, type VariacaoDeProduto } from '@/domain'
 import type { PesquisaAnterior, VitrineDaLoja } from '@/data/pesquisa-de-mercado'
 
-import { pesquisarLoja, registrarRodada } from './actions'
+import { pesquisarLoja, registrarRodada, verVariacoes } from './actions'
 
 /**
  * Pesquisa de mercado — o price-lab dentro do ERP.
@@ -26,6 +26,7 @@ type EstadoVitrine =
 
 export function PesquisaCliente({ historicoInicial }: { historicoInicial: PesquisaAnterior[] }) {
   const [termo, setTermo] = useState('')
+  const [detalhe, setDetalhe] = useState<CartaoDeProduto | null>(null)
   const [palavra, setPalavra] = useState<string | null>(null)
   const [vitrines, setVitrines] = useState<Record<string, EstadoVitrine>>({})
   const [historico, setHistorico] = useState(historicoInicial)
@@ -248,7 +249,7 @@ export function PesquisaCliente({ historicoInicial }: { historicoInicial: Pesqui
                     }}
                   >
                     {v.vitrine.cartoes.map((cartao) => (
-                      <Cartao key={cartao.url} c={cartao} />
+                      <Cartao key={cartao.url} c={cartao} aoAbrirVariacoes={() => setDetalhe(cartao)} />
                     ))}
                   </div>
                 )}
@@ -257,17 +258,15 @@ export function PesquisaCliente({ historicoInicial }: { historicoInicial: Pesqui
           })}
         </>
       )}
+      {detalhe && <PainelVariacoes cartao={detalhe} aoFechar={() => setDetalhe(null)} />}
     </div>
   )
 }
 
-function Cartao({ c }: { c: CartaoDeProduto }) {
+function Cartao({ c, aoAbrirVariacoes }: { c: CartaoDeProduto; aoAbrirVariacoes: () => void }) {
   const porMl = precoPorMl(c)
   return (
-    <a
-      href={c.url}
-      target="_blank"
-      rel="noreferrer"
+    <div
       className="hover:border-ouro/40"
       style={{
         display: 'flex',
@@ -277,12 +276,16 @@ function Cartao({ c }: { c: CartaoDeProduto }) {
         borderRadius: 10,
         padding: 10,
         background: 'rgba(255,255,255,.02)',
-        textDecoration: 'none',
         color: 'inherit',
         minWidth: 0,
       }}
     >
-      <div
+      {/* A imagem abre as VARIAÇÕES (tamanho × preço) lidas do site do
+          concorrente; o título continua levando ao produto lá. */}
+      <button
+        type="button"
+        onClick={aoAbrirVariacoes}
+        title="Ver os preços de cada tamanho"
         style={{
           aspectRatio: '1 / 1',
           borderRadius: 8,
@@ -291,6 +294,9 @@ function Cartao({ c }: { c: CartaoDeProduto }) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
+          border: 0,
+          padding: 0,
+          cursor: 'pointer',
         }}
       >
         {c.imagem ? (
@@ -302,9 +308,9 @@ function Cartao({ c }: { c: CartaoDeProduto }) {
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
           />
         ) : (
-          <span style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>sem imagem</span>
+          <span style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>ver variações</span>
         )}
-      </div>
+      </button>
       <span
         className="font-sans"
         style={{
@@ -318,7 +324,15 @@ function Cartao({ c }: { c: CartaoDeProduto }) {
           minHeight: 31,
         }}
       >
-        {c.titulo}
+        <a
+          href={c.url}
+          target="_blank"
+          rel="noreferrer"
+          className="hover:text-ouro"
+          style={{ color: 'inherit', textDecoration: 'none' }}
+        >
+          {c.titulo}
+        </a>
       </span>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 'auto' }}>
         <span className="font-mono" style={{ fontSize: 13, fontWeight: 700, color: COR.ouro }}>
@@ -330,7 +344,150 @@ function Cartao({ c }: { c: CartaoDeProduto }) {
           </span>
         )}
       </div>
-    </a>
+    </div>
+  )
+}
+
+/**
+ * O painel de variações: o que cada tamanho custa NAQUELA loja, lido da
+ * própria página do produto na hora do clique.
+ */
+function PainelVariacoes({ cartao, aoFechar }: { cartao: CartaoDeProduto; aoFechar: () => void }) {
+  const [estado, setEstado] = useState<
+    | { fase: 'carregando' }
+    | { fase: 'pronta'; variacoes: VariacaoDeProduto[] }
+    | { fase: 'erro'; erro: string }
+  >({ fase: 'carregando' })
+
+  useEffect(() => {
+    let viva = true
+    verVariacoes(cartao.url).then((r) => {
+      if (!viva) return
+      setEstado(r.ok ? { fase: 'pronta', variacoes: r.variacoes } : { fase: 'erro', erro: r.erro })
+    })
+    return () => {
+      viva = false
+    }
+  }, [cartao.url])
+
+  return (
+    <div
+      onClick={aoFechar}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 60,
+        background: 'rgba(10,9,8,.72)',
+        backdropFilter: 'blur(3px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 'min(440px, 100%)',
+          maxHeight: '80vh',
+          overflowY: 'auto',
+          borderRadius: 14,
+          border: '1px solid rgba(255,255,255,.12)',
+          background: 'var(--color-mesa)',
+          padding: 18,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          {cartao.imagem && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={cartao.imagem}
+              alt=""
+              style={{ width: 52, height: 52, objectFit: 'cover', borderRadius: 8, flex: 'none' }}
+            />
+          )}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="font-sans" style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3 }}>
+              {cartao.titulo}
+            </div>
+            <a
+              href={cartao.url}
+              target="_blank"
+              rel="noreferrer"
+              className="font-sans hover:text-ouro"
+              style={{ fontSize: 11, color: COR.ouro, textDecoration: 'underline', textUnderlineOffset: 3 }}
+            >
+              abrir no site ↗
+            </a>
+          </div>
+          <button
+            type="button"
+            onClick={aoFechar}
+            aria-label="Fechar"
+            style={{ border: 0, background: 'transparent', color: 'var(--color-terciario)', cursor: 'pointer', fontSize: 16 }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {estado.fase === 'carregando' && (
+          <div className="font-sans" style={{ fontSize: 12, color: 'var(--color-terciario)' }}>
+            Lendo as variações no site do concorrente…
+          </div>
+        )}
+        {estado.fase === 'erro' && (
+          <div className="font-sans" style={{ fontSize: 12, color: 'var(--color-terciario)' }}>
+            {estado.erro}
+          </div>
+        )}
+        {estado.fase === 'pronta' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {estado.variacoes.map((v, i) => {
+              const ml = v.nome.match(/(\d+(?:[.,]\d+)?)\s*ml/i)
+              const porMl =
+                v.preco !== null && ml
+                  ? Math.round((v.preco / Number.parseFloat(ml[1].replace(',', '.'))) * 100) / 100
+                  : null
+              return (
+                <div
+                  key={`${v.nome}-${i}`}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    gap: 10,
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    border: '1px solid rgba(255,255,255,.07)',
+                    background: 'rgba(255,255,255,.02)',
+                    opacity: v.disponivel ? 1 : 0.55,
+                  }}
+                >
+                  <span className="font-sans" style={{ flex: 1, fontSize: 12.5 }}>
+                    {v.nome}
+                  </span>
+                  {!v.disponivel && (
+                    <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>
+                      esgotado
+                    </span>
+                  )}
+                  {porMl !== null && (
+                    <span className="font-mono" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>
+                      {brl(porMl)}/ml
+                    </span>
+                  )}
+                  <span className="font-mono" style={{ fontSize: 13, fontWeight: 700, color: COR.ouro }}>
+                    {v.preco !== null ? brl(v.preco) : '—'}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 

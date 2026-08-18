@@ -4,8 +4,10 @@ import { CONCORRENTES, primeiraPalavra } from '@/domain'
 import {
   pesquisasAnteriores,
   registrarPesquisa,
+  variacoesDoProduto,
   vitrineDoConcorrente,
   type PesquisaAnterior,
+  type RespostaVariacoes,
   type VitrineDaLoja,
 } from '@/data/pesquisa-de-mercado'
 
@@ -38,4 +40,12 @@ export async function registrarRodada(
 ): Promise<PesquisaAnterior[]> {
   await registrarPesquisa(termo, palavra, vitrines)
   return pesquisasAnteriores()
+}
+
+/**
+ * As variações (tamanho × preço) do produto clicado, direto do site do
+ * concorrente. A camada de dados só aceita URL das lojas pesquisadas.
+ */
+export async function verVariacoes(url: string): Promise<RespostaVariacoes> {
+  return variacoesDoProduto(url)
 }

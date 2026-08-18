@@ -450,3 +450,73 @@ export function precoPorMl(c: CartaoDeProduto): number | null {
   if (!ml) return null
   return Math.round((c.preco / ml) * 100) / 100
 }
+
+// ── Variações do produto no site do concorrente ────────────────────────────
+
+export interface VariacaoDeProduto {
+  nome: string
+  preco: number | null
+  disponivel: boolean
+}
+
+/**
+ * As variações da PÁGINA DE PRODUTO da Nuvemshop, lidas do `LS.variants`.
+ *
+ * Descoberto sobre a página real da Gabi (e a Tabs é a mesma plataforma): o
+ * tema publica `LS.variants = [...]` com uma entrada por variação — o nome em
+ * `option0` ("2 ml"), o preço cheio em `price_number`, o promocional em
+ * `promotional_price_number` e a disponibilidade. É o mesmo dado que o
+ * seletor de tamanho do site usa, então não há como divergir da vitrine.
+ */
+export function extrairVariacoes(htmlCru: string): VariacaoDeProduto[] {
+  const m = htmlCru.match(/LS\.variants\s*=\s*(\[[\s\S]*?\])\s*;/)
+  if (!m) return []
+  let bruto: unknown
+  try {
+    bruto = JSON.parse(m[1])
+  } catch {
+    return []
+  }
+  if (!Array.isArray(bruto)) return []
+
+  const saida: VariacaoDeProduto[] = []
+  for (const v of bruto as Record<string, unknown>[]) {
+    const nome = ['option0', 'option1', 'option2']
+      .map((k) => v[k])
+      .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+      .join(' / ')
+    const promo = Number(v.promotional_price_number)
+    const cheio = Number(v.price_number)
+    const preco =
+      Number.isFinite(promo) && promo > 0
+        ? promo
+        : Number.isFinite(cheio) && cheio > 0
+          ? cheio
+          : null
+    if (!nome && preco === null) continue
+    saida.push({ nome: nome || 'Único', preco, disponivel: Boolean(v.available) })
+  }
+  return saida
+}
+
+/**
+ * O plano B para loja Shopify: `/products/<handle>.js` devolve as variações
+ * em JSON limpo, com o preço em centavos.
+ */
+export function extrairVariacoesShopify(corpo: string): VariacaoDeProduto[] {
+  let bruto: unknown
+  try {
+    bruto = JSON.parse(corpo)
+  } catch {
+    return []
+  }
+  const variants = (bruto as { variants?: unknown })?.variants
+  if (!Array.isArray(variants)) return []
+  return (variants as { title?: unknown; price?: unknown; available?: unknown }[])
+    .map((v) => ({
+      nome: typeof v.title === 'string' && v.title.trim() ? v.title.trim() : 'Único',
+      preco: Number.isFinite(Number(v.price)) && Number(v.price) > 0 ? Number(v.price) / 100 : null,
+      disponivel: Boolean(v.available),
+    }))
+    .filter((v) => v.preco !== null || v.nome !== 'Único')
+}
