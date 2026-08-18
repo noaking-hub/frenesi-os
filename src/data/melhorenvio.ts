@@ -299,35 +299,62 @@ export interface RodadaMelhorEnvio {
  * do que a documentação prometia.
  */
 export async function rastrearNoMelhorEnvio(codigos: string[]): Promise<RodadaMelhorEnvio> {
-  const alvos = [...new Set(codigos.map((c) => c.trim()).filter(Boolean))].slice(0, 100)
-  if (alvos.length === 0) return { consultados: 0, eventos: 0, entregues: 0, amostra: null }
+  const alvos = new Set(codigos.map((c) => c.trim().toUpperCase()).filter(Boolean))
+  if (alvos.size === 0) return { consultados: 0, eventos: 0, entregues: 0, amostra: null }
 
-  const resposta = await chamar<Record<string, unknown>>('/api/v2/me/shipment/tracking', {
-    orders: alvos,
-  })
+  // O endpoint /shipment/tracking exige o ID INTERNO da etiqueta (UUID), que
+  // o ERP não guarda — mandar o código da transportadora respondia 422 em
+  // TODA rodada, e a varredura ME passou semanas morta sem ninguém notar.
+  // As listas de etiquetas trazem o mesmo estado (postado/entregue e as
+  // datas), então os marcos saem delas, sem endpoint extra.
+  const etiquetas = await etiquetasDoMelhorEnvio(['posted', 'delivered'])
 
   let amostra: string | null = null
-  try {
-    amostra = JSON.stringify(resposta).slice(0, 400)
-  } catch {
-    /* amostra é diagnóstico; não pode derrubar a leitura */
-  }
-
-  // A resposta é um mapa `{ [id ou código]: { ... } }` — cada valor é um envio.
   const eventos: EventoTransportadora[] = []
-  for (const [chave, valor] of Object.entries(resposta)) {
-    if (!valor || typeof valor !== 'object') continue
-    const envio = valor as Record<string, unknown>
-    // O código pode vir dentro do objeto; se não vier, a chave do mapa é ele.
-    const codigo =
-      texto(campo(envio, ['tracking', 'tracking_code', 'codigo'])) ??
-      (alvos.includes(chave) ? chave : null)
-    if (!codigo) continue
+  for (const envio of etiquetas) {
+    const codigo = texto(campo(envio, ['tracking']))
+    if (!codigo || !alvos.has(codigo.trim().toUpperCase())) continue
+    if (!amostra) {
+      try {
+        amostra = JSON.stringify(envio).slice(0, 400)
+      } catch {
+        /* amostra é diagnóstico; não pode derrubar a leitura */
+      }
+    }
     eventos.push(...eventosDoMelhorEnvio(envio, codigo))
   }
 
   const r = eventos.length ? await gravarEventosRastreio(eventos, 'melhorenvio') : { gravados: 0, entregues: 0 }
-  return { consultados: alvos.length, eventos: r.gravados, entregues: r.entregues, amostra }
+  return { consultados: alvos.size, eventos: r.gravados, entregues: r.entregues, amostra }
+}
+
+/**
+ * As etiquetas da conta, paginadas de verdade.
+ *
+ * A primeira versão lia só a primeira página de cada lista (~10 etiquetas), e
+ * foi assim que envios reais ficaram invisíveis: com dezenas de etiquetas
+ * postadas e entregues na conta, o que interessava estava nas páginas que
+ * ninguém pedia — e a descoberta examinava 20 e casava zero.
+ */
+async function etiquetasDoMelhorEnvio(
+  status: string[],
+  paginasPorStatus = 3,
+): Promise<Record<string, unknown>[]> {
+  const listas = await Promise.all(
+    status.map(async (s) => {
+      const tudo: Record<string, unknown>[] = []
+      for (let pagina = 1; pagina <= paginasPorStatus; pagina++) {
+        const r = await chamar<{ data?: unknown }>(
+          `/api/v2/me/orders?status=${s}&per_page=100&page=${pagina}`,
+        )
+        const lote = Array.isArray(r.data) ? (r.data as Record<string, unknown>[]) : []
+        tudo.push(...lote)
+        if (lote.length < 100) break
+      }
+      return tudo
+    }),
+  )
+  return listas.flat()
 }
 
 /** Os códigos vivos do Melhor Envio — os que a varredura deve consultar. */
@@ -374,14 +401,12 @@ export async function descobrirEnviosDoMelhorEnvio(): Promise<DescobertaMelhorEn
   if (!supabaseConfigurado()) return resultado
 
   // Postadas E entregues: uma entrega rápida pode acontecer antes de a
-  // descoberta rodar, e a etiqueta some da lista de postadas.
-  const paginas = await Promise.all([
-    chamar<{ data?: unknown }>('/api/v2/me/orders?status=posted'),
-    chamar<{ data?: unknown }>('/api/v2/me/orders?status=delivered'),
-  ])
-  const etiquetas = paginas.flatMap((p) =>
-    Array.isArray(p.data) ? (p.data as Record<string, unknown>[]) : [],
-  )
+  // descoberta rodar, e a etiqueta some da lista de postadas. E LIBERADAS
+  // ("released"): é a etiqueta comprada e impressa que a transportadora ainda
+  // não escaneou — nesta operação o pacote sai no mesmo dia da compra da
+  // etiqueta, e esperar o "posted" do Melhor Envio deixou cliente com pedido
+  // despachado e tela em "aguardando envio" por dias.
+  const etiquetas = await etiquetasDoMelhorEnvio(['posted', 'delivered', 'released'])
   if (!etiquetas.length) return resultado
 
   const sb = supabaseServer()
