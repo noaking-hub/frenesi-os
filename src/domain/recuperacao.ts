@@ -231,7 +231,6 @@ export function emailRecuperacao(
             <tr>
               <td style="padding:20px 10px 0;text-align:center;">
                 <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.6;color:#9A927F;">
-                  Alguma dúvida sobre um perfume? É só responder este e-mail.<br>
                   Você recebeu esta mensagem porque deixou itens no carrinho da FRENESI.
                 </p>
               </td>
@@ -463,7 +462,6 @@ export const HTML_BASE_RECUPERACAO = `<!doctype html>
             <tr>
               <td style="padding:20px 10px 0;text-align:center;">
                 <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.6;color:#9A927F;">
-                  Alguma dúvida sobre um perfume? É só responder este e-mail.<br>
                   Você recebeu esta mensagem porque deixou itens no carrinho da FRENESI.
                 </p>
               </td>

@@ -195,7 +195,7 @@ const escapa = (t: string) =>
  */
 const MENSAGEM_ENVIO_LOCAL =
   'Seu pedido saiu para entrega com o nosso motoboy e será entregue em mãos, direto no seu endereço. ' +
-  'Entrega local não tem código de rastreio — qualquer dúvida, é só responder este e-mail.'
+  'Entrega local não tem código de rastreio.'
 
 export function emailEnvio(
   d: {
