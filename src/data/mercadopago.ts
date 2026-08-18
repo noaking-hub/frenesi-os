@@ -1363,6 +1363,7 @@ export async function descobrirDestinoDosPayouts(limite = 8): Promise<RodadaDest
       `/v1/payments/${idMovimento}`,
       `/v1/transfers/${idMovimento}`,
       `/v1/withdrawals/${idMovimento}`,
+      `/v1/account/withdrawals/${idMovimento}`,
       `/v1/account/movements/${idMovimento}`,
     ]
     let contraparte: string | null = null
@@ -1386,7 +1387,19 @@ export async function descobrirDestinoDosPayouts(limite = 8): Promise<RodadaDest
       }
     }
     primeiro = false
-    if (!contraparte) continue
+    if (!contraparte) {
+      // Sondado e mudo: fica anotado para a rotina não bater nos mesmos 404
+      // a cada rodada — e para quem abrir o lançamento saber que a resposta
+      // automática já foi tentada.
+      if (!(l.observacao ?? '').trim()) {
+        await sb
+          .from('lancamentos')
+          .update({ observacao: 'Contraparte: o gateway não revela o destinatário deste saque — decisão manual em Repasses.' })
+          .eq('id', l.id)
+          .eq('aguarda_destino', true)
+      }
+      continue
+    }
 
     const categoria = categoriaPelaContraparte(contraparte)
     if (categoria) {
