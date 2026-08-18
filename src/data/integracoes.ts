@@ -243,6 +243,11 @@ async function detalheDoQuiz(): Promise<string> {
   if (r.respostas === 0) {
     return 'Configurado. A primeira importação sai na próxima rodada de hora em hora.'
   }
+  if (r.comEmail === 0) {
+    // O quiz de hoje não captura e-mail: o que chega é o clique na
+    // recomendação, com o perfil de respostas — sinal de demanda, anônimo.
+    return `${r.respostas} interações importadas, todas anônimas — o quiz ainda não captura e-mail, então não há cruzamento com clientes.`
+  }
   const receita = r.receitaAtribuida.toLocaleString('pt-BR', { minimumFractionDigits: 2 })
   return (
     `${r.respostas} respostas importadas (${r.comEmail} com e-mail) · ` +

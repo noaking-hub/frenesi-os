@@ -66,16 +66,32 @@ const COLUNAS_DE_ID = ['id', 'uuid']
 
 /**
  * Qual tabela guarda as respostas: `QUIZ_TABELA` decide quando definida;
- * senão, a tabela com coluna de e-mail — desempate pelo nome mais sugestivo.
+ * senão, a tabela com coluna de e-mail — e, na falta dela, a de EVENTOS do
+ * quiz (nome sugestivo + data de criação). O quiz de hoje não captura
+ * e-mail: o que existe é `quiz_clicks`, cada clique numa recomendação com o
+ * perfil de respostas junto. Anônimo, mas é o sinal de demanda — e no dia em
+ * que o quiz ganhar captura de e-mail, a detecção por e-mail volta a mandar.
  */
 export function tabelaDeRespostas(tabelas: TabelaDoQuiz[]): TabelaDoQuiz | null {
   const forcada = (process.env.QUIZ_TABELA ?? '').trim()
   if (forcada) return tabelas.find((t) => t.tabela === forcada) ?? null
 
-  const comEmail = tabelas.filter((t) => t.colunas.some((c) => COLUNAS_DE_EMAIL.includes(c.toLowerCase())))
-  if (comEmail.length === 0) return null
-  const sugestiva = comEmail.find((t) => /resposta|resultado|lead|submiss|quiz|curadoria/i.test(t.tabela))
-  return sugestiva ?? comEmail[0]
+  // Backup não é fonte: importar cópia velha duplicaria tudo com data errada.
+  const vivas = tabelas.filter((t) => !/backup/i.test(t.tabela))
+
+  const comEmail = vivas.filter((t) => t.colunas.some((c) => COLUNAS_DE_EMAIL.includes(c.toLowerCase())))
+  if (comEmail.length > 0) {
+    const sugestiva = comEmail.find((t) => /resposta|resultado|lead|submiss|quiz|curadoria/i.test(t.tabela))
+    return sugestiva ?? comEmail[0]
+  }
+
+  return (
+    vivas.find(
+      (t) =>
+        /click|resposta|resultado|lead|submiss|evento/i.test(t.tabela) &&
+        t.colunas.some((c) => COLUNAS_DE_DATA.includes(c.toLowerCase())),
+    ) ?? null
+  )
 }
 
 const acha = (colunas: string[], candidatas: string[]) =>
