@@ -2,11 +2,10 @@
  * O motor de imagem do gerador — canvas puro, sem React.
  *
  * Portado do projeto `gerador-frenesi` (App.jsx, versão confirmada pelo dono
- * como a boa) com o desenho preservado traço a traço: as cenas que ele produz
- * SÃO as imagens do catálogo da Shopify, e mudar um sombreado aqui mudaria a
- * cara da loja. O que mudou na vinda para o ERP foi a arquitetura, não o
- * desenho: o motor virou módulo puro (recebe ajustes e imagens, devolve
- * pixels), e todo o estado foi para quem o chama.
+ * como a boa) com o desenho preservado traço a traço: a cena que ele produz É
+ * a imagem do catálogo da Shopify, e mudar um sombreado aqui mudaria a cara
+ * da loja. Das três cenas originais sobrou só a Luxo — o dono aposentou as
+ * outras duas — então o modo deixou de existir: o motor renderiza UMA cena.
  *
  * Tudo aqui roda NO NAVEGADOR. Nenhuma função deste arquivo pode ser chamada
  * de Server Component — canvas, Image e FileReader não existem no servidor.
@@ -33,42 +32,13 @@ export const TEMA_PADRAO: Tema = {
   text: '#111111',
 }
 
-export type Modo = 'default' | 'hover' | 'luxury'
-
-/** Todos os controles da cena, nos três modos. */
+/**
+ * Todos os controles da cena. Os nomes `luxury*` são herdados do original de
+ * propósito: presets salvos no banco guardam estas chaves, e renomear campo
+ * aqui seria invalidar preset alheio em silêncio.
+ */
 export interface Ajustes {
   usePerfumeTheme: boolean
-  showInfoLabels: boolean
-  perfumeScale: number
-  perfumeX: number
-  perfumeY: number
-  decantScale: number
-  decantX: number
-  decantY: number
-  arrowY: number
-  arrowColor: 'gold' | 'black'
-  arrowType: string
-  arrowScale: number
-  showBadge: boolean
-  badgeScale: number
-  badgeX: number
-  badgeY: number
-  mode: Modo
-  hoverBgColor: string
-  hoverPerfumeScale: number
-  hoverPerfumeX: number
-  hoverPerfumeY: number
-  hoverBottleOpacity: number
-  hoverCircleSize: number
-  hoverCircleX: number
-  hoverCircleY: number
-  hoverDecantScale: number
-  hoverDecantOffsetX: number
-  hoverDecantOffsetY: number
-  hoverLabel: string
-  showHoverLabel: boolean
-  hoverLabelSize: number
-  showArrow: boolean
   luxuryPerfumeScale: number
   luxuryPerfumeX: number
   luxuryPerfumeY: number
@@ -85,39 +55,9 @@ export interface Ajustes {
   luxuryLabelSize: number
 }
 
+/** O padrão é o preset "Luxo" original — a composição do catálogo. */
 export const AJUSTES_PADRAO: Ajustes = {
   usePerfumeTheme: true,
-  showInfoLabels: true,
-  perfumeScale: 0.82,
-  perfumeX: -18,
-  perfumeY: -8,
-  decantScale: 0.92,
-  decantX: 4,
-  decantY: 12,
-  arrowY: 28,
-  arrowColor: 'gold',
-  arrowType: 'bold',
-  arrowScale: 1,
-  showBadge: true,
-  badgeScale: 1.18,
-  badgeX: 841,
-  badgeY: 41,
-  mode: 'default',
-  hoverBgColor: '#8e6a62',
-  hoverPerfumeScale: 1.05,
-  hoverPerfumeX: 0,
-  hoverPerfumeY: 0,
-  hoverBottleOpacity: 0.42,
-  hoverCircleSize: 324,
-  hoverCircleX: 668,
-  hoverCircleY: 686,
-  hoverDecantScale: 1.3,
-  hoverDecantOffsetX: 0,
-  hoverDecantOffsetY: -46,
-  hoverLabel: 'DECANT',
-  showHoverLabel: true,
-  hoverLabelSize: 52,
-  showArrow: true,
   luxuryPerfumeScale: 0.96,
   luxuryPerfumeX: 0,
   luxuryPerfumeY: 10,
@@ -134,84 +74,6 @@ export const AJUSTES_PADRAO: Ajustes = {
   luxuryLabelSize: 18,
 }
 
-/**
- * Os quatro presets de fábrica.
- *
- * "Ads" fica: procurei "tiktok" nas três versões do projeto original (atual,
- * .bak e o zip) e não existe — os presets reais sempre foram estes quatro.
- */
-export const PRESETS_DE_FABRICA: { chave: string; nome: string; valores: Partial<Ajustes> }[] = [
-  { chave: 'catalogo', nome: 'Catálogo', valores: { ...AJUSTES_PADRAO, mode: 'default' } },
-  {
-    chave: 'hover',
-    nome: 'Hover',
-    valores: {
-      mode: 'hover',
-      usePerfumeTheme: true,
-      showInfoLabels: true,
-      hoverBgColor: '#8e6a62',
-      hoverPerfumeScale: 1.06,
-      hoverPerfumeX: 0,
-      hoverPerfumeY: 0,
-      hoverBottleOpacity: 0.42,
-      hoverCircleSize: 324,
-      hoverCircleX: 668,
-      hoverCircleY: 686,
-      hoverDecantScale: 1.3,
-      hoverDecantOffsetX: 0,
-      hoverDecantOffsetY: -46,
-      hoverLabel: 'DECANT',
-      showHoverLabel: true,
-      hoverLabelSize: 52,
-    },
-  },
-  {
-    chave: 'luxo',
-    nome: 'Luxo',
-    valores: {
-      mode: 'luxury',
-      usePerfumeTheme: true,
-      showInfoLabels: true,
-      showBadge: false,
-      luxuryPerfumeScale: 0.96,
-      luxuryPerfumeX: 0,
-      luxuryPerfumeY: 10,
-      luxuryCircleSize: 304,
-      luxuryCircleX: 660,
-      luxuryCircleY: 168,
-      luxuryDecantScale: 1.18,
-      luxuryDecantOffsetX: 0,
-      luxuryDecantOffsetY: 14,
-      luxuryArrowType: 'swoosh',
-      luxuryArrowLift: 92,
-      luxuryShowLabel: true,
-      luxuryLabelText: 'DECANT',
-      luxuryLabelSize: 18,
-    },
-  },
-  {
-    chave: 'ads',
-    nome: 'Ads',
-    valores: {
-      mode: 'default',
-      usePerfumeTheme: true,
-      showInfoLabels: true,
-      perfumeScale: 0.84,
-      perfumeX: -26,
-      perfumeY: -10,
-      decantScale: 0.96,
-      decantX: 0,
-      decantY: 0,
-      arrowY: 12,
-      arrowColor: 'black',
-      arrowType: 'curve',
-      arrowScale: 1.15,
-      showArrow: true,
-      showBadge: false,
-    },
-  },
-]
-
 export interface Retangulo {
   x: number
   y: number
@@ -224,7 +86,6 @@ type Fonte = HTMLImageElement | HTMLCanvasElement
 export interface ImagensDaCena {
   perfume: Fonte | null
   decant: Fonte | null
-  decantLuxo: Fonte | null
 }
 
 type Ctx = CanvasRenderingContext2D
@@ -308,32 +169,6 @@ export function apararTransparencia(fonte: HTMLCanvasElement, folga = 6): HTMLCa
   return canvas
 }
 
-/**
- * Recorta o frasco de decant da foto composta `decants.png` — o crop fixo é
- * herdado do original e casa com aquela imagem específica.
- */
-export function extrairDecant(fonte: HTMLCanvasElement): HTMLCanvasElement {
-  const sw = fonte.width
-  const sh = fonte.height
-  const corte = document.createElement('canvas')
-  corte.width = Math.floor(sw * 0.36)
-  corte.height = Math.floor(sh * 0.94)
-  corte
-    .getContext('2d')!
-    .drawImage(
-      fonte,
-      Math.floor(sw * 0.49),
-      Math.floor(sh * 0.03),
-      Math.floor(sw * 0.36),
-      Math.floor(sh * 0.94),
-      0,
-      0,
-      corte.width,
-      corte.height,
-    )
-  return apararTransparencia(corte, 8)
-}
-
 /** Prepara a foto crua do perfume: fundo fora, bordas aparadas. */
 export function prepararPerfume(img: HTMLImageElement): HTMLCanvasElement {
   return apararTransparencia(removerFundoClaro(img, 245, 28), 6)
@@ -375,8 +210,8 @@ function brilhoParaTexto(cor: string) {
 
 /**
  * O tema nasce da própria foto: média ponderada das cores saturadas do
- * frasco, com peso maior no meio-tom. É o que faz o cartão, o círculo e as
- * legendas combinarem com cada perfume sem ninguém escolher cor.
+ * frasco, com peso maior no meio-tom. É o que faz o círculo do decant
+ * combinar com cada perfume sem ninguém escolher cor.
  */
 export function extrairTemaDaImagem(fonte: Fonte): Tema {
   try {
@@ -451,19 +286,6 @@ function sombra(ctx: Ctx, x: number, y: number, w: number, h: number, blur = 28,
   ctx.restore()
 }
 
-function brilhoSuave(ctx: Ctx, x: number, y: number, raio: number, cor: string, alpha = 0.18) {
-  const glow = ctx.createRadialGradient(x, y, 0, x, y, raio)
-  glow.addColorStop(0, rgba(cor, alpha))
-  glow.addColorStop(0.45, rgba(cor, alpha * 0.52))
-  glow.addColorStop(1, rgba(cor, 0))
-  ctx.save()
-  ctx.fillStyle = glow
-  ctx.beginPath()
-  ctx.arc(x, y, raio, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.restore()
-}
-
 function sombraDeChao(ctx: Ctx, cx: number, cy: number, rx: number, ry: number, alpha = 0.14) {
   ctx.save()
   const grad = ctx.createRadialGradient(cx, cy, Math.min(rx, ry) * 0.12, cx, cy, Math.max(rx, ry))
@@ -472,36 +294,6 @@ function sombraDeChao(ctx: Ctx, cx: number, cy: number, rx: number, ry: number, 
   ctx.fillStyle = grad
   ctx.beginPath()
   ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.restore()
-}
-
-function cartaoDeVidro(ctx: Ctx, x: number, y: number, w: number, h: number, tema: Tema) {
-  ctx.save()
-  ctx.shadowColor = 'rgba(0,0,0,0.14)'
-  ctx.shadowBlur = 34
-  ctx.shadowOffsetY = 16
-  caminhoArredondado(ctx, x, y, w, h, 34)
-  const fill = ctx.createLinearGradient(x, y, x, y + h)
-  fill.addColorStop(0, 'rgba(255,255,255,0.98)')
-  fill.addColorStop(1, rgba(tema.neutral, 0.94))
-  ctx.fillStyle = fill
-  ctx.fill()
-  ctx.restore()
-
-  ctx.save()
-  caminhoArredondado(ctx, x, y, w, h, 34)
-  ctx.strokeStyle = rgba(tema.accent, 0.22)
-  ctx.lineWidth = 2
-  ctx.stroke()
-  ctx.restore()
-
-  ctx.save()
-  caminhoArredondado(ctx, x + 10, y + 10, w - 20, h * 0.32, 26)
-  const sheen = ctx.createLinearGradient(x, y, x + w, y + h * 0.38)
-  sheen.addColorStop(0, 'rgba(255,255,255,0.55)')
-  sheen.addColorStop(1, 'rgba(255,255,255,0)')
-  ctx.fillStyle = sheen
   ctx.fill()
   ctx.restore()
 }
@@ -556,71 +348,7 @@ function pilula(
   return { x, y, w, h }
 }
 
-function selo100(ctx: Ctx, x: number, y: number, tamanho = 120) {
-  const cx = x + tamanho / 2
-  const cy = y + tamanho / 2
-  const rExterno = tamanho / 2
-  const rInterno = tamanho * 0.41
-  ctx.save()
-  const ouro = ctx.createRadialGradient(cx, cy, rInterno * 0.2, cx, cy, rExterno)
-  ouro.addColorStop(0, '#f8e39a')
-  ouro.addColorStop(0.5, '#d3ac46')
-  ouro.addColorStop(1, '#9b6f17')
-  ctx.fillStyle = ouro
-  const pontas = 28
-  ctx.beginPath()
-  for (let i = 0; i < pontas * 2; i++) {
-    const ang = (Math.PI / pontas) * i - Math.PI / 2
-    const raio = i % 2 === 0 ? rExterno : rExterno * 0.9
-    const px = cx + Math.cos(ang) * raio
-    const py = cy + Math.sin(ang) * raio
-    if (i === 0) ctx.moveTo(px, py)
-    else ctx.lineTo(px, py)
-  }
-  ctx.closePath()
-  ctx.fill()
-  ctx.beginPath()
-  ctx.arc(cx, cy, rInterno, 0, Math.PI * 2)
-  ctx.fillStyle = '#111111'
-  ctx.fill()
-  ctx.strokeStyle = 'rgba(255,215,120,0.8)'
-  ctx.lineWidth = 3
-  ctx.beginPath()
-  ctx.arc(cx, cy, rInterno + 8, 0, Math.PI * 2)
-  ctx.stroke()
-  ctx.fillStyle = '#f1cf72'
-  ctx.textAlign = 'center'
-  ctx.font = `700 ${Math.max(14, tamanho * 0.18)}px Arial`
-  ctx.fillText('100%', cx, cy - tamanho * 0.03)
-  ctx.font = `700 ${Math.max(9, tamanho * 0.11)}px Arial`
-  ctx.fillText('ORIGINAL', cx, cy + tamanho * 0.17)
-  ctx.font = `700 ${Math.max(8, tamanho * 0.08)}px Arial`
-  ctx.fillText('✦ ✦ ✦', cx, cy - tamanho * 0.22)
-  ctx.fillText('✦ ✦ ✦', cx, cy + tamanho * 0.31)
-  ctx.restore()
-}
-
-// ── Setas ───────────────────────────────────────────────────────────────────
-
-function estiloDeSeta(ctx: Ctx, startX: number, y: number, endX: number, cor: 'gold' | 'black') {
-  if (cor === 'gold') {
-    const g = ctx.createLinearGradient(startX, y, endX, y)
-    g.addColorStop(0, '#8f6820')
-    g.addColorStop(0.5, '#e6c870')
-    g.addColorStop(1, '#a97a27')
-    ctx.strokeStyle = g
-    ctx.fillStyle = g
-    ctx.shadowColor = 'rgba(206,164,71,0.28)'
-    ctx.shadowBlur = 8
-  } else {
-    ctx.strokeStyle = '#111111'
-    ctx.fillStyle = '#111111'
-    ctx.shadowColor = 'rgba(0,0,0,0.14)'
-    ctx.shadowBlur = 4
-  }
-  ctx.lineCap = 'round'
-  ctx.lineJoin = 'round'
-}
+// ── Indicador (a linha dourada entre o frasco e o decant) ──────────────────
 
 function pontaDeSeta(ctx: Ctx, endX: number, endY: number, ang: number, comp = 18, fator = 5.2) {
   const asa = Math.PI / fator
@@ -640,103 +368,6 @@ function pontaAberta(ctx: Ctx, endX: number, endY: number, ang: number, comp = 2
   ctx.lineTo(endX, endY)
   ctx.lineTo(endX - comp * Math.cos(ang + asa), endY - comp * Math.sin(ang + asa))
   ctx.stroke()
-}
-
-function setaBloco(ctx: Ctx, startX: number, endX: number, y: number, cor: 'gold' | 'black', escala = 1) {
-  ctx.save()
-  estiloDeSeta(ctx, startX, y, endX, cor)
-  const espessura = 16 * escala
-  const cabeca = 46 * escala
-  const fimHaste = endX - cabeca + 6 * escala
-  ctx.beginPath()
-  ctx.rect(startX, y - espessura / 2, Math.max(8, fimHaste - startX), espessura)
-  ctx.fill()
-  ctx.beginPath()
-  ctx.moveTo(endX, y)
-  ctx.lineTo(endX - cabeca, y - espessura * 1.45)
-  ctx.lineTo(endX - cabeca, y + espessura * 1.45)
-  ctx.closePath()
-  ctx.fill()
-  ctx.restore()
-}
-
-function seta(
-  ctx: Ctx,
-  startX: number,
-  endX: number,
-  y: number,
-  tipo: string,
-  cor: 'gold' | 'black',
-  escala = 1,
-) {
-  if (tipo === 'none') return
-  if (tipo === 'bold') {
-    setaBloco(ctx, startX, endX, y, cor, escala)
-    return
-  }
-  ctx.save()
-  estiloDeSeta(ctx, startX, y, endX, cor)
-  const linha = 5 * escala
-  const cabeca = 28 * escala
-
-  if (tipo === 'straight') {
-    ctx.lineWidth = linha
-    ctx.beginPath()
-    ctx.moveTo(startX, y)
-    ctx.lineTo(endX, y)
-    ctx.stroke()
-    pontaDeSeta(ctx, endX, y, 0, cabeca, 5.2)
-  }
-  if (tipo === 'short') {
-    ctx.lineWidth = linha
-    const s = startX + 35 * escala
-    const e = endX - 35 * escala
-    ctx.beginPath()
-    ctx.moveTo(s, y)
-    ctx.lineTo(e, y)
-    ctx.stroke()
-    pontaDeSeta(ctx, e, y, 0, 24 * escala, 5.2)
-  }
-  if (tipo === 'curve') {
-    ctx.lineWidth = linha
-    const cpX = (startX + endX) / 2
-    const cpY = y - 55 * escala
-    ctx.beginPath()
-    ctx.moveTo(startX, y + 10 * escala)
-    ctx.quadraticCurveTo(cpX, cpY, endX, y)
-    ctx.stroke()
-    const ang = Math.atan2(y - cpY, endX - cpX)
-    pontaDeSeta(ctx, endX, y, ang, 28 * escala, 5.2)
-  }
-  if (tipo === 'minimal') {
-    ctx.lineWidth = 3 * escala
-    ctx.beginPath()
-    ctx.moveTo(startX, y)
-    ctx.lineTo(endX, y)
-    ctx.stroke()
-    pontaDeSeta(ctx, endX, y, 0, 22 * escala, 5.4)
-  }
-  if (tipo === 'double') {
-    ctx.lineWidth = 4.5 * escala
-    ctx.beginPath()
-    ctx.moveTo(startX, y - 8 * escala)
-    ctx.lineTo(endX - 22 * escala, y - 8 * escala)
-    ctx.moveTo(startX, y + 8 * escala)
-    ctx.lineTo(endX - 22 * escala, y + 8 * escala)
-    ctx.stroke()
-    pontaDeSeta(ctx, endX, y, 0, 30 * escala, 5.2)
-  }
-  if (tipo === 'dash') {
-    ctx.lineWidth = linha
-    ctx.setLineDash([12 * escala, 10 * escala])
-    ctx.beginPath()
-    ctx.moveTo(startX, y)
-    ctx.lineTo(endX, y)
-    ctx.stroke()
-    ctx.setLineDash([])
-    pontaDeSeta(ctx, endX, y, 0, 28 * escala, 5.2)
-  }
-  ctx.restore()
 }
 
 function indicadorDeLuxo(
@@ -870,252 +501,14 @@ function indicadorDeLuxo(
   desenhar(0, true)
 }
 
-function circuloDoDecant(
-  ctx: Ctx,
-  x: number,
-  y: number,
-  tamanho: number,
-  img: Fonte,
-  tema: Tema,
-  escala = 1.34,
-  offsetX = 0,
-  offsetY = -52,
-) {
-  const cx = x + tamanho / 2
-  const cy = y + tamanho / 2
-
-  brilhoSuave(ctx, cx, cy, tamanho * 0.82, tema.accent, 0.18)
-
-  ctx.save()
-  ctx.shadowColor = 'rgba(0,0,0,0.22)'
-  ctx.shadowBlur = 36
-  ctx.shadowOffsetY = 18
-  ctx.beginPath()
-  ctx.arc(cx, cy, tamanho / 2, 0, Math.PI * 2)
-  const fill = ctx.createLinearGradient(cx - tamanho / 2, cy - tamanho / 2, cx + tamanho / 2, cy + tamanho / 2)
-  fill.addColorStop(0, 'rgba(255,255,255,0.99)')
-  fill.addColorStop(0.55, rgba(tema.neutral, 0.98))
-  fill.addColorStop(1, rgba(tema.accentSoft, 0.94))
-  ctx.fillStyle = fill
-  ctx.fill()
-  ctx.restore()
-
-  ctx.save()
-  const anel = ctx.createLinearGradient(x, y, x + tamanho, y + tamanho)
-  anel.addColorStop(0, rgba(tema.accentSoft, 0.95))
-  anel.addColorStop(0.5, rgba(tema.accent, 0.75))
-  anel.addColorStop(1, rgba(tema.accentDeep, 0.9))
-  ctx.strokeStyle = anel
-  ctx.lineWidth = 3
-  ctx.beginPath()
-  ctx.arc(cx, cy, tamanho / 2 - 2, 0, Math.PI * 2)
-  ctx.stroke()
-  ctx.restore()
-
-  ctx.save()
-  ctx.beginPath()
-  ctx.arc(cx - tamanho * 0.12, cy - tamanho * 0.15, tamanho * 0.22, 0, Math.PI * 2)
-  ctx.fillStyle = 'rgba(255,255,255,0.52)'
-  ctx.fill()
-  ctx.restore()
-
-  sombraDeChao(ctx, cx, cy + tamanho * 0.22, tamanho * 0.22, tamanho * 0.08, 0.12)
-
-  const fit = ajustarDentro(img.width, img.height, tamanho * 0.9 * escala, tamanho * 1.18 * escala)
-  ctx.drawImage(img, cx - fit.w / 2 + offsetX, cy - fit.h / 2 + offsetY, fit.w, fit.h)
-}
-
-// ── As três cenas ───────────────────────────────────────────────────────────
+// ── A cena ──────────────────────────────────────────────────────────────────
 
 export interface AreasInterativas {
-  selo: Retangulo | null
   circulo: Retangulo | null
 }
 
-function cenaPadrao(ctx: Ctx, a: Ajustes, imagens: ImagensDaCena, tema: Tema): AreasInterativas {
-  const areas: AreasInterativas = { selo: null, circulo: null }
-  let perfumeRect: Retangulo | null = null
-  let decantRect: Retangulo | null = null
-
-  brilhoSuave(ctx, 258, 360, 220, tema.accentSoft, 0.14)
-  brilhoSuave(ctx, 770, 428, 170, tema.accent, 0.12)
-
-  if (imagens.perfume) {
-    const box = { x: 58, y: 92, w: 500, h: 920 }
-    const fit = ajustarDentro(imagens.perfume.width, imagens.perfume.height, box.w, box.h)
-    const w = fit.w * a.perfumeScale
-    const h = fit.h * a.perfumeScale
-    const x = box.x + (box.w - w) / 2 + a.perfumeX
-    const y = box.y + (box.h - h) / 2 + a.perfumeY
-    perfumeRect = { x, y, w, h }
-
-    brilhoSuave(ctx, x + w * 0.48, y + h * 0.36, Math.max(150, w * 0.34), tema.accent, 0.12)
-    sombraDeChao(ctx, x + w / 2, y + h + 38, Math.max(86, w * 0.28), 22, 0.15)
-    sombra(ctx, x, y, w, h, 32, 0.15)
-    ctx.drawImage(imagens.perfume, x, y, w, h)
-  }
-
-  const cartao = { x: 614, y: 202, w: 264, h: 742 }
-
-  if (imagens.decant) {
-    cartaoDeVidro(ctx, cartao.x, cartao.y, cartao.w, cartao.h, tema)
-    pilula(ctx, {
-      x: cartao.x + 30,
-      y: cartao.y + 26,
-      texto: 'FRENESI',
-      fundo: rgba(tema.accentSoft, 0.92),
-      cor: tema.accentDeep,
-      borda: rgba(tema.accent, 0.26),
-      tamanho: 16,
-      paddingX: 14,
-      paddingY: 10,
-    })
-
-    const box = { x: cartao.x + 26, y: cartao.y + 76, w: cartao.w - 52, h: cartao.h - 132 }
-    const fit = ajustarDentro(imagens.decant.width, imagens.decant.height, box.w, box.h)
-    const w = fit.w * a.decantScale
-    const h = fit.h * a.decantScale
-    const x = box.x + (box.w - w) / 2 + a.decantX
-    const y = box.y + (box.h - h) / 2 + a.decantY
-    decantRect = { x, y, w, h }
-    sombraDeChao(ctx, x + w / 2, cartao.y + cartao.h - 86, 74, 20, 0.12)
-    sombra(ctx, x, y, w, h, 26, 0.16)
-    ctx.drawImage(imagens.decant, x, y, w, h)
-  }
-
-  if (a.showArrow && perfumeRect && decantRect) {
-    const startX = perfumeRect.x + perfumeRect.w + 24
-    const endX = cartao.x - 22
-    const centroY =
-      Math.min(perfumeRect.y + perfumeRect.h * 0.43, decantRect.y + decantRect.h * 0.43) + a.arrowY
-    if (endX > startX) seta(ctx, startX, endX, centroY, a.arrowType, a.arrowColor, a.arrowScale)
-  }
-
-  if (a.showInfoLabels && perfumeRect && decantRect) {
-    pilula(ctx, {
-      x: perfumeRect.x + Math.max(-10, perfumeRect.w / 2 - 112),
-      y: Math.min(CANVAS_H - 86, perfumeRect.y + perfumeRect.h + 16),
-      texto: 'FRASCO ORIGINAL',
-      fundo: 'rgba(255,255,255,0.96)',
-      cor: '#111111',
-      borda: 'rgba(0,0,0,0.08)',
-      tamanho: 18,
-    })
-    pilula(ctx, {
-      x: cartao.x + 28,
-      y: cartao.y + cartao.h + 18,
-      texto: 'DECANT FRENESI',
-      fundo: rgba(tema.accent, 0.14),
-      cor: tema.accentDeep,
-      borda: rgba(tema.accent, 0.28),
-      tamanho: 18,
-    })
-  }
-
-  if (a.showBadge) {
-    const tamanho = 112 * a.badgeScale
-    selo100(ctx, a.badgeX, a.badgeY, tamanho)
-    areas.selo = { x: a.badgeX, y: a.badgeY, w: tamanho, h: tamanho }
-  }
-  return areas
-}
-
-function cenaHover(ctx: Ctx, a: Ajustes, imagens: ImagensDaCena, tema: Tema): AreasInterativas {
-  const areas: AreasInterativas = { selo: null, circulo: null }
-
-  const bg = ctx.createLinearGradient(0, 0, CANVAS_W, CANVAS_H)
-  bg.addColorStop(0, misturar(a.hoverBgColor, tema.accentDeep, 0.18))
-  bg.addColorStop(0.5, a.hoverBgColor)
-  bg.addColorStop(1, misturar(a.hoverBgColor, '#1a120e', 0.16))
-  ctx.fillStyle = bg
-  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
-
-  brilhoSuave(ctx, 230, 250, 260, tema.accentSoft, 0.13)
-  brilhoSuave(
-    ctx,
-    a.hoverCircleX + a.hoverCircleSize / 2,
-    a.hoverCircleY + a.hoverCircleSize / 2,
-    a.hoverCircleSize * 0.95,
-    tema.accent,
-    0.18,
-  )
-
-  const vinheta = ctx.createRadialGradient(
-    CANVAS_W / 2,
-    CANVAS_H / 2,
-    CANVAS_H * 0.18,
-    CANVAS_W / 2,
-    CANVAS_H / 2,
-    CANVAS_H * 0.72,
-  )
-  vinheta.addColorStop(0, 'rgba(0,0,0,0)')
-  vinheta.addColorStop(1, 'rgba(0,0,0,0.24)')
-  ctx.fillStyle = vinheta
-  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
-
-  pilula(ctx, {
-    x: 58,
-    y: 54,
-    texto: 'DECANT ORIGINAL',
-    fundo: 'rgba(255,255,255,0.12)',
-    cor: '#ffffff',
-    borda: 'rgba(255,255,255,0.18)',
-    tamanho: 18,
-    paddingX: 16,
-    paddingY: 10,
-  })
-
-  if (!imagens.perfume) return areas
-
-  const box = { x: 30, y: 34, w: 760, h: 900 }
-  const fit = ajustarDentro(imagens.perfume.width, imagens.perfume.height, box.w, box.h)
-  const w = fit.w * a.hoverPerfumeScale
-  const h = fit.h * a.hoverPerfumeScale
-  const x = box.x + (box.w - w) / 2 + a.hoverPerfumeX
-  const y = box.y + (box.h - h) / 2 + a.hoverPerfumeY
-
-  ctx.save()
-  ctx.globalAlpha = a.hoverBottleOpacity
-  ctx.shadowColor = rgba(tema.accentDeep, 0.22)
-  ctx.shadowBlur = 28
-  ctx.shadowOffsetY = 18
-  ctx.drawImage(imagens.perfume, x, y, w, h)
-  ctx.restore()
-
-  if (imagens.decant) {
-    circuloDoDecant(
-      ctx,
-      a.hoverCircleX,
-      a.hoverCircleY,
-      a.hoverCircleSize,
-      imagens.decant,
-      tema,
-      a.hoverDecantScale,
-      a.hoverDecantOffsetX,
-      a.hoverDecantOffsetY,
-    )
-    areas.circulo = { x: a.hoverCircleX, y: a.hoverCircleY, w: a.hoverCircleSize, h: a.hoverCircleSize }
-
-    if (a.showHoverLabel) {
-      ctx.save()
-      ctx.fillStyle = '#ffffff'
-      ctx.shadowColor = 'rgba(0,0,0,0.22)'
-      ctx.shadowBlur = 14
-      ctx.textAlign = 'center'
-      ctx.font = `800 ${a.hoverLabelSize}px Inter, Arial, sans-serif`
-      ctx.fillText(
-        a.hoverLabel || 'DECANT',
-        a.hoverCircleX + a.hoverCircleSize / 2,
-        a.hoverCircleY + a.hoverCircleSize + a.hoverLabelSize + 20,
-      )
-      ctx.restore()
-    }
-  }
-  return areas
-}
-
 function cenaLuxo(ctx: Ctx, a: Ajustes, imagens: ImagensDaCena, tema: Tema): AreasInterativas {
-  const areas: AreasInterativas = { selo: null, circulo: null }
+  const areas: AreasInterativas = { circulo: null }
 
   ctx.save()
   ctx.fillStyle = '#ffffff'
@@ -1172,11 +565,10 @@ function cenaLuxo(ctx: Ctx, a: Ajustes, imagens: ImagensDaCena, tema: Tema): Are
   ctx.restore()
 
   let decantRect: Retangulo | null = null
-  const decantImg = imagens.decantLuxo || imagens.decant
-  if (decantImg) {
+  if (imagens.decant) {
     const fitD = ajustarDentro(
-      decantImg.width,
-      decantImg.height,
+      imagens.decant.width,
+      imagens.decant.height,
       circleSize * 0.82 * a.luxuryDecantScale,
       circleSize * 1.32 * a.luxuryDecantScale,
     )
@@ -1188,7 +580,7 @@ function cenaLuxo(ctx: Ctx, a: Ajustes, imagens: ImagensDaCena, tema: Tema): Are
     ctx.imageSmoothingQuality = 'high'
     sombraDeChao(ctx, cx, cy + circleSize * 0.22, circleSize * 0.19, circleSize * 0.07, 0.1)
     sombra(ctx, dx, dy, fitD.w, fitD.h, 12, 0.08)
-    ctx.drawImage(decantImg, dx, dy, fitD.w, fitD.h)
+    ctx.drawImage(imagens.decant, dx, dy, fitD.w, fitD.h)
     ctx.restore()
   }
 
@@ -1244,12 +636,11 @@ function cenaLuxo(ctx: Ctx, a: Ajustes, imagens: ImagensDaCena, tema: Tema): Are
 /**
  * Renderiza a cena inteira num canvas, em qualquer escala.
  *
- * A transformação de escala fica no contexto — as cenas desenham sempre em
+ * A transformação de escala fica no contexto — a cena desenha sempre em
  * coordenadas de 1000×1250, e a exportação em alta é só um canvas maior.
  */
 export function renderizarCena(
   canvas: HTMLCanvasElement,
-  modo: Modo,
   a: Ajustes,
   imagens: ImagensDaCena,
 ): AreasInterativas {
@@ -1264,10 +655,7 @@ export function renderizarCena(
 
   const tema = a.usePerfumeTheme && imagens.perfume ? extrairTemaDaImagem(imagens.perfume) : TEMA_PADRAO
 
-  let areas: AreasInterativas = { selo: null, circulo: null }
-  if (modo === 'default') areas = cenaPadrao(ctx, a, imagens, tema)
-  if (modo === 'hover') areas = cenaHover(ctx, a, imagens, tema)
-  if (modo === 'luxury') areas = cenaLuxo(ctx, a, imagens, tema)
+  const areas = cenaLuxo(ctx, a, imagens, tema)
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   return areas
 }

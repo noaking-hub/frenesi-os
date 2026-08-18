@@ -11,56 +11,31 @@ import {
   AJUSTES_PADRAO,
   CANVAS_H,
   CANVAS_W,
-  PRESETS_DE_FABRICA,
   apararTransparencia,
   baixarBlob,
   canvasDeExportacao,
   canvasParaBlob,
   carregarImagem,
   criarZip,
-  extrairDecant,
   nomeDeArquivoSeguro,
   pontoNoRetangulo,
   prepararPerfume,
-  removerFundoClaro,
   renderizarCena,
   type Ajustes,
   type AreasInterativas,
   type ImagensDaCena,
-  type Modo,
 } from './motor'
 
 /**
  * Gerador de imagens de produto — a ferramenta que compõe a foto do perfume
- * com o frasco de decant da FRENESI.
+ * com o frasco de decant da FRENESI, na cena Luxo (a única que restou; o dono
+ * aposentou as demais).
  *
  * A imagem que sai daqui É a imagem do catálogo da Shopify; a foto que entra é
  * a crua do frasco original. Por isso a entrada continua sendo upload (puxar
  * do catálogo seria circular: lá já está a composição pronta), e a saída ganha
  * nome de arquivo limpo para subir direto.
- *
- * O motor de desenho veio intacto do projeto original. O que mudou:
- * - o estado virou UM objeto (`ajustes`) em vez de cinquenta useState;
- * - os presets moram no banco, com autor, em vez do localStorage;
- * - a interface fala a língua do ERP.
  */
-
-const MODOS: { valor: Modo; rotulo: string }[] = [
-  { valor: 'default', rotulo: 'Padrão' },
-  { valor: 'hover', rotulo: 'Hover' },
-  { valor: 'luxury', rotulo: 'Luxo' },
-]
-
-const TIPOS_DE_SETA = [
-  ['bold', 'Bloco'],
-  ['straight', 'Reta'],
-  ['curve', 'Curva premium'],
-  ['short', 'Curta'],
-  ['minimal', 'Minimal'],
-  ['double', 'Dupla'],
-  ['dash', 'Tracejada'],
-  ['none', 'Sem seta'],
-] as const
 
 const TIPOS_DE_INDICADOR = [
   ['swoosh', 'Swoosh premium'],
@@ -86,14 +61,13 @@ interface ItemDoLote {
 
 export function GeradorCliente({ presets }: { presets: PresetDoGerador[] }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const areasRef = useRef<AreasInterativas>({ selo: null, circulo: null })
-  const arrastoRef = useRef<{ alvo: 'selo' | 'circulo'; dx: number; dy: number } | null>(null)
+  const areasRef = useRef<AreasInterativas>({ circulo: null })
+  const arrastoRef = useRef<{ dx: number; dy: number } | null>(null)
 
   const [ajustes, setAjustes] = useState<Ajustes>(AJUSTES_PADRAO)
   const [perfumeImg, setPerfumeImg] = useState<HTMLCanvasElement | null>(null)
   const [nomeDoPerfume, setNomeDoPerfume] = useState('')
   const [decantImg, setDecantImg] = useState<HTMLCanvasElement | null>(null)
-  const [decantLuxoImg, setDecantLuxoImg] = useState<HTMLCanvasElement | null>(null)
   const [escalaExport, setEscalaExport] = useState(2)
   const [nomePreset, setNomePreset] = useState('')
   const [erro, setErro] = useState<string | null>(null)
@@ -101,40 +75,35 @@ export function GeradorCliente({ presets }: { presets: PresetDoGerador[] }) {
   const [pendente, iniciar] = useTransition()
 
   const [lote, setLote] = useState<ItemDoLote[]>([])
-  const [presetsDoLote, setPresetsDoLote] = useState<Record<string, boolean>>({
-    catalogo: true,
-    hover: true,
-    luxo: false,
-    ads: false,
-  })
+  // A cena atual sempre participa do lote por padrão; presets salvos entram
+  // por marcação.
+  const [cenaAtualNoLote, setCenaAtualNoLote] = useState(true)
   const [presetsSalvosNoLote, setPresetsSalvosNoLote] = useState<Record<string, boolean>>({})
   const [statusDoLote, setStatusDoLote] = useState('')
   const [exportandoLote, setExportandoLote] = useState(false)
 
   const imagens: ImagensDaCena = useMemo(
-    () => ({ perfume: perfumeImg, decant: decantImg, decantLuxo: decantLuxoImg }),
-    [perfumeImg, decantImg, decantLuxoImg],
+    () => ({ perfume: perfumeImg, decant: decantImg }),
+    [perfumeImg, decantImg],
   )
 
   const mudar = useCallback(<K extends keyof Ajustes>(chave: K, valor: Ajustes[K]) => {
     setAjustes((a) => ({ ...a, [chave]: valor }))
   }, [])
 
-  // O frasco de decant da marca, preparado uma vez: fundo fora e recorte do
-  // frasco certo dentro da foto composta.
+  // O frasco de decant da marca, preparado uma vez.
   useEffect(() => {
-    carregarImagem('/gerador/decants.png')
-      .then((img) => setDecantImg(extrairDecant(removerFundoClaro(img, 245, 20))))
-      .catch(() => setErro('Não foi possível carregar a imagem do decant (public/gerador/decants.png).'))
     carregarImagem('/gerador/decant-luxury.png')
       .then((img) => {
         const c = document.createElement('canvas')
         c.width = img.width
         c.height = img.height
         c.getContext('2d')!.drawImage(img, 0, 0)
-        setDecantLuxoImg(apararTransparencia(c, 2))
+        setDecantImg(apararTransparencia(c, 2))
       })
-      .catch(() => console.warn('decant-luxury.png não carregou — o modo Luxo usa o decant padrão.'))
+      .catch(() =>
+        setErro('Não foi possível carregar a imagem do decant (public/gerador/decant-luxury.png).'),
+      )
   }, [])
 
   // Redesenha a prévia a cada mudança. O canvas de exibição é o mesmo 1000×1250
@@ -142,7 +111,7 @@ export function GeradorCliente({ presets }: { presets: PresetDoGerador[] }) {
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    areasRef.current = renderizarCena(canvas, ajustes.mode, ajustes, imagens)
+    areasRef.current = renderizarCena(canvas, ajustes, imagens)
   }, [ajustes, imagens])
 
   function aoEnviarFoto(e: React.ChangeEvent<HTMLInputElement>) {
@@ -163,7 +132,7 @@ export function GeradorCliente({ presets }: { presets: PresetDoGerador[] }) {
     e.target.value = ''
   }
 
-  // ── Arrasto do selo e do círculo, direto na prévia ────────────────────────
+  // ── Arrasto do círculo do decant, direto na prévia ────────────────────────
 
   function pontoDoCanvas(e: React.PointerEvent<HTMLCanvasElement>) {
     const canvas = canvasRef.current
@@ -178,14 +147,9 @@ export function GeradorCliente({ presets }: { presets: PresetDoGerador[] }) {
   function aoPressionar(e: React.PointerEvent<HTMLCanvasElement>) {
     const p = pontoDoCanvas(e)
     if (!p) return
-    const { selo, circulo } = areasRef.current
-    if ((ajustes.mode === 'hover' || ajustes.mode === 'luxury') && circulo && pontoNoRetangulo(p, circulo)) {
-      arrastoRef.current = { alvo: 'circulo', dx: p.x - circulo.x, dy: p.y - circulo.y }
-      e.currentTarget.setPointerCapture(e.pointerId)
-      return
-    }
-    if (ajustes.mode === 'default' && ajustes.showBadge && selo && pontoNoRetangulo(p, selo)) {
-      arrastoRef.current = { alvo: 'selo', dx: p.x - selo.x, dy: p.y - selo.y }
+    const { circulo } = areasRef.current
+    if (circulo && pontoNoRetangulo(p, circulo)) {
+      arrastoRef.current = { dx: p.x - circulo.x, dy: p.y - circulo.y }
       e.currentTarget.setPointerCapture(e.pointerId)
     }
   }
@@ -195,15 +159,7 @@ export function GeradorCliente({ presets }: { presets: PresetDoGerador[] }) {
     if (!arrasto) return
     const p = pontoDoCanvas(e)
     if (!p) return
-    if (arrasto.alvo === 'circulo') {
-      if (ajustes.mode === 'luxury') {
-        setAjustes((a) => ({ ...a, luxuryCircleX: p.x - arrasto.dx, luxuryCircleY: p.y - arrasto.dy }))
-      } else {
-        setAjustes((a) => ({ ...a, hoverCircleX: p.x - arrasto.dx, hoverCircleY: p.y - arrasto.dy }))
-      }
-      return
-    }
-    setAjustes((a) => ({ ...a, badgeX: p.x - arrasto.dx, badgeY: p.y - arrasto.dy }))
+    setAjustes((a) => ({ ...a, luxuryCircleX: p.x - arrasto.dx, luxuryCircleY: p.y - arrasto.dy }))
   }
 
   function aoSoltar() {
@@ -216,8 +172,8 @@ export function GeradorCliente({ presets }: { presets: PresetDoGerador[] }) {
 
   async function exportarAtual() {
     const canvas = canvasDeExportacao(escalaExport)
-    renderizarCena(canvas, ajustes.mode, ajustes, imagens)
-    baixarBlob(await canvasParaBlob(canvas), `${nomeBase}-${ajustes.mode}.png`)
+    renderizarCena(canvas, ajustes, imagens)
+    baixarBlob(await canvasParaBlob(canvas), `${nomeBase}.png`)
   }
 
   function aplicarPreset(valores: Partial<Ajustes>) {
@@ -243,24 +199,24 @@ export function GeradorCliente({ presets }: { presets: PresetDoGerador[] }) {
   async function exportarLote() {
     if (!lote.length || !decantImg || exportandoLote) return
     const escolhidos = [
-      ...PRESETS_DE_FABRICA.filter((p) => presetsDoLote[p.chave]).map((p) => ({
-        chave: p.chave,
-        valores: { ...ajustes, ...p.valores } as Ajustes,
-      })),
+      ...(cenaAtualNoLote ? [{ chave: 'cena-atual', valores: ajustes }] : []),
       ...presets
         .filter((p) => presetsSalvosNoLote[p.id])
         .map((p) => ({
-          chave: `personalizado-${nomeDeArquivoSeguro(p.nome)}`,
+          chave: nomeDeArquivoSeguro(p.nome),
           valores: { ...AJUSTES_PADRAO, ...ajustes, ...(p.valores as Partial<Ajustes>) } as Ajustes,
         })),
     ]
     if (!escolhidos.length) {
-      setStatusDoLote('Escolha ao menos um preset para o lote.')
+      setStatusDoLote('Marque ao menos a cena atual ou um preset para o lote.')
       return
     }
 
     setExportandoLote(true)
     try {
+      // Com um preset só, os arquivos vão na raiz do ZIP; pastas só quando há
+      // mais de uma variação para separar.
+      const comPasta = escolhidos.length > 1
       const entradas: { nome: string; dados: Uint8Array }[] = []
       for (const [i, item] of lote.entries()) {
         setLote((atual) => atual.map((r) => (r.id === item.id ? { ...r, estado: 'processando' } : r)))
@@ -270,14 +226,12 @@ export function GeradorCliente({ presets }: { presets: PresetDoGerador[] }) {
           for (const preset of escolhidos) {
             setStatusDoLote(`Processando ${i + 1}/${lote.length}: ${item.nome} — ${preset.chave}`)
             const canvas = canvasDeExportacao(escalaExport)
-            renderizarCena(canvas, preset.valores.mode, preset.valores, {
-              perfume: preparado,
-              decant: decantImg,
-              decantLuxo: decantLuxoImg,
-            })
+            renderizarCena(canvas, preset.valores, { perfume: preparado, decant: decantImg })
             const blob = await canvasParaBlob(canvas)
             entradas.push({
-              nome: `${preset.chave}/${nomeDeArquivoSeguro(item.nome)}-${preset.chave}.png`,
+              nome: comPasta
+                ? `${preset.chave}/${nomeDeArquivoSeguro(item.nome)}.png`
+                : `${nomeDeArquivoSeguro(item.nome)}.png`,
               dados: new Uint8Array(await blob.arrayBuffer()),
             })
           }
@@ -346,9 +300,7 @@ export function GeradorCliente({ presets }: { presets: PresetDoGerador[] }) {
             />
           </div>
           <div style={{ fontSize: 11, color: 'var(--color-terciario)', paddingTop: 8 }}>
-            {ajustes.mode === 'default'
-              ? 'Arraste o selo 100% direto na prévia.'
-              : 'Arraste o círculo do decant direto na prévia.'}
+            Arraste o círculo do decant direto na prévia.
           </div>
         </div>
 
@@ -372,174 +324,53 @@ export function GeradorCliente({ presets }: { presets: PresetDoGerador[] }) {
               <input type="file" accept="image/*" onChange={aoEnviarFoto} style={{ display: 'none' }} />
               {perfumeImg ? `Trocar foto (${nomeDoPerfume})` : 'Enviar a foto crua do frasco original'}
             </label>
-            <div style={{ display: 'flex', gap: 14, paddingTop: 10, flexWrap: 'wrap' }}>
+            <div style={{ paddingTop: 10 }}>
               <Marcar
                 rotulo="Tema pela cor do perfume"
                 valor={ajustes.usePerfumeTheme}
                 aoMudar={(v) => mudar('usePerfumeTheme', v)}
               />
-              <Marcar
-                rotulo="Legendas premium"
-                valor={ajustes.showInfoLabels}
-                aoMudar={(v) => mudar('showInfoLabels', v)}
-              />
             </div>
           </Grupo>
 
-          <Grupo titulo="Modo da cena">
-            <div style={{ display: 'flex', gap: 6 }}>
-              {MODOS.map((m) => (
-                <button
-                  key={m.valor}
-                  type="button"
-                  onClick={() => mudar('mode', m.valor)}
-                  style={{
-                    flex: 1,
-                    height: 32,
-                    borderRadius: 8,
-                    fontSize: 12,
-                    cursor: 'pointer',
-                    border: `1px solid ${ajustes.mode === m.valor ? 'rgba(239,209,140,.5)' : 'rgba(255,255,255,.12)'}`,
-                    background: ajustes.mode === m.valor ? 'rgba(239,209,140,.12)' : 'transparent',
-                    color: ajustes.mode === m.valor ? COR.ouro : 'var(--color-secundario)',
-                  }}
-                >
-                  {m.rotulo}
-                </button>
+          <Grupo titulo="Frasco principal">
+            <Faixa rotulo="Escala do perfume" v={ajustes.luxuryPerfumeScale} min={0.75} max={1.2} passo={0.01} aoMudar={(v) => mudar('luxuryPerfumeScale', v)} />
+            <Faixa rotulo="Horizontal do perfume" v={ajustes.luxuryPerfumeX} min={-220} max={220} aoMudar={(v) => mudar('luxuryPerfumeX', v)} />
+            <Faixa rotulo="Vertical do perfume" v={ajustes.luxuryPerfumeY} min={-180} max={220} aoMudar={(v) => mudar('luxuryPerfumeY', v)} />
+          </Grupo>
+
+          <Grupo titulo="Círculo do decant">
+            <Faixa rotulo="Tamanho do círculo" v={ajustes.luxuryCircleSize} min={220} max={360} aoMudar={(v) => mudar('luxuryCircleSize', v)} />
+            <Faixa rotulo="Escala do decant" v={ajustes.luxuryDecantScale} min={0.65} max={1.2} passo={0.01} aoMudar={(v) => mudar('luxuryDecantScale', v)} />
+            <Faixa rotulo="Decant no eixo X" v={ajustes.luxuryDecantOffsetX} min={-80} max={80} aoMudar={(v) => mudar('luxuryDecantOffsetX', v)} />
+            <Faixa rotulo="Decant no eixo Y" v={ajustes.luxuryDecantOffsetY} min={-40} max={120} aoMudar={(v) => mudar('luxuryDecantOffsetY', v)} />
+          </Grupo>
+
+          <Grupo titulo="Indicador e etiqueta">
+            <select value={ajustes.luxuryArrowType} onChange={(e) => mudar('luxuryArrowType', e.target.value)} style={campo}>
+              {TIPOS_DE_INDICADOR.map(([v, r]) => (
+                <option key={v} value={v}>{r}</option>
               ))}
+            </select>
+            <Faixa rotulo="Curvatura do indicador" v={ajustes.luxuryArrowLift} min={40} max={220} aoMudar={(v) => mudar('luxuryArrowLift', v)} />
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', paddingTop: 4 }}>
+              <Marcar rotulo="Etiqueta do decant" valor={ajustes.luxuryShowLabel} aoMudar={(v) => mudar('luxuryShowLabel', v)} />
+              <input
+                value={ajustes.luxuryLabelText}
+                onChange={(e) => mudar('luxuryLabelText', e.target.value)}
+                style={{ ...campo, width: 140 }}
+              />
             </div>
-            <div style={{ display: 'flex', gap: 6, paddingTop: 8, flexWrap: 'wrap' }}>
-              {PRESETS_DE_FABRICA.map((p) => (
-                <BotaoSecundario key={p.chave} altura={28} onClick={() => aplicarPreset(p.valores)}>
-                  {p.nome}
-                </BotaoSecundario>
-              ))}
+            {ajustes.luxuryShowLabel && (
+              <Faixa rotulo="Tamanho da etiqueta" v={ajustes.luxuryLabelSize} min={16} max={30} aoMudar={(v) => mudar('luxuryLabelSize', v)} />
+            )}
+          </Grupo>
+
+          <Grupo titulo="Meus presets">
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               <BotaoSecundario altura={28} onClick={() => setAjustes(AJUSTES_PADRAO)}>
                 Restaurar padrão
               </BotaoSecundario>
-            </div>
-          </Grupo>
-
-          {ajustes.mode === 'default' && (
-            <>
-              <Grupo titulo="Frasco principal">
-                <Faixa rotulo="Escala do perfume" v={ajustes.perfumeScale} min={0.55} max={1.35} passo={0.01} aoMudar={(v) => mudar('perfumeScale', v)} />
-                <Faixa rotulo="Horizontal do perfume" v={ajustes.perfumeX} min={-220} max={220} aoMudar={(v) => mudar('perfumeX', v)} />
-                <Faixa rotulo="Vertical do perfume" v={ajustes.perfumeY} min={-180} max={180} aoMudar={(v) => mudar('perfumeY', v)} />
-              </Grupo>
-              <Grupo titulo="Decant no cartão">
-                <Faixa rotulo="Escala do decant" v={ajustes.decantScale} min={0.65} max={1.35} passo={0.01} aoMudar={(v) => mudar('decantScale', v)} />
-                <Faixa rotulo="Horizontal do decant" v={ajustes.decantX} min={-180} max={180} aoMudar={(v) => mudar('decantX', v)} />
-                <Faixa rotulo="Vertical do decant" v={ajustes.decantY} min={-180} max={180} aoMudar={(v) => mudar('decantY', v)} />
-              </Grupo>
-              <Grupo titulo="Seta e selo">
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <Marcar rotulo="Seta" valor={ajustes.showArrow} aoMudar={(v) => mudar('showArrow', v)} />
-                  <select value={ajustes.arrowType} onChange={(e) => mudar('arrowType', e.target.value)} style={campo}>
-                    {TIPOS_DE_SETA.map(([v, r]) => (
-                      <option key={v} value={v}>{r}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={ajustes.arrowColor}
-                    onChange={(e) => mudar('arrowColor', e.target.value as 'gold' | 'black')}
-                    style={campo}
-                  >
-                    <option value="gold">Dourada</option>
-                    <option value="black">Preta</option>
-                  </select>
-                </div>
-                <Faixa rotulo="Altura da seta" v={ajustes.arrowY} min={-140} max={140} aoMudar={(v) => mudar('arrowY', v)} />
-                <Faixa rotulo="Escala da seta" v={ajustes.arrowScale} min={0.6} max={1.8} passo={0.01} aoMudar={(v) => mudar('arrowScale', v)} />
-                <div style={{ paddingTop: 4 }}>
-                  <Marcar rotulo="Selo 100% original" valor={ajustes.showBadge} aoMudar={(v) => mudar('showBadge', v)} />
-                </div>
-                {ajustes.showBadge && (
-                  <Faixa rotulo="Tamanho do selo" v={ajustes.badgeScale} min={0.5} max={1.8} passo={0.01} aoMudar={(v) => mudar('badgeScale', v)} />
-                )}
-              </Grupo>
-            </>
-          )}
-
-          {ajustes.mode === 'hover' && (
-            <>
-              <Grupo titulo="Fundo e frasco">
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                  <Rotulo>Cor do fundo</Rotulo>
-                  <input
-                    type="color"
-                    value={ajustes.hoverBgColor}
-                    onChange={(e) => mudar('hoverBgColor', e.target.value)}
-                    style={{ width: 44, height: 30, border: 0, background: 'none', cursor: 'pointer' }}
-                  />
-                </div>
-                <Faixa rotulo="Escala do perfume" v={ajustes.hoverPerfumeScale} min={0.7} max={1.4} passo={0.01} aoMudar={(v) => mudar('hoverPerfumeScale', v)} />
-                <Faixa rotulo="Horizontal do perfume" v={ajustes.hoverPerfumeX} min={-180} max={180} aoMudar={(v) => mudar('hoverPerfumeX', v)} />
-                <Faixa rotulo="Vertical do perfume" v={ajustes.hoverPerfumeY} min={-180} max={180} aoMudar={(v) => mudar('hoverPerfumeY', v)} />
-                <Faixa rotulo="Opacidade do perfume" v={ajustes.hoverBottleOpacity} min={0.2} max={1} passo={0.01} aoMudar={(v) => mudar('hoverBottleOpacity', v)} />
-              </Grupo>
-              <Grupo titulo="Círculo do decant">
-                <Faixa rotulo="Tamanho do círculo" v={ajustes.hoverCircleSize} min={220} max={420} aoMudar={(v) => mudar('hoverCircleSize', v)} />
-                <Faixa rotulo="Escala do decant" v={ajustes.hoverDecantScale} min={0.8} max={1.9} passo={0.01} aoMudar={(v) => mudar('hoverDecantScale', v)} />
-                <Faixa rotulo="Decant no eixo X" v={ajustes.hoverDecantOffsetX} min={-120} max={120} aoMudar={(v) => mudar('hoverDecantOffsetX', v)} />
-                <Faixa rotulo="Decant no eixo Y" v={ajustes.hoverDecantOffsetY} min={-180} max={120} aoMudar={(v) => mudar('hoverDecantOffsetY', v)} />
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', paddingTop: 4 }}>
-                  <Marcar rotulo="Texto sob o círculo" valor={ajustes.showHoverLabel} aoMudar={(v) => mudar('showHoverLabel', v)} />
-                  <input
-                    value={ajustes.hoverLabel}
-                    onChange={(e) => mudar('hoverLabel', e.target.value)}
-                    style={{ ...campo, width: 140 }}
-                  />
-                </div>
-                {ajustes.showHoverLabel && (
-                  <Faixa rotulo="Tamanho do texto" v={ajustes.hoverLabelSize} min={24} max={72} aoMudar={(v) => mudar('hoverLabelSize', v)} />
-                )}
-              </Grupo>
-            </>
-          )}
-
-          {ajustes.mode === 'luxury' && (
-            <>
-              <Grupo titulo="Frasco principal">
-                <Faixa rotulo="Escala do perfume" v={ajustes.luxuryPerfumeScale} min={0.75} max={1.2} passo={0.01} aoMudar={(v) => mudar('luxuryPerfumeScale', v)} />
-                <Faixa rotulo="Horizontal do perfume" v={ajustes.luxuryPerfumeX} min={-220} max={220} aoMudar={(v) => mudar('luxuryPerfumeX', v)} />
-                <Faixa rotulo="Vertical do perfume" v={ajustes.luxuryPerfumeY} min={-180} max={220} aoMudar={(v) => mudar('luxuryPerfumeY', v)} />
-              </Grupo>
-              <Grupo titulo="Círculo do decant">
-                <Faixa rotulo="Tamanho do círculo" v={ajustes.luxuryCircleSize} min={220} max={360} aoMudar={(v) => mudar('luxuryCircleSize', v)} />
-                <Faixa rotulo="Escala do decant" v={ajustes.luxuryDecantScale} min={0.65} max={1.2} passo={0.01} aoMudar={(v) => mudar('luxuryDecantScale', v)} />
-                <Faixa rotulo="Decant no eixo X" v={ajustes.luxuryDecantOffsetX} min={-80} max={80} aoMudar={(v) => mudar('luxuryDecantOffsetX', v)} />
-                <Faixa rotulo="Decant no eixo Y" v={ajustes.luxuryDecantOffsetY} min={-40} max={120} aoMudar={(v) => mudar('luxuryDecantOffsetY', v)} />
-              </Grupo>
-              <Grupo titulo="Indicador e etiqueta">
-                <select value={ajustes.luxuryArrowType} onChange={(e) => mudar('luxuryArrowType', e.target.value)} style={campo}>
-                  {TIPOS_DE_INDICADOR.map(([v, r]) => (
-                    <option key={v} value={v}>{r}</option>
-                  ))}
-                </select>
-                <Faixa rotulo="Curvatura do indicador" v={ajustes.luxuryArrowLift} min={40} max={220} aoMudar={(v) => mudar('luxuryArrowLift', v)} />
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', paddingTop: 4 }}>
-                  <Marcar rotulo="Etiqueta do decant" valor={ajustes.luxuryShowLabel} aoMudar={(v) => mudar('luxuryShowLabel', v)} />
-                  <input
-                    value={ajustes.luxuryLabelText}
-                    onChange={(e) => mudar('luxuryLabelText', e.target.value)}
-                    style={{ ...campo, width: 140 }}
-                  />
-                </div>
-                {ajustes.luxuryShowLabel && (
-                  <Faixa rotulo="Tamanho da etiqueta" v={ajustes.luxuryLabelSize} min={16} max={30} aoMudar={(v) => mudar('luxuryLabelSize', v)} />
-                )}
-              </Grupo>
-            </>
-          )}
-
-          <Grupo titulo="Meus presets">
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {presets.length === 0 && (
-                <span style={{ fontSize: 12, color: 'var(--color-terciario)' }}>
-                  Nenhum preset salvo ainda — ajuste a cena e salve com um nome.
-                </span>
-              )}
               {presets.map((p) => (
                 <span key={p.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                   <BotaoSecundario altura={28} onClick={() => aplicarPreset(p.valores as Partial<Ajustes>)}>
@@ -560,6 +391,11 @@ export function GeradorCliente({ presets }: { presets: PresetDoGerador[] }) {
                   </button>
                 </span>
               ))}
+              {presets.length === 0 && (
+                <span style={{ fontSize: 12, color: 'var(--color-terciario)' }}>
+                  Nenhum preset salvo ainda — ajuste a cena e salve com um nome.
+                </span>
+              )}
             </div>
             <div style={{ display: 'flex', gap: 8, paddingTop: 8 }}>
               <input
@@ -592,7 +428,7 @@ export function GeradorCliente({ presets }: { presets: PresetDoGerador[] }) {
 
           <Grupo titulo="Exportação em lote">
             <div style={{ fontSize: 11.5, color: 'var(--color-terciario)' }}>
-              Envie várias fotos cruas; cada uma sai nos presets marcados, num ZIP organizado por pasta.
+              Envie várias fotos cruas; cada uma sai nas variações marcadas, num ZIP.
             </div>
             <label
               style={{
@@ -612,14 +448,7 @@ export function GeradorCliente({ presets }: { presets: PresetDoGerador[] }) {
               Adicionar fotos ao lote
             </label>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', paddingTop: 8 }}>
-              {PRESETS_DE_FABRICA.map((p) => (
-                <Marcar
-                  key={p.chave}
-                  rotulo={p.nome}
-                  valor={Boolean(presetsDoLote[p.chave])}
-                  aoMudar={(v) => setPresetsDoLote((s) => ({ ...s, [p.chave]: v }))}
-                />
-              ))}
+              <Marcar rotulo="Cena atual" valor={cenaAtualNoLote} aoMudar={setCenaAtualNoLote} />
               {presets.map((p) => (
                 <Marcar
                   key={p.id}
