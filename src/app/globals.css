@@ -410,6 +410,17 @@
   .erp .trilha-erp {
     grid-template-columns: 1fr !important;
   }
+  /* O painel de alertas ancorado no chip vazava para fora da tela: 380px
+     presos à direita do chip não cabem num iPhone. No celular ele vira uma
+     folha fixa, com respiro dos dois lados. */
+  .erp .painel-alertas {
+    position: fixed !important;
+    top: 70px !important;
+    left: 12px !important;
+    right: 12px !important;
+    width: auto !important;
+    max-height: min(70dvh, 520px) !important;
+  }
 }
 
 /* iPad em retrato (768–1024): a barra continua visível, mas recolhida — o

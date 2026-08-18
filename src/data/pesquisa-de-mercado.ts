@@ -35,13 +35,6 @@ export interface VitrineDaLoja {
   erro: string | null
 }
 
-export interface ReferenciaFrenesi {
-  nome: string
-  imagem: string | null
-  variante: string
-  preco: number
-}
-
 async function paginaDeBusca(url: string, referer: string): Promise<string> {
   const controle = new AbortController()
   const corte = setTimeout(() => controle.abort(), PRAZO_POR_LOJA_MS)
@@ -134,37 +127,6 @@ export async function vitrineDoConcorrente(c: Concorrente, termo: string): Promi
             : String(e),
     }
   }
-}
-
-/** Como a FRENESI vende o mesmo perfume — a régua do comparativo. */
-export async function referenciaFrenesi(termo: string): Promise<ReferenciaFrenesi[]> {
-  const palavras = termo.trim().split(/\s+/).filter(Boolean)
-  if (!supabaseConfigurado() || !palavras.length) return []
-  // TODAS as palavras digitadas entram no recorte: "Polo Black" devolvia a
-  // família Polo inteira e a régua virava um paredão de cartões.
-  let consulta = supabaseServer()
-    .from('perfumes_base')
-    .select('nome, imagem_url, produtos_derivados(variante, preco_praticado)')
-    .eq('ativo', true)
-  for (const p of palavras) consulta = consulta.ilike('nome', `%${p}%`)
-  const { data } = await consulta.limit(6)
-
-  const linhas = (data ?? []) as unknown as {
-    nome: string
-    imagem_url: string | null
-    produtos_derivados: { variante: string; preco_praticado: number | string | null }[] | null
-  }[]
-
-  return linhas.flatMap((p) =>
-    (p.produtos_derivados ?? [])
-      .filter((d) => Number(d.preco_praticado) > 0)
-      .map((d) => ({
-        nome: p.nome,
-        imagem: p.imagem_url,
-        variante: d.variante,
-        preco: Number(d.preco_praticado),
-      })),
-  )
 }
 
 /**

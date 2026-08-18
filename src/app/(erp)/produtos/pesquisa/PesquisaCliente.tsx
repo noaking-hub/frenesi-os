@@ -5,9 +5,9 @@ import { useRef, useState } from 'react'
 import { BotaoOuro, Rotulo, TituloSecao } from '@/components/erp/primitivos'
 import { COR } from '@/components/erp/tokens'
 import { CONCORRENTES, brl, precoPorMl, primeiraPalavra, type CartaoDeProduto } from '@/domain'
-import type { PesquisaAnterior, ReferenciaFrenesi, VitrineDaLoja } from '@/data/pesquisa-de-mercado'
+import type { PesquisaAnterior, VitrineDaLoja } from '@/data/pesquisa-de-mercado'
 
-import { pesquisarLoja, registrarRodada, reguaDaCasa } from './actions'
+import { pesquisarLoja, registrarRodada } from './actions'
 
 /**
  * Pesquisa de mercado — o price-lab dentro do ERP.
@@ -28,7 +28,6 @@ export function PesquisaCliente({ historicoInicial }: { historicoInicial: Pesqui
   const [termo, setTermo] = useState('')
   const [palavra, setPalavra] = useState<string | null>(null)
   const [vitrines, setVitrines] = useState<Record<string, EstadoVitrine>>({})
-  const [frenesi, setFrenesi] = useState<ReferenciaFrenesi[]>([])
   const [historico, setHistorico] = useState(historicoInicial)
   const [buscando, setBuscando] = useState(false)
   const [desatualizada, setDesatualizada] = useState(false)
@@ -46,12 +45,7 @@ export function PesquisaCliente({ historicoInicial }: { historicoInicial: Pesqui
     setPalavra(p)
     setBuscando(true)
     setDesatualizada(false)
-    setFrenesi([])
     setVitrines(Object.fromEntries(CONCORRENTES.map((c) => [c.chave, { estado: 'buscando' }])))
-
-    void reguaDaCasa(limpo).then((r) => {
-      if (rodadaRef.current === rodada && r.ok) setFrenesi(r.frenesi)
-    })
 
     // Uma retentativa por loja: soluço de rede não pode custar a vitrine.
     const comRetentativa = (chave: string) =>
@@ -191,51 +185,6 @@ export function PesquisaCliente({ historicoInicial }: { historicoInicial: Pesqui
 
       {palavra !== null && (
         <>
-          {/* A régua da casa */}
-          {frenesi.length > 0 && (
-            <section style={{ ...cartaoSecao, border: '1px solid rgba(239,209,140,.35)' }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-                <Rotulo>Na FRENESI</Rotulo>
-                <span style={{ fontSize: 11, color: 'var(--color-terciario)' }}>
-                  como estamos vendendo “{termo}” hoje
-                </span>
-              </div>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', paddingTop: 10 }}>
-                {frenesi.map((f, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      border: '1px solid rgba(255,255,255,.1)',
-                      borderRadius: 10,
-                      padding: '8px 12px',
-                      background: 'rgba(255,255,255,.02)',
-                    }}
-                  >
-                    {f.imagem && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={f.imagem}
-                        alt=""
-                        style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 7 }}
-                      />
-                    )}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      <span className="font-sans" style={{ fontSize: 11.5, fontWeight: 600 }}>
-                        {f.nome} · {/^\d+$/.test(f.variante) ? `${f.variante} ml` : f.variante}
-                      </span>
-                      <span className="font-mono" style={{ fontSize: 12, color: COR.ouro, fontWeight: 700 }}>
-                        {brl(f.preco)}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
           {!buscando && (
             <div style={{ fontSize: 11.5, color: 'var(--color-terciario)' }}>
               {totalAchado} produto{totalAchado === 1 ? '' : 's'} encontrado

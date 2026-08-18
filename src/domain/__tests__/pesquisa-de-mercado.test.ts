@@ -104,7 +104,7 @@ describe('pesquisa de mercado', () => {
         <img src="data:image/gif;base64,x" data-src="//cdn.loja.com/polo-black.jpg" />
         ver produto
       </a>
-      <span class="preco">R$ 34,90</span>`
+      <span class="preco">R$&nbsp;34,90</span>`
     const cartoes = extrairCartoes(html, 'https://loja.com.br')
     expect(cartoes).toHaveLength(1)
     expect(cartoes[0].titulo).toBe('Polo Black Decant 5ml')

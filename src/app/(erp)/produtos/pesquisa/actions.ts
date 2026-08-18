@@ -3,11 +3,9 @@
 import { CONCORRENTES, primeiraPalavra } from '@/domain'
 import {
   pesquisasAnteriores,
-  referenciaFrenesi,
   registrarPesquisa,
   vitrineDoConcorrente,
   type PesquisaAnterior,
-  type ReferenciaFrenesi,
   type VitrineDaLoja,
 } from '@/data/pesquisa-de-mercado'
 
@@ -27,19 +25,6 @@ export async function pesquisarLoja(
     // O termo INTEIRO segue adiante: a loja é buscada pela primeira palavra,
     // mas o filtro respeita tudo que foi digitado.
     return { ok: true, vitrine: await vitrineDoConcorrente(c, termo) }
-  } catch (e) {
-    return { ok: false, erro: e instanceof Error ? e.message : String(e) }
-  }
-}
-
-/** A régua da casa: os preços FRENESI do perfume pesquisado. */
-export async function reguaDaCasa(
-  termo: string,
-): Promise<{ ok: true; palavra: string; frenesi: ReferenciaFrenesi[] } | { ok: false; erro: string }> {
-  const palavra = primeiraPalavra(termo)
-  if (!palavra) return { ok: false, erro: 'Diga o nome do perfume a pesquisar.' }
-  try {
-    return { ok: true, palavra, frenesi: await referenciaFrenesi(palavra) }
   } catch (e) {
     return { ok: false, erro: e instanceof Error ? e.message : String(e) }
   }

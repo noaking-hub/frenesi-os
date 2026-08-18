@@ -117,38 +117,53 @@ function extrairCartoesNuvemshop(html: string, dominio: string): CartaoDeProduto
       recorte.match(/R\$\s*\d{1,3}(?:\.\d{3})*,\d{2}/i) || recorte.match(/\d+,\d{2}(?=<)/i)
     const preco = precoM ? precoDoTexto(precoM[0]) : null
 
-    let imagem: string | null = null
-    const imgTag = recorte.match(/<img[^>]+>/i)
-    if (imgTag) {
-      const t = imgTag[0]
-      const srcset = t.match(/\ssrcset=["']([^"']+)["']/i)
-      if (srcset) {
-        const maior = srcset[1]
-          .split(',')
-          .map((s) => s.trim().match(/(\S+)\s+(\d+)w/))
-          .filter((x): x is RegExpMatchArray => Boolean(x))
-          .sort((a, b) => Number(b[2]) - Number(a[2]))[0]
-        if (maior) imagem = absoluta(maior[1], dominio)
-      }
-      if (!imagem) {
-        const dataSrc = t.match(/\sdata-src=["']([^"']+)["']/i)
-        if (dataSrc) imagem = absoluta(dataSrc[1], dominio)
-      }
-      if (!imagem) {
-        const src = t.match(/\ssrc=["']([^"']+)["']/i)
-        if (src && !/data:image|placeholder|blank|1x1/i.test(src[1])) imagem = absoluta(src[1], dominio)
-      }
-    }
-
-    itens.push({ titulo, url, preco, imagem })
+    itens.push({ titulo, url, preco, imagem: imagemDoTrecho(recorte, dominio) })
   }
   return itens
+}
+
+/**
+ * A melhor imagem que o trecho do card oferece. Cada tema esconde a foto num
+ * lugar: `srcset`/`data-srcset` (a maior largura vence), `data-src` do
+ * lazy-load, `src` de verdade — placeholder não conta — e, por fim, o
+ * `background-image` de quem desenha o card com CSS.
+ */
+function imagemDoTrecho(trecho: string, dominio: string): string | null {
+  const imgTag = trecho.match(/<img[^>]+>/i)
+  if (imgTag) {
+    const t = imgTag[0]
+    const conjunto =
+      t.match(/\s(?:data-)?srcset=["']([^"']+)["']/i)
+    if (conjunto) {
+      const maior = conjunto[1]
+        .split(',')
+        .map((s) => s.trim().match(/(\S+)\s+(\d+)w/))
+        .filter((x): x is RegExpMatchArray => Boolean(x))
+        .sort((a, b) => Number(b[2]) - Number(a[2]))[0]
+      if (maior) return absoluta(maior[1], dominio)
+      // srcset sem descritor de largura: vale a primeira URL.
+      const primeira = conjunto[1].split(',')[0]?.trim().split(/\s+/)[0]
+      if (primeira) return absoluta(primeira, dominio)
+    }
+    const dataSrc = t.match(/\sdata-src=["']([^"']+)["']/i)
+    if (dataSrc) return absoluta(dataSrc[1], dominio)
+    const src = t.match(/\ssrc=["']([^"']+)["']/i)
+    if (src && !/data:image|placeholder|blank|1x1|\.svg/i.test(src[1])) {
+      return absoluta(src[1], dominio)
+    }
+  }
+  const fundo = trecho.match(/background-image\s*:\s*url\((["']?)([^)"']+)\1\)/i)
+  if (fundo) return absoluta(fundo[2], dominio)
+  return null
 }
 
 export function extrairCartoes(htmlCru: string, dominio: string): CartaoDeProduto[] {
   const html = htmlCru
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+    // "R$&nbsp;34,90" é como a Nuvemshop escreve preço — e `\s` não casa com
+    // a entidade. Sem esta troca, TODOS os preços da loja viravam null.
+    .replace(/&nbsp;| /g, ' ')
 
   // A passada da Nuvemshop vem PRIMEIRO: o dedup preserva a primeira
   // ocorrência, e é ela que traz o título do atributo e a imagem certa do
@@ -180,8 +195,7 @@ export function extrairCartoes(htmlCru: string, dominio: string): CartaoDeProdut
     precos.sort((a, b) => b.valor * b.peso - a.valor * a.peso)
     const preco = precos.length ? precos[0].valor : null
 
-    const img = contexto.match(/<img\b[^>]*src=['"]([^'"]+)['"][^>]*>/i)
-    itens.push({ titulo, url, preco, imagem: img ? absoluta(img[1], dominio) : null })
+    itens.push({ titulo, url, preco, imagem: imagemDoTrecho(contexto, dominio) })
   }
 
   if (!itens.length) {
@@ -201,15 +215,23 @@ export function extrairCartoes(htmlCru: string, dominio: string): CartaoDeProdut
     }
   }
 
-  // Dedup por URL: o mesmo produto aparece na âncora da imagem e na do título.
-  const vistos = new Set<string>()
-  const unicos: CartaoDeProduto[] = []
+  // Dedup por URL que FUNDE, não descarta: o mesmo produto aparece em várias
+  // âncoras — uma com o título, outra com o preço, outra com a imagem. Cada
+  // duplicata preenche o que faltava na primeira.
+  const porUrl = new Map<string, CartaoDeProduto>()
   for (const it of itens) {
-    if (vistos.has(it.url)) continue
-    vistos.add(it.url)
-    unicos.push(it)
+    const visto = porUrl.get(it.url)
+    if (!visto) {
+      porUrl.set(it.url, { ...it })
+      continue
+    }
+    // O título da primeira passada é o do atributo `title` — autoridade. A
+    // duplicata só o preenche quando a primeira veio sem nome.
+    if (visto.titulo.trim().length <= 2 && it.titulo.trim().length > 2) visto.titulo = it.titulo
+    if (visto.preco === null && it.preco !== null) visto.preco = it.preco
+    if (!visto.imagem && it.imagem) visto.imagem = it.imagem
   }
-  return unicos.slice(0, 80)
+  return [...porUrl.values()].slice(0, 80)
 }
 
 /** Cards genéricos que a busca devolve e que não são produto nenhum. */

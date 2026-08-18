@@ -136,7 +136,7 @@ export function AlertasDoTopo({ alertas }: { alertas: AlertaTopo[] }) {
           aria-label="Alertas da operação"
           tabIndex={-1}
           data-camada="menu"
-          className="animate-[fr-in_.16s_ease_both]"
+          className="animate-[fr-in_.16s_ease_both] painel-alertas"
           style={{
             position: 'absolute',
             top: 46,
