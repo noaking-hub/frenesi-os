@@ -947,24 +947,43 @@ export interface ResumoNotificacoes {
   dispensados: number
   falhas: number
   emCurso: number
+  /** Enviados HOJE (dia de São Paulo) — a régua do limite diário do Resend. */
+  enviadosHoje: number
+  /** Enviados no MÊS corrente — a régua do limite mensal do Resend. */
+  enviadosMes: number
 }
 
-/** Os números dos últimos 30 dias, para os cartões do topo. */
+/** Os números para os cartões do topo: 30 dias, o dia e o mês corrente. */
 export async function resumoDeNotificacoes(): Promise<ResumoNotificacoes> {
-  const zero: ResumoNotificacoes = { enviados: 0, dispensados: 0, falhas: 0, emCurso: 0 }
+  const zero: ResumoNotificacoes = {
+    enviados: 0,
+    dispensados: 0,
+    falhas: 0,
+    emCurso: 0,
+    enviadosHoje: 0,
+    enviadosMes: 0,
+  }
   if (!supabaseConfigurado()) return zero
 
   // A contagem é do SERVIDOR. O PostgREST devolve no máximo 1.000 linhas por
   // resposta, e o log passou disso — só a carga inicial de dispensados tem
   // 1.5 mil. Trazer linhas para contar aqui mostrava "5 enviados" num mês em
   // que saíram 73: a amostra truncada vinha dominada pelos dispensados.
+  //
+  // A coluna contada é `chave` — o log não tem `id`, e contar por uma coluna
+  // inexistente zerava o cartão inteiro.
   const desde = new Date(Date.now() - 30 * 86_400_000).toISOString()
+  // O dia e o mês do Resend são os de São Paulo; 00:00 aqui é 03:00Z.
+  const hojeSp = new Date().toLocaleDateString('sv', { timeZone: 'America/Sao_Paulo' })
+  const inicioDoDia = `${hojeSp}T03:00:00Z`
+  const inicioDoMes = `${hojeSp.slice(0, 7)}-01T03:00:00Z`
+
   const sb = supabaseServer()
-  const conta = async (estado?: string): Promise<number> => {
+  const conta = async (aPartirDe: string, estado?: string): Promise<number> => {
     let q = sb
       .from('notificacoes_enviadas')
-      .select('id', { count: 'exact', head: true })
-      .gte('criado_em', desde)
+      .select('chave', { count: 'exact', head: true })
+      .gte('criado_em', aPartirDe)
     if (estado) q = q.eq('estado', estado)
     const { count, error } = await q
     if (error) throw error
@@ -972,13 +991,22 @@ export async function resumoDeNotificacoes(): Promise<ResumoNotificacoes> {
   }
 
   try {
-    const [total, enviados, dispensados, falhas] = await Promise.all([
-      conta(),
-      conta('enviado'),
-      conta('dispensado'),
-      conta('falhou'),
+    const [total, enviados, dispensados, falhas, enviadosHoje, enviadosMes] = await Promise.all([
+      conta(desde),
+      conta(desde, 'enviado'),
+      conta(desde, 'dispensado'),
+      conta(desde, 'falhou'),
+      conta(inicioDoDia, 'enviado'),
+      conta(inicioDoMes, 'enviado'),
     ])
-    return { enviados, dispensados, falhas, emCurso: Math.max(0, total - enviados - dispensados - falhas) }
+    return {
+      enviados,
+      dispensados,
+      falhas,
+      emCurso: Math.max(0, total - enviados - dispensados - falhas),
+      enviadosHoje,
+      enviadosMes,
+    }
   } catch {
     return zero
   }

@@ -1329,14 +1329,18 @@ export async function descobrirDestinoDosPayouts(limite = 8): Promise<RodadaDest
     .filter((l) => !(l.observacao ?? '').startsWith('Contraparte'))
     .slice(0, limite)
 
-  // Enquanto houver saque sem resposta, a rodada persegue a única porta que a
-  // sondagem encontrou aberta: o informe bancário tem um modo que ANEXA o
-  // detalhe de cada retirada no fim do arquivo (`include_withdrawal_at_end`) —
-  // é ali que o gateway escreve para onde o dinheiro foi. Em dois atos: liga
-  // o detalhe e encomenda o informe; na rodada seguinte, baixa o arquivo e
-  // registra o FIM dele nas amostras, cru, para o leitor nascer sobre fato.
+  // Enquanto houver saque sem resposta, a rodada persegue a porta que restou:
+  // o RELATÓRIO DE LIBERAÇÕES — o mesmo que a esteira já baixa toda hora —
+  // tem o modo `include_withdrawal_at_end`, que anexa no fim do arquivo o
+  // detalhe de cada retirada; é ali que o gateway escreve para onde o
+  // dinheiro foi. Em dois atos: liga o modo na config (o leitor do extrato já
+  // corta esse rodapé antes de ler movimentos); nas rodadas seguintes, traz o
+  // FIM do arquivo mais novo nas amostras, cru, para o leitor do destino
+  // nascer sobre o formato real. O informe bancário ficou para trás: o PUT da
+  // config dele responde 405 e a geração 404 — o produto não existe nesta
+  // conta.
   if (fila.length) {
-    const configCru = await texto('/v1/account/bank_report/config')
+    const configCru = await texto('/v1/account/release_report/config')
     let config: Record<string, unknown> | null = null
     try {
       config = JSON.parse(configCru.corpo) as Record<string, unknown>
@@ -1345,29 +1349,19 @@ export async function descobrirDestinoDosPayouts(limite = 8): Promise<RodadaDest
     }
     if (config && config.include_withdrawal_at_end !== true) {
       const ligado = await sondar(
-        '/v1/account/bank_report/config',
+        '/v1/account/release_report/config',
         'PUT',
         JSON.stringify({ ...config, include_withdrawal_at_end: true }),
       )
       rodada.amostras.push(ligado)
-      const encomenda = await sondar(
-        '/v1/account/bank_report',
-        'POST',
-        JSON.stringify({
-          begin_date: `${recuar(hojeEmSaoPaulo(), 30)}T03:00:00Z`,
-          end_date: `${new Date().toISOString().slice(0, 19)}Z`,
-        }),
-      )
-      rodada.amostras.push(encomenda)
     } else if (config) {
-      const lista = await texto('/v1/account/bank_report/list')
       try {
-        const arquivos = JSON.parse(lista.corpo) as { file_name?: string }[]
-        const pronto = Array.isArray(arquivos) ? arquivos.find((a) => a.file_name) : null
-        if (pronto?.file_name) {
-          const csv = await texto(`/v1/account/bank_report/${pronto.file_name}`)
+        const arquivos = await relatoriosDisponiveis()
+        const pronto = arquivos[0]
+        if (pronto?.arquivo) {
+          const csv = await texto(`/v1/account/release_report/${pronto.arquivo}`)
           rodada.amostras.push({
-            caminho: pronto.file_name,
+            caminho: pronto.arquivo,
             metodo: 'GET',
             status: csv.status,
             // O detalhe das retiradas mora no FIM do arquivo.

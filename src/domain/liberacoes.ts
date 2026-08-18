@@ -37,6 +37,14 @@ export interface ExtratoLiberacoes {
   /** Cabeçalhos que o arquivo trouxe, para quando nada for reconhecido. */
   cabecalhos: string[]
   avisos: string[]
+  /**
+   * O rodapé de DETALHE DAS RETIRADAS, cru, quando a conta liga
+   * `include_withdrawal_at_end`. É outra tabela, com colunas próprias, colada
+   * no fim do mesmo arquivo — é dela que sai o destino de cada saque. Cortá-la
+   * ANTES de ler os movimentos é obrigatório: uma linha do rodapé com data e
+   * valor nas posições certas viraria lançamento fantasma no caixa.
+   */
+  rodape: string[]
 }
 
 /**
@@ -158,7 +166,7 @@ export function lerLiberacoes(csv: string): ExtratoLiberacoes {
     .filter((l) => l.trim().length > 0)
 
   if (linhasTexto.length < 2) {
-    return { linhas: [], cabecalhos: [], avisos: ['O relatório veio sem linhas.'] }
+    return { linhas: [], cabecalhos: [], avisos: ['O relatório veio sem linhas.'], rodape: [] }
   }
 
   const sep = separadorDe(linhasTexto[0])
@@ -188,6 +196,7 @@ export function lerLiberacoes(csv: string): ExtratoLiberacoes {
         avisos: [
           `Não reconheci as colunas do relatório. Vieram: ${cabecalhos.join(', ')}.`,
         ],
+        rodape: [],
       }
     }
   }
@@ -198,12 +207,22 @@ export function lerLiberacoes(csv: string): ExtratoLiberacoes {
   }
 
   const linhas: LinhaLiberacao[] = []
+  const rodape: string[] = []
   let semData = 0
 
-  for (const texto of linhasTexto.slice(1)) {
+  for (let i = 1; i < linhasTexto.length; i++) {
+    const texto = linhasTexto[i]
     const campos = dividir(texto, sep)
     const quando = data(pegar(campos, 'data')) ?? data(pegar(campos, 'aprovacao'))
     if (!quando) {
+      // Um segundo cabeçalho falando de retirada é o começo do rodapé de
+      // detalhe (`include_withdrawal_at_end`): dali em diante NADA é
+      // movimento. Sem o corte, uma linha do rodapé com data e valor nas
+      // posições certas entraria no caixa como lançamento fantasma.
+      if (/withdraw|retirad|retiro/i.test(texto)) {
+        rodape.push(...linhasTexto.slice(i))
+        break
+      }
       semData += 1
       continue
     }
@@ -231,7 +250,7 @@ export function lerLiberacoes(csv: string): ExtratoLiberacoes {
     avisos.push(`${semData} linha(s) sem data ficaram de fora.`)
   }
 
-  return { linhas, cabecalhos, avisos }
+  return { linhas, cabecalhos, avisos, rodape }
 }
 
 /**

@@ -219,3 +219,22 @@ describe('a mesma palavra, dois sentidos', () => {
     ])
   })
 })
+
+describe('rodapé de detalhe das retiradas (include_withdrawal_at_end)', () => {
+  it('corta o rodapé antes de ler: nada dali vira movimento', () => {
+    const csv = `DATA;DATA_DE_APROVACAO_DA_TRANSACAO;ID_DA_OPERACAO;DESCRICAO;VALOR_LIQUIDO_CREDITO;VALOR_LIQUIDO_DEBITO;VALOR_BRUTO;TARIFA_MP;IMPOSTOS
+10/08/2026;10/08/2026;172981567954;Venda;71,66;0;84,25;12,59;0
+DETALHE_DA_RETIRADA;ID_DA_RETIRADA;STATUS;BANCO;FAVORECIDO
+17/08/2026;174328123882;pago;BCO XYZ;GOOGLE BRASIL INTERNET LTDA`
+    const r = lerLiberacoes(csv)
+    // A linha do rodapé TEM data e um número na posição de débito — sem o
+    // corte, ela entraria no caixa como lançamento fantasma.
+    expect(r.linhas).toHaveLength(1)
+    expect(r.rodape).toHaveLength(2)
+    expect(r.rodape[1]).toContain('GOOGLE BRASIL INTERNET LTDA')
+  })
+
+  it('arquivo sem rodapé segue como sempre, com rodapé vazio', () => {
+    expect(lerLiberacoes(CSV_PT).rodape).toEqual([])
+  })
+})
