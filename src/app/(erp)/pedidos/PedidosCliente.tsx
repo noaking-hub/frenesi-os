@@ -107,12 +107,51 @@ const PREDICADO: Record<Fila, (v: Viva) => boolean> = {
   Devoluções: (v) => v.log.status === 'devolucao',
 }
 
-const PERIODOS: { rotulo: string; dias: number }[] = [
-  { rotulo: 'Últimos 7 dias', dias: 7 },
-  { rotulo: 'Últimos 30 dias', dias: 30 },
-  { rotulo: 'Últimos 90 dias', dias: 90 },
-  { rotulo: 'Todo o histórico', dias: 0 },
+const PERIODOS: { chave: string; rotulo: string }[] = [
+  { chave: '7', rotulo: 'Últimos 7 dias' },
+  { chave: '30', rotulo: 'Últimos 30 dias' },
+  { chave: '90', rotulo: 'Últimos 90 dias' },
+  { chave: 'mes-atual', rotulo: 'Mês atual' },
+  { chave: 'mes-passado', rotulo: 'Mês passado' },
+  { chave: 'tudo', rotulo: 'Todo o histórico' },
+  { chave: 'faixa', rotulo: 'Período personalizado…' },
 ]
+
+/**
+ * O intervalo [início, fim] que a chave do período descreve — e o anterior de
+ * MESMO tamanho, que alimenta a comparação dos cartões. "Mês atual" compara
+ * com o mesmo número de dias imediatamente antes do dia 1º, não com o mês
+ * passado inteiro: comparar 5 dias corridos com 31 faria todo começo de mês
+ * parecer queda.
+ */
+function intervaloDoPeriodo(
+  chave: string,
+  faixaDe: string,
+  faixaAte: string,
+): { inicio: number; fim: number } | null {
+  const agora = new Date()
+  if (chave === 'tudo') return null
+  if (chave === 'mes-atual') {
+    return { inicio: new Date(agora.getFullYear(), agora.getMonth(), 1).getTime(), fim: agora.getTime() }
+  }
+  if (chave === 'mes-passado') {
+    return {
+      inicio: new Date(agora.getFullYear(), agora.getMonth() - 1, 1).getTime(),
+      fim: new Date(agora.getFullYear(), agora.getMonth(), 1).getTime() - 1,
+    }
+  }
+  if (chave === 'faixa') {
+    // Sem as duas pontas escolhidas, a faixa ainda não filtra nada.
+    if (!faixaDe || !faixaAte) return null
+    const inicio = new Date(`${faixaDe}T00:00:00`).getTime()
+    const fim = new Date(`${faixaAte}T23:59:59.999`).getTime()
+    if (!Number.isFinite(inicio) || !Number.isFinite(fim) || fim < inicio) return null
+    return { inicio, fim }
+  }
+  const dias = Number(chave)
+  if (!Number.isFinite(dias) || dias <= 0) return null
+  return { inicio: agora.getTime() - dias * 86_400_000, fim: agora.getTime() }
+}
 
 const ROTULO_SITUACAO_FILTRO: Record<SituacaoPedido, string> = {
   pago: 'Pago',
@@ -126,7 +165,9 @@ const ROTULO_SITUACAO_FILTRO: Record<SituacaoPedido, string> = {
 export function PedidosCliente({ itens, filaInicial }: { itens: Linha[]; filaInicial?: Fila }) {
   const [fila, setFila] = useState<Fila>(filaInicial ?? 'Todos')
   const [busca, setBusca] = useState('')
-  const [dias, setDias] = useState(30)
+  const [periodo, setPeriodo] = useState('30')
+  const [faixaDe, setFaixaDe] = useState('')
+  const [faixaAte, setFaixaAte] = useState('')
   const [canal, setCanal] = useState('Todos')
   const [transportadora, setTransportadora] = useState('Todas')
   const [situacao, setSituacao] = useState<'Todas' | SituacaoPedido>('Todas')
@@ -171,7 +212,11 @@ export function PedidosCliente({ itens, filaInicial }: { itens: Linha[]; filaIni
 
   // O período recorta ANTES de tudo: cartão, aba e tabela falam da mesma
   // janela, senão o número do cartão nunca bate com a lista.
-  const { doPeriodo, doAnterior } = useMemo(() => janelas(vivas, dias), [vivas, dias])
+  const intervalo = useMemo(
+    () => intervaloDoPeriodo(periodo, faixaDe, faixaAte),
+    [periodo, faixaDe, faixaAte],
+  )
+  const { doPeriodo, doAnterior } = useMemo(() => janelas(vivas, intervalo), [vivas, intervalo])
 
   const canais = useMemo(
     () => ['Todos', ...Array.from(new Set(vivas.map((v) => v.p.canal))).sort()],
@@ -428,13 +473,19 @@ export function PedidosCliente({ itens, filaInicial }: { itens: Linha[]; filaIni
 
         <Busca valor={busca} aoMudar={setBusca} />
 
-        <CaixaSeletor rotulo="Período" valor={String(dias)} aoMudar={(v) => setDias(Number(v))}>
+        <CaixaSeletor rotulo="Período" valor={periodo} aoMudar={setPeriodo}>
           {PERIODOS.map((p) => (
-            <option key={p.dias} value={p.dias}>
+            <option key={p.chave} value={p.chave}>
               {p.rotulo}
             </option>
           ))}
         </CaixaSeletor>
+        {periodo === 'faixa' && (
+          <>
+            <CampoData rotulo="De" valor={faixaDe} aoMudar={setFaixaDe} />
+            <CampoData rotulo="Até" valor={faixaAte} aoMudar={setFaixaAte} />
+          </>
+        )}
         <CaixaSeletor
           rotulo="Status"
           valor={situacao}
@@ -1297,18 +1348,21 @@ export function CardMetrica({
   )
 }
 
-function janelas(vivas: Viva[], dias: number): { doPeriodo: Viva[]; doAnterior: Viva[] } {
-  if (dias <= 0) return { doPeriodo: vivas, doAnterior: [] }
-  const agora = Date.now()
-  const inicio = agora - dias * 86_400_000
-  const inicioAnterior = inicio - dias * 86_400_000
+function janelas(
+  vivas: Viva[],
+  intervalo: { inicio: number; fim: number } | null,
+): { doPeriodo: Viva[]; doAnterior: Viva[] } {
+  if (!intervalo) return { doPeriodo: vivas, doAnterior: [] }
+  const { inicio, fim } = intervalo
+  const duracao = fim - inicio
+  const inicioAnterior = inicio - duracao
   const doPeriodo: Viva[] = []
   const doAnterior: Viva[] = []
   for (const v of vivas) {
     const t = Date.parse(v.p.compradoEm)
     if (!Number.isFinite(t)) continue
-    if (t >= inicio) doPeriodo.push(v)
-    else if (t >= inicioAnterior) doAnterior.push(v)
+    if (t >= inicio && t <= fim) doPeriodo.push(v)
+    else if (t >= inicioAnterior && t < inicio) doAnterior.push(v)
   }
   return { doPeriodo, doAnterior }
 }
@@ -1632,6 +1686,61 @@ export function CaixaSeletor({
       >
         {children}
       </select>
+    </label>
+  )
+}
+
+/** Data com o calendário do navegador, na mesma moldura dos seletores. */
+function CampoData({
+  rotulo,
+  valor,
+  aoMudar,
+}: {
+  rotulo: string
+  valor: string
+  aoMudar: (v: string) => void
+}) {
+  return (
+    <label
+      className="hover:border-ouro/30"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 1,
+        padding: '5px 10px 4px',
+        border: '1px solid rgba(255,255,255,.1)',
+        borderRadius: 9,
+        background: 'rgba(255,255,255,.02)',
+        cursor: 'pointer',
+      }}
+    >
+      <span
+        className="font-sans"
+        style={{
+          fontSize: 8,
+          letterSpacing: '.12em',
+          textTransform: 'uppercase',
+          color: 'var(--color-terciario)',
+        }}
+      >
+        {rotulo}
+      </span>
+      <input
+        type="date"
+        value={valor}
+        onChange={(e) => aoMudar(e.target.value)}
+        className="font-sans"
+        style={{
+          border: 0,
+          outline: 0,
+          background: 'transparent',
+          color: 'var(--color-corrente)',
+          fontSize: 11.5,
+          fontWeight: 600,
+          colorScheme: 'dark',
+          cursor: 'pointer',
+        }}
+      />
     </label>
   )
 }
