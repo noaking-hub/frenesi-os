@@ -1329,19 +1329,54 @@ export async function descobrirDestinoDosPayouts(limite = 8): Promise<RodadaDest
     .filter((l) => !(l.observacao ?? '').startsWith('Contraparte'))
     .slice(0, limite)
 
-  // Enquanto houver saque sem resposta, a rodada também sonda as fontes de
-  // EXTRATO que podem nomear o destinatário: o informe bancário e as colunas
-  // configuráveis do relatório de liberações. O painel do gateway mostra CNPJ
-  // e razão social no comprovante — o dado existe do lado deles; o que está
-  // sendo descoberto aqui é qual porta a API abre para ele.
+  // Enquanto houver saque sem resposta, a rodada persegue a única porta que a
+  // sondagem encontrou aberta: o informe bancário tem um modo que ANEXA o
+  // detalhe de cada retirada no fim do arquivo (`include_withdrawal_at_end`) —
+  // é ali que o gateway escreve para onde o dinheiro foi. Em dois atos: liga
+  // o detalhe e encomenda o informe; na rodada seguinte, baixa o arquivo e
+  // registra o FIM dele nas amostras, cru, para o leitor nascer sobre fato.
   if (fila.length) {
-    for (const caminho of [
-      '/v1/account/bank_report/list',
-      '/v1/account/bank_report/config',
-      '/v1/account/release_report/config',
-    ]) {
-      const r = await texto(caminho)
-      rodada.amostras.push({ caminho, metodo: 'GET', status: r.status, corpo: r.corpo.slice(0, 1200) })
+    const configCru = await texto('/v1/account/bank_report/config')
+    let config: Record<string, unknown> | null = null
+    try {
+      config = JSON.parse(configCru.corpo) as Record<string, unknown>
+    } catch {
+      config = null
+    }
+    if (config && config.include_withdrawal_at_end !== true) {
+      const ligado = await sondar(
+        '/v1/account/bank_report/config',
+        'PUT',
+        JSON.stringify({ ...config, include_withdrawal_at_end: true }),
+      )
+      rodada.amostras.push(ligado)
+      const encomenda = await sondar(
+        '/v1/account/bank_report',
+        'POST',
+        JSON.stringify({
+          begin_date: `${recuar(hojeEmSaoPaulo(), 30)}T03:00:00Z`,
+          end_date: `${new Date().toISOString().slice(0, 19)}Z`,
+        }),
+      )
+      rodada.amostras.push(encomenda)
+    } else if (config) {
+      const lista = await texto('/v1/account/bank_report/list')
+      try {
+        const arquivos = JSON.parse(lista.corpo) as { file_name?: string }[]
+        const pronto = Array.isArray(arquivos) ? arquivos.find((a) => a.file_name) : null
+        if (pronto?.file_name) {
+          const csv = await texto(`/v1/account/bank_report/${pronto.file_name}`)
+          rodada.amostras.push({
+            caminho: pronto.file_name,
+            metodo: 'GET',
+            status: csv.status,
+            // O detalhe das retiradas mora no FIM do arquivo.
+            corpo: csv.corpo.slice(-1600),
+          })
+        }
+      } catch {
+        /* amostra é diagnóstico; não pode derrubar a rodada */
+      }
     }
   }
 
