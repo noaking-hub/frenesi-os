@@ -609,6 +609,12 @@ export interface ResultadoAplicacao {
   locais: string[]
   /** O que foi gravado, variante a variante: de → para. O rastro do diagnóstico. */
   mudancas: { variante: string; de: number; para: number }[]
+  /**
+   * Alvos conferidos e deixados como estão (leitura ao vivo == valor-alvo).
+   * É o único desfecho SILENCIOSO do aplicador — sem este rastro, "por que a
+   * variante X não foi gravada?" não tinha resposta possível depois.
+   */
+  jaCertas: { variante: string; valor: number }[]
 }
 
 /**
@@ -629,7 +635,7 @@ export async function aplicarEstoqueShopify(
     throw new Error('SHOPIFY_LOJA precisa estar no .env.local (ex.: sua-loja.myshopify.com)')
   }
   if (alvos.length === 0) {
-    return { aplicadas: 0, ignoradas: [], local: '', locais: [], mudancas: [] }
+    return { aplicadas: 0, ignoradas: [], local: '', locais: [], mudancas: [], jaCertas: [] }
   }
   const token = await tokenDeAcesso(loja)
 
@@ -648,6 +654,7 @@ export async function aplicarEstoqueShopify(
 
   const ignoradas: ResultadoAplicacao['ignoradas'] = []
   const mudancas: ResultadoAplicacao['mudancas'] = []
+  const jaCertas: ResultadoAplicacao['jaCertas'] = []
   const quantidades: {
     inventoryItemId: string
     locationId: string
@@ -694,7 +701,10 @@ export async function aplicarEstoqueShopify(
 
       // Já está no valor certo: escrever de novo gastaria chamada e poluiria o
       // histórico de ajustes da loja com uma correção que não corrige nada.
-      if (atual === alvo.novoValor) return
+      if (atual === alvo.novoValor) {
+        jaCertas.push({ variante: alvo.rotulo, valor: atual })
+        return
+      }
 
       mudancas.push({ variante: alvo.rotulo, de: atual, para: alvo.novoValor })
       quantidades.push({
@@ -763,6 +773,7 @@ export async function aplicarEstoqueShopify(
     local: local.name,
     locais: dadosLocal.locations.nodes.map((n) => n.name),
     mudancas,
+    jaCertas,
   }
 }
 
@@ -2002,7 +2013,7 @@ export async function aplicarEstoqueCalculado(): Promise<AplicacaoCalculada> {
       // As mudanças entram no diário porque a leitura seguinte do catálogo
       // sobrescreve `shopify_publicado` — sem isto, "o que foi gravado onde"
       // era irrecuperável uma rodada depois.
-      detalhes: { local: resultado.local, locais: resultado.locais, mudancas: resultado.mudancas, ignoradas: resultado.ignoradas },
+      detalhes: { local: resultado.local, locais: resultado.locais, mudancas: resultado.mudancas, jaCertas: resultado.jaCertas, ignoradas: resultado.ignoradas },
     })
     if (erroLog) throw erroLog
   }
