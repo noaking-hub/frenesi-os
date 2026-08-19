@@ -717,6 +717,9 @@ export async function POST(req: Request) {
         aplicadas: s.aplicadas,
         recusadas: s.ignoradas.length,
         semIdDaLoja: s.pulados,
+        local: s.local,
+        ...(s.locais.length > 1 ? { locais: s.locais } : {}),
+        mudancas: s.mudancas.slice(0, 15),
       }
     } catch (e) {
       relatorio.shopifyEstoque = { erro: mensagemDe(e) }

@@ -463,9 +463,12 @@ export async function ultimaSincronizacao(
 
 // ── Escrita: publicar na Shopify o estoque que o ERP calculou ──────────────
 
+// first: 10, e não 1: loja com mais de um local ativo é exatamente o caso em
+// que gravar "no primeiro" erra em silêncio — a lista inteira vai ao
+// relatório para o desvio aparecer.
 const CONSULTA_LOCAL = /* GraphQL */ `
   query {
-    locations(first: 1, query: "active:true") {
+    locations(first: 10, query: "active:true") {
       nodes {
         id
         name
@@ -602,6 +605,10 @@ export interface ResultadoAplicacao {
   /** Variantes que o ERP quis mexer mas a Shopify não deixou, com o motivo. */
   ignoradas: { variante: string; motivo: string }[]
   local: string
+  /** Todos os locais ativos da loja — mais de um é sinal de gravação no lugar errado. */
+  locais: string[]
+  /** O que foi gravado, variante a variante: de → para. O rastro do diagnóstico. */
+  mudancas: { variante: string; de: number; para: number }[]
 }
 
 /**
@@ -622,7 +629,7 @@ export async function aplicarEstoqueShopify(
     throw new Error('SHOPIFY_LOJA precisa estar no .env.local (ex.: sua-loja.myshopify.com)')
   }
   if (alvos.length === 0) {
-    return { aplicadas: 0, ignoradas: [], local: '' }
+    return { aplicadas: 0, ignoradas: [], local: '', locais: [], mudancas: [] }
   }
   const token = await tokenDeAcesso(loja)
 
@@ -640,6 +647,7 @@ export async function aplicarEstoqueShopify(
   }
 
   const ignoradas: ResultadoAplicacao['ignoradas'] = []
+  const mudancas: ResultadoAplicacao['mudancas'] = []
   const quantidades: {
     inventoryItemId: string
     locationId: string
@@ -688,6 +696,7 @@ export async function aplicarEstoqueShopify(
       // histórico de ajustes da loja com uma correção que não corrige nada.
       if (atual === alvo.novoValor) return
 
+      mudancas.push({ variante: alvo.rotulo, de: atual, para: alvo.novoValor })
       quantidades.push({
         inventoryItemId: no.inventoryItem.id,
         locationId: local.id,
@@ -748,7 +757,13 @@ export async function aplicarEstoqueShopify(
     }
   }
 
-  return { aplicadas: quantidades.length, ignoradas, local: local.name }
+  return {
+    aplicadas: quantidades.length,
+    ignoradas,
+    local: local.name,
+    locais: dadosLocal.locations.nodes.map((n) => n.name),
+    mudancas,
+  }
 }
 
 const MUTACAO_PRECO = /* GraphQL */ `
@@ -1984,7 +1999,10 @@ export async function aplicarEstoqueCalculado(): Promise<AplicacaoCalculada> {
       perfumes: new Set(confirmadas.map((c) => c.base_id)).size,
       variantes: resultado.aplicadas,
       ignorados: resultado.ignoradas.length + pulados,
-      detalhes: resultado.ignoradas,
+      // As mudanças entram no diário porque a leitura seguinte do catálogo
+      // sobrescreve `shopify_publicado` — sem isto, "o que foi gravado onde"
+      // era irrecuperável uma rodada depois.
+      detalhes: { local: resultado.local, locais: resultado.locais, mudancas: resultado.mudancas, ignoradas: resultado.ignoradas },
     })
     if (erroLog) throw erroLog
   }
