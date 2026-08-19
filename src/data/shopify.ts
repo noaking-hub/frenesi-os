@@ -507,8 +507,8 @@ const CONSULTA_ITENS = /* GraphQL */ `
 // do ERP correto e a vitrine congelada. A semântica não muda: a gravação já
 // era idempotente por construção (o ERP manda o valor absoluto).
 const MUTACAO_ESTOQUE = /* GraphQL */ `
-  mutation ($input: InventorySetQuantitiesInput!) @idempotent {
-    inventorySetQuantities(input: $input) {
+  mutation ($input: InventorySetQuantitiesInput!) {
+    inventorySetQuantities(input: $input) @idempotent {
       userErrors {
         field
         message
