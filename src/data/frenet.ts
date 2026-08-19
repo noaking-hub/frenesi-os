@@ -66,6 +66,68 @@ async function chamarFrenet<T>(caminho: string, corpo?: unknown): Promise<T> {
   return JSON.parse(cru) as T
 }
 
+// ── Descoberta de etiquetas geradas no PAINEL da Frenet ────────────────────
+//
+// Etiqueta comprada na Yampi chega pelo track_code; etiqueta feita direto no
+// painel da Frenet não chega por lugar NENHUM — quatro pedidos (SH-1958/76/
+// 88/89) ficaram "faturado" por dias com a etiqueta impressa e o cliente sem
+// aviso. A API pública documenta cotação e rastreio, não listagem de envios;
+// em vez de adivinhar, a rotina SONDA os caminhos plausíveis e devolve as
+// respostas cruas — o leitor definitivo nasce sobre o formato real, como foi
+// feito com os relatórios do Mercado Pago.
+
+export interface SondagemEnviosFrenet {
+  /** Pedidos pagos e faturados sem rastreio — a razão de sondar. */
+  pendentes: string[]
+  amostras: { caminho: string; status: number | string; corpo: string }[]
+}
+
+export async function sondarEnviosDaFrenet(): Promise<SondagemEnviosFrenet> {
+  if (!frenetConfigurada() || !supabaseConfigurado()) return { pendentes: [], amostras: [] }
+  const sb = supabaseServer()
+  const corte = new Date(Date.now() - 30 * 86_400_000).toISOString()
+  const { data } = await sb
+    .from('pedidos')
+    .select('id, shopify_numero')
+    .eq('pagamento', 'pago')
+    .eq('situacao', 'faturado')
+    .is('rastreio', null)
+    .eq('entrega_local', false)
+    .gte('comprado_em', corte)
+    .limit(20)
+  const pendentes = ((data ?? []) as { id: string; shopify_numero: string | null }[]).map(
+    (p) => p.shopify_numero ?? p.id,
+  )
+  if (pendentes.length === 0) return { pendentes: [], amostras: [] }
+
+  const token = process.env.FRENET_TOKEN?.trim()
+  if (!token) return { pendentes, amostras: [] }
+
+  const caminhos: { caminho: string; corpo?: unknown }[] = [
+    { caminho: '/shipping/order' },
+    { caminho: '/shipping/orders' },
+    { caminho: '/shipping/order/list', corpo: {} },
+    { caminho: '/order/list' },
+    { caminho: '/shipping/label/list' },
+  ]
+  const amostras: SondagemEnviosFrenet['amostras'] = []
+  for (const c of caminhos) {
+    try {
+      const r = await fetch(`${BASE}${c.caminho}`, {
+        method: c.corpo === undefined ? 'GET' : 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', token },
+        body: c.corpo === undefined ? undefined : JSON.stringify(c.corpo),
+        cache: 'no-store',
+        signal: AbortSignal.timeout(8_000),
+      })
+      amostras.push({ caminho: c.caminho, status: r.status, corpo: (await r.text()).slice(0, 400) })
+    } catch (e) {
+      amostras.push({ caminho: c.caminho, status: 'erro', corpo: e instanceof Error ? e.message : String(e) })
+    }
+  }
+  return { pendentes, amostras }
+}
+
 export interface ServicoFrenet {
   codigo: string
   descricao: string

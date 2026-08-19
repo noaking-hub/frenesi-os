@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { sincronizarEnvios } from '@/app/(erp)/pedidos/actions'
-import { cotarPrazosDeEntrega, frenetConfigurada, varrerRastreiosFrenet } from '@/data/frenet'
+import { cotarPrazosDeEntrega, frenetConfigurada, sondarEnviosDaFrenet, varrerRastreiosFrenet } from '@/data/frenet'
 import { codigosDoMelhorEnvio, descobrirEnviosDoMelhorEnvio, melhorEnvioConectado, rastrearNoMelhorEnvio } from '@/data/melhorenvio'
 import { atualizarExtratoMp, descobrirDestinoDosPayouts, mercadoPagoConfigurado } from '@/data/mercadopago'
 import { baixarEstoqueDosFaturados } from '@/data/baixa-estoque'
@@ -393,6 +393,22 @@ export async function POST(req: Request) {
         : { erro: esp.erro }
     } catch (e) {
       relatorio.espelhoEnvios = { erro: mensagemDe(e) }
+    }
+  }
+
+  // Etiqueta feita no PAINEL da Frenet não chega por caminho nenhum (a Yampi
+  // só informa track_code de etiqueta faturada nela). Enquanto a porta de
+  // listagem não é conhecida, a rodada SONDA a API quando há pedido faturado
+  // sem rastreio e traz as respostas cruas — o leitor definitivo nasce sobre
+  // o formato real, como foi com o Mercado Pago.
+  if (grupo('logistica') && frenetConfigurada()) {
+    try {
+      const s = await sondarEnviosDaFrenet()
+      if (s.pendentes.length) {
+        relatorio.descobertaFrenet = { pendentes: s.pendentes, amostras: s.amostras }
+      }
+    } catch (e) {
+      relatorio.descobertaFrenet = { erro: mensagemDe(e) }
     }
   }
 
