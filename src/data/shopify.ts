@@ -1930,7 +1930,20 @@ export async function vincularPedidosShopify(): Promise<ResultadoVinculo> {
 export interface AplicacaoCalculada extends ResultadoAplicacao {
   /** Variantes fora de sincronia mas sem id da Shopify — reimportar o catálogo resolve. */
   pulados: number
+  /**
+   * DEPURAÇÃO TEMPORÁRIA (19/08): o cálculo cru das bases sob investigação.
+   * Vibrato 3ml e Prada 3/5/8ml deveriam sair "repor" e saem "ok" — este
+   * rastro mostra os NÚMEROS que o motor viu em produção. Sai junto com a
+   * causa, quando ela aparecer.
+   */
+  depuracao?: { base: string; variante: number; acao: string; possivel: number; publicado: number; novoValor: number }[]
 }
+
+/** As bases do rastro de depuração acima. */
+const BASES_DEPURADAS = new Set([
+  'vibrato-sospiro-unissex-eau-de-parfum-decant',
+  'prada-paradoxe-intense-feminino-eau-de-parfum-decant',
+])
 
 /**
  * Publica na Shopify tudo o que o ERP calculou diferente do que está na loja.
@@ -1973,9 +1986,22 @@ export async function aplicarEstoqueCalculado(): Promise<AplicacaoCalculada> {
 
   const alvos: { shopifyVariantId: string; rotulo: string; novoValor: number }[] = []
   const gravar: { base_id: string; variante: number; publicado: number }[] = []
+  const depuracao: NonNullable<AplicacaoCalculada['depuracao']> = []
   let pulados = 0
 
   for (const b of sync.bases) {
+    if (BASES_DEPURADAS.has(b.base.id)) {
+      for (const v of b.variantes) {
+        depuracao.push({
+          base: b.base.id,
+          variante: v.variante,
+          acao: v.acao,
+          possivel: v.possivel,
+          publicado: v.publicado,
+          novoValor: v.novoValor,
+        })
+      }
+    }
     for (const v of b.variantes) {
       // `sem_carga` é a trava que impede a loja de ir a zero: base que nunca
       // recebeu carga inicial não tem volume porque ninguém contou, não
@@ -2030,7 +2056,7 @@ export async function aplicarEstoqueCalculado(): Promise<AplicacaoCalculada> {
     if (erroLog) throw erroLog
   }
 
-  return { ...resultado, pulados }
+  return { ...resultado, pulados, ...(depuracao.length ? { depuracao } : {}) }
 }
 
 // ── Anulados na Shopify ────────────────────────────────────────────────────

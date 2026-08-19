@@ -736,6 +736,7 @@ export async function POST(req: Request) {
         local: s.local,
         ...(s.locais.length > 1 ? { locais: s.locais } : {}),
         mudancas: s.mudancas.slice(0, 15),
+        ...(s.depuracao ? { depuracao: s.depuracao } : {}),
       }
     } catch (e) {
       relatorio.shopifyEstoque = { erro: mensagemDe(e) }
