@@ -67,6 +67,13 @@ const ABERTO = [
   // chamadas pelo navegador e continuam exigindo sessão. Abrir o prefixo todo
   // deixaria qualquer um perguntar o saldo do caixa sem estar logado.
   '/api/assessor/vigilia',
+  // O cupom da Curadoria Olfativa: o quiz chama do navegador do cliente, em
+  // outro domínio, sem cookie e sem segredo. A rota se defende sozinha — um
+  // cupom por e-mail (repetir devolve o mesmo), teto de cupons novos por
+  // hora e limite de 1 uso no cupom criado. Fora desta lista, a falha era a
+  // conhecida: o middleware devolvia a página de login com 200 e o quiz
+  // "recebia" HTML no lugar do código.
+  '/api/quiz/cupom',
   // Webhook do WhatsApp: a Meta chama sem cookie. O GET confere o
   // `WHATSAPP_VERIFY_TOKEN` e o POST confere a assinatura HMAC-SHA256 do
   // corpo cru contra o `WHATSAPP_APP_SECRET`. Sem o segredo, a rota recusa
