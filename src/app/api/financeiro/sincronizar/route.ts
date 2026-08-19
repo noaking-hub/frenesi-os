@@ -397,18 +397,18 @@ export async function POST(req: Request) {
   }
 
   // Etiqueta feita no PAINEL da Frenet não chega por caminho nenhum (a Yampi
-  // só informa track_code de etiqueta faturada nela). Enquanto a porta de
-  // listagem não é conhecida, a rodada SONDA a API quando há pedido faturado
-  // sem rastreio e traz as respostas cruas — o leitor definitivo nasce sobre
-  // o formato real, como foi com o Mercado Pago.
+  // só informa track_code de etiqueta faturada nela, e a API da Frenet não
+  // lista envios — sondado em 19/08, 404 em todos os caminhos). O buraco é
+  // vigiado: faturado sem rastreio aparece aqui e no alerta de expedição; o
+  // conserto é informar o código na Yampi ao faturar.
   if (grupo('logistica') && frenetConfigurada()) {
     try {
       const s = await sondarEnviosDaFrenet()
       if (s.pendentes.length) {
-        relatorio.descobertaFrenet = { pendentes: s.pendentes, amostras: s.amostras }
+        relatorio.faturadosSemRastreio = s.pendentes
       }
     } catch (e) {
-      relatorio.descobertaFrenet = { erro: mensagemDe(e) }
+      relatorio.faturadosSemRastreio = { erro: mensagemDe(e) }
     }
   }
 
