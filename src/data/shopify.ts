@@ -1,5 +1,7 @@
 import 'server-only'
 
+import { randomUUID } from 'node:crypto'
+
 import { mapearCatalogo, parseVarianteMl } from '@/domain'
 import type { CatalogoMapeado, ProdutoShopify } from '@/domain'
 
@@ -506,9 +508,13 @@ const CONSULTA_ITENS = /* GraphQL */ `
 // estoque da loja para de andar — foi exatamente o que aconteceu, com o ml
 // do ERP correto e a vitrine congelada. A semântica não muda: a gravação já
 // era idempotente por construção (o ERP manda o valor absoluto).
+// A chave é única por lote DE PROPÓSITO: a Shopify usa o `key` para
+// descartar repetições, e uma chave fixa faria a segunda gravação legítima
+// ser ignorada em silêncio. A proteção contra retry duplicado que o
+// gateway quer já existe do nosso lado — o ERP manda o valor absoluto.
 const MUTACAO_ESTOQUE = /* GraphQL */ `
-  mutation ($input: InventorySetQuantitiesInput!) {
-    inventorySetQuantities(input: $input) @idempotent {
+  mutation ($input: InventorySetQuantitiesInput!, $chave: String!) {
+    inventorySetQuantities(input: $input) @idempotent(key: $chave) {
       userErrors {
         field
         message
@@ -727,6 +733,7 @@ export async function aplicarEstoqueShopify(
           // rotina foi dividida em etapas.
           quantities: parte,
         },
+        chave: randomUUID(),
       },
       'gravar o estoque',
       'write_inventory',
