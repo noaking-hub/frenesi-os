@@ -56,9 +56,22 @@ interface Busca {
 
 const dataBr = (iso: string) => iso.slice(0, 10).split('-').reverse().join('/')
 
-/** "15/08/2026 09:12" quando o instante tem hora; só a data quando não tem. */
+/**
+ * "15/08/2026 09:12" quando o instante tem hora; só a data quando não tem.
+ * A hora é SEMPRE convertida para Brasília: o banco grava em UTC, e cortar a
+ * string mostrava "última leitura 18:32" às 16h da tarde — leitura do futuro.
+ */
 const dataHoraBr = (iso: string) =>
-  iso.length > 10 ? `${dataBr(iso)} ${iso.slice(11, 16)}` : dataBr(iso)
+  iso.length > 10
+    ? new Date(iso).toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'America/Sao_Paulo',
+      }).replace(',', '')
+    : dataBr(iso)
 
 // O mesmo campo dos filtros aprovados em Lançamentos, mais baixo para caber
 // na linha da tabela.

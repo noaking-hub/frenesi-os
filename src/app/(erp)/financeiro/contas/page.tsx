@@ -139,8 +139,10 @@ export default async function ContasECaixas({
     .filter(Boolean)
     .sort()
     .at(-1)
+  // Sempre em Brasília: o servidor roda em UTC e sem o fuso o carimbo
+  // mostrava hora do futuro.
   const ultimaLeitura = maisRecente
-    ? `${new Date(maisRecente).toLocaleDateString('pt-BR')} às ${new Date(maisRecente).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+    ? `${new Date(maisRecente).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })} às ${new Date(maisRecente).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })}`
     : null
 
   // O atalho "Registrar saldo" da trilha age sobre a conta padrão: é a que o
@@ -405,11 +407,18 @@ export default async function ContasECaixas({
  */
 function quandoAtualizou(sincronizadoEm: string | null, agora: number): string {
   if (!sincronizadoEm) return 'Nunca sincronizada'
+  // Tudo em Brasília: o servidor roda em UTC e, sem o fuso, "Hoje, 18:32"
+  // aparecia às 16h — e a virada de dia acontecia às 21h.
+  const diaSp = (t: number | Date) =>
+    new Date(t).toLocaleDateString('sv', { timeZone: 'America/Sao_Paulo' })
   const d = new Date(sincronizadoEm)
-  const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-  const hoje = new Date(agora)
-  if (d.toDateString() === hoje.toDateString()) return `Hoje, ${hora}`
-  if (d.toDateString() === new Date(agora - 86_400_000).toDateString()) return `Ontem, ${hora}`
+  const hora = d.toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'America/Sao_Paulo',
+  })
+  if (diaSp(d) === diaSp(agora)) return `Hoje, ${hora}`
+  if (diaSp(d) === diaSp(agora - 86_400_000)) return `Ontem, ${hora}`
   const dias = Math.max(1, Math.floor((agora - d.getTime()) / 86_400_000))
   return `Há ${plural(dias, 'dia', 'dias')}`
 }
