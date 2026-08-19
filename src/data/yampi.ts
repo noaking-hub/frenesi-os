@@ -202,7 +202,8 @@ interface PedidoYampi {
   date_delivery: { date?: string } | string | null
   track_code: string | null
   shipment_service: string | null
-  promocode: string | null
+  /** String no pedido comum; a Yampi também já devolveu objeto aqui. */
+  promocode: unknown
   /** Número do mesmo pedido na Shopify — a Yampi guarda como venda de marketplace. */
   marketplace_sale_number: string | number | null
   /**
@@ -279,6 +280,25 @@ function dataYampi(valor: { date?: string } | string | null | undefined): string
 function numero(valor: number | string | null | undefined): number {
   const n = typeof valor === 'string' ? Number(valor) : (valor ?? 0)
   return Number.isFinite(n) ? n : 0
+}
+
+/**
+ * O promocode do pedido vem como string na maioria dos casos, mas a Yampi já
+ * devolveu objeto (relação embrulhada) — e um `.trim()` cego derrubou a
+ * importação de vendas inteira. Aqui só interessa o código, venha como vier.
+ */
+function cupomDoPedido(promocode: unknown): string | null {
+  const bruto =
+    typeof promocode === 'string'
+      ? promocode
+      : promocode && typeof promocode === 'object'
+        ? (() => {
+            const o = promocode as { code?: unknown; data?: { code?: unknown } }
+            return typeof o.code === 'string' ? o.code : typeof o.data?.code === 'string' ? o.data.code : null
+          })()
+        : null
+  const limpo = bruto?.trim().toUpperCase()
+  return limpo || null
 }
 
 /** A Yampi ora embrulha a relação em `{ data }`, ora devolve o objeto direto. */
@@ -580,7 +600,7 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
       cashback: 0,
       // O cupom usado no checkout: é ele que fecha a atribuição da Curadoria
       // Olfativa (CURA10-…) e denuncia cupom usado por e-mail que não é o dono.
-      cupom: p.promocode?.trim().toUpperCase() || null,
+      cupom: cupomDoPedido(p.promocode),
       pagamento: situacaoDoPedido(p),
       envio: envioYampi(alias, nome, entregue, rastreio),
       // O alias CRU vai junto: derivação corrigida depois vale um UPDATE, e
