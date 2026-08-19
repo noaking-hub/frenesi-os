@@ -1,59 +1,86 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useTransition } from 'react'
 
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
 import { Badge, TituloSecao } from '@/components/erp/primitivos'
 import { Tabela, type Coluna } from '@/components/erp/Tabela'
 import { COR } from '@/components/erp/tokens'
 import type { PainelDaCuradoria } from '@/data/quiz'
-import { brl, plural } from '@/domain'
+import { brl, iniciaisDe, plural } from '@/domain'
+
+import { curadoriaDoGerente } from './actions'
 
 /**
- * O painel da Curadoria Olfativa.
+ * CRM → Curadoria Olfativa.
  *
- * Três perguntas, nesta ordem: o quiz está trazendo gente? (ritmo e leads),
- * o que essa gente quer? (perfumes clicados e perfil olfativo), e isso vira
- * dinheiro? (cupons usados e receita). Tudo derivado das respostas
- * importadas — nada aqui é editável, porque o fato acontece no quiz.
+ * Três perguntas, nesta ordem: o quiz está trazendo gente? o que essa gente
+ * quer? e isso vira dinheiro? A ficha individual fecha o ciclo: perfil
+ * declarado, afinidade estatística (gênero é eliminatório) e a curadoria do
+ * Gerente IA restrita ao estoque disponível.
  */
 
 const dataBr = (iso: string) =>
   new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'America/Sao_Paulo' })
 
-const ROTULO_TITULO: React.CSSProperties = {
-  fontSize: 10,
+const OURO_GRADIENTE = 'linear-gradient(90deg, #8A6D2F, #EFD18C)'
+
+const MICRO: React.CSSProperties = {
+  fontSize: 9.5,
   fontWeight: 700,
-  letterSpacing: '.08em',
+  letterSpacing: '.16em',
   textTransform: 'uppercase',
-  color: 'rgba(242,237,227,.45)',
+  color: 'rgba(239,209,140,.55)',
 }
 
-function Barra({ rotulo, qtd, maior, tom }: { rotulo: string; qtd: number; maior: number; tom?: 'ouro' }) {
-  const largura = Math.max(4, Math.round((qtd / Math.max(1, maior)) * 100))
+/** O cartão-padrão do módulo: título serifado + fio dourado que esvai. */
+function Cartao({
+  titulo,
+  apoio,
+  children,
+  semRespiro,
+}: {
+  titulo: string
+  apoio?: string
+  children: React.ReactNode
+  semRespiro?: boolean
+}) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,220px) 1fr auto', gap: 10, alignItems: 'center' }}>
+    <section
+      className="card-ouro"
+      style={{ borderRadius: 16, padding: semRespiro ? '18px 20px 12px' : '18px 20px', display: 'flex', flexDirection: 'column', gap: 13 }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+          <TituloSecao tamanho={15}>{titulo}</TituloSecao>
+          {apoio && (
+            <span className="font-sans" style={{ fontSize: 10.5, lineHeight: 1.4, color: 'var(--color-terciario)' }}>
+              {apoio}
+            </span>
+          )}
+        </div>
+        <span aria-hidden style={{ height: 1, background: 'linear-gradient(90deg, rgba(239,209,140,.45), rgba(239,209,140,.05) 60%, transparent)' }} />
+      </div>
+      {children}
+    </section>
+  )
+}
+
+/** Barra fina com preenchimento dourado em degradê — a régua visual da tela. */
+function BarraOuro({ fracao, altura = 6 }: { fracao: number; altura?: number }) {
+  return (
+    <span style={{ display: 'block', height: altura, borderRadius: 99, background: 'rgba(255,255,255,.055)', overflow: 'hidden' }}>
       <span
-        className="font-sans"
-        style={{ fontSize: 11.5, lineHeight: 1.3, color: 'rgba(242,237,227,.75)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-      >
-        {rotulo}
-      </span>
-      <span style={{ height: 8, borderRadius: 4, background: 'rgba(255,255,255,.06)', overflow: 'hidden' }}>
-        <span
-          style={{
-            display: 'block',
-            width: `${largura}%`,
-            height: '100%',
-            borderRadius: 4,
-            background: tom === 'ouro' ? 'rgba(239,209,140,.75)' : 'rgba(242,237,227,.32)',
-          }}
-        />
-      </span>
-      <span className="font-mono" style={{ fontSize: 11, color: tom === 'ouro' ? COR.ouro : 'rgba(242,237,227,.6)', whiteSpace: 'nowrap' }}>
-        {qtd}
-      </span>
-    </div>
+        style={{
+          display: 'block',
+          width: `${Math.max(3, Math.min(100, Math.round(fracao * 100)))}%`,
+          height: '100%',
+          borderRadius: 99,
+          background: OURO_GRADIENTE,
+          boxShadow: '0 0 8px rgba(239,209,140,.25)',
+        }}
+      />
+    </span>
   )
 }
 
@@ -64,34 +91,28 @@ export function CuradoriaCliente({ painel }: { painel: PainelDaCuradoria }) {
   const lead = painel.leadsRecentes.find((l) => `${l.email}-${l.quando}` === selecionado) ?? null
 
   const kpis: Kpi[] = [
-    {
-      label: 'Interações no quiz',
-      valor: String(painel.interacoes),
-      hint: 'cliques em recomendações, desde o início',
-    },
+    { label: 'Interações no quiz', valor: String(painel.interacoes), hint: 'cliques em recomendações' },
     {
       label: 'Leads capturados',
       valor: String(painel.leads),
-      hint: 'deixaram e-mail em troca do cupom',
+      hint: 'deixaram e-mail pelo cupom',
       tom: painel.leads ? 'ok' : 'neutro',
     },
     {
       label: 'Viraram clientes',
       valor: String(painel.viraramClientes),
-      hint: painel.leads
-        ? `${Math.round((painel.viraramClientes / painel.leads) * 100)}% dos leads têm cadastro de cliente`
-        : 'nenhum lead ainda',
+      hint: painel.leads ? `${Math.round((painel.viraramClientes / painel.leads) * 100)}% dos leads` : 'nenhum lead ainda',
     },
     {
       label: 'Cupons usados',
       valor: painel.leads ? `${painel.cuponsUsados} de ${painel.leads}` : '—',
-      hint: 'CURA10 aplicado em pedido pago',
+      hint: 'CURA10 em pedido pago',
       tom: painel.cuponsUsados ? 'ok' : 'neutro',
     },
     {
       label: 'Receita via cupom',
       valor: brl(painel.receitaViaCupom),
-      hint: 'atribuição determinística — o pedido usou o código',
+      hint: 'o pedido usou o código — atribuição certa',
       tom: painel.receitaViaCupom ? 'ouro' : 'neutro',
     },
     {
@@ -104,21 +125,43 @@ export function CuradoriaCliente({ painel }: { painel: PainelDaCuradoria }) {
   const maiorPerfume = Math.max(1, ...painel.topPerfumes.map((p) => p.cliques))
   const maiorDia = Math.max(1, ...painel.cliquesPorDia.map((d) => d.qtd))
 
-  const colunas: Coluna<PainelDaCuradoria['leadsRecentes'][number]>[] = [
+  const colunas: Coluna<Lead>[] = [
     {
       chave: 'email',
       titulo: 'Lead',
       largura: 'minmax(0,1fr)',
       render: (l) => (
-        <span className="font-mono" style={{ fontSize: 11.5, color: 'var(--color-corrente)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
-          {l.email}
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+          <span
+            aria-hidden
+            className="font-display"
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: '50%',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              border: '1px solid rgba(239,209,140,.4)',
+              background: 'radial-gradient(circle at 30% 25%, rgba(239,209,140,.22), rgba(239,209,140,.05))',
+              color: COR.ouro,
+              fontSize: 11,
+              fontWeight: 600,
+            }}
+          >
+            {iniciaisDe(l.email.split('@')[0].replace(/[._]/g, ' '))}
+          </span>
+          <span className="font-mono" style={{ fontSize: 11.5, color: 'var(--color-corrente)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {l.email}
+          </span>
         </span>
       ),
     },
     {
       chave: 'quando',
       titulo: 'Quando',
-      largura: '90px',
+      largura: '84px',
       alinhamento: 'right',
       render: (l) => (
         <span className="font-mono" style={{ fontSize: 11, color: 'rgba(242,237,227,.55)' }}>{dataBr(l.quando)}</span>
@@ -127,10 +170,10 @@ export function CuradoriaCliente({ painel }: { painel: PainelDaCuradoria }) {
     {
       chave: 'cupom',
       titulo: 'Cupom',
-      largura: '150px',
+      largura: '148px',
       render: (l) =>
         l.cupom ? (
-          <span className="font-mono" style={{ fontSize: 11, color: l.cupomUsado ? COR.ok : 'rgba(239,209,140,.7)' }}>
+          <span className="font-mono" style={{ fontSize: 11, letterSpacing: '.04em', color: l.cupomUsado ? COR.ok : 'rgba(239,209,140,.75)' }}>
             {l.cupom}
           </span>
         ) : (
@@ -140,7 +183,7 @@ export function CuradoriaCliente({ painel }: { painel: PainelDaCuradoria }) {
     {
       chave: 'estado',
       titulo: 'Situação',
-      largura: '130px',
+      largura: '140px',
       render: (l) =>
         l.cupomUsado ? (
           <Badge tom="ok">comprou com cupom</Badge>
@@ -160,8 +203,8 @@ export function CuradoriaCliente({ painel }: { painel: PainelDaCuradoria }) {
         <span
           className="font-sans"
           style={{
-            padding: '9px 13px',
-            borderRadius: 10,
+            padding: '10px 14px',
+            borderRadius: 12,
             border: '1px solid rgba(230,180,80,.35)',
             background: 'rgba(230,180,80,.08)',
             color: COR.atencao,
@@ -176,84 +219,97 @@ export function CuradoriaCliente({ painel }: { painel: PainelDaCuradoria }) {
         </span>
       )}
 
-      <div className="empilha-1100" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
-        <section className="card-ouro" style={{ borderRadius: 14, padding: '15px 17px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-            <TituloSecao tamanho={13.5}>Perfumes mais desejados</TituloSecao>
-            <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
-              cliques nas recomendações do quiz
-            </span>
-          </div>
+      <div className="empilha-1100" style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 16, alignItems: 'start' }}>
+        <Cartao titulo="Perfumes mais desejados" apoio="cliques nas recomendações do quiz — o sinal de demanda">
           {painel.topPerfumes.length === 0 ? (
             <span className="font-sans" style={{ fontSize: 11, color: 'var(--color-terciario)' }}>
               Nenhum clique registrado ainda.
             </span>
           ) : (
-            painel.topPerfumes.map((p) => (
-              <Barra key={p.nome} rotulo={p.nome} qtd={p.cliques} maior={maiorPerfume} tom="ouro" />
-            ))
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+              {painel.topPerfumes.map((p, i) => (
+                <div key={p.nome} style={{ display: 'grid', gridTemplateColumns: '30px minmax(0,1fr) auto', gap: 12, alignItems: 'center' }}>
+                  <span
+                    className="font-display"
+                    style={{ fontSize: 17, fontWeight: 600, color: i < 3 ? COR.ouro : 'rgba(242,237,227,.3)', fontVariantNumeric: 'tabular-nums' }}
+                  >
+                    {String(i + 1).padStart(2, '0')}
+                  </span>
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
+                    <span
+                      className="font-sans"
+                      style={{ fontSize: 12, lineHeight: 1.3, color: 'var(--color-corrente)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    >
+                      {p.nome}
+                    </span>
+                    <BarraOuro fracao={p.cliques / maiorPerfume} altura={5} />
+                  </span>
+                  <span className="font-mono" style={{ fontSize: 11.5, color: 'rgba(242,237,227,.6)', whiteSpace: 'nowrap' }}>
+                    {p.cliques}
+                  </span>
+                </div>
+              ))}
+            </div>
           )}
-        </section>
+        </Cartao>
 
-        <section className="card-ouro" style={{ borderRadius: 14, padding: '15px 17px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-            <TituloSecao tamanho={13.5}>Perfil olfativo do público</TituloSecao>
-            <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
-              as respostas mais comuns, pergunta a pergunta
-            </span>
-          </div>
+        <Cartao titulo="Perfil olfativo do público" apoio="o que as respostas dizem, pergunta a pergunta">
           {painel.perfil.length === 0 ? (
             <span className="font-sans" style={{ fontSize: 11, color: 'var(--color-terciario)' }}>
               As respostas ainda não trazem perfil legível.
             </span>
           ) : (
-            painel.perfil.map((p) => (
-              <div key={p.pergunta} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <span className="font-sans" style={ROTULO_TITULO}>{p.pergunta.replace(/_/g, ' ')}</span>
-                {p.valores.map((v) => (
-                  <Barra
-                    key={v.valor}
-                    rotulo={v.valor}
-                    qtd={v.qtd}
-                    maior={Math.max(1, ...p.valores.map((x) => x.qtd))}
-                  />
-                ))}
-              </div>
-            ))
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {painel.perfil.map((p) => {
+                const total = Math.max(1, p.valores.reduce((a, v) => a + v.qtd, 0))
+                return (
+                  <div key={p.pergunta} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span className="font-sans" style={MICRO}>{p.pergunta.replace(/_/g, ' ')}</span>
+                    {p.valores.map((v) => (
+                      <div key={v.valor} style={{ display: 'grid', gridTemplateColumns: '110px 1fr auto', gap: 10, alignItems: 'center' }}>
+                        <span className="font-sans" style={{ fontSize: 11.5, color: 'rgba(242,237,227,.78)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {v.valor.replace(/_/g, ' ')}
+                        </span>
+                        <BarraOuro fracao={v.qtd / total} altura={5} />
+                        <span className="font-mono" style={{ fontSize: 10.5, color: 'rgba(242,237,227,.55)', whiteSpace: 'nowrap' }}>
+                          {`${Math.round((v.qtd / total) * 100)}%`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })}
+            </div>
           )}
-        </section>
+        </Cartao>
       </div>
 
       {painel.cliquesPorDia.length > 0 && (
-        <section className="card-ouro" style={{ borderRadius: 14, padding: '15px 17px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-            <TituloSecao tamanho={13.5}>Ritmo do quiz</TituloSecao>
-            <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
-              interações por dia · últimos 30 dias
-            </span>
-          </div>
-          <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end', height: 64, overflowX: 'auto', paddingBottom: 2 }}>
+        <Cartao titulo="Ritmo do quiz" apoio="interações por dia · últimos 30 dias" semRespiro>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', height: 86, overflowX: 'auto', paddingBottom: 4 }}>
             {painel.cliquesPorDia.map((d) => (
-              <div key={d.dia} title={`${dataBr(d.dia)} · ${d.qtd}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, minWidth: 18 }}>
+              <div key={d.dia} title={`${dataBr(d.dia)} · ${plural(d.qtd, 'interação', 'interações')}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 26 }}>
+                <span className="font-mono" style={{ fontSize: 9, color: 'rgba(239,209,140,.7)' }}>{d.qtd}</span>
                 <span
                   aria-hidden
                   style={{
-                    width: 12,
-                    height: Math.max(3, Math.round((d.qtd / maiorDia) * 52)),
-                    background: 'rgba(239,209,140,.65)',
-                    borderRadius: 2,
+                    width: 16,
+                    height: Math.max(4, Math.round((d.qtd / maiorDia) * 54)),
+                    background: 'linear-gradient(180deg, #EFD18C, rgba(138,109,47,.65))',
+                    borderRadius: '4px 4px 2px 2px',
+                    boxShadow: '0 0 10px rgba(239,209,140,.18)',
                   }}
                 />
-                <span className="font-mono" style={{ fontSize: 8.5, color: 'rgba(242,237,227,.4)', whiteSpace: 'nowrap' }}>
+                <span className="font-mono" style={{ fontSize: 8.5, color: 'rgba(242,237,227,.45)', whiteSpace: 'nowrap' }}>
                   {dataBr(d.dia).slice(0, 5)}
                 </span>
               </div>
             ))}
           </div>
-        </section>
+        </Cartao>
       )}
 
-      <div className="empilha-1100" style={{ display: 'grid', gridTemplateColumns: lead ? 'minmax(0,1fr) 360px' : '1fr', gap: 16, alignItems: 'start' }}>
+      <div className="empilha-1100" style={{ display: 'grid', gridTemplateColumns: lead ? 'minmax(0,1fr) 380px' : '1fr', gap: 16, alignItems: 'start' }}>
         <Tabela
           colunas={colunas}
           itens={painel.leadsRecentes}
@@ -263,10 +319,10 @@ export function CuradoriaCliente({ painel }: { painel: PainelDaCuradoria }) {
           }
           selecionadoDe={(l) => `${l.email}-${l.quando}` === selecionado}
           cabecalho={
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '13px 15px', borderBottom: '1px solid var(--color-borda)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '13px 15px', borderBottom: '1px solid var(--color-borda)', flexWrap: 'wrap' }}>
               <TituloSecao tamanho={13}>Leads recentes</TituloSecao>
               <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
-                clique num lead para ver o perfil olfativo dele e as recomendações
+                clique num lead para abrir a assinatura olfativa dele
               </span>
             </div>
           }
@@ -285,24 +341,52 @@ export function CuradoriaCliente({ painel }: { painel: PainelDaCuradoria }) {
   )
 }
 
-/**
- * A ficha individual: o perfil que ESTE lead declarou, o que ele clicou na
- * sessão, e o que perfis parecidos clicaram — a recomendação pronta para o
- * atendimento usar no WhatsApp.
- */
+/** A ficha individual: assinatura olfativa, afinidade e a curadoria do Gerente. */
 function FichaDoLead({ lead, aoFechar }: { lead: Lead; aoFechar: () => void }) {
+  const [ia, setIa] = useState<{ texto?: string; erro?: string } | null>(null)
+  const [consultando, iniciar] = useTransition()
+
   const porPergunta = new Map<string, string[]>()
   for (const [pergunta, valor] of lead.perfil) {
     porPergunta.set(pergunta, [...(porPergunta.get(pergunta) ?? []), valor])
   }
-  const maiorAfinidade = Math.max(0.01, ...lead.recomendacoes.map((r) => r.afinidade))
+
+  const pedirAoGerente = () =>
+    iniciar(async () => {
+      setIa(null)
+      const r = await curadoriaDoGerente(lead.email)
+      setIa(r.ok ? { texto: r.texto } : { erro: r.erro })
+    })
 
   return (
-    <section className="card-ouro" style={{ borderRadius: 16, padding: '18px 19px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-        <span style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 0 }}>
-          <TituloSecao tamanho={14}>Perfil olfativo</TituloSecao>
-          <span className="font-mono" style={{ fontSize: 10, color: 'rgba(242,237,227,.45)', wordBreak: 'break-all' }}>
+    <section
+      className="card-ouro"
+      style={{ borderRadius: 16, padding: '20px 21px', display: 'flex', flexDirection: 'column', gap: 15, borderColor: 'rgba(239,209,140,.3)' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span
+          aria-hidden
+          className="font-display"
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: '50%',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            border: '1px solid rgba(239,209,140,.5)',
+            background: 'radial-gradient(circle at 30% 25%, rgba(239,209,140,.3), rgba(239,209,140,.06))',
+            color: COR.ouro,
+            fontSize: 16,
+            fontWeight: 600,
+          }}
+        >
+          {iniciaisDe(lead.email.split('@')[0].replace(/[._]/g, ' '))}
+        </span>
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1, minWidth: 0 }}>
+          <TituloSecao tamanho={15}>Assinatura olfativa</TituloSecao>
+          <span className="font-mono" style={{ fontSize: 10, color: 'rgba(242,237,227,.5)', wordBreak: 'break-all' }}>
             {lead.email}
           </span>
         </span>
@@ -311,33 +395,35 @@ function FichaDoLead({ lead, aoFechar }: { lead: Lead; aoFechar: () => void }) {
           onClick={aoFechar}
           aria-label="Fechar ficha"
           className="font-sans hover:brightness-150"
-          style={{ border: 0, background: 'transparent', color: 'rgba(242,237,227,.4)', fontSize: 14, cursor: 'pointer', padding: 2 }}
+          style={{ border: 0, background: 'transparent', color: 'rgba(242,237,227,.4)', fontSize: 15, cursor: 'pointer', padding: 2, alignSelf: 'flex-start' }}
         >
           ×
         </button>
       </div>
 
+      <span aria-hidden style={{ height: 1, background: 'linear-gradient(90deg, rgba(239,209,140,.45), rgba(239,209,140,.05) 60%, transparent)' }} />
+
       {lead.perfil.length === 0 ? (
-        <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
-          Este lead deixou o e-mail sem o perfil de respostas — o quiz não mandou as respostas junto.
+        <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.55, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
+          Este lead deixou o e-mail sem o perfil de respostas.
         </span>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {[...porPergunta.entries()].map(([pergunta, valores]) => (
-            <div key={pergunta} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-              <span className="font-sans" style={ROTULO_TITULO}>{pergunta.replace(/_/g, ' ')}</span>
+            <div key={pergunta} style={{ display: 'grid', gridTemplateColumns: '76px 1fr', gap: 10, alignItems: 'baseline' }}>
+              <span className="font-sans" style={MICRO}>{pergunta.replace(/_/g, ' ')}</span>
               <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {valores.map((v) => (
                   <span
                     key={v}
                     className="font-sans"
                     style={{
-                      padding: '4px 10px',
-                      border: '1px solid rgba(239,209,140,.35)',
-                      background: 'rgba(239,209,140,.08)',
+                      padding: '4px 11px',
+                      border: '1px solid rgba(239,209,140,.4)',
+                      background: 'linear-gradient(135deg, rgba(239,209,140,.13), rgba(239,209,140,.04))',
                       color: COR.ouro,
                       fontSize: 11,
-                      lineHeight: 1,
+                      lineHeight: 1.2,
                       borderRadius: 'var(--radius-pill)',
                     }}
                   >
@@ -351,8 +437,8 @@ function FichaDoLead({ lead, aoFechar }: { lead: Lead; aoFechar: () => void }) {
       )}
 
       {lead.clicadosNaSessao.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,.07)' }}>
-          <span className="font-sans" style={ROTULO_TITULO}>Clicou no quiz</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,.07)' }}>
+          <span className="font-sans" style={MICRO}>Clicou no quiz</span>
           {lead.clicadosNaSessao.map((p) => (
             <span key={p} className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.4, color: 'var(--color-corrente)' }}>
               {p}
@@ -361,41 +447,85 @@ function FichaDoLead({ lead, aoFechar }: { lead: Lead; aoFechar: () => void }) {
         </div>
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,.07)' }}>
-        <span className="font-sans" style={ROTULO_TITULO}>Recomendações para este perfil</span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 9, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,.07)' }}>
+        <span className="font-sans" style={MICRO}>Afinidade com outros perfis</span>
         {lead.recomendacoes.length === 0 ? (
-          <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
-            Ainda não há cliques de perfis parecidos — a recomendação melhora sozinha a cada uso do quiz.
+          <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.55, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
+            Ainda não há cliques suficientes de perfis parecidos (o gênero é eliminatório e
+            recomendação fraca não sai). A curadoria do Gerente, abaixo, cobre essa lacuna.
           </span>
         ) : (
-          lead.recomendacoes.map((r) => (
-            <div key={r.nome} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
-                <span className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.35, color: 'var(--color-corrente)' }}>
+          lead.recomendacoes.map((r, i) => (
+            <div key={r.nome} style={{ display: 'grid', gridTemplateColumns: '22px minmax(0,1fr) auto', gap: 9, alignItems: 'center' }}>
+              <span className="font-display" style={{ fontSize: 14, fontWeight: 600, color: i === 0 ? COR.ouro : 'rgba(242,237,227,.35)' }}>
+                {String(i + 1).padStart(2, '0')}
+              </span>
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+                <span className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.3, color: 'var(--color-corrente)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {r.nome}
                 </span>
-                <span className="font-mono" style={{ fontSize: 10, color: COR.ouro, whiteSpace: 'nowrap' }}>
-                  {`${Math.round(r.afinidade * 100)}%`}
-                </span>
+                <BarraOuro fracao={r.afinidade} altura={4} />
               </span>
-              <span style={{ height: 5, borderRadius: 3, background: 'rgba(255,255,255,.06)', overflow: 'hidden' }}>
-                <span
-                  style={{
-                    display: 'block',
-                    width: `${Math.max(4, Math.round((r.afinidade / maiorAfinidade) * 100))}%`,
-                    height: '100%',
-                    borderRadius: 3,
-                    background: 'rgba(239,209,140,.7)',
-                  }}
-                />
+              <span className="font-mono" style={{ fontSize: 10.5, color: COR.ouro, whiteSpace: 'nowrap' }}>
+                {`${Math.round(r.afinidade * 100)}%`}
               </span>
             </div>
           ))
         )}
-        <span className="font-sans" style={{ fontSize: 9.5, lineHeight: 1.45, color: 'rgba(242,237,227,.38)', textWrap: 'pretty' }}>
-          Afinidade = quanto do perfil deste lead o clique mais parecido cobre. Pronto para usar no
-          WhatsApp do atendimento.
-        </span>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,.07)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="font-sans" style={MICRO}>Curadoria do Gerente</span>
+          <div style={{ flex: 1 }} />
+          <button
+            type="button"
+            disabled={consultando || lead.perfil.length === 0}
+            onClick={pedirAoGerente}
+            className="botao-ouro font-sans hover:brightness-110"
+            style={{
+              height: 32,
+              padding: '0 15px',
+              fontWeight: 700,
+              fontSize: 11,
+              letterSpacing: '.04em',
+              borderRadius: 9,
+              cursor: consultando ? 'wait' : 'pointer',
+              opacity: consultando || lead.perfil.length === 0 ? 0.6 : 1,
+            }}
+          >
+            {consultando ? 'Compondo…' : '✦ Curar com IA'}
+          </button>
+        </div>
+
+        {ia?.erro && (
+          <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.5, color: COR.erro, textWrap: 'pretty' }}>
+            {ia.erro}
+          </span>
+        )}
+        {ia?.texto && (
+          <div
+            style={{
+              padding: '13px 15px',
+              borderRadius: 12,
+              border: '1px solid rgba(239,209,140,.3)',
+              background: 'linear-gradient(160deg, rgba(239,209,140,.08), rgba(239,209,140,.02))',
+            }}
+          >
+            <p
+              className="font-sans"
+              style={{ margin: 0, fontSize: 11.5, lineHeight: 1.65, color: 'var(--color-corrente)', whiteSpace: 'pre-wrap', textWrap: 'pretty' }}
+            >
+              {ia.texto}
+            </p>
+          </div>
+        )}
+        {!ia && !consultando && (
+          <span className="font-sans" style={{ fontSize: 10, lineHeight: 1.5, color: 'rgba(242,237,227,.4)', textWrap: 'pretty' }}>
+            O Gerente lê o perfil e recomenda SÓ do estoque disponível, com o porquê de cada
+            escolha — pronto para enviar no WhatsApp.
+          </span>
+        )}
       </div>
     </section>
   )

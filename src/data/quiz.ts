@@ -500,7 +500,7 @@ export async function painelDaCuradoria(): Promise<PainelDaCuradoria> {
       virouCliente: Boolean(l.email && clientesPorEmail.has(l.email)),
       perfil,
       clicadosNaSessao,
-      recomendacoes: recomendacoesPorAfinidade(perfil, cliquesComPerfil),
+      recomendacoes: recomendacoesPorAfinidade(perfil, cliquesComPerfil, 5, new Set(clicadosNaSessao)),
     }
   })
 
