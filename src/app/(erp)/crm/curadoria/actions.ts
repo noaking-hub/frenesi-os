@@ -1,20 +1,20 @@
 'use server'
 
-import { assessorConfigurado, atorDoErp, executarInteracao } from '@/data/assessor/motor'
+import { assessorConfigurado, atorDoErp, comporTexto } from '@/data/assessor/motor'
 import { catalogoComDna } from '@/data/quiz'
 import { sessaoAtual } from '@/data/sessao'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import { curadoriaPorDna, paresDePerfil } from '@/domain'
 
 /**
- * A curadoria refinada pelo Gerente — o mesmo motor com política, limites e
- * auditoria que atende o resto do ERP, agora olhando para UM lead.
+ * A curadoria refinada pela IA, olhando para UM lead.
  *
  * A seleção é DETERMINÍSTICA: perfil × DNA olfativo do catálogo espelhado do
  * quiz (curadoriaPorDna). O modelo não escolhe nem inventa — recebe os
  * candidatos já cruzados, com o porquê de cada um, e entra só para compor o
- * texto no tom da marca. Foi a lição da primeira versão: sem base de
- * conhecimento no pedido, o motor recusa (corretamente) a recomendar.
+ * texto no tom da marca, por `comporTexto` (sem ferramentas, com auditoria).
+ * O laço completo do Gerente não serve aqui: a regra dele "fato só de
+ * ferramenta" fazia o motor recusar mesmo com os dados inline no pedido.
  */
 export async function curadoriaDoGerente(
   email: string,
@@ -65,29 +65,29 @@ export async function curadoriaDoGerente(
     })
     .join('\n')
 
-  const pergunta =
-    `Componha a curadoria olfativa para um lead do quiz da FRENESI.\n\n` +
-    `Todos os dados necessários já estão NESTE pedido — não use ferramentas nem consulte nada:` +
-    ` os candidatos abaixo saíram do cruzamento do perfil do lead com o DNA olfativo real do` +
-    ` catálogo (a mesma base do quiz), já filtrados por gênero e estoque.\n\n` +
+  const instrucoes =
+    `Você escreve a curadoria olfativa da FRENESI Perfumes — decants de perfumes importados,` +
+    ` marca elegante e direta. Você recebe o perfil de um lead e candidatos JÁ selecionados` +
+    ` pelo ERP (cruzamento do perfil com o DNA olfativo real do catálogo, filtrado por gênero` +
+    ` e estoque). Sua única tarefa é compor o texto: escolha os 3 melhores candidatos e escreva,` +
+    ` para cada um, UMA frase de por que combina com o perfil, pronta para o atendimento enviar` +
+    ` no WhatsApp. Use apenas os motivos e descrições fornecidos. Sem preço, sem link, sem` +
+    ` saudação, sem citar perfume fora da lista. Formato: o nome do perfume em negrito, dois` +
+    ` pontos, a frase.`
+
+  const conteudo =
     `PERFIL DECLARADO — ${linhasDePerfil}\n\n` +
-    `CANDIDATOS (em ordem de afinidade):\n${linhasDeEscolhas}\n\n` +
-    `Escolha os 3 melhores entre os candidatos e escreva, para cada um, UMA frase de por que` +
-    ` combina com este perfil, no tom da marca (elegante, direto), pronta para o atendimento` +
-    ` enviar no WhatsApp. Use os motivos e descrições fornecidos. Sem preço, sem link, sem` +
-    ` citar perfume fora da lista.`
+    `CANDIDATOS (em ordem de afinidade):\n${linhasDeEscolhas}`
 
   const sessao = await sessaoAtual()
   try {
-    const r = await executarInteracao({
-      pergunta,
+    const r = await comporTexto({
+      instrucoes,
+      conteudo,
       ator: atorDoErp(sessao?.id ?? null, sessao?.papel ?? 'operacao'),
       canal: 'erp',
-      conversaId: null,
     })
-    const texto = r?.texto?.trim()
-    if (!texto) return { ok: false, erro: 'O Gerente não devolveu resposta.' }
-    return { ok: true, texto }
+    return { ok: true, texto: r.texto }
   } catch (e) {
     return { ok: false, erro: e instanceof Error ? e.message : String(e) }
   }

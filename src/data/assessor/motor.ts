@@ -601,6 +601,77 @@ export async function executarInteracao(pedido: PedidoAoGerente & { conversaId: 
 }
 
 /**
+ * Composição de texto por cima de dados JÁ CRUZADOS pelo ERP.
+ *
+ * O laço do Gerente exige que todo fato venha de ferramenta — regra certa
+ * para o financeiro, e foi ela que o fez recusar a curadoria olfativa mesmo
+ * com os candidatos no pedido: sem chamada de ferramenta, o motor manda
+ * consultar, e não há ferramenta de perfumaria no catálogo. Este caminho é
+ * para o caso inverso: o ERP já fez o cruzamento determinístico e o modelo
+ * entra SÓ para escrever. Uma chamada, sem ferramentas, com prazo — e com a
+ * mesma auditoria, porque texto gerado para cliente também é rastro.
+ */
+export async function comporTexto(pedido: {
+  /** As instruções da tarefa — fazem o papel do system prompt. */
+  instrucoes: string
+  /** O pedido com TODOS os dados inline: o modelo não consulta nada. */
+  conteudo: string
+  ator: Ator
+  canal: CanalDoGerente
+  traceId?: string
+}): Promise<{ traceId: string; texto: string }> {
+  const chave = process.env.ANTHROPIC_API_KEY
+  if (!chave) throw new Error('ANTHROPIC_API_KEY não está definida nas variáveis do site.')
+
+  const traceId = pedido.traceId ?? randomUUID()
+  const comecou = Date.now()
+  let texto: string | null = null
+  let erro: string | null = null
+  let tokensEntrada = 0
+  let tokensSaida = 0
+
+  try {
+    const r = await chamarModelo(
+      {
+        model: MODELO,
+        max_tokens: 1024,
+        system: pedido.instrucoes,
+        messages: [{ role: 'user', content: pedido.conteudo }],
+      },
+      chave,
+      60_000,
+    )
+    tokensEntrada = r.usage?.input_tokens ?? 0
+    tokensSaida = r.usage?.output_tokens ?? 0
+    texto = (r.content ?? [])
+      .filter((b): b is BlocoTexto => b.type === 'text')
+      .map((b) => b.text)
+      .join('\n')
+      .trim()
+    if (!texto) throw new Error('O modelo não devolveu texto.')
+    return { traceId, texto }
+  } catch (e) {
+    erro = e instanceof Error ? e.message : String(e)
+    throw e
+  } finally {
+    await auditar({
+      traceId,
+      conversaId: null,
+      ator: pedido.ator,
+      canal: pedido.canal,
+      pergunta: `[compor texto] ${pedido.conteudo}`,
+      resposta: texto,
+      ferramentas: [],
+      tokensEntrada,
+      tokensSaida,
+      duracaoMs: Date.now() - comecou,
+      parou: erro ? 'cancelado' : 'concluiu',
+      erro: erro ?? undefined,
+    }).catch(() => {})
+  }
+}
+
+/**
  * O relatório exportável — §4.5.
  *
  * Não há relatório guardado em lugar nenhum: a exportação REEXECUTA a mesma
