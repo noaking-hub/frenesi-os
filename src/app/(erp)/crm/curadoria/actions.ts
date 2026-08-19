@@ -1,20 +1,20 @@
 'use server'
 
 import { assessorConfigurado, atorDoErp, executarInteracao } from '@/data/assessor/motor'
-import { carregarEstoque } from '@/data/consultas'
+import { catalogoComDna } from '@/data/quiz'
 import { sessaoAtual } from '@/data/sessao'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
-import { paresDePerfil } from '@/domain'
+import { curadoriaPorDna, paresDePerfil } from '@/domain'
 
 /**
  * A curadoria refinada pelo Gerente — o mesmo motor com política, limites e
  * auditoria que atende o resto do ERP, agora olhando para UM lead.
  *
- * A afinidade estatística ordena o que perfis parecidos clicaram; o modelo
- * entra por cima com o que a estatística não tem: conhecimento de perfumaria
- * (o que é um âmbar especiado, com o que um cítrico aromático conversa) e a
- * restrição ao que a FRENESI pode VENDER HOJE — a lista de disponíveis vai no
- * pedido, e fora dela não vale recomendar.
+ * A seleção é DETERMINÍSTICA: perfil × DNA olfativo do catálogo espelhado do
+ * quiz (curadoriaPorDna). O modelo não escolhe nem inventa — recebe os
+ * candidatos já cruzados, com o porquê de cada um, e entra só para compor o
+ * texto no tom da marca. Foi a lição da primeira versão: sem base de
+ * conhecimento no pedido, o motor recusa (corretamente) a recomendar.
  */
 export async function curadoriaDoGerente(
   email: string,
@@ -37,27 +37,45 @@ export async function curadoriaDoGerente(
     return { ok: false, erro: 'Este lead não tem perfil de respostas gravado.' }
   }
 
-  // Só o que dá para vender hoje: base sob controle de estoque com ml
-  // disponível. Recomendar o indisponível é queimar a recomendação.
-  const estoque = await carregarEstoque()
-  const disponiveis = estoque.coberturas
-    .filter((c) => c.disponivelMl > 0)
-    .sort((a, b) => b.disponivelMl - a.disponivelMl)
-    .slice(0, 80)
-    .map((c) => `${c.base.nome}${c.base.marca ? ` — ${c.base.marca}` : ''}`)
-  if (disponiveis.length === 0) {
-    return { ok: false, erro: 'Nenhuma base com estoque disponível para recomendar.' }
+  const catalogo = await catalogoComDna()
+  if (catalogo.length === 0) {
+    return {
+      ok: false,
+      erro: 'O catálogo do quiz ainda não foi espelhado — rode a sincronização de vendas.',
+    }
+  }
+
+  const escolhas = curadoriaPorDna(perfil, catalogo, 6)
+  if (escolhas.length === 0) {
+    return {
+      ok: false,
+      erro: 'Nenhum perfume do catálogo casa o suficiente com este perfil — melhor não recomendar do que errar.',
+    }
   }
 
   const linhasDePerfil = perfil.map(([p, v]) => `${p}: ${v}`).join('; ')
+  const linhasDeEscolhas = escolhas
+    .map((e, i) => {
+      const partes = [
+        `${i + 1}. ${e.nome}${e.marca ? ` — ${e.marca}` : ''}`,
+        `   afinidade ${Math.round(e.afinidade * 100)}% | combina em: ${e.casaEm.join(', ')}`,
+      ]
+      if (e.descricao) partes.push(`   descrição: ${e.descricao}`)
+      return partes.join('\n')
+    })
+    .join('\n')
+
   const pergunta =
-    `Monte a curadoria olfativa para um lead do quiz da FRENESI.\n\n` +
+    `Componha a curadoria olfativa para um lead do quiz da FRENESI.\n\n` +
+    `Todos os dados necessários já estão NESTE pedido — não use ferramentas nem consulte nada:` +
+    ` os candidatos abaixo saíram do cruzamento do perfil do lead com o DNA olfativo real do` +
+    ` catálogo (a mesma base do quiz), já filtrados por gênero e estoque.\n\n` +
     `PERFIL DECLARADO — ${linhasDePerfil}\n\n` +
-    `PERFUMES DISPONÍVEIS HOJE (recomende SOMENTE desta lista, respeitando o gênero do perfil):\n` +
-    disponiveis.map((d) => `- ${d}`).join('\n') +
-    `\n\nEscolha os 3 que melhor servem a este perfil. Para cada um, escreva UMA frase de` +
-    ` por que combina, no tom da marca (elegante, direto), pronta para o atendimento enviar` +
-    ` no WhatsApp. Sem preço, sem link, sem inventar perfume fora da lista.`
+    `CANDIDATOS (em ordem de afinidade):\n${linhasDeEscolhas}\n\n` +
+    `Escolha os 3 melhores entre os candidatos e escreva, para cada um, UMA frase de por que` +
+    ` combina com este perfil, no tom da marca (elegante, direto), pronta para o atendimento` +
+    ` enviar no WhatsApp. Use os motivos e descrições fornecidos. Sem preço, sem link, sem` +
+    ` citar perfume fora da lista.`
 
   const sessao = await sessaoAtual()
   try {

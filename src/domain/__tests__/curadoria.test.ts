@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { generoDoPerfume, paresDePerfil, recomendacoesPorAfinidade } from '../curadoria'
+import { curadoriaPorDna, generoDoPerfume, paresDePerfil, recomendacoesPorAfinidade } from '../curadoria'
 
 describe('pares de perfil', () => {
   it('achata valores simples e listas, ignorando nulos e objetos', () => {
@@ -103,5 +103,52 @@ describe('recomendação por afinidade', () => {
       new Set(['F Masculino']),
     )
     expect(r).toEqual([{ nome: 'E Masculino', afinidade: 1, cliques: 2 }])
+  })
+})
+
+describe('curadoria por DNA olfativo', () => {
+  const perfil: [string, string][] = [
+    ['genero', 'masculino'],
+    ['acorde', 'citrico'],
+    ['acorde', 'amadeirado'],
+    ['estilo', 'sofisticado'],
+    ['clima', 'quente'],
+  ]
+  const perfume = (
+    nome: string,
+    genero: string | null,
+    tags: [string, string][],
+  ) => ({ nome, marca: null, genero, tags, descricao: null })
+
+  it('gênero do catálogo é eliminatório; unissex passa', () => {
+    const r = curadoriaPorDna(perfil, [
+      perfume('Delina', 'feminino', [['acorde', 'citrico'], ['acorde', 'amadeirado'], ['estilo', 'sofisticado']]),
+      perfume('CK One', 'unissex', [['acorde', 'citrico'], ['acorde', 'amadeirado'], ['estilo', 'sofisticado']]),
+      perfume('Sauvage', 'masculino', [['acorde', 'citrico'], ['acorde', 'amadeirado'], ['estilo', 'sofisticado']]),
+    ])
+    expect(r.map((x) => x.nome).sort()).toEqual(['CK One', 'Sauvage'])
+  })
+
+  it('a escolha explica POR QUE casou e a afinidade é ponderada', () => {
+    // Perfil relevante pesa 7 (2+2+2+1). Cítrico+amadeirado+quente = 5/7.
+    const r = curadoriaPorDna(perfil, [
+      perfume('Club de Nuit', 'masculino', [['acorde', 'citrico'], ['acorde', 'amadeirado'], ['clima', 'quente']]),
+    ])
+    expect(r[0].afinidade).toBeCloseTo(0.71, 2)
+    expect(r[0].casaEm.sort()).toEqual(['amadeirado', 'citrico', 'quente'])
+  })
+
+  it('o valor casa mesmo com rótulo de coluna diferente (acorde × familia)', () => {
+    const r = curadoriaPorDna(perfil, [
+      perfume('Aventus', 'masculino', [['familia', 'citrico'], ['familia', 'amadeirado'], ['estilo', 'sofisticado']]),
+    ])
+    expect(r[0].afinidade).toBeCloseTo(6 / 7, 2)
+  })
+
+  it('abaixo do piso não sai — DNA distante cala', () => {
+    const r = curadoriaPorDna(perfil, [
+      perfume('Doce Distante', 'masculino', [['acorde', 'doce'], ['clima', 'frio']]),
+    ])
+    expect(r).toEqual([])
   })
 })

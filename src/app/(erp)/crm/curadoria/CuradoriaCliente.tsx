@@ -16,8 +16,8 @@ import { curadoriaDoGerente } from './actions'
  *
  * Três perguntas, nesta ordem: o quiz está trazendo gente? o que essa gente
  * quer? e isso vira dinheiro? A ficha individual fecha o ciclo: perfil
- * declarado, afinidade estatística (gênero é eliminatório) e a curadoria do
- * Gerente IA restrita ao estoque disponível.
+ * declarado, curadoria por DNA olfativo (perfil × catálogo espelhado do quiz,
+ * com o porquê de cada escolha) e o Gerente IA compondo o texto por cima.
  */
 
 const dataBr = (iso: string) =>
@@ -447,15 +447,63 @@ function FichaDoLead({ lead, aoFechar }: { lead: Lead; aoFechar: () => void }) {
         </div>
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 9, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,.07)' }}>
-        <span className="font-sans" style={MICRO}>Afinidade com outros perfis</span>
-        {lead.recomendacoes.length === 0 ? (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 11, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,.07)' }}>
+        <span className="font-sans" style={MICRO}>Curadoria por DNA olfativo</span>
+        {lead.curadoria.length === 0 ? (
           <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.55, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
-            Ainda não há cliques suficientes de perfis parecidos (o gênero é eliminatório e
-            recomendação fraca não sai). A curadoria do Gerente, abaixo, cobre essa lacuna.
+            {lead.perfil.length === 0
+              ? 'Sem perfil de respostas não há cruzamento possível.'
+              : 'Nenhum perfume do catálogo casa o suficiente com este perfil — ou o espelho do catálogo ainda não rodou (sincronização de vendas).'}
           </span>
         ) : (
-          lead.recomendacoes.map((r, i) => (
+          lead.curadoria.map((e, i) => (
+            <div key={e.nome} style={{ display: 'grid', gridTemplateColumns: '22px minmax(0,1fr)', gap: 9, alignItems: 'start' }}>
+              <span className="font-display" style={{ fontSize: 14, fontWeight: 600, color: i === 0 ? COR.ouro : 'rgba(242,237,227,.35)', lineHeight: 1.4 }}>
+                {String(i + 1).padStart(2, '0')}
+              </span>
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
+                <span style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  <span className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.3, color: 'var(--color-corrente)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
+                    {e.nome}
+                    {e.marca && <span style={{ color: 'rgba(242,237,227,.45)' }}>{` · ${e.marca}`}</span>}
+                  </span>
+                  <span className="font-mono" style={{ fontSize: 10.5, color: COR.ouro, whiteSpace: 'nowrap' }}>
+                    {`${Math.round(e.afinidade * 100)}%`}
+                  </span>
+                </span>
+                <BarraOuro fracao={e.afinidade} altura={4} />
+                {e.casaEm.length > 0 && (
+                  <span style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'baseline' }}>
+                    <span className="font-sans" style={{ ...MICRO, fontSize: 8.5 }}>combina em</span>
+                    {e.casaEm.map((c) => (
+                      <span
+                        key={c}
+                        className="font-sans"
+                        style={{
+                          padding: '2px 8px',
+                          border: '1px solid rgba(239,209,140,.3)',
+                          background: 'rgba(239,209,140,.07)',
+                          color: 'rgba(239,209,140,.85)',
+                          fontSize: 9.5,
+                          lineHeight: 1.3,
+                          borderRadius: 'var(--radius-pill)',
+                        }}
+                      >
+                        {c.replace(/_/g, ' ')}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+
+      {lead.recomendacoes.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 9, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,.07)' }}>
+          <span className="font-sans" style={MICRO}>Afinidade com outros perfis</span>
+          {lead.recomendacoes.map((r, i) => (
             <div key={r.nome} style={{ display: 'grid', gridTemplateColumns: '22px minmax(0,1fr) auto', gap: 9, alignItems: 'center' }}>
               <span className="font-display" style={{ fontSize: 14, fontWeight: 600, color: i === 0 ? COR.ouro : 'rgba(242,237,227,.35)' }}>
                 {String(i + 1).padStart(2, '0')}
@@ -470,9 +518,9 @@ function FichaDoLead({ lead, aoFechar }: { lead: Lead; aoFechar: () => void }) {
                 {`${Math.round(r.afinidade * 100)}%`}
               </span>
             </div>
-          ))
-        )}
-      </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,.07)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -522,8 +570,8 @@ function FichaDoLead({ lead, aoFechar }: { lead: Lead; aoFechar: () => void }) {
         )}
         {!ia && !consultando && (
           <span className="font-sans" style={{ fontSize: 10, lineHeight: 1.5, color: 'rgba(242,237,227,.4)', textWrap: 'pretty' }}>
-            O Gerente lê o perfil e recomenda SÓ do estoque disponível, com o porquê de cada
-            escolha — pronto para enviar no WhatsApp.
+            O Gerente recebe a curadoria por DNA acima e compõe o texto no tom da marca —
+            uma frase por perfume, pronta para enviar no WhatsApp.
           </span>
         )}
       </div>

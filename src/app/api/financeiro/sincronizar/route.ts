@@ -6,7 +6,7 @@ import { codigosDoMelhorEnvio, descobrirEnviosDoMelhorEnvio, melhorEnvioConectad
 import { atualizarExtratoMp, descobrirDestinoDosPayouts, mercadoPagoConfigurado } from '@/data/mercadopago'
 import { baixarEstoqueDosFaturados } from '@/data/baixa-estoque'
 import { pagaleveConfigurada } from '@/data/pagaleve'
-import { importarRespostasDoQuiz, quizConfigurado } from '@/data/quiz'
+import { importarCatalogoDoQuiz, importarRespostasDoQuiz, quizConfigurado } from '@/data/quiz'
 import { registrarSaudeDaRotina } from '@/data/saude-das-rotinas'
 import { importarPagaleve } from '@/data/pagaleve-importacao'
 import {
@@ -200,6 +200,13 @@ export async function POST(req: Request) {
         : { tabela: q.tabela, lidas: q.lidas, gravadas: q.gravadas }
     } catch (e) {
       relatorio.quiz = { erro: mensagemDe(e) }
+    }
+    // O catálogo com DNA olfativo — a base da curadoria por perfil.
+    try {
+      const c = await importarCatalogoDoQuiz()
+      relatorio.quizCatalogo = c.erro ? { erro: c.erro } : { perfumes: c.perfumes, tags: c.tags }
+    } catch (e) {
+      relatorio.quizCatalogo = { erro: mensagemDe(e) }
     }
   }
 

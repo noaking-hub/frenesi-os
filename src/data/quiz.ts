@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { emailComoIdentidade, paresDePerfil, recomendacoesPorAfinidade, type CliqueComPerfil, type Recomendacao } from '@/domain'
+import { curadoriaPorDna, emailComoIdentidade, paresDePerfil, recomendacoesPorAfinidade, type CliqueComPerfil, type EscolhaDaCuradoria, type PerfumeComDna, type Recomendacao } from '@/domain'
 
 import { supabaseConfigurado, supabaseServer, tudoDe } from './supabase'
 
@@ -332,6 +332,8 @@ export interface PainelDaCuradoria {
     clicadosNaSessao: string[]
     /** Perfumes de quem respondeu parecido — a recomendação para este lead. */
     recomendacoes: Recomendacao[]
+    /** Perfil × DNA do catálogo do quiz — a curadoria principal, explicada. */
+    curadoria: EscolhaDaCuradoria[]
   }[]
   desviados: CupomDesviado[]
 }
@@ -480,6 +482,8 @@ export async function painelDaCuradoria(): Promise<PainelDaCuradoria> {
     return [{ perfume: nome, pares: paresDePerfil(c.dados.respostas) }]
   })
 
+  const dna = await catalogoComDna()
+
   const leadsRecentes = leads.slice(0, 20).map((l) => {
     const cupom = typeof l.dados.cupom === 'string' ? l.dados.cupom : null
     const perfil = paresDePerfil(l.dados.respostas)
@@ -501,6 +505,7 @@ export async function painelDaCuradoria(): Promise<PainelDaCuradoria> {
       perfil,
       clicadosNaSessao,
       recomendacoes: recomendacoesPorAfinidade(perfil, cliquesComPerfil, 5, new Set(clicadosNaSessao)),
+      curadoria: curadoriaPorDna(perfil, dna),
     }
   })
 
@@ -517,4 +522,105 @@ export async function painelDaCuradoria(): Promise<PainelDaCuradoria> {
     leadsRecentes,
     desviados: await cuponsDaCuradoriaDesviados(),
   }
+}
+
+// ── Catálogo e DNA olfativo do quiz ────────────────────────────────────────
+
+/** Página a página, porque o PostgREST corta em ~1.000 linhas por resposta. */
+async function tudoDoQuiz(caminho: string): Promise<Record<string, unknown>[]> {
+  const tudo: Record<string, unknown>[] = []
+  for (let offset = 0; offset <= 20_000; offset += 1000) {
+    const lote = await chamarQuiz<Record<string, unknown>[]>(
+      `${caminho}${caminho.includes('?') ? '&' : '?'}limit=1000&offset=${offset}`,
+    )
+    tudo.push(...lote)
+    if (lote.length < 1000) break
+  }
+  return tudo
+}
+
+const textoOuNulo = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null)
+
+export interface ImportacaoDoCatalogo {
+  perfumes: number
+  tags: number
+  erro?: string
+}
+
+/**
+ * Espelha a base de conhecimento do quiz: `perfumes` + `perfume_tags`.
+ *
+ * É ela que faz a curadoria do quiz ser boa — e é ela que faltou quando o
+ * Gerente, correto, se recusou a recomendar sem dado. Espelhada aqui, a
+ * recomendação do ERP passa a cruzar perfil × DNA deterministicamente.
+ */
+export async function importarCatalogoDoQuiz(): Promise<ImportacaoDoCatalogo> {
+  if (!quizConfigurado() || !supabaseConfigurado()) {
+    return { perfumes: 0, tags: 0, erro: 'quiz não configurado' }
+  }
+  try {
+    const sb = supabaseServer()
+
+    const perfumes = (await tudoDoQuiz('/rest/v1/perfumes'))
+      .filter((p) => p.id != null && typeof p.nome === 'string')
+      .map((p) => ({
+        id: String(p.id),
+        nome: p.nome as string,
+        marca: textoOuNulo(p.marca),
+        genero: textoOuNulo(p.genero),
+        ativo: p.ativo !== false,
+        em_estoque: p.em_estoque !== false,
+        // A descrição escrita PARA o quiz é a voz da curadoria; a base cobre
+        // quem não tem.
+        descricao: textoOuNulo(p.descricao_quiz) ?? textoOuNulo(p.descricao_base),
+        importado_em: new Date().toISOString(),
+      }))
+    for (let i = 0; i < perfumes.length; i += 500) {
+      const { error } = await sb.from('quiz_perfumes').upsert(perfumes.slice(i, i + 500))
+      if (error) throw error
+    }
+
+    const tags = (await tudoDoQuiz('/rest/v1/perfume_tags'))
+      .filter((t) => t.perfume_id != null && typeof t.categoria === 'string' && typeof t.valor === 'string')
+      .map((t) => ({
+        perfume_id: String(t.perfume_id),
+        categoria: (t.categoria as string).trim(),
+        valor: (t.valor as string).trim(),
+      }))
+    for (let i = 0; i < tags.length; i += 1000) {
+      const { error } = await sb.from('quiz_perfume_tags').upsert(tags.slice(i, i + 1000))
+      if (error) throw error
+    }
+
+    return { perfumes: perfumes.length, tags: tags.length }
+  } catch (e) {
+    return { perfumes: 0, tags: 0, erro: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/** O catálogo espelhado pronto para o motor: só ativo e em estoque no quiz. */
+export async function catalogoComDna(): Promise<PerfumeComDna[]> {
+  if (!supabaseConfigurado()) return []
+  const sb = supabaseServer()
+  const [{ data: perfumes }, tags] = await Promise.all([
+    sb.from('quiz_perfumes').select('id, nome, marca, genero, descricao').eq('ativo', true).eq('em_estoque', true),
+    tudoDe<{ perfume_id: string; categoria: string; valor: string }>('quiz_perfume_tags', (de, ate) =>
+      sb.from('quiz_perfume_tags').select('perfume_id, categoria, valor').range(de, ate),
+    ),
+  ])
+  const porPerfume = new Map<string, [string, string][]>()
+  for (const t of tags) {
+    const lista = porPerfume.get(t.perfume_id) ?? []
+    lista.push([t.categoria, t.valor])
+    porPerfume.set(t.perfume_id, lista)
+  }
+  return ((perfumes ?? []) as { id: string; nome: string; marca: string | null; genero: string | null; descricao: string | null }[]).map(
+    (p) => ({
+      nome: p.nome,
+      marca: p.marca,
+      genero: p.genero,
+      tags: porPerfume.get(p.id) ?? [],
+      descricao: p.descricao,
+    }),
+  )
 }

@@ -117,3 +117,85 @@ export function recomendacoesPorAfinidade(
     .sort((a, b) => b.afinidade - a.afinidade || b.cliques - a.cliques)
     .slice(0, limite)
 }
+
+// ── Curadoria por DNA olfativo ─────────────────────────────────────────────
+
+export interface PerfumeComDna {
+  nome: string
+  marca: string | null
+  genero: string | null
+  /** [categoria, valor] — o vocabulário é o MESMO das respostas do quiz. */
+  tags: [string, string][]
+  descricao: string | null
+}
+
+export interface EscolhaDaCuradoria {
+  nome: string
+  marca: string | null
+  afinidade: number
+  /** Os valores do perfil que o DNA deste perfume cobre — a justificativa. */
+  casaEm: string[]
+  descricao: string | null
+}
+
+const normaliza = (s: string) => s.trim().toLowerCase()
+
+/**
+ * O cruzamento determinístico perfil × DNA — a mesma base que faz o quiz
+ * acertar, agora dentro do ERP.
+ *
+ * Gênero é eliminatório pelo CAMPO do catálogo (não por adivinhação de
+ * nome); a afinidade é a fração ponderada do perfil coberta pelas tags
+ * (acorde/estilo/intensidade valem o dobro); e cada escolha carrega POR QUE
+ * casou — recomendação sem justificativa é palpite com número.
+ */
+export function curadoriaPorDna(
+  perfilDoLead: [string, string][],
+  perfumes: PerfumeComDna[],
+  limite = 5,
+): EscolhaDaCuradoria[] {
+  const generoDoLead = perfilDoLead.find(([p]) => ehPerguntaDeGenero(p))?.[1]
+  const generoAlvo = generoDoLead ? normaliza(generoDoLead) : null
+  const relevantes = perfilDoLead.filter(([p]) => !ehPerguntaDeGenero(p))
+  if (relevantes.length === 0 || perfumes.length === 0) return []
+
+  const pesoTotal = relevantes.reduce((a, [p]) => a + pesoDaPergunta(p), 0)
+
+  const escolhas: EscolhaDaCuradoria[] = []
+  for (const perfume of perfumes) {
+    if (generoAlvo && perfume.genero) {
+      const g = normaliza(perfume.genero)
+      if (g !== generoAlvo && !/unissex|unisex|ambos/.test(g)) continue
+    }
+
+    const dna = new Set(perfume.tags.map(([c, v]) => `${normaliza(c)}→${normaliza(v)}`))
+    // A tag também casa só pelo VALOR: "citrico" em acorde do lead e em
+    // "familia" do catálogo é o mesmo fato com rótulo de coluna diferente.
+    const valoresDoDna = new Set(perfume.tags.map(([, v]) => normaliza(v)))
+
+    let pesoCasado = 0
+    const casaEm: string[] = []
+    for (const [pergunta, valor] of relevantes) {
+      const bate =
+        dna.has(`${normaliza(pergunta)}→${normaliza(valor)}`) || valoresDoDna.has(normaliza(valor))
+      if (bate) {
+        pesoCasado += pesoDaPergunta(pergunta)
+        casaEm.push(valor)
+      }
+    }
+    const afinidade = pesoTotal > 0 ? pesoCasado / pesoTotal : 0
+    if (afinidade >= AFINIDADE_MINIMA) {
+      escolhas.push({
+        nome: perfume.nome,
+        marca: perfume.marca,
+        afinidade: Math.round(afinidade * 100) / 100,
+        casaEm: [...new Set(casaEm)],
+        descricao: perfume.descricao,
+      })
+    }
+  }
+
+  return escolhas
+    .sort((a, b) => b.afinidade - a.afinidade || b.casaEm.length - a.casaEm.length)
+    .slice(0, limite)
+}
