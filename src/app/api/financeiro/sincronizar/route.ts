@@ -12,6 +12,7 @@ import { importarPagaleve } from '@/data/pagaleve-importacao'
 import { casarDepositosAgrupadosPagaleve } from '@/data/pagaleve-agrupado'
 import {
   aplicarEstoqueCalculado,
+  importarCatalogoShopify,
   importarEntregasLocaisDaShopify,
   marcarAnuladosDaShopify,
   mensagemDe,
@@ -682,6 +683,25 @@ export async function POST(req: Request) {
     relatorio.rascunhosDeDevolucao = { removidos: nomes.length }
   } catch (e) {
     relatorio.rascunhosDeDevolucao = { erro: mensagemDe(e) }
+  }
+
+  // O catálogo da loja entra SOZINHO: produto cadastrado na Shopify aparecia
+  // no ERP só quando alguém lembrava de clicar "Importar catálogo" — e
+  // ninguém lembra. A importação é idempotente (upsert em lote, campos do
+  // ERP preservados) e roda ANTES da vitrine, para a variante nova já
+  // receber estoque na mesma rodada.
+  if (grupo('operacao') && shopifyConfigurada()) {
+    try {
+      const c = await importarCatalogoShopify()
+      relatorio.catalogoShopify = {
+        perfumesNovos: c.perfumesNovos,
+        perfumesAtualizados: c.perfumesAtualizados,
+        variantes: c.variantes,
+        ignorados: c.ignorados.length,
+      }
+    } catch (e) {
+      relatorio.catalogoShopify = { erro: mensagemDe(e) }
+    }
   }
 
   // A loja é atualizada por ÚLTIMO, e a ordem é o ponto.
