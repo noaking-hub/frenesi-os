@@ -9,6 +9,7 @@ import { pagaleveConfigurada } from '@/data/pagaleve'
 import { importarCatalogoDoQuiz, importarRespostasDoQuiz, quizConfigurado } from '@/data/quiz'
 import { registrarSaudeDaRotina } from '@/data/saude-das-rotinas'
 import { importarPagaleve } from '@/data/pagaleve-importacao'
+import { casarDepositosAgrupadosPagaleve } from '@/data/pagaleve-agrupado'
 import {
   aplicarEstoqueCalculado,
   importarEntregasLocaisDaShopify,
@@ -115,10 +116,18 @@ export async function POST(req: Request) {
    *
    * Agora cada grupo é uma chamada própria, agendada em minuto diferente:
    *
-   *   ?etapa=vendas      pedidos da Yampi, Pagaleve, estorno parcial
-   *   ?etapa=logistica   entregas locais, rastreio, Melhor Envio, anulados
-   *   ?etapa=financeiro  Mercado Pago, extrato em caixa, repasses, ADS
-   *   ?etapa=operacao    baixa de estoque, rascunhos, Shopify, ocorrências
+   *   ?etapa=vendas         pedidos da Yampi, Pagaleve, estorno parcial
+   *   ?etapa=logistica      entregas locais, rastreio, Melhor Envio, anulados
+   *   ?etapa=financeiro     Mercado Pago, extrato em caixa, repasses, ADS
+   *   ?etapa=classificacao  regras, repasses agrupados, destino dos saques
+   *   ?etapa=operacao       baixa de estoque, rascunhos, Shopify, ocorrências
+   *
+   * A etapa `classificacao` existe porque medimos a fome: a importação do
+   * extrato consome sozinha o orçamento da etapa financeira, e TUDO que vinha
+   * depois dela era pulado por tempo em toda rodada — a fila de destino dos
+   * saques ficou dias sem uma única sondagem, com as regras cadastradas e
+   * ninguém as aplicando. O trabalho barato que dá nome ao dinheiro roda em
+   * minuto próprio, longe do download.
    *
    * Sem `etapa` roda tudo — que é o que o botão "Sincronizar agora" faz, com
    * alguém olhando a tela e podendo clicar de novo.
@@ -132,7 +141,7 @@ export async function POST(req: Request) {
   const ORCAMENTO_MS = 12_000
   const puladasPorTempo: string[] = []
 
-  type Grupo = 'vendas' | 'logistica' | 'financeiro' | 'operacao'
+  type Grupo = 'vendas' | 'logistica' | 'financeiro' | 'classificacao' | 'operacao'
 
   /** Este grupo pertence à rodada pedida? Sem efeito colateral. */
   const naEtapa = (nome: Grupo) => !etapa || etapa === nome
@@ -534,6 +543,93 @@ export async function POST(req: Request) {
     }
   } catch (e) {
     relatorio.semExtratoDispensadas = { erro: mensagemDe(e) }
+  }
+
+  // ── Classificação: o trabalho que dá nome ao dinheiro, longe do download ─
+  //
+  // Estes passos existem TAMBÉM na etapa financeira, mas lá quase nunca
+  // rodam: a importação do extrato consome o orçamento e o resto é pulado.
+  // Aqui eles são o prato principal. A ordem importa: converter primeiro
+  // (linhas viram lançamento), regras em cima do que acabou de nascer, o
+  // repasse agrupado da Pagaleve antes da conciliação, e o destino dos
+  // saques por último — é o único que sonda API externa.
+  if (grupo('classificacao')) try {
+    const { data, error } = await supabaseServer().rpc('converter_extrato_em_caixa')
+    if (error) throw error
+    const linha = Array.isArray(data) ? data[0] : data
+    relatorio.extratoEmCaixa = {
+      criados: linha?.criados ?? 0,
+      total: linha?.total_convertidos ?? 0,
+    }
+  } catch (e) {
+    relatorio.extratoEmCaixa = { erro: mensagemDe(e) }
+  }
+
+  if (grupo('classificacao')) try {
+    const { data, error } = await supabaseServer().rpc('aplicar_regras_categoria')
+    if (error) throw error
+    relatorio.regrasDoExtrato = data ?? { aplicadas: 0 }
+  } catch (e) {
+    relatorio.regrasDoExtrato = { erro: mensagemDe(e) }
+  }
+
+  if (grupo('classificacao')) try {
+    const { data, error } = await supabaseServer().rpc('aplicar_regras_de_categoria')
+    if (error) throw error
+    relatorio.regrasDeCategoria = data ?? { aplicadas: 0 }
+  } catch (e) {
+    relatorio.regrasDeCategoria = { erro: mensagemDe(e) }
+  }
+
+  if (grupo('classificacao')) try {
+    const { data, error } = await supabaseServer().rpc('casar_repasses_pagaleve')
+    if (error) throw error
+    const linha = Array.isArray(data) ? data[0] : data
+    relatorio.repassesPagaleve = {
+      repasses: linha?.repasses ?? 0,
+      parcelasBaixadas: linha?.parcelas_baixadas ?? 0,
+      valor: Number(linha?.valor ?? 0),
+    }
+  } catch (e) {
+    relatorio.repassesPagaleve = { erro: mensagemDe(e) }
+  }
+
+  // O depósito que soma parcelas de DIAS diferentes — o de R$163,26 de 18/08
+  // pagava 18/08 inteiro e duas parcelas de 19/08 adiantadas. O casamento
+  // "mesmo dia" acima não fecha esses; o subconjunto exato fecha.
+  if (grupo('classificacao')) try {
+    const a = await casarDepositosAgrupadosPagaleve()
+    relatorio.repassesAgrupados = {
+      examinados: a.examinados,
+      casados: a.casados,
+      ...(a.erros.length ? { erros: a.erros } : {}),
+    }
+  } catch (e) {
+    relatorio.repassesAgrupados = { erro: mensagemDe(e) }
+  }
+
+  if (grupo('classificacao')) try {
+    const { data, error } = await supabaseServer().rpc('conciliar_repasses_pelo_extrato')
+    if (error) throw error
+    const linha = Array.isArray(data) ? data[0] : data
+    relatorio.repassesConciliados = {
+      preenchidos: linha?.preenchidos ?? 0,
+      aindaSemCredito: linha?.ainda_sem_credito ?? 0,
+    }
+  } catch (e) {
+    relatorio.repassesConciliados = { erro: mensagemDe(e) }
+  }
+
+  if (grupo('classificacao') && mercadoPagoConfigurado()) try {
+    const d = await descobrirDestinoDosPayouts()
+    relatorio.destinoDosPayouts = {
+      examinados: d.examinados,
+      resolvidos: d.resolvidos,
+      anotados: d.anotados,
+      ...(d.amostras.length ? { amostras: d.amostras } : {}),
+    }
+  } catch (e) {
+    relatorio.destinoDosPayouts = { erro: mensagemDe(e) }
   }
 
   // Estorno PARCIAL não derruba a venda inteira.
