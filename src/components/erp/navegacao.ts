@@ -271,6 +271,7 @@ export const NAV: GrupoNav[] = [
     telas: [
       { id: 'clientes', label: 'Clientes', href: '/crm', pronta: true },
       { id: 'carrinhos', label: 'Carrinhos abandonados', href: '/crm/carrinhos', pronta: true },
+      { id: 'curadoria', label: 'Curadoria Olfativa', href: '/crm/curadoria', pronta: true },
       { id: 'cashback', label: 'Cashback', href: '/crm/cashback', pronta: true },
       { id: 'giftback', label: 'Giftback · Aniversários', href: '/crm/giftback', pronta: true },
       { id: 'emails', label: 'E-mails da marca', href: '/crm/emails', pronta: true },

@@ -75,6 +75,8 @@ export interface EstadoDaOperacao {
   rotinasDoentes?: { rotina: string; onde: string; rodadasSeguidas: number; ultimoErro: string }[]
   /** Lembretes do dono cuja data chegou e que ainda não foram concluídos. */
   lembretes?: { id: number; assunto: string; detalhe: string | null }[]
+  /** Cupom da Curadoria usado por e-mail que não é o dono do lead. */
+  cuponsDesviados?: { cupom: string; dono: string; usadoPor: string }[]
 }
 
 const PESO: Record<Severidade, number> = { critico: 0, alto: 1, medio: 2, informativo: 3 }
@@ -266,6 +268,25 @@ export function prioridadesDe(e: EstadoDaOperacao): Prioridade[] {
       confianca: { nivel: 'alta', motivo: 'Relatórios das próprias rodadas, persistidos a cada execução.' },
       responsavel: 'Dono',
       proximaAcao: { texto: 'Ver as integrações', href: '/configuracoes/integracoes' },
+    })
+  }
+
+  // ── Cupom da Curadoria desviado ──────────────────────────────────────────
+  // O checkout não sabe amarrar cupom a e-mail de visitante; a trava dura é o
+  // limite de 1 uso, e esta é a vigilância: o desvio existe, mas não passa
+  // despercebido.
+  if (e.cuponsDesviados && e.cuponsDesviados.length > 0) {
+    const exemplo = e.cuponsDesviados[0]
+    fila.push({
+      id: 'cupom-curadoria-desviado',
+      titulo: 'Cupom da Curadoria usado por e-mail diferente do dono',
+      severidade: 'medio',
+      impactoFinanceiro: null,
+      impactoOperacional: `${e.cuponsDesviados.length} ${e.cuponsDesviados.length === 1 ? 'caso' : 'casos'} — ex.: ${exemplo.cupom} gerado para um e-mail e usado por outro.`,
+      urgencia: 'O código é de uso único, então o dano é limitado — mas padrão repetido é farming.',
+      confianca: { nivel: 'alta', motivo: 'Cupom do pedido pago cruzado com o dono registrado do lead.' },
+      responsavel: 'Dono',
+      proximaAcao: { texto: 'Ver a Curadoria', href: '/crm/curadoria' },
     })
   }
 

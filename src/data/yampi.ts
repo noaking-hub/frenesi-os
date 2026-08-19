@@ -578,6 +578,9 @@ export async function importarPedidosYampi(dias = 90): Promise<ResultadoYampi> {
       valor: numero(p.value_total),
       frete: numero(p.value_shipment),
       cashback: 0,
+      // O cupom usado no checkout: é ele que fecha a atribuição da Curadoria
+      // Olfativa (CURA10-…) e denuncia cupom usado por e-mail que não é o dono.
+      cupom: p.promocode?.trim().toUpperCase() || null,
       pagamento: situacaoDoPedido(p),
       envio: envioYampi(alias, nome, entregue, rastreio),
       // O alias CRU vai junto: derivação corrigida depois vale um UPDATE, e

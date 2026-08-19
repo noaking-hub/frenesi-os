@@ -12,6 +12,7 @@ import {
   statusCliente,
   TETO_VIP,
   diasAteAniversario,
+  emailComoIdentidade,
   iniciaisDe,
   nomeCurtoPerfume,
 } from '..'
@@ -249,5 +250,18 @@ describe('nome curto do perfume', () => {
       'Jean Paul Gaultier - Le Male Le Parfum',
     )
     expect(nomeCurtoPerfume('1 Million Masculino Parfum (Decant) 5ml')).toBe('1 Million Parfum')
+  })
+})
+
+describe('e-mail como identidade', () => {
+  it('normaliza apelidos do gmail para a mesma caixa', () => {
+    expect(emailComoIdentidade('No.Me+quiz@GMAIL.com')).toBe('nome@gmail.com')
+    expect(emailComoIdentidade('nome@googlemail.com')).toBe('nome@gmail.com')
+  })
+  it('corta +etiqueta em qualquer domínio, mas preserva pontos fora do gmail', () => {
+    expect(emailComoIdentidade('ana.paula+x@hotmail.com')).toBe('ana.paula@hotmail.com')
+  })
+  it('e-mail sem arroba volta como veio, minúsculo', () => {
+    expect(emailComoIdentidade(' Torto ')).toBe('torto')
   })
 })

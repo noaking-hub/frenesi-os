@@ -336,3 +336,22 @@ export function iniciaisDe(nome: string): string {
   const ultima = partes.length > 1 ? (partes[partes.length - 1][0] ?? '') : ''
   return (primeira + ultima).toUpperCase()
 }
+
+/**
+ * O e-mail como IDENTIDADE, para "um cupom por e-mail" valer de verdade.
+ *
+ * `nome+1@gmail.com`, `no.me@gmail.com` e `nome@googlemail.com` são a mesma
+ * caixa de entrada — sem normalizar, cada apelido ganharia um cupom novo. O
+ * sufixo `+etiqueta` cai em qualquer domínio (é convenção geral); os pontos
+ * do usuário e o domínio googlemail só no Gmail, onde é regra documentada.
+ */
+export function emailComoIdentidade(email: string): string {
+  const cru = email.trim().toLowerCase()
+  const arroba = cru.lastIndexOf('@')
+  if (arroba <= 0) return cru
+  let usuario = cru.slice(0, arroba).split('+')[0]
+  let dominio = cru.slice(arroba + 1)
+  if (dominio === 'googlemail.com') dominio = 'gmail.com'
+  if (dominio === 'gmail.com') usuario = usuario.split('.').join('')
+  return `${usuario}@${dominio}`
+}

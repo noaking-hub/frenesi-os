@@ -1,5 +1,7 @@
 import 'server-only'
 
+import { emailComoIdentidade } from '@/domain'
+
 import { supabaseConfigurado, supabaseServer, tudoDe } from './supabase'
 
 /**
@@ -246,5 +248,261 @@ export async function resumoDoQuiz(): Promise<ResumoDoQuiz> {
   } catch (e) {
     console.error('[quiz] resumo falhou:', e)
     return vazio
+  }
+}
+
+// ── Painel da Curadoria (CRM → Curadoria Olfativa) ─────────────────────────
+
+export interface CupomDesviado {
+  cupom: string
+  dono: string
+  usadoPor: string
+  pedido: string
+}
+
+/**
+ * Cupom CURA usado por e-mail que não é o dono do lead.
+ *
+ * A Yampi não sabe amarrar cupom a e-mail de visitante sem cadastro, então a
+ * trava dura é o limite de 1 uso — e esta vigilância é o resto: o desvio não
+ * passa despercebido, vira alerta do Gerente.
+ */
+export async function cuponsDaCuradoriaDesviados(): Promise<CupomDesviado[]> {
+  if (!supabaseConfigurado()) return []
+  try {
+    const sb = supabaseServer()
+    const desde = new Date(Date.now() - 60 * 86_400_000).toISOString()
+    const { data: pedidos } = await sb
+      .from('pedidos')
+      .select('id, cupom, clientes(email)')
+      .ilike('cupom', 'CURA%')
+      .gte('comprado_em', desde)
+    const usos = ((pedidos ?? []) as unknown as {
+      id: string
+      cupom: string
+      clientes: { email: string | null } | null
+    }[]).filter((p) => p.cupom)
+    if (!usos.length) return []
+
+    const { data: leads } = await sb
+      .from('quiz_respostas')
+      .select('email, dados')
+      .eq('tabela_origem', 'lead-cupom')
+      .in('dados->>cupom', usos.map((u) => u.cupom))
+    const donoDoCupom = new Map(
+      ((leads ?? []) as { email: string | null; dados: { cupom?: string } }[])
+        .filter((l) => l.email && l.dados?.cupom)
+        .map((l) => [l.dados.cupom!, l.email!]),
+    )
+
+    return usos.flatMap((u) => {
+      const dono = donoDoCupom.get(u.cupom)
+      const usadoPor = u.clientes?.email ? emailComoIdentidade(u.clientes.email) : null
+      if (!dono || !usadoPor || usadoPor === dono) return []
+      return [{ cupom: u.cupom, dono, usadoPor, pedido: u.id }]
+    })
+  } catch (e) {
+    console.error('[quiz] vigilância de cupons falhou:', e)
+    return []
+  }
+}
+
+export interface PainelDaCuradoria {
+  interacoes: number
+  leads: number
+  viraramClientes: number
+  /** Pedidos pagos que USARAM um cupom CURA — atribuição determinística. */
+  receitaViaCupom: number
+  cuponsUsados: number
+  /** Pedidos pagos do mesmo e-mail depois da resposta — atribuição por janela. */
+  receitaPorJanela: number
+  topPerfumes: { nome: string; cliques: number }[]
+  /** O perfil olfativo agregado: cada pergunta com as respostas mais comuns. */
+  perfil: { pergunta: string; valores: { valor: string; qtd: number }[] }[]
+  cliquesPorDia: { dia: string; qtd: number }[]
+  leadsRecentes: {
+    email: string
+    quando: string
+    cupom: string | null
+    cupomUsado: boolean
+    virouCliente: boolean
+  }[]
+  desviados: CupomDesviado[]
+}
+
+/** Achata o objeto de respostas do quiz em pares pergunta → valor legíveis. */
+function paresDeRespostas(respostas: unknown): [string, string][] {
+  if (!respostas || typeof respostas !== 'object') return []
+  const saida: [string, string][] = []
+  for (const [chave, valor] of Object.entries(respostas as Record<string, unknown>)) {
+    if (valor == null) continue
+    if (Array.isArray(valor)) {
+      for (const v of valor) if (typeof v === 'string' || typeof v === 'number') saida.push([chave, String(v)])
+    } else if (typeof valor === 'string' || typeof valor === 'number' || typeof valor === 'boolean') {
+      saida.push([chave, String(valor)])
+    }
+  }
+  return saida
+}
+
+export async function painelDaCuradoria(): Promise<PainelDaCuradoria> {
+  const vazio: PainelDaCuradoria = {
+    interacoes: 0,
+    leads: 0,
+    viraramClientes: 0,
+    receitaViaCupom: 0,
+    cuponsUsados: 0,
+    receitaPorJanela: 0,
+    topPerfumes: [],
+    perfil: [],
+    cliquesPorDia: [],
+    leadsRecentes: [],
+    desviados: [],
+  }
+  if (!supabaseConfigurado()) return vazio
+  const sb = supabaseServer()
+
+  const linhas = await tudoDe<{
+    email: string | null
+    respondido_em: string | null
+    importado_em: string
+    tabela_origem: string
+    dados: Record<string, unknown>
+  }>('quiz_respostas', (de, ate) =>
+    sb
+      .from('quiz_respostas')
+      .select('email, respondido_em, importado_em, tabela_origem, dados')
+      .order('respondido_em', { ascending: false })
+      .range(de, ate),
+  )
+
+  const cliques = linhas.filter((l) => l.tabela_origem !== 'lead-cupom')
+  const leads = linhas.filter((l) => l.tabela_origem === 'lead-cupom')
+
+  // Top perfumes clicados — o sinal de demanda do quiz.
+  const porPerfume = new Map<string, number>()
+  for (const c of cliques) {
+    const nome = typeof c.dados.perfume_nome === 'string' ? c.dados.perfume_nome : null
+    if (nome) porPerfume.set(nome, (porPerfume.get(nome) ?? 0) + 1)
+  }
+  const topPerfumes = [...porPerfume.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([nome, cliques]) => ({ nome, cliques }))
+
+  // Perfil olfativo agregado: pergunta → valores mais votados. As respostas
+  // vêm do clique (o quiz manda o perfil junto) e do lead.
+  const porPergunta = new Map<string, Map<string, number>>()
+  for (const l of linhas) {
+    const respostas = l.tabela_origem === 'lead-cupom' ? (l.dados.respostas ?? null) : l.dados.respostas
+    for (const [pergunta, valor] of paresDeRespostas(respostas)) {
+      const valores = porPergunta.get(pergunta) ?? new Map<string, number>()
+      valores.set(valor, (valores.get(valor) ?? 0) + 1)
+      porPergunta.set(pergunta, valores)
+    }
+  }
+  const perfil = [...porPergunta.entries()]
+    .map(([pergunta, valores]) => ({
+      pergunta,
+      valores: [...valores.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([valor, qtd]) => ({ valor, qtd })),
+    }))
+    .sort((a, b) => {
+      const soma = (x: typeof a) => x.valores.reduce((s, v) => s + v.qtd, 0)
+      return soma(b) - soma(a)
+    })
+    .slice(0, 6)
+
+  // Cliques por dia, últimos 30 — o ritmo do quiz.
+  const porDia = new Map<string, number>()
+  const corte30 = Date.now() - 30 * 86_400_000
+  for (const c of cliques) {
+    const em = Date.parse(c.respondido_em ?? c.importado_em)
+    if (!Number.isFinite(em) || em < corte30) continue
+    const dia = new Date(em).toLocaleDateString('sv', { timeZone: 'America/Sao_Paulo' })
+    porDia.set(dia, (porDia.get(dia) ?? 0) + 1)
+  }
+  const cliquesPorDia = [...porDia.entries()].sort().map(([dia, qtd]) => ({ dia, qtd }))
+
+  // Conversão dos leads: cliente pelo e-mail, receita pela janela e pelo cupom.
+  const emails = [...new Set(leads.map((l) => l.email).filter((e): e is string => Boolean(e)))]
+  const clientesPorEmail = new Map<string, string>()
+  if (emails.length) {
+    const { data: clientes } = await sb.from('clientes').select('id, email').in('email', emails.slice(0, 900))
+    for (const c of (clientes ?? []) as { id: string; email: string | null }[]) {
+      if (c.email) clientesPorEmail.set(c.email.trim().toLowerCase(), c.id)
+    }
+  }
+
+  const cupons = leads
+    .map((l) => (typeof l.dados.cupom === 'string' ? l.dados.cupom : null))
+    .filter((c): c is string => Boolean(c))
+  let receitaViaCupom = 0
+  const cuponsUsadosSet = new Set<string>()
+  if (cupons.length) {
+    const { data: comCupom } = await sb
+      .from('pedidos')
+      .select('cupom, valor')
+      .eq('pagamento', 'pago')
+      .in('cupom', cupons)
+    for (const p of (comCupom ?? []) as { cupom: string; valor: string }[]) {
+      cuponsUsadosSet.add(p.cupom)
+      receitaViaCupom += Number(p.valor)
+    }
+  }
+
+  let receitaPorJanela = 0
+  let viraramClientes = 0
+  const clientesQueViraram = new Set<string>()
+  if (clientesPorEmail.size) {
+    const { data: pagos } = await sb
+      .from('pedidos')
+      .select('cliente_id, valor, comprado_em')
+      .eq('pagamento', 'pago')
+      .in('cliente_id', [...clientesPorEmail.values()])
+    const primeiroLead = new Map<string, number>()
+    for (const l of leads) {
+      if (!l.email) continue
+      const em = Date.parse(l.respondido_em ?? l.importado_em)
+      const atual = primeiroLead.get(l.email)
+      if (atual === undefined || em < atual) primeiroLead.set(l.email, em)
+    }
+    const emailDoCliente = new Map([...clientesPorEmail.entries()].map(([e, id]) => [id, e]))
+    for (const p of (pagos ?? []) as { cliente_id: string; valor: string; comprado_em: string }[]) {
+      const email = emailDoCliente.get(p.cliente_id)
+      const inicio = email ? primeiroLead.get(email) : undefined
+      clientesQueViraram.add(p.cliente_id)
+      if (inicio !== undefined && Date.parse(p.comprado_em) >= inicio) {
+        receitaPorJanela += Number(p.valor)
+      }
+    }
+    viraramClientes = clientesPorEmail.size
+  }
+
+  const leadsRecentes = leads.slice(0, 20).map((l) => {
+    const cupom = typeof l.dados.cupom === 'string' ? l.dados.cupom : null
+    return {
+      email: l.email ?? '—',
+      quando: l.respondido_em ?? l.importado_em,
+      cupom,
+      cupomUsado: cupom ? cuponsUsadosSet.has(cupom) : false,
+      virouCliente: Boolean(l.email && clientesPorEmail.has(l.email)),
+    }
+  })
+
+  return {
+    interacoes: cliques.length,
+    leads: leads.length,
+    viraramClientes,
+    receitaViaCupom: Math.round(receitaViaCupom * 100) / 100,
+    cuponsUsados: cuponsUsadosSet.size,
+    receitaPorJanela: Math.round(receitaPorJanela * 100) / 100,
+    topPerfumes,
+    perfil,
+    cliquesPorDia,
+    leadsRecentes,
+    desviados: await cuponsDaCuradoriaDesviados(),
   }
 }

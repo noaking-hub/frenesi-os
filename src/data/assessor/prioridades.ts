@@ -3,6 +3,7 @@ import 'server-only'
 import { carregarConciliacao, carregarLancamentos, carregarVisaoFinanceira } from '@/data/financeiro'
 import { carregarPainelPrincipal } from '@/data/painel'
 import { carregarEstoque, carregarFilaDeEnvase } from '@/data/consultas'
+import { cuponsDaCuradoriaDesviados } from '@/data/quiz'
 import { rotinasComErroPersistente } from '@/data/saude-das-rotinas'
 import { supabaseServer } from '@/data/supabase'
 import { briefingDe, hojeEmSaoPaulo, prioridadesDe, resumoDaFila, type Briefing, type Prioridade } from '@/domain'
@@ -42,7 +43,7 @@ export interface CentralDoGerente {
 export async function carregarCentralDoGerente(): Promise<CentralDoGerente> {
   // As seis leituras são independentes: em série levariam a soma dos tempos, e
   // a Central abre junto com a tela.
-  const [visao, painel, conciliacao, estoque, lancamentos, envase, expedicaoAtrasada, rotinasDoentes, lembretes] =
+  const [visao, painel, conciliacao, estoque, lancamentos, envase, expedicaoAtrasada, rotinasDoentes, lembretes, cuponsDesviados] =
     await Promise.all([
       carregarVisaoFinanceira(),
       carregarPainelPrincipal('30d'),
@@ -53,6 +54,7 @@ export async function carregarCentralDoGerente(): Promise<CentralDoGerente> {
       expedicaoAlemDoPrazo(),
       rotinasComErroPersistente(),
       lembretesVencidos(),
+      cuponsDaCuradoriaDesviados(),
     ])
 
   // A distinção já vem pronta do domínio e é reaproveitada, não recalculada:
@@ -99,6 +101,7 @@ export async function carregarCentralDoGerente(): Promise<CentralDoGerente> {
     expedicaoAtrasada,
     rotinasDoentes,
     lembretes,
+    cuponsDesviados,
   }
 
   const itens = prioridadesDe(estado)

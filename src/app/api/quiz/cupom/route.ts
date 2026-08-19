@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
+import { emailComoIdentidade } from '@/domain'
 import { yampiConfigurada } from '@/data/yampi'
 import { criarCupomYampi } from '@/data/yampi-crm'
 
@@ -61,10 +62,13 @@ export async function POST(req: Request) {
     return responder({ ok: false, erro: 'Corpo inválido.' }, 400)
   }
 
-  const email = (corpo.email ?? '').trim().toLowerCase()
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(email) || email.length > 200) {
+  const informado = (corpo.email ?? '').trim().toLowerCase()
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(informado) || informado.length > 200) {
     return responder({ ok: false, erro: 'Informe um e-mail válido.' }, 400)
   }
+  // A identidade normalizada: nome+1@gmail e no.me@gmail são a mesma caixa,
+  // e "um cupom por e-mail" tem que valer para a CAIXA, não para o apelido.
+  const email = emailComoIdentidade(informado)
 
   const sb = supabaseServer()
   const id = `lead:${email}`
@@ -121,7 +125,12 @@ export async function POST(req: Request) {
       id,
       email,
       respondido_em: new Date().toISOString(),
-      dados: { respostas: corpo.respostas ?? null, cupom: codigo, cupomExpiraEm: expiraEm },
+      dados: {
+        respostas: corpo.respostas ?? null,
+        cupom: codigo,
+        cupomExpiraEm: expiraEm,
+        ...(informado !== email ? { emailInformado: informado } : {}),
+      },
       tabela_origem: 'lead-cupom',
     })
     if (error) throw error
