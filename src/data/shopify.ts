@@ -501,8 +501,13 @@ const CONSULTA_ITENS = /* GraphQL */ `
   }
 `
 
+// A diretiva @idempotent passou a ser OBRIGATÓRIA nesta mutação: sem ela a
+// API recusa a chamada inteira ("The @idempotent directive is required") e o
+// estoque da loja para de andar — foi exatamente o que aconteceu, com o ml
+// do ERP correto e a vitrine congelada. A semântica não muda: a gravação já
+// era idempotente por construção (o ERP manda o valor absoluto).
 const MUTACAO_ESTOQUE = /* GraphQL */ `
-  mutation ($input: InventorySetQuantitiesInput!) {
+  mutation ($input: InventorySetQuantitiesInput!) @idempotent {
     inventorySetQuantities(input: $input) {
       userErrors {
         field
