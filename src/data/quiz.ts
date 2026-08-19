@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { emailComoIdentidade } from '@/domain'
+import { emailComoIdentidade, paresDePerfil, recomendacoesPorAfinidade, type CliqueComPerfil, type Recomendacao } from '@/domain'
 
 import { supabaseConfigurado, supabaseServer, tudoDe } from './supabase'
 
@@ -326,23 +326,14 @@ export interface PainelDaCuradoria {
     cupom: string | null
     cupomUsado: boolean
     virouCliente: boolean
+    /** O perfil olfativo declarado por ESTE lead no quiz. */
+    perfil: [string, string][]
+    /** Perfumes clicados na mesma sessão (perfil idêntico ao do lead). */
+    clicadosNaSessao: string[]
+    /** Perfumes de quem respondeu parecido — a recomendação para este lead. */
+    recomendacoes: Recomendacao[]
   }[]
   desviados: CupomDesviado[]
-}
-
-/** Achata o objeto de respostas do quiz em pares pergunta → valor legíveis. */
-function paresDeRespostas(respostas: unknown): [string, string][] {
-  if (!respostas || typeof respostas !== 'object') return []
-  const saida: [string, string][] = []
-  for (const [chave, valor] of Object.entries(respostas as Record<string, unknown>)) {
-    if (valor == null) continue
-    if (Array.isArray(valor)) {
-      for (const v of valor) if (typeof v === 'string' || typeof v === 'number') saida.push([chave, String(v)])
-    } else if (typeof valor === 'string' || typeof valor === 'number' || typeof valor === 'boolean') {
-      saida.push([chave, String(valor)])
-    }
-  }
-  return saida
 }
 
 export async function painelDaCuradoria(): Promise<PainelDaCuradoria> {
@@ -395,7 +386,7 @@ export async function painelDaCuradoria(): Promise<PainelDaCuradoria> {
   const porPergunta = new Map<string, Map<string, number>>()
   for (const l of linhas) {
     const respostas = l.tabela_origem === 'lead-cupom' ? (l.dados.respostas ?? null) : l.dados.respostas
-    for (const [pergunta, valor] of paresDeRespostas(respostas)) {
+    for (const [pergunta, valor] of paresDePerfil(respostas)) {
       const valores = porPergunta.get(pergunta) ?? new Map<string, number>()
       valores.set(valor, (valores.get(valor) ?? 0) + 1)
       porPergunta.set(pergunta, valores)
@@ -481,14 +472,35 @@ export async function painelDaCuradoria(): Promise<PainelDaCuradoria> {
     viraramClientes = clientesPorEmail.size
   }
 
+  // Cada clique com o perfil de quem clicou: é a base da recomendação por
+  // afinidade — e do casamento "clicou na mesma sessão" (perfil idêntico).
+  const cliquesComPerfil: CliqueComPerfil[] = cliques.flatMap((c) => {
+    const nome = typeof c.dados.perfume_nome === 'string' ? c.dados.perfume_nome : null
+    if (!nome) return []
+    return [{ perfume: nome, pares: paresDePerfil(c.dados.respostas) }]
+  })
+
   const leadsRecentes = leads.slice(0, 20).map((l) => {
     const cupom = typeof l.dados.cupom === 'string' ? l.dados.cupom : null
+    const perfil = paresDePerfil(l.dados.respostas)
+    const chaveDoPerfil = JSON.stringify(perfil)
+    const clicadosNaSessao =
+      perfil.length > 0
+        ? [...new Set(
+            cliquesComPerfil
+              .filter((c) => JSON.stringify(c.pares) === chaveDoPerfil)
+              .map((c) => c.perfume),
+          )]
+        : []
     return {
       email: l.email ?? '—',
       quando: l.respondido_em ?? l.importado_em,
       cupom,
       cupomUsado: cupom ? cuponsUsadosSet.has(cupom) : false,
       virouCliente: Boolean(l.email && clientesPorEmail.has(l.email)),
+      perfil,
+      clicadosNaSessao,
+      recomendacoes: recomendacoesPorAfinidade(perfil, cliquesComPerfil),
     }
   })
 

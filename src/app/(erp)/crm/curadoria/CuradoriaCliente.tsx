@@ -1,5 +1,7 @@
 'use client'
 
+import { useState } from 'react'
+
 import { FaixaKpis, type Kpi } from '@/components/erp/Kpi'
 import { Badge, TituloSecao } from '@/components/erp/primitivos'
 import { Tabela, type Coluna } from '@/components/erp/Tabela'
@@ -55,7 +57,12 @@ function Barra({ rotulo, qtd, maior, tom }: { rotulo: string; qtd: number; maior
   )
 }
 
+type Lead = PainelDaCuradoria['leadsRecentes'][number]
+
 export function CuradoriaCliente({ painel }: { painel: PainelDaCuradoria }) {
+  const [selecionado, setSelecionado] = useState<string | null>(null)
+  const lead = painel.leadsRecentes.find((l) => `${l.email}-${l.quando}` === selecionado) ?? null
+
   const kpis: Kpi[] = [
     {
       label: 'Interações no quiz',
@@ -246,26 +253,150 @@ export function CuradoriaCliente({ painel }: { painel: PainelDaCuradoria }) {
         </section>
       )}
 
-      <Tabela
-        colunas={colunas}
-        itens={painel.leadsRecentes}
-        chaveDe={(l) => `${l.email}-${l.quando}`}
-        cabecalho={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '13px 15px', borderBottom: '1px solid var(--color-borda)' }}>
-            <TituloSecao tamanho={13}>Leads recentes</TituloSecao>
-            <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
-              um cupom por e-mail · o perfil de cada lead fica guardado junto da resposta
-            </span>
-          </div>
-        }
-        vazio={
-          <div style={{ padding: '24px 18px', textAlign: 'center' }}>
-            <span className="font-sans" style={{ fontSize: 11.5, color: 'var(--color-terciario)' }}>
-              Nenhum lead ainda — eles aparecem aqui assim que alguém deixar o e-mail no quiz.
-            </span>
-          </div>
-        }
-      />
+      <div className="empilha-1100" style={{ display: 'grid', gridTemplateColumns: lead ? 'minmax(0,1fr) 360px' : '1fr', gap: 16, alignItems: 'start' }}>
+        <Tabela
+          colunas={colunas}
+          itens={painel.leadsRecentes}
+          chaveDe={(l) => `${l.email}-${l.quando}`}
+          aoClicar={(l) =>
+            setSelecionado(selecionado === `${l.email}-${l.quando}` ? null : `${l.email}-${l.quando}`)
+          }
+          selecionadoDe={(l) => `${l.email}-${l.quando}` === selecionado}
+          cabecalho={
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '13px 15px', borderBottom: '1px solid var(--color-borda)' }}>
+              <TituloSecao tamanho={13}>Leads recentes</TituloSecao>
+              <span className="font-sans" style={{ fontSize: 10.5, color: 'var(--color-terciario)' }}>
+                clique num lead para ver o perfil olfativo dele e as recomendações
+              </span>
+            </div>
+          }
+          vazio={
+            <div style={{ padding: '24px 18px', textAlign: 'center' }}>
+              <span className="font-sans" style={{ fontSize: 11.5, color: 'var(--color-terciario)' }}>
+                Nenhum lead ainda — eles aparecem aqui assim que alguém deixar o e-mail no quiz.
+              </span>
+            </div>
+          }
+        />
+
+        {lead && <FichaDoLead lead={lead} aoFechar={() => setSelecionado(null)} />}
+      </div>
     </div>
+  )
+}
+
+/**
+ * A ficha individual: o perfil que ESTE lead declarou, o que ele clicou na
+ * sessão, e o que perfis parecidos clicaram — a recomendação pronta para o
+ * atendimento usar no WhatsApp.
+ */
+function FichaDoLead({ lead, aoFechar }: { lead: Lead; aoFechar: () => void }) {
+  const porPergunta = new Map<string, string[]>()
+  for (const [pergunta, valor] of lead.perfil) {
+    porPergunta.set(pergunta, [...(porPergunta.get(pergunta) ?? []), valor])
+  }
+  const maiorAfinidade = Math.max(0.01, ...lead.recomendacoes.map((r) => r.afinidade))
+
+  return (
+    <section className="card-ouro" style={{ borderRadius: 16, padding: '18px 19px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 0 }}>
+          <TituloSecao tamanho={14}>Perfil olfativo</TituloSecao>
+          <span className="font-mono" style={{ fontSize: 10, color: 'rgba(242,237,227,.45)', wordBreak: 'break-all' }}>
+            {lead.email}
+          </span>
+        </span>
+        <button
+          type="button"
+          onClick={aoFechar}
+          aria-label="Fechar ficha"
+          className="font-sans hover:brightness-150"
+          style={{ border: 0, background: 'transparent', color: 'rgba(242,237,227,.4)', fontSize: 14, cursor: 'pointer', padding: 2 }}
+        >
+          ×
+        </button>
+      </div>
+
+      {lead.perfil.length === 0 ? (
+        <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
+          Este lead deixou o e-mail sem o perfil de respostas — o quiz não mandou as respostas junto.
+        </span>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+          {[...porPergunta.entries()].map(([pergunta, valores]) => (
+            <div key={pergunta} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              <span className="font-sans" style={ROTULO_TITULO}>{pergunta.replace(/_/g, ' ')}</span>
+              <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {valores.map((v) => (
+                  <span
+                    key={v}
+                    className="font-sans"
+                    style={{
+                      padding: '4px 10px',
+                      border: '1px solid rgba(239,209,140,.35)',
+                      background: 'rgba(239,209,140,.08)',
+                      color: COR.ouro,
+                      fontSize: 11,
+                      lineHeight: 1,
+                      borderRadius: 'var(--radius-pill)',
+                    }}
+                  >
+                    {v.replace(/_/g, ' ')}
+                  </span>
+                ))}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {lead.clicadosNaSessao.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,.07)' }}>
+          <span className="font-sans" style={ROTULO_TITULO}>Clicou no quiz</span>
+          {lead.clicadosNaSessao.map((p) => (
+            <span key={p} className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.4, color: 'var(--color-corrente)' }}>
+              {p}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,.07)' }}>
+        <span className="font-sans" style={ROTULO_TITULO}>Recomendações para este perfil</span>
+        {lead.recomendacoes.length === 0 ? (
+          <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}>
+            Ainda não há cliques de perfis parecidos — a recomendação melhora sozinha a cada uso do quiz.
+          </span>
+        ) : (
+          lead.recomendacoes.map((r) => (
+            <div key={r.nome} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
+                <span className="font-sans" style={{ fontSize: 11.5, lineHeight: 1.35, color: 'var(--color-corrente)' }}>
+                  {r.nome}
+                </span>
+                <span className="font-mono" style={{ fontSize: 10, color: COR.ouro, whiteSpace: 'nowrap' }}>
+                  {`${Math.round(r.afinidade * 100)}%`}
+                </span>
+              </span>
+              <span style={{ height: 5, borderRadius: 3, background: 'rgba(255,255,255,.06)', overflow: 'hidden' }}>
+                <span
+                  style={{
+                    display: 'block',
+                    width: `${Math.max(4, Math.round((r.afinidade / maiorAfinidade) * 100))}%`,
+                    height: '100%',
+                    borderRadius: 3,
+                    background: 'rgba(239,209,140,.7)',
+                  }}
+                />
+              </span>
+            </div>
+          ))
+        )}
+        <span className="font-sans" style={{ fontSize: 9.5, lineHeight: 1.45, color: 'rgba(242,237,227,.38)', textWrap: 'pretty' }}>
+          Afinidade = quanto do perfil deste lead o clique mais parecido cobre. Pronto para usar no
+          WhatsApp do atendimento.
+        </span>
+      </div>
+    </section>
   )
 }
