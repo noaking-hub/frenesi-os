@@ -107,31 +107,30 @@ export function sincronizarVariante(
   // errado, e contar como sobrevenda inventaria um alarme sem base.
   const excesso = temCargaInicial ? Math.max(0, publicado - possivel) : 0
 
+  // O teto de 20 unidades EXISTIU aqui e foi removido por decisão do dono
+  // (19/08): com estoque para produzir mais, segurar a vitrine em 20 era
+  // esconder capacidade — o Vibrato podia 29 de 3 ml e publicava 20. A loja
+  // agora espelha o "dá para" exato, para cima e para baixo.
   const acao: AcaoSync = !temCargaInicial
     ? 'sem_carga'
     : possivel === 0
       ? 'esgotar'
       : excesso > 0
         ? 'reduzir'
-        : publicado < TETO_SHOPIFY && possivel >= TETO_SHOPIFY
+        : publicado < possivel
           ? 'repor'
           : 'ok'
 
   // `sem_carga` grava o que já está lá — ou seja, não grava: a sincronia só
   // escreve o que mudou.
-  const novoValor =
-    acao === 'ok' || acao === 'sem_carga'
-      ? publicado
-      : acao === 'repor'
-        ? TETO_SHOPIFY
-        : possivel
+  const novoValor = acao === 'ok' || acao === 'sem_carga' ? publicado : possivel
 
   const detalhe = !temCargaInicial
     ? 'sem carga inicial no ERP — a loja fica como está'
     : possivel === 0
       ? 'sem volume disponível para fracionar'
       : acao === 'repor'
-        ? `disponível permite ${possivel} · decremento manual antigo`
+        ? `disponível permite ${possivel} · loja publica menos`
         : prontos
           ? `${prontos} prontos + ${doVolume} do disponível`
           : `${doVolume} do volume disponível`

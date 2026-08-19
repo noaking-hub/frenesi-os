@@ -104,11 +104,18 @@ describe('estoque em ml, venda em unidades', () => {
     expect(v.excesso).toBe(14)
   })
 
-  it('repõe ao teto quando o decremento manual ficou desatualizado', () => {
+  it('repõe ao POSSÍVEL quando a loja publica menos — sem teto (política de 19/08)', () => {
+    // 640 ml permitem 42 de 15 ml; a loja publicava 8. O teto de 20 existiu
+    // e foi removido: com estoque para produzir, esconder capacidade é perda.
     const v = sincronizarVariante(640, 15, 0, 8)
     expect(v.acao).toBe('repor')
-    expect(v.novoValor).toBe(TETO_SHOPIFY)
-    expect(v.detalhe).toContain('decremento manual antigo')
+    expect(v.novoValor).toBe(42)
+    expect(v.detalhe).toContain('disponível permite 42')
+
+    // O caso real da decisão: Vibrato com 87,7 ml publicava 20 de 3 ml.
+    const vibrato = sincronizarVariante(87.7, 3, 0, 20)
+    expect(vibrato.acao).toBe('repor')
+    expect(vibrato.novoValor).toBe(29)
   })
 
   it('não confunde base sem carga inicial com base esgotada', () => {
@@ -159,11 +166,11 @@ describe('estoque em ml, venda em unidades', () => {
     expect(comProntos.variantes.find((v) => v.variante === 5)?.acao).not.toBe('sem_carga')
   })
 
-  it('nunca sobe acima do teto de 20', () => {
+  it('sobe até o possível — o teto de 20 foi removido (política de 19/08)', () => {
     const v = sincronizarVariante(1180, 3, 0, 20)
     expect(v.possivel).toBeGreaterThan(TETO_SHOPIFY)
-    expect(v.acao).toBe('ok')
-    expect(v.novoValor).toBe(TETO_SHOPIFY)
+    expect(v.acao).toBe('repor')
+    expect(v.novoValor).toBe(v.possivel)
   })
 
   it('conta cobertura em dias, não em jargão', () => {
