@@ -1949,12 +1949,24 @@ export async function aplicarEstoqueCalculado(): Promise<AplicacaoCalculada> {
 
   // O id da variante na loja mora em produtos_derivados; sem ele não há o
   // que gravar — a base foi criada à mão ou nunca veio da importação.
-  const { data: derivados, error } = await sb
-    .from('produtos_derivados')
-    .select('base_id, variante, shopify_variant_id')
-  if (error) throw error
+  //
+  // PAGINADO, e a falta disso custou caro: o Supabase corta em 1.000 linhas
+  // por padrão e o catálogo tem mais de 2.000 variantes — metade do mapa
+  // sumia a cada rodada, em ordem arbitrária, e produtos inteiros (Vibrato,
+  // Prada Paradoxe…) nunca eram gravados enquanto o contador "sem id da
+  // loja" oscilava sem explicação.
+  const derivados = await tudoDe<{ base_id: string; variante: number; shopify_variant_id: string | null }>(
+    'produtos_derivados',
+    (de, ate) =>
+      sb
+        .from('produtos_derivados')
+        .select('base_id, variante, shopify_variant_id')
+        .order('base_id')
+        .order('variante')
+        .range(de, ate),
+  )
   const idPorChave = new Map(
-    (derivados ?? [])
+    derivados
       .filter((d) => d.shopify_variant_id)
       .map((d) => [`${d.base_id}|${d.variante}`, d.shopify_variant_id as string]),
   )
