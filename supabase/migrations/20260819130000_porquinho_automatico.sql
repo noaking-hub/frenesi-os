@@ -14,6 +14,14 @@ declare
   v_depois integer;
   v_destino text;
 begin
+  -- Linha de reserva interna (o gateway retém e devolve; as pernas se
+  -- anulam) nunca vira lançamento nem fica pendurada na fila: dispensada
+  -- com motivo, toda rodada.
+  update extrato_linhas
+     set ignorado = true,
+         motivo_ignorado = 'Reserva interna do Mercado Pago: o valor é retido e devolvido pelo próprio gateway; o pagamento real é a linha "payment".'
+   where descricao like 'Reserva%' and not ignorado and lancamento_id is null;
+
   select count(*) into v_antes from lancamentos where origem like 'Extrato %';
   select id into v_destino from contas_bancarias where recebe_repasses limit 1;
 
