@@ -552,7 +552,7 @@ export function PortalDevolucoes({
               <RotuloCampo>
                 {(() => {
                   const entrega = dataPt(pedido.entregueEm)
-                  return entrega ? `Pedido ${pedido.id} · entregue em ${entrega}` : `Pedido ${pedido.id}`
+                  return entrega ? `Pedido ${pedido.codigo} · entregue em ${entrega}` : `Pedido ${pedido.codigo}`
                 })()}
               </RotuloCampo>
               <TituloPasso>Quais itens você quer devolver?</TituloPasso>
@@ -939,7 +939,7 @@ export function PortalDevolucoes({
                 Solicitação enviada
               </h1>
               <Corpo>
-                {`Sua solicitação para o pedido ${pedido.id} foi registrada. Guarde o protocolo: é por ele que encontramos o seu caso.`}
+                {`Sua solicitação para o pedido ${pedido.codigo} foi registrada. Guarde o protocolo: é por ele que encontramos o seu caso.`}
               </Corpo>
               <CaixaProtocolo protocolo={protocolo ?? '—'} />
             </div>
@@ -1746,7 +1746,7 @@ function CartaoPedido({
             color: clicavel ? PORTAL.tinta : 'rgba(36,31,24,.45)',
           }}
         >
-          {pedido.id}
+          {pedido.codigo}
         </span>
         <span style={{ flex: 1 }} />
         <span

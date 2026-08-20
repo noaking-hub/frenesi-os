@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 
 import { enviarAvisosDePedido } from '@/data/notificacoes'
 import { registrarSaudeDaRotina } from '@/data/saude-das-rotinas'
-import { mensagemDe } from '@/data/shopify'
+import { mensagemDe, shopifyConfigurada, vincularPedidosShopify } from '@/data/shopify'
+import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 
 /**
  * Os avisos ao cliente, em rotina PRÓPRIA.
@@ -42,10 +43,32 @@ export async function POST(req: Request) {
   }
 
   try {
+    // O e-mail cita o número que o cliente vê no site — o da Shopify — e o
+    // aviso de pedido sem esse número fica segurado. O vínculo mora na rotina
+    // de logística (de hora em hora); rodá-lo AQUI, só quando existe pedido
+    // recente sem número, encolhe a espera para um ciclo destes (5 min). A
+    // janela de 24h espelha a do seguro: pedido mais velho que isso sai com o
+    // código interno e não justifica uma chamada à Shopify por rodada.
+    let vinculados = 0
+    if (supabaseConfigurado() && shopifyConfigurada()) {
+      const { count } = await supabaseServer()
+        .from('pedidos')
+        .select('id', { count: 'exact', head: true })
+        .is('shopify_numero', null)
+        .gte('comprado_em', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      if ((count ?? 0) > 0) {
+        try {
+          vinculados = (await vincularPedidosShopify()).vinculados
+        } catch (e) {
+          console.error('[avisos] vínculo antes dos avisos falhou:', mensagemDe(e))
+        }
+      }
+    }
+
     // Vinte por rodada: com a pausa de 600 ms entre envios, são ~12 segundos
     // de trabalho — metade do tempo da função, com folga para o resto.
     const r = await enviarAvisosDePedido({ limite: 20 })
-    await registrarSaudeDaRotina('avisos-de-pedido', r)
+    await registrarSaudeDaRotina('avisos-de-pedido', { ...r, vinculados })
     return NextResponse.json(
       r.desligado
         ? {
@@ -53,7 +76,14 @@ export async function POST(req: Request) {
             desligado: 'AVISOS_DE_PEDIDO não está ligado — nada foi enviado',
             fatosRegistrados: r.candidatos,
           }
-        : { ok: true, candidatos: r.candidatos, enviados: r.enviados, falhas: r.falhas },
+        : {
+            ok: true,
+            candidatos: r.candidatos,
+            enviados: r.enviados,
+            falhas: r.falhas,
+            aguardandoVinculo: r.aguardandoVinculo ?? 0,
+            vinculados,
+          },
     )
   } catch (e) {
     await registrarSaudeDaRotina('avisos-de-pedido', { erro: mensagemDe(e) })

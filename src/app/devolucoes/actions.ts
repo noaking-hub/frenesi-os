@@ -133,6 +133,7 @@ export async function buscarPedidos(
       .slice(0, LIMITE_DE_PEDIDOS)
       .map((p) => ({
         id: p.id,
+        codigo: p.id,
         data: p.data,
         valor: p.valor,
         situacao: p.situacao,
@@ -155,7 +156,7 @@ export async function buscarPedidos(
   const { data, error } = await sb
     .from('pedidos')
     .select(
-      'id, comprado_em, valor, situacao, entregue_em, entrega_prevista_em, entrega_shopify_em, ' +
+      'id, shopify_numero, comprado_em, valor, situacao, entregue_em, entrega_prevista_em, entrega_shopify_em, ' +
         'servico_frete, rastreio, pedido_itens(descricao, variante, preco, base_id), ' +
         'clientes!inner(email, cpf)',
     )
@@ -169,6 +170,7 @@ export async function buscarPedidos(
 
   const linhas = (data ?? []) as unknown as {
     id: string
+    shopify_numero: string | null
     comprado_em: string
     valor: number | string
     situacao: string | null
@@ -221,6 +223,9 @@ export async function buscarPedidos(
   const pedidos = linhas.map((p): PedidoPortal => {
     return {
       id: p.id,
+      // O cliente procura pelo número que ele vê na conta do site (SH-1989).
+      // O id Yampi só aparece se o vínculo com a Shopify ainda não rodou.
+      codigo: p.shopify_numero ?? p.id,
       data: dataCurtaPt(p.comprado_em),
       valor: Number(p.valor),
       situacao: (p.situacao ?? 'pago') as PedidoPortal['situacao'],

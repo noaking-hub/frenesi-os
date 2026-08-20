@@ -186,6 +186,13 @@ export interface ItemPortal {
 
 export interface PedidoPortal {
   id: string
+  /**
+   * O número que o CLIENTE conhece — o do pedido na Shopify (SH-1989), o
+   * mesmo que aparece na conta dele no site. O `id` (Yampi) segue sendo a
+   * chave interna, mas nunca deve aparecer na tela do portal: o cliente não
+   * tem como reconhecê-lo.
+   */
+  codigo: string
   /** dd/MM/aaaa da compra, já formatada. */
   data: string
   valor: number

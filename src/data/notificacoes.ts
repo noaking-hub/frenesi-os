@@ -134,6 +134,9 @@ export function avisosDeDevolucaoLigados(): boolean {
 
 interface LinhaPedidoAviso {
   id: string
+  /** O número do pedido na Shopify (SH-1989) — o ÚNICO que o cliente conhece. */
+  shopify_numero: string | null
+  comprado_em: string
   pagamento: string
   envio: string
   valor: number | string | null
@@ -152,6 +155,11 @@ export interface ResultadoAvisos {
   falhas: { pedido: string; erro: string }[]
   /** O módulo está desligado; nada foi enviado. */
   desligado: boolean
+  /**
+   * Pedidos novos segurados até o vínculo com a Shopify preencher o número
+   * que o cliente conhece. Saem na rodada seguinte ao vínculo.
+   */
+  aguardandoVinculo?: number
 }
 
 /**
@@ -186,7 +194,7 @@ export async function enviarAvisosDePedido(opcoes?: {
   const sb = supabaseServer()
   const { data, error } = await sb
     .from('pedidos')
-    .select('id, pagamento, envio, valor, rastreio, servico_frete, rastreio_url, rastreio_servico, entrega_local, clientes(nome, email)')
+    .select('id, shopify_numero, comprado_em, pagamento, envio, valor, rastreio, servico_frete, rastreio_url, rastreio_servico, entrega_local, clientes(nome, email)')
     // A janela vale pela data do FATO: a compra, ou o momento em que o ERP
     // soube do envio (`envio_visto_em`, carimbado pela descoberta do Melhor
     // Envio). Sem a segunda porta, um pedido de julho postado em agosto caía
@@ -203,9 +211,23 @@ export async function enviarAvisosDePedido(opcoes?: {
 
   const pendentes: { aviso: AvisoPendente; pedido: LinhaPedidoAviso }[] = []
   const ultrapassados: AvisoPendente[] = []
+  let aguardandoVinculo = 0
   for (const p of (data ?? []) as unknown as LinhaPedidoAviso[]) {
     const email = p.clientes?.email?.trim()
     if (!email) continue
+    // O e-mail cita o número que o cliente vê na conta dele no site — o da
+    // Shopify. Pedido recém-importado ainda não passou pelo vínculo (rotina de
+    // logística, de hora em hora): segura o aviso até a rodada em que o número
+    // existir. O teto de 24h garante que uma falha do vínculo atrasa, mas
+    // nunca cala o aviso — aí ele sai com o código interno, que é pior que o
+    // ideal e melhor que o silêncio.
+    if (
+      !p.shopify_numero &&
+      Date.now() - new Date(p.comprado_em).getTime() < 24 * 60 * 60 * 1000
+    ) {
+      aguardandoVinculo++
+      continue
+    }
     // Só o aviso do estado ATUAL sai; os anteriores que porventura nunca
     // saíram viram dispensados. "Seu pedido foi enviado" para quem já recebeu
     // não informa — denuncia o atraso.
@@ -242,7 +264,7 @@ export async function enviarAvisosDePedido(opcoes?: {
     )
   }
 
-  if (pendentes.length === 0) return { ...vazio, desligado }
+  if (pendentes.length === 0) return { ...vazio, desligado, aguardandoVinculo }
 
   /**
    * O filtro de escopo vem DEPOIS de montar a lista, não antes.
@@ -319,7 +341,7 @@ export async function enviarAvisosDePedido(opcoes?: {
     )
   }
 
-  if (doEscopo.length === 0) return { ...vazio, desligado }
+  if (doEscopo.length === 0) return { ...vazio, desligado, aguardandoVinculo }
 
   // Uma leitura por rodada, não uma por e-mail: o modelo é o mesmo para todos.
   const modelo = (await lerModeloEmail('envio')) as ModeloEnvio
@@ -356,7 +378,7 @@ export async function enviarAvisosDePedido(opcoes?: {
     for (const l of (parte ?? []) as { chave: string }[]) jaRegistradas.add(l.chave)
   }
   const novos = doEscopo.filter(({ aviso }) => !jaRegistradas.has(aviso.chave))
-  if (novos.length === 0) return { ...vazio, desligado }
+  if (novos.length === 0) return { ...vazio, desligado, aguardandoVinculo }
 
   // Reserva em lote: a chave primária decide quem manda. `ignoreDuplicates`
   // devolve só as linhas que ESTA rodada conseguiu inserir — as demais
@@ -366,12 +388,12 @@ export async function enviarAvisosDePedido(opcoes?: {
   const { data: ganhas, error: erroReserva } = await sb
     .from('notificacoes_enviadas')
     .upsert(
-      reserva.map(({ aviso }) => ({
+      reserva.map(({ aviso, pedido }) => ({
         chave: aviso.chave,
         pedido_id: aviso.pedidoId,
         evento: aviso.evento,
         destinatario: aviso.email,
-        assunto: ASSUNTO[aviso.evento].replace('{pedido}', aviso.pedidoId),
+        assunto: ASSUNTO[aviso.evento].replace('{pedido}', pedido.shopify_numero ?? aviso.pedidoId),
         estado: 'enviando',
       })),
       { onConflict: 'chave', ignoreDuplicates: true },
@@ -381,7 +403,7 @@ export async function enviarAvisosDePedido(opcoes?: {
 
   const minhas = new Set((ganhas ?? []).map((l) => (l as { chave: string }).chave))
   const fila = reserva.filter(({ aviso }) => minhas.has(aviso.chave))
-  const resultado: ResultadoAvisos = { ...vazio, candidatos: fila.length }
+  const resultado: ResultadoAvisos = { ...vazio, candidatos: fila.length, aguardandoVinculo }
 
   for (const [indice, { aviso, pedido }] of fila.entries()) {
     // Meio segundo entre envios: o limite do provedor é por segundo, e um
@@ -547,22 +569,27 @@ async function mensagemDoAviso(
     Boolean(pedido.entrega_local) ||
     ehEntregaLocal({ servicoFrete: pedido.servico_frete, destino: null, rastreio: pedido.rastreio })
 
+  // O número exibido é o da Shopify — o único que o cliente reconhece, porque
+  // é o que a conta dele no site mostra. O id Yampi segue como chave interna
+  // (consultas de itens, cashback), mas não aparece no e-mail.
+  const codigo = pedido.shopify_numero ?? aviso.pedidoId
+
   const conteudo =
     aviso.evento === 'pedido_pago'
       ? emailPagamento({
           nome: aviso.cliente,
-          pedido: aviso.pedidoId,
+          pedido: codigo,
           total: Number(pedido.valor ?? 0),
           ...(await resumoDaCompra(aviso.pedidoId)),
           cashback: await cashbackDaCompra(aviso.pedidoId, aviso.email),
           entregaLocal,
         })
       : aviso.evento === 'pedido_entregue'
-      ? emailEntregue({ nome: aviso.cliente, pedido: aviso.pedidoId, transportadora: nome, entregaLocal })
+      ? emailEntregue({ nome: aviso.cliente, pedido: codigo, transportadora: nome, entregaLocal })
       : emailEnvio(
           {
             nome: aviso.cliente,
-            pedido: aviso.pedidoId,
+            pedido: codigo,
             codigo: pedido.rastreio,
             transportadora: nome,
             link: entregaLocal ? null : (pedido.rastreio_url ?? paginaDeRastreio(nome, pedido.rastreio)),
@@ -612,7 +639,7 @@ async function avisarDevolucao(
 
     const { data } = await sb
       .from('solicitacoes_devolucao')
-      .select('protocolo, pedido_id, motivo, reverso, pedido_de_fotos, pedidos(clientes(nome, email))')
+      .select('protocolo, pedido_id, motivo, reverso, pedido_de_fotos, pedidos(shopify_numero, clientes(nome, email))')
       .eq('protocolo', protocolo)
       .maybeSingle()
     const s = data as unknown as {
@@ -622,6 +649,7 @@ async function avisarDevolucao(
       reverso: string
       pedido_de_fotos: string | null
       pedidos: {
+        shopify_numero: string | null
         clientes: { nome: string | null; email: string | null } | null
       } | null
     } | null
@@ -631,7 +659,8 @@ async function avisarDevolucao(
     const mensagem = montar({
       nome: s.pedidos?.clientes?.nome ?? null,
       email,
-      pedido: s.pedido_id,
+      // O cliente conhece o número da Shopify, não o id interno.
+      pedido: s.pedidos?.shopify_numero ?? s.pedido_id,
       reverso: s.reverso,
       oQueFalta: s.pedido_de_fotos,
     })
@@ -750,6 +779,17 @@ export async function avisarDevolucaoConcluida(protocolo: string): Promise<void>
     const email = s?.pedidos?.clientes?.email?.trim()
     if (!s || !email) return
 
+    // O pedido do reenvio também sai com o número que o cliente vê no site.
+    let trocaCodigo = s.troca_pedido_id
+    if (s.troca_pedido_id) {
+      const { data: troca } = await sb
+        .from('pedidos')
+        .select('shopify_numero')
+        .eq('id', s.troca_pedido_id)
+        .maybeSingle()
+      trocaCodigo = (troca as { shopify_numero: string | null } | null)?.shopify_numero ?? s.troca_pedido_id
+    }
+
     const modelo = await lerModeloEmail('devolucao-concluida').catch(() => undefined)
     const mensagem = emailDevolucaoConcluida(
       {
@@ -767,7 +807,7 @@ export async function avisarDevolucaoConcluida(protocolo: string): Promise<void>
             })
           : null,
         temComprovante: Boolean(s.comprovante_reembolso),
-        trocaPedidoId: s.troca_pedido_id,
+        trocaPedidoId: trocaCodigo,
       },
       modelo,
     )
