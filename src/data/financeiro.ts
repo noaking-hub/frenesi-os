@@ -343,6 +343,14 @@ export interface LinhaDaTela {
  */
 export interface ContaDaTela extends ContaFinanceira {
   temExtrato: boolean
+  /**
+   * Dia do mês em que a fatura do cartão vence. Null fora dos cartões.
+   *
+   * Vem de `contas_bancarias`, e não das views de saldo: as duas foram criadas
+   * antes desta coluna existir e `select *` numa view é expandido na criação —
+   * a coluna nova não aparece nelas sem recriá-las.
+   */
+  diaVencimento: number | null
 }
 
 export interface TelaDeLancamentos {
@@ -474,7 +482,7 @@ export async function carregarTelaDeLancamentos(
   // PostgREST por render (19 com o detalhe aberto): duas páginas de 1.000
   // lançamentos, o catálogo inteiro de perfumes para alimentar um modal
   // fechado, e `lerContas` duas vezes na mesma renderização.
-  const [lista, panorama, categorias, contas, centros, extratos] = await Promise.all([
+  const [lista, panorama, categorias, contas, centros, extratos, faturas] = await Promise.all([
     sb.rpc('lancamentos_da_tela', {
       p_hoje: hoje,
       // Janela vazia vira `null`, não string vazia: `ocorrido_em >= ''` é erro
@@ -501,6 +509,7 @@ export async function carregarTelaDeLancamentos(
     // lá que o número existe — `saldos_das_contas`, que `lerContas` usa, não o
     // expõe.
     sb.from('contas_saldo').select('id, linhas_extrato, saldo_informado'),
+    sb.from('contas_bancarias').select('id, dia_vencimento'),
   ])
 
   if (lista.error) throw lista.error
@@ -510,6 +519,7 @@ export async function carregarTelaDeLancamentos(
   // mesmo Pix entraria duas vezes no saldo — uma pelo extrato, outra pelo
   // lançamento. Falha aqui derruba a tela, que é o desfecho barato.
   if (extratos.error) throw extratos.error
+  if (faturas.error) throw faturas.error
 
   const l = lista.data as {
     linhas: LinhaDaRpc[]
@@ -545,6 +555,14 @@ export async function carregarTelaDeLancamentos(
   // criar o lançamento, ou o dinheiro dela sumiria do saldo. A mesma regra está
   // escrita no plpgsql de `registrar_venda_manual`; se as duas divergirem, a
   // tela oferece um caminho que o banco recusa.
+  // O dia da fatura de cada cartão, para o formulário conseguir posicionar o
+  // vencimento da compra sem ninguém precisar lembrar de cabeça.
+  const diaDaFatura = new Map(
+    ((faturas.data ?? []) as { id: string; dia_vencimento: number | null }[])
+      .filter((c) => c.dia_vencimento !== null)
+      .map((c) => [c.id, Number(c.dia_vencimento)]),
+  )
+
   const comExtrato = new Set(
     (
       (extratos.data ?? []) as {
@@ -607,7 +625,11 @@ export async function carregarTelaDeLancamentos(
       })),
     },
     categorias,
-    contas: contas.map((c) => ({ ...c, temExtrato: comExtrato.has(c.id) })),
+    contas: contas.map((c) => ({
+      ...c,
+      temExtrato: comExtrato.has(c.id),
+      diaVencimento: diaDaFatura.get(c.id) ?? null,
+    })),
     centrosCusto: centros,
     hoje,
     saldoProjetado: Math.round((disponivel + totalAReceber - totalAPagar) * 100) / 100,

@@ -75,6 +75,25 @@ const CADENCIAS = [
 const hoje = () => hojeEmSaoPaulo()
 const mesAtual = () => hoje().slice(0, 7)
 
+/**
+ * A próxima fatura de um cartão que fecha no dia `dia`.
+ *
+ * Compra feita HOJE cai na fatura deste mês se ela ainda não venceu, e na do
+ * mês que vem se já venceu — comprar dia 23 num cartão que vence dia 22 é
+ * dívida de outubro, não de setembro.
+ *
+ * O dia é grampeado no último dia do mês: cartão que vence dia 31 em fevereiro
+ * vence no dia 28. `new Date(ano, mes + 1, 0)` devolve o último dia do mês.
+ */
+function proximaFatura(dia: number): string {
+  const hoje = new Date(`${hojeEmSaoPaulo()}T12:00:00`)
+  const mes = hoje.getDate() <= dia ? hoje.getMonth() : hoje.getMonth() + 1
+  const alvo = new Date(hoje.getFullYear(), mes, 1)
+  const ultimo = new Date(alvo.getFullYear(), alvo.getMonth() + 1, 0).getDate()
+  alvo.setDate(Math.min(dia, ultimo))
+  return `${alvo.getFullYear()}-${String(alvo.getMonth() + 1).padStart(2, '0')}-${String(alvo.getDate()).padStart(2, '0')}`
+}
+
 function Campo({ rotulo, children, dica }: { rotulo: string; children: ReactNode; dica?: string }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 7, minWidth: 0 }}>
@@ -205,7 +224,13 @@ export function NovoCompromisso({
   categorias,
   centros,
 }: {
-  contas: ContaFinanceira[]
+  /**
+   * `diaVencimento` chega opcional porque nem toda tela que abre este
+   * formulário carrega a conta com ele — quem tem é a lista de Lançamentos,
+   * que já lê `contas_bancarias`. Sem o dia, o vencimento continua sendo o que
+   * o operador digitar, que é o comportamento de antes.
+   */
+  contas: (ContaFinanceira & { diaVencimento?: number | null })[]
   categorias: CategoriaGerencial[]
   centros: { id: string; nome: string }[]
 }) {
@@ -249,6 +274,7 @@ export function NovoCompromisso({
     ? categoriaId
     : (disponiveis[0]?.id ?? '')
   const escolhida = disponiveis.find((c) => c.id === categoriaValida)
+  const contaEscolhida = contas.find((c) => c.id === contaId)
 
   const salvar = () =>
     iniciar(async () => {
@@ -401,8 +427,29 @@ export function NovoCompromisso({
                   style={CAMPO}
                 />
               </Campo>
-              <Campo rotulo="Conta">
-                <select value={contaId} onChange={(e) => setContaId(e.target.value)} style={CAMPO}>
+              <Campo
+                rotulo="Conta"
+                dica={
+                  contaEscolhida?.diaVencimento
+                    ? `Fatura vence todo dia ${contaEscolhida.diaVencimento} — o vencimento já foi ajustado`
+                    : undefined
+                }
+              >
+                <select
+                  value={contaId}
+                  onChange={(e) => {
+                    const id = e.target.value
+                    setContaId(id)
+                    // Escolher um cartão move o vencimento para a próxima
+                    // fatura dele. Sem isso a parcela nasceria vencendo no dia
+                    // da COMPRA, e a projeção de caixa mostraria a saída antes
+                    // de o dinheiro sair de verdade — no cartão o que fecha a
+                    // conta é a fatura, não a compra.
+                    const dia = contas.find((c) => c.id === id)?.diaVencimento
+                    if (dia) setVenceEm(proximaFatura(dia))
+                  }}
+                  style={CAMPO}
+                >
                   {contas.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.nome}
