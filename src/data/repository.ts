@@ -337,7 +337,8 @@ const repositorioSupabase: Repositorio = {
       supabaseServer()
         .from('pedidos')
         .select(
-          'id, canal, valor, frete, cashback, pagamento, envio, comprado_em, entregue_em, ' +
+          'id, canal, valor, frete, desconto, comprovante, cashback, pagamento, envio, ' +
+            'comprado_em, entregue_em, ' +
             'destino, cep, logradouro, peso, dimensoes, gateway, rastreio, situacao, ' +
             'servico_frete, rastreio_url, rastreio_lido_em, entrega_local, ' +
             'producao_em, enviado_shopify_em, estoque_baixado_em, estoque_baixado_ml, ' +
@@ -348,6 +349,21 @@ const repositorioSupabase: Repositorio = {
         .range(de, ate) as unknown as PromiseLike<{ data: LinhaPedido[] | null; error: unknown }>,
     )
     const dia = 24 * 60 * 60 * 1000
+
+    // O comprovante da venda mora em bucket privado, e a ficha só o exibe por
+    // URL assinada de vida curta — a mesma receita das provas de devolução, e
+    // pelo mesmo motivo: caminho cru na tela é endereço que não expira. Um lote
+    // só, nunca uma assinatura por pedido, e só para quem tem arquivo.
+    const comprovantes = linhas.map((p) => p.comprovante).filter(Boolean) as string[]
+    const urlDoComprovante = new Map<string, string>()
+    if (comprovantes.length) {
+      const { data: assinadas } = await supabaseServer()
+        .storage.from('financeiro')
+        .createSignedUrls(comprovantes, 60 * 60)
+      for (const a of assinadas ?? []) {
+        if (a.path && a.signedUrl) urlDoComprovante.set(a.path, a.signedUrl)
+      }
+    }
 
     // A foto de cada item vem do catálogo. O caminho titular é o base_id que
     // a importação casou por SKU; os itens anteriores ao casamento ficam sem
@@ -389,7 +405,9 @@ const repositorioSupabase: Repositorio = {
         canal: capitalizaCanal(p.canal),
         valor: Number(p.valor),
         frete: Number(p.frete),
+        desconto: Number(p.desconto ?? 0),
         cashback: Number(p.cashback),
+        comprovanteUrl: p.comprovante ? (urlDoComprovante.get(p.comprovante) ?? null) : null,
         pagamento: p.pagamento,
         envio: rotuloEnvio(p.envio),
         // Uma regra só, no domínio, para os três lugares que contam este
@@ -1083,7 +1101,10 @@ interface LinhaPedido {
   canal: string
   valor: number | string
   frete: number | string
+  desconto: number | string | null
   cashback: number | string
+  /** Caminho dentro do bucket privado `financeiro` — nunca vai cru para a tela. */
+  comprovante: string | null
   pagamento: Pedido['pagamento']
   envio: string
   comprado_em: string

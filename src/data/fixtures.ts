@@ -175,7 +175,7 @@ export const LOTES: Lote[] = [
 export const PEDIDOS: Pedido[] = [
   {
     id: '#10482', cliente: 'Camila Rocha', email: 'camila.rocha@email.com', cpf: '30412877010', telefone: '11 98421-0032',
-    data: '03/08/2026', canal: 'Shopify', valor: 389.0, frete: 24.9, cashback: 24.9,
+    data: '03/08/2026', canal: 'Shopify', valor: 389.0, frete: 24.9, cashback: 24.9, desconto: 0, comprovanteUrl: null,
     pagamento: 'pago', envio: 'Aguardando envio', diasDesdeEntrega: null, entregueEm: null,
     destino: 'São Paulo · SP', cep: '05435-000', rua: 'Rua Harmonia, 482 · Vila Madalena',
     peso: '0,42 kg', dimensoes: '18 × 12 × 9 cm', gateway: 'Frenet', rastreio: null,
@@ -189,7 +189,7 @@ export const PEDIDOS: Pedido[] = [
   },
   {
     id: '#10481', cliente: 'Rafael Andrade', email: 'rafael.andrade@email.com', cpf: '18855204093', telefone: '19 99120-8874',
-    data: '03/08/2026', canal: 'Yampi', valor: 245.0, frete: 24.9, cashback: 0,
+    data: '03/08/2026', canal: 'Yampi', valor: 245.0, frete: 24.9, cashback: 0, desconto: 0, comprovanteUrl: null,
     pagamento: 'pago', envio: 'Enviado', diasDesdeEntrega: null, entregueEm: null,
     destino: 'Campinas · SP', cep: '13024-110', rua: 'Av. Andrade Neves, 1204 · Centro',
     peso: '0,28 kg', dimensoes: '16 × 10 × 8 cm', gateway: 'Melhor Envio', rastreio: 'OS4471120BR',
@@ -200,7 +200,7 @@ export const PEDIDOS: Pedido[] = [
   },
   {
     id: '#10480', cliente: 'Juliana Prado', email: 'ju.prado@email.com', cpf: '04133092122', telefone: '31 98003-1177',
-    data: '02/08/2026', canal: 'Shopify', valor: 612.5, frete: 41.2, cashback: 0,
+    data: '02/08/2026', canal: 'Shopify', valor: 612.5, frete: 41.2, cashback: 0, desconto: 0, comprovanteUrl: null,
     pagamento: 'divergente', envio: 'Retido', diasDesdeEntrega: null, entregueEm: null,
     destino: 'Belo Horizonte · MG', cep: '30140-071', rua: 'Rua Pernambuco, 907 · Savassi',
     peso: '0,61 kg', dimensoes: '22 × 14 × 10 cm', gateway: 'Melhor Envio', rastreio: 'OS9981204BR',
@@ -215,7 +215,7 @@ export const PEDIDOS: Pedido[] = [
   },
   {
     id: '#10479', cliente: 'Tiago Nunes', email: 'tiago.nunes@email.com', cpf: '27790145088', telefone: '41 99887-2210',
-    data: '02/08/2026', canal: 'WhatsApp', valor: 298.0, frete: 29.9, cashback: 0,
+    data: '02/08/2026', canal: 'WhatsApp', valor: 298.0, frete: 29.9, cashback: 0, desconto: 0, comprovanteUrl: null,
     pagamento: 'pendente', envio: 'Não iniciado', diasDesdeEntrega: null, entregueEm: null,
     destino: 'Curitiba · PR', cep: '80420-090', rua: 'Al. Dr. Carlos de Carvalho, 318',
     peso: '0,34 kg', dimensoes: '17 × 11 × 9 cm', gateway: 'Frenet', rastreio: null,
@@ -226,7 +226,7 @@ export const PEDIDOS: Pedido[] = [
   },
   {
     id: '#10478', cliente: 'Beatriz Lima', email: 'bia.lima@email.com', cpf: '11204877035', telefone: '21 98554-9021',
-    data: '26/07/2026', canal: 'Shopify', valor: 513.6, frete: 26.7, cashback: 26.7,
+    data: '26/07/2026', canal: 'Shopify', valor: 513.6, frete: 26.7, cashback: 26.7, desconto: 0, comprovanteUrl: null,
     pagamento: 'pago', envio: 'Entregue', diasDesdeEntrega: 5, entregueEm: '30/07/2026',
     destino: 'Rio de Janeiro · RJ', cep: '22071-020', rua: 'Rua Bulhões de Carvalho, 145 · Copacabana',
     peso: '0,45 kg', dimensoes: '19 × 12 × 9 cm', gateway: 'Frenet', rastreio: 'LGG88214077',
@@ -242,7 +242,7 @@ export const PEDIDOS: Pedido[] = [
   },
   {
     id: '#10477', cliente: 'Marcos Ferreira', email: 'marcos.f@email.com', cpf: '39471200164', telefone: '13 99441-7788',
-    data: '01/08/2026', canal: 'Yampi', valor: 352.0, frete: 22.4, cashback: 0,
+    data: '01/08/2026', canal: 'Yampi', valor: 352.0, frete: 22.4, cashback: 0, desconto: 0, comprovanteUrl: null,
     pagamento: 'pago', envio: 'Aguardando envio', diasDesdeEntrega: null, entregueEm: null,
     destino: 'Santos · SP', cep: '11055-200', rua: 'Av. Ana Costa, 62 · Gonzaga',
     peso: '0,30 kg', dimensoes: '16 × 11 × 8 cm', gateway: 'Frenet', rastreio: null,
@@ -253,7 +253,7 @@ export const PEDIDOS: Pedido[] = [
   },
   {
     id: '#10476', cliente: 'Larissa Duarte', email: 'larissa.d@email.com', cpf: '52208814077', telefone: '62 98220-4410',
-    data: '01/08/2026', canal: 'Shopify', valor: 824.9, frete: 31.8, cashback: 31.8,
+    data: '01/08/2026', canal: 'Shopify', valor: 824.9, frete: 31.8, cashback: 31.8, desconto: 0, comprovanteUrl: null,
     pagamento: 'pago', envio: 'Enviado', diasDesdeEntrega: null, entregueEm: null,
     destino: 'Goiânia · GO', cep: '74110-010', rua: 'Rua 9, 1130 · Setor Oeste',
     peso: '0,86 kg', dimensoes: '26 × 16 × 12 cm', gateway: 'Melhor Envio', rastreio: 'OS7712004BR',
@@ -268,7 +268,7 @@ export const PEDIDOS: Pedido[] = [
   },
   {
     id: '#10475', cliente: 'Eduardo Salles', email: 'edu.salles@email.com', cpf: '64019928140', telefone: '51 99612-3345',
-    data: '01/08/2026', canal: 'WhatsApp', valor: 189.0, frete: 27.5, cashback: 0,
+    data: '01/08/2026', canal: 'WhatsApp', valor: 189.0, frete: 27.5, cashback: 0, desconto: 0, comprovanteUrl: null,
     pagamento: 'pendente', envio: 'Não iniciado', diasDesdeEntrega: null, entregueEm: null,
     destino: 'Porto Alegre · RS', cep: '90570-020', rua: 'Rua Mostardeiro, 274 · Moinhos de Vento',
     peso: '0,26 kg', dimensoes: '15 × 10 × 8 cm', gateway: 'Frenet', rastreio: null,
@@ -279,7 +279,7 @@ export const PEDIDOS: Pedido[] = [
   },
   {
     id: '#10474', cliente: 'Ana Clara Mota', email: 'ana.mota@email.com', cpf: '77310455021', telefone: '11 97001-5540',
-    data: '28/06/2026', canal: 'Shopify', valor: 168.8, frete: 58.9, cashback: 0,
+    data: '28/06/2026', canal: 'Shopify', valor: 168.8, frete: 58.9, cashback: 0, desconto: 0, comprovanteUrl: null,
     pagamento: 'pago', envio: 'Entregue', diasDesdeEntrega: 32, entregueEm: '03/07/2026',
     destino: 'São Paulo · SP', cep: '04532-060', rua: 'Rua Jerônimo da Veiga, 45 · Itaim Bibi',
     peso: '0,44 kg', dimensoes: '19 × 12 × 9 cm', gateway: 'Frenet', rastreio: 'AZ7710455',
@@ -293,7 +293,7 @@ export const PEDIDOS: Pedido[] = [
   },
   {
     id: '#10402', cliente: 'Beatriz Lima', email: 'bia.lima@email.com', cpf: '11204877035', telefone: '21 98554-9021',
-    data: '28/06/2026', canal: 'Shopify', valor: 168.8, frete: 22.4, cashback: 0,
+    data: '28/06/2026', canal: 'Shopify', valor: 168.8, frete: 22.4, cashback: 0, desconto: 0, comprovanteUrl: null,
     pagamento: 'pago', envio: 'Entregue', diasDesdeEntrega: 32, entregueEm: '03/07/2026',
     destino: 'Rio de Janeiro · RJ', cep: '22071-020', rua: 'Rua Bulhões de Carvalho, 145 · Copacabana',
     peso: '0,29 kg', dimensoes: '16 × 11 × 8 cm', gateway: 'Frenet', rastreio: 'AZ4471120',
@@ -307,7 +307,7 @@ export const PEDIDOS: Pedido[] = [
   },
   {
     id: '#10486', cliente: 'Beatriz Lima', email: 'bia.lima@email.com', cpf: '11204877035', telefone: '21 98554-9021',
-    data: '02/08/2026', canal: 'Shopify', valor: 289.9, frete: 24.9, cashback: 0,
+    data: '02/08/2026', canal: 'Shopify', valor: 289.9, frete: 24.9, cashback: 0, desconto: 0, comprovanteUrl: null,
     pagamento: 'pago', envio: 'Enviado', diasDesdeEntrega: null, entregueEm: null,
     destino: 'Rio de Janeiro · RJ', cep: '22071-020', rua: 'Rua Bulhões de Carvalho, 145 · Copacabana',
     peso: '0,38 kg', dimensoes: '18 × 12 × 9 cm', gateway: 'Frenet', rastreio: 'LGG55120904',

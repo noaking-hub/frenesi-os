@@ -564,6 +564,10 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
                     id: c.id,
                     nome: c.nome,
                     principal: c.principal,
+                    // Conta cujo extrato o ERP lê não recebe lançamento da venda
+                    // manual: lá o caixa é do extrato, e lançar de novo contaria
+                    // o mesmo PIX duas vezes no saldo.
+                    temExtrato: c.temExtrato,
                   }))}
                   abrirAoMontar={filtro.venda === 'nova'}
                 />

@@ -213,7 +213,25 @@ export interface Pedido {
   canal: Canal
   valor: number
   frete: number
+  /**
+   * Abatimento concedido na venda, em reais.
+   *
+   * `valor` já é o LÍQUIDO e `pedido_itens.preco` é sempre o preço de tabela —
+   * então a soma dos itens NÃO fecha com o total quando houve desconto. Este
+   * número existe só para a tela explicar a diferença: 535 dos 663 pedidos
+   * pagos da Yampi têm essa lacuna e ela nunca esteve gravada em lugar nenhum.
+   * Nenhuma view o lê; somá-lo em qualquer apuração desconta duas vezes.
+   */
+  desconto: number
   cashback: number
+  /**
+   * Comprovante da venda — URL ASSINADA de uma hora, nunca o caminho no bucket.
+   *
+   * O arquivo mora em bucket privado, como as provas de devolução: publicar o
+   * caminho cru na tela entregaria um endereço que não expira. `null` é "não
+   * anexado", e a ficha diz isso com todas as letras em vez de um traço mudo.
+   */
+  comprovanteUrl: string | null
   pagamento: StatusPagamento
   envio: StatusEnvio
   /** Dias desde a marcação de entrega. null = ainda não entregue. */

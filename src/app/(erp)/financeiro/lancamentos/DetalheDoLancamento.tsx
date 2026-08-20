@@ -59,6 +59,9 @@ const TOM_SITUACAO: Record<SituacaoLancamento, TomUi> = {
 /** O único painel das abas — as duas trocam o conteúdo dele, não o elemento. */
 const PAINEL = 'painel-do-lancamento'
 
+/** Os canais que o formulário de venda manual oferece — os únicos com comprovante anexável. */
+const CANAIS_DA_VENDA_MANUAL = new Set(['manual', 'whatsapp', 'instagram'])
+
 /** dd/mm/aaaa a partir de AAAA-MM-DD, sem passar por `Date` (que desloca fuso). */
 function diaPt(iso: string | null | undefined): string | null {
   if (!iso) return null
@@ -718,6 +721,16 @@ function Pedido({ explicacao: e }: { explicacao: ExplicacaoLancamento | null }) 
               ausente="o pedido não registra a data da compra"
               mono
             />
+            {/* Sem esta linha a tela mostrava R$ 216,00 em itens logo abaixo de
+                "Valor do pedido: R$ 194,40" e deixava a diferença sem
+                explicação — os itens guardam preço de tabela, o pedido guarda o
+                líquido, e o abatimento só existe aqui. */}
+            <Dado
+              rotulo="Desconto"
+              valor={p.desconto > 0 ? brl(p.desconto) : null}
+              ausente="nenhum desconto foi concedido"
+              mono
+            />
             <Dado rotulo="Frete" valor={p.frete > 0 ? brl(p.frete) : null} ausente="sem frete cobrado" mono />
             <Dado
               rotulo="Cashback usado"
@@ -725,6 +738,36 @@ function Pedido({ explicacao: e }: { explicacao: ExplicacaoLancamento | null }) 
               ausente="nenhum cashback foi usado"
               mono
             />
+            {/* "Da venda", nunca "do recebimento": numa venda parcelada o
+                arquivo prova a primeira entrada e nada diz sobre as outras. Ele
+                mora no PEDIDO, então as três parcelas apontam para o mesmo
+                link, sem duplicar arquivo. */}
+            {/* Só onde o comprovante faz sentido. Anunciar a ausência dele nos
+                pedidos do checkout seria dizer 667 vezes que falta um arquivo
+                que ninguém deveria anexar — a prova daqueles é o gateway e a
+                transação, logo acima. */}
+            {(p.comprovanteUrl || CANAIS_DA_VENDA_MANUAL.has(p.canal)) && (
+              <Dado
+                rotulo="Comprovante da venda"
+                valor={
+                  p.comprovanteUrl ? (
+                    <a
+                      href={p.comprovanteUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        color: COR.ouro,
+                        textDecoration: 'underline',
+                        textUnderlineOffset: 3,
+                      }}
+                    >
+                      Abrir comprovante
+                    </a>
+                  ) : null
+                }
+                ausente="nenhum comprovante foi anexado"
+              />
+            )}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginTop: 4 }}>

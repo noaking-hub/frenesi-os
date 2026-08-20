@@ -20,7 +20,12 @@ import {
   type StatusDevolucao,
 } from '@/domain'
 
-import { atualizarRastreamento, confirmarEntregaEmMaos, linhaDoTempoDoPedido } from './actions'
+import {
+  anexarComprovanteDoPedido,
+  atualizarRastreamento,
+  confirmarEntregaEmMaos,
+  linhaDoTempoDoPedido,
+} from './actions'
 
 /**
  * A ficha do pedido — o painel ancorado do mockup.
@@ -446,8 +451,10 @@ export function FichaDoPedido({
             </Bloco>
             <Bloco titulo="Valores">
               <Campo rotulo="Valor do pedido" valor={brl(pedido.valor)} mono />
+              <CampoDesconto desconto={pedido.desconto} />
               <Campo rotulo="Frete" valor={brl(pedido.frete)} mono />
               <Campo rotulo="Cashback usado" valor={brl(pedido.cashback)} mono />
+              <CampoComprovante url={pedido.comprovanteUrl} pedidoId={pedido.id} />
             </Bloco>
           </div>
         )}
@@ -557,8 +564,10 @@ export function FichaDoPedido({
             </Bloco>
             <Bloco titulo="Valores">
               <Campo rotulo="Valor do pedido" valor={brl(pedido.valor)} mono />
+              <CampoDesconto desconto={pedido.desconto} />
               <Campo rotulo="Frete" valor={brl(pedido.frete)} mono />
               <Campo rotulo="Cashback usado" valor={brl(pedido.cashback)} mono />
+              <CampoComprovante url={pedido.comprovanteUrl} pedidoId={pedido.id} />
             </Bloco>
           </div>
         )}
@@ -875,6 +884,101 @@ export function Campo({
       >
         {valor || '—'}
       </span>
+    </div>
+  )
+}
+
+/**
+ * O abatimento, e só quando existe.
+ *
+ * 667 dos pedidos têm desconto zero: uma linha "R$ 0,00" em todos eles polui a
+ * ficha para explicar nada. Quando o número aparece, ele está ali para fechar a
+ * conta — os itens são preço de tabela e o valor do pedido já é o líquido.
+ */
+function CampoDesconto({ desconto }: { desconto: number }) {
+  if (desconto <= 0) return null
+  return <Campo rotulo="Desconto" valor={brl(desconto)} mono />
+}
+
+/**
+ * O comprovante anexado à venda.
+ *
+ * "Comprovante da venda", nunca "do recebimento": numa venda parcelada o Pix
+ * anexado prova a primeira entrada e nada diz sobre as outras — a ficha não
+ * pode afirmar mais do que sabe.
+ *
+ * O anexo pode chegar DEPOIS da venda — a cliente manda o Pix no WhatsApp no dia
+ * seguinte, e sem um caminho aqui a única saída seria registrar a mesma venda de
+ * novo, baixando o estoque duas vezes. Por isso a ficha anexa, e não só mostra.
+ */
+function CampoComprovante({ url, pedidoId }: { url: string | null; pedidoId: string }) {
+  const entrada = useRef<HTMLInputElement>(null)
+  const [erro, setErro] = useState<string | null>(null)
+  const [enviando, enviar] = useTransition()
+
+  const escolher = (arquivo: File) =>
+    enviar(async () => {
+      setErro(null)
+      const r = await anexarComprovanteDoPedido(pedidoId, arquivo)
+      if (!r.ok) setErro(r.erro)
+    })
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+      <RotuloCampo>Comprovante da venda</RotuloCampo>
+      <input
+        ref={entrada}
+        type="file"
+        accept="application/pdf,image/*"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const arquivo = e.target.files?.[0]
+          if (arquivo) escolher(arquivo)
+          // Zerado para o mesmo arquivo poder ser reenviado depois de um erro.
+          e.target.value = ''
+        }}
+      />
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+        {url && (
+          <a
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            className="font-sans hover:text-ouro"
+            style={{
+              fontSize: 12,
+              color: COR.ouro,
+              textDecoration: 'underline',
+              textUnderlineOffset: 3,
+            }}
+          >
+            Abrir comprovante
+          </a>
+        )}
+        <button
+          type="button"
+          onClick={() => entrada.current?.click()}
+          disabled={enviando}
+          className="font-sans hover:text-ouro"
+          style={{
+            border: 0,
+            background: 'transparent',
+            padding: 0,
+            fontSize: 12,
+            color: url ? 'rgba(242,237,227,.5)' : COR.ouro,
+            textDecoration: 'underline',
+            textUnderlineOffset: 3,
+            cursor: enviando ? 'wait' : 'pointer',
+          }}
+        >
+          {enviando ? 'Enviando…' : url ? 'Trocar' : 'Anexar comprovante'}
+        </button>
+      </div>
+      {erro && (
+        <span className="font-sans" style={{ fontSize: 11, lineHeight: 1.45, color: COR.erro }}>
+          {erro}
+        </span>
+      )}
     </div>
   )
 }

@@ -7,6 +7,7 @@ import {
   atualizarExtratoMp,
   diagnosticarMercadoPago,
   importarLiberacoes,
+  pedidosComCaixaProprio,
   pedirRelatorio,
   relatoriosDisponiveis,
   sincronizarMercadoPago,
@@ -377,12 +378,21 @@ export async function recasarExtrato(): Promise<
     if (e1) return { ok: false, erro: mensagemDe(e1) }
     if (e2) return { ok: false, erro: mensagemDe(e2) }
 
+    // A venda manual que nasceu com lançamento próprio de caixa sai do índice:
+    // ela foi lançada numa conta sem extrato lido (Inter, Sicoob, dinheiro), o
+    // dinheiro dela não está aqui, e deixá-la concorrer faz o palpite por valor
+    // e data — que aceita quando sobra um candidato só — carimbar o crédito da
+    // loja no pedido de balcão que já estava pago. Dois pedidos de R$ 216,00 na
+    // mesma semana são o normal numa loja de decants.
+    const caixaProprio = await pedidosComCaixaProprio()
     const indice = indexarPedidos(
-      (pedidos ?? []).map((p) => ({
-        id: p.id as string,
-        valor: Number(p.valor),
-        data: String(p.comprado_em).slice(0, 10),
-      })),
+      (pedidos ?? [])
+        .filter((p) => !caixaProprio.has(p.id as string))
+        .map((p) => ({
+          id: p.id as string,
+          valor: Number(p.valor),
+          data: String(p.comprado_em).slice(0, 10),
+        })),
     )
 
     let religadas = 0

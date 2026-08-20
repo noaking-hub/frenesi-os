@@ -427,6 +427,11 @@ export type RespostaVendaManual =
   | {
       ok: true
       pedidoId: string
+      /** Σ preço de tabela × quantidade, antes do abatimento. */
+      bruto: number
+      /** O abatimento que o banco gravou em `pedidos.desconto`. */
+      desconto: number
+      /** O LÍQUIDO (bruto − desconto) — é ele que vale como valor do pedido. */
       total: number
       /**
        * Quanto do total JÁ está na conta — lido do que o banco gravou.
@@ -440,6 +445,21 @@ export type RespostaVendaManual =
       mlBaixado: number
       /** Vazio quando a venda não foi repartida; o cronograma completo quando foi. */
       parcelas: ParcelaGravada[]
+      /**
+       * A conta escolhida tem extrato lido, então a venda NÃO criou lançamento
+       * de caixa — quem responde pelo dinheiro dela é a linha do extrato.
+       *
+       * Quem decide isso é o banco, olhando `extrato_linhas`. A tela só conta
+       * ao operador o que foi decidido: sem isso ele procuraria em Lançamentos
+       * uma entrada que, de propósito, não existe.
+       */
+      caixaNoExtrato: boolean
+      comprovanteAnexado: boolean
+      /**
+       * Preenchido só quando a venda gravou e o comprovante não — o único
+       * caso em que `ok: true` esconderia uma perda se ficasse calado.
+       */
+      avisoComprovante?: string
     }
   | { ok: false; erro: string }
 
@@ -451,6 +471,57 @@ export type RespostaVendaManual =
  * quem está no balcão entende.
  */
 const CANAIS_MANUAIS = new Set(['manual', 'whatsapp', 'instagram'])
+
+/**
+ * Bucket PRIVADO dos comprovantes de venda.
+ *
+ * Privado como o de devoluções: o repositório é público e um bucket aberto
+ * publicaria o extrato do PIX de um cliente com nome e valor. A leitura é
+ * sempre por URL assinada de 1 hora, gerada no servidor.
+ */
+const BUCKET_FINANCEIRO = 'financeiro'
+
+/** Os mesmos tipos e o mesmo teto do comprovante de reembolso das devoluções. */
+const TIPOS_DE_COMPROVANTE = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+])
+const TAMANHO_MAXIMO_COMPROVANTE = 8 * 1024 * 1024
+
+/**
+ * A frase que recusa o comprovante, ou `null` quando ele serve.
+ *
+ * As frases são LETRA POR LETRA as de `devolucoes/actions.ts`: é o mesmo dono
+ * anexando o mesmo tipo de arquivo em duas telas do ERP, e duas redações para
+ * a mesma recusa fariam parecer que são dois limites diferentes.
+ */
+function recusaDoComprovante(arquivo: File): string | null {
+  if (!TIPOS_DE_COMPROVANTE.has(arquivo.type)) {
+    return 'O comprovante precisa ser PDF ou imagem.'
+  }
+  if (arquivo.size > TAMANHO_MAXIMO_COMPROVANTE) {
+    return 'O comprovante pode ter no máximo 8 MB.'
+  }
+  return null
+}
+
+/**
+ * A extensão do arquivo, saneada.
+ *
+ * O nome vem do navegador e entra no caminho do Storage — "nota.2024/../x" ou
+ * um nome sem ponto viraria chave torta no bucket. Como o tipo já passou por
+ * `recusaDoComprovante`, o que não for extensão curta e alfanumérica cai em
+ * `jpg` sem prejuízo: quem abre o arquivo é a URL assinada, não a extensão.
+ */
+function extensaoDoComprovante(arquivo: File): string {
+  if (arquivo.type === 'application/pdf') return 'pdf'
+  const bruta = arquivo.name.split('.').pop()?.toLowerCase() ?? ''
+  return /^[a-z0-9]{2,5}$/.test(bruta) ? bruta : 'jpg'
+}
 
 /**
  * Registra uma venda que não nasceu na loja chamando `registrar_venda_manual()`.
@@ -479,6 +550,20 @@ const CANAIS_MANUAIS = new Set(['manual', 'whatsapp', 'instagram'])
  * detalha: duas RPCs são duas transações — meia venda gravada é pior que venda
  * nenhuma — e `parcelar_lancamento` cancela o lançamento original, o que
  * deixaria a venda com um lançamento nascido e morto no mesmo segundo.
+ *
+ * DESCONTO: os itens continuam valendo o preço de TABELA; o abatimento é um
+ * número à parte, e o pedido vale o líquido. É a convenção que a loja já
+ * pratica sem nunca ter registrado — 535 dos 663 pedidos pagos da Yampi valem
+ * menos que a soma dos seus itens, e em nenhum deles dá para dizer quanto foi
+ * desconto. `pedidos.desconto` existe para as telas conseguirem explicar essa
+ * diferença; nenhuma view financeira o lê.
+ *
+ * CAIXA: quando a conta escolhida tem extrato lido, o banco NÃO cria
+ * lançamento — a linha do extrato é que responde pelo dinheiro. Sem isso o
+ * mesmo PIX entraria duas vezes no saldo da conta, porque `contas_saldo` soma
+ * extrato E lançamento de origem própria. `p_transacao_id` é opcional e existe
+ * para o casamento com a linha do extrato ser por igualdade exata, em vez de
+ * por valor e data aproximados.
  */
 export async function registrarVendaManual(dados: {
   itens: ItemVendaManual[]
@@ -497,6 +582,18 @@ export async function registrarVendaManual(dados: {
   jaRecebidas: number
   /** AAAA-MM-DD em que essas K entraram; null quando K = 0. */
   recebidasEm: string | null
+  /**
+   * O abatimento em REAIS, já convertido pela tela.
+   *
+   * Sempre em reais, nunca em porcentagem: "10% de R$ 189,90" arredonda
+   * diferente aqui e no plpgsql, e a divergência apareceria como centavos
+   * teimosos na conciliação. Quem faz a conta é a tela, uma vez só.
+   */
+  desconto: number
+  /** Id do pagamento no gateway, para casar com a linha do extrato. */
+  transacaoId?: string | null
+  /** PDF ou imagem do pagamento. Vai para o PEDIDO, não para o lançamento. */
+  comprovante?: File | null
 }): Promise<RespostaVendaManual> {
   if (!supabaseConfigurado()) {
     return { ok: false, erro: 'O Supabase precisa estar configurado para registrar vendas.' }
@@ -514,9 +611,24 @@ export async function registrarVendaManual(dados: {
     if (item.preco < 0) return { ok: false, erro: `O preço do ${posicao} não pode ser negativo.` }
   }
 
-  const total = itens.reduce((a, i) => a + i.preco * i.quantidade, 0)
-  if (!(total > 0)) {
+  const bruto = itens.reduce((a, i) => a + i.preco * i.quantidade, 0)
+  if (!(bruto > 0)) {
     return { ok: false, erro: 'O total da venda precisa ser maior que zero — informe os preços.' }
+  }
+
+  // As duas frases são as MESMAS do plpgsql da migração irmã. O operador não
+  // pode ver duas redações para a mesma recusa dependendo de qual trava pegou
+  // primeiro — aqui e lá é a mesma regra, dita igual.
+  // Arredondado aqui também, e não só na tela: a coluna é numeric(12,2) e
+  // arredondaria sozinha na gravação, mas a validação abaixo compara o desconto
+  // com o subtotal — partir de um número com três casas faria a recusa falar de
+  // um valor diferente do que seria gravado.
+  const desconto = Math.round((Number(dados.desconto) || 0) * 100) / 100
+  if (desconto < 0) return { ok: false, erro: 'O desconto não pode ser negativo.' }
+  // Cobre também o líquido: com desconto < bruto, bruto − desconto é sempre
+  // maior que zero. Venda de graça é brinde, e brinde não passa por aqui.
+  if (desconto >= bruto) {
+    return { ok: false, erro: 'O desconto não pode ser igual ou maior que o total dos itens.' }
   }
 
   if (!dados.contaId) return { ok: false, erro: 'Escolha a conta que recebeu o dinheiro.' }
@@ -569,7 +681,35 @@ export async function registrarVendaManual(dados: {
     return { ok: false, erro: 'O e-mail do cliente não parece válido. Corrija ou deixe em branco.' }
   }
 
-  const { data, error } = await supabaseServer().rpc('registrar_venda_manual', {
+  // Arquivo de zero byte é o campo em branco, não um comprovante vazio.
+  const comprovante =
+    dados.comprovante instanceof File && dados.comprovante.size > 0 ? dados.comprovante : null
+  if (comprovante) {
+    const recusa = recusaDoComprovante(comprovante)
+    if (recusa) return { ok: false, erro: recusa }
+  }
+
+  const sb = supabaseServer()
+
+  // O arquivo sobe ANTES da venda, num rascunho: o pedido ainda não tem id
+  // para dar nome à pasta, e um upload que falha aqui não deixou nada gravado
+  // — o operador corrige o arquivo e reenvia o formulário inteiro. Na ordem
+  // inversa, a venda existiria e o comprovante não, que é exatamente o estado
+  // que este bloco existe para evitar.
+  let rascunho: string | null = null
+  const extensao = comprovante ? extensaoDoComprovante(comprovante) : ''
+  if (comprovante) {
+    rascunho = `rascunhos/${crypto.randomUUID()}.${extensao}`
+    const { error: erroUpload } = await sb.storage
+      .from(BUCKET_FINANCEIRO)
+      .upload(rascunho, comprovante, { contentType: comprovante.type, upsert: false })
+    if (erroUpload) {
+      console.error('[venda manual] upload do comprovante falhou:', erroUpload)
+      return { ok: false, erro: 'Não foi possível guardar o comprovante. Tente de novo.' }
+    }
+  }
+
+  const { data, error } = await sb.rpc('registrar_venda_manual', {
     p_itens: itens.map((i) => ({
       base_id: i.baseId,
       ml: i.ml,
@@ -592,9 +732,14 @@ export async function registrarVendaManual(dados: {
     p_ja_recebidas: jaRecebidas,
     // Nulo com K = 0 — o banco só usa a data para carimbar parcela recebida.
     p_recebidas_em: jaRecebidas > 0 ? dados.recebidasEm : null,
+    p_desconto: desconto,
+    p_transacao_id: (dados.transacaoId ?? '').trim().slice(0, 120) || null,
   })
   if (error) {
     console.error('[venda manual] registrar_venda_manual falhou:', error)
+    // A venda não nasceu, então o rascunho não tem dono — some com ele agora,
+    // senão o bucket junta um arquivo órfão a cada tentativa recusada.
+    if (rascunho) await sb.storage.from(BUCKET_FINANCEIRO).remove([rascunho])
     return { ok: false, erro: error.message || error.details || 'Falha ao registrar a venda.' }
   }
 
@@ -602,16 +747,56 @@ export async function registrarVendaManual(dados: {
   const linha = (Array.isArray(data) ? data[0] : data) as
     | {
         pedido_id: string
+        bruto: number | string
+        desconto: number | string
         total: number | string
         total_recebido: number | string
         ml_baixado: number | string
         parcelas:
           | { numero: number; vence_em: string; valor: number | string; recebida_em: string | null }[]
           | null
+        caixa_no_extrato: boolean
       }
     | undefined
   if (!linha) {
     return { ok: false, erro: 'A venda foi enviada, mas o banco não devolveu o pedido criado.' }
+  }
+
+  const pedidoId = String(linha.pedido_id)
+
+  // Agora o pedido tem id, e o comprovante sai do rascunho para a pasta dele.
+  // Daqui em diante a venda JÁ EXISTE: se o move ou o update falhar, a
+  // resposta continua sendo `ok: true` com um aviso — dizer "falhou" mandaria
+  // o operador registrar a mesma venda de novo, e aí seriam duas.
+  let comprovanteAnexado = false
+  let avisoComprovante: string | undefined
+  if (rascunho) {
+    const destino = `${pedidoId}/comprovante.${extensao}`
+    const { error: erroMove } = await sb.storage
+      .from(BUCKET_FINANCEIRO)
+      .move(rascunho, destino)
+    if (erroMove) {
+      console.error(`[venda manual] mover comprovante de ${pedidoId} falhou:`, erroMove)
+    } else {
+      const { error: erroUpdate } = await sb
+        .from('pedidos')
+        .update({ comprovante: destino })
+        .eq('id', pedidoId)
+      if (erroUpdate) {
+        console.error(`[venda manual] gravar comprovante de ${pedidoId} falhou:`, erroUpdate)
+      } else comprovanteAnexado = true
+    }
+    if (!comprovanteAnexado) {
+      // O arquivo que ficou pelo caminho sai do bucket agora. Nenhuma tela
+      // lista o Storage, então o que não tem linha apontando para ele vira
+      // lixo invisível — e a reanexação sobe o arquivo de novo, no lugar certo.
+      await sb.storage
+        .from(BUCKET_FINANCEIRO)
+        .remove([erroMove ? rascunho : destino])
+        .catch(() => {})
+      avisoComprovante =
+        'A venda foi registrada, mas o comprovante não subiu. Use o botão abaixo para anexar agora — a venda já está lançada e NÃO precisa ser refeita.'
+    }
   }
 
   // Uma venda manual mexe em quatro telas ao mesmo tempo: o pedido nasce em
@@ -628,10 +813,19 @@ export async function registrarVendaManual(dados: {
 
   return {
     ok: true,
-    pedidoId: String(linha.pedido_id),
+    pedidoId,
+    // Tudo lido do que o banco devolveu, inclusive o bruto e o desconto que
+    // esta função acabou de validar: quem arredonda é o `numeric` do Postgres,
+    // e repetir a conta aqui é como a tela de sucesso passaria a mostrar um
+    // centavo que o pedido não tem.
+    bruto: Number(linha.bruto),
+    desconto: Number(linha.desconto),
     total: Number(linha.total),
     recebido: Number(linha.total_recebido),
     mlBaixado: Number(linha.ml_baixado),
+    caixaNoExtrato: Boolean(linha.caixa_no_extrato),
+    comprovanteAnexado,
+    avisoComprovante,
     // O cronograma vem do banco, não da prévia: a tela de sucesso mostra o que
     // foi GRAVADO, do mesmo jeito que já fazia com o total e os ml baixados.
     // Inclusive quais parcelas nasceram baixadas — é o que separa "já entrou"
@@ -643,6 +837,85 @@ export async function registrarVendaManual(dados: {
       recebidaEm: p.recebida_em ? String(p.recebida_em) : null,
     })),
   }
+}
+
+/**
+ * Anexa (ou substitui) o comprovante de um pedido que já existe.
+ *
+ * Existe por dois motivos. O primeiro é honestidade: é este botão que torna
+ * verdadeira a frase "a venda foi registrada, mas o comprovante não ficou
+ * guardado" — sem ele, aquele aviso seria um beco sem saída e o operador
+ * acabaria registrando a venda duas vezes para conseguir anexar o arquivo. O
+ * segundo é o dia a dia: o PIX que só cai depois, o comprovante que o cliente
+ * manda no WhatsApp no dia seguinte, a foto que saiu tremida.
+ *
+ * `upsert: true` porque reenviar é CORRIGIR: o caminho é o mesmo, o arquivo
+ * novo substitui o velho e o bucket não junta `comprovante-2`, `-3`, `-4` de
+ * quem tentou três vezes. É o contrário da regra das devoluções, onde a prova
+ * antiga fica — lá o histórico sustenta a decisão da triagem; aqui o
+ * comprovante é só o recibo de um pagamento que não mudou.
+ */
+export async function anexarComprovanteDoPedido(
+  pedidoId: string,
+  arquivo: File,
+): Promise<{ ok: true } | { ok: false; erro: string }> {
+  if (!supabaseConfigurado()) {
+    return { ok: false, erro: 'O Supabase precisa estar configurado para anexar comprovantes.' }
+  }
+
+  const id = pedidoId.trim()
+  if (!id) return { ok: false, erro: 'Pedido não informado.' }
+  if (!(arquivo instanceof File) || arquivo.size === 0) {
+    return { ok: false, erro: 'Escolha o arquivo do comprovante.' }
+  }
+  const recusa = recusaDoComprovante(arquivo)
+  if (recusa) return { ok: false, erro: recusa }
+
+  const sb = supabaseServer()
+
+  // Confere o pedido ANTES de subir: sem isso, um id errado criaria uma pasta
+  // no bucket para um pedido que não existe — arquivo que ninguém encontra e
+  // ninguém apaga, porque nenhuma tela sabe que ele está lá.
+  const { data: pedido, error: erroBusca } = await sb
+    .from('pedidos')
+    .select('id, comprovante')
+    .eq('id', id)
+    .maybeSingle()
+  if (erroBusca) {
+    console.error('[comprovante] leitura do pedido falhou:', erroBusca)
+    return { ok: false, erro: mensagemDe(erroBusca) }
+  }
+  if (!pedido) return { ok: false, erro: `Pedido ${id} não encontrado.` }
+
+  const caminho = `${id}/comprovante.${extensaoDoComprovante(arquivo)}`
+  const { error: erroUpload } = await sb.storage
+    .from(BUCKET_FINANCEIRO)
+    .upload(caminho, arquivo, { contentType: arquivo.type, upsert: true })
+  if (erroUpload) {
+    console.error(`[comprovante] upload de ${id} falhou:`, erroUpload)
+    return { ok: false, erro: 'Não foi possível guardar o comprovante. Tente de novo.' }
+  }
+
+  const { error: erroUpdate } = await sb
+    .from('pedidos')
+    .update({ comprovante: caminho })
+    .eq('id', id)
+  if (erroUpdate) {
+    console.error(`[comprovante] gravar caminho de ${id} falhou:`, erroUpdate)
+    return { ok: false, erro: mensagemDe(erroUpdate) }
+  }
+
+  // Trocar de PDF para foto muda a extensão, e o `upsert` só cobre o caminho
+  // novo: sem isso o arquivo antigo ficaria no bucket para sempre, sem
+  // nenhuma linha apontando para ele.
+  const anterior = (pedido as { comprovante?: string | null }).comprovante
+  if (anterior && anterior !== caminho) {
+    await sb.storage.from(BUCKET_FINANCEIRO).remove([anterior])
+  }
+
+  revalidatePath('/pedidos')
+  for (const rota of ROTAS_DO_FINANCEIRO) revalidatePath(rota)
+  return { ok: true }
 }
 
 export type RespostaRastreio =

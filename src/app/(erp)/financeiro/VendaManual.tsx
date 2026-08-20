@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from 'react'
 
 import { Modal } from '@/components/erp/Modal'
 import { BotaoSecundario, Rotulo, TituloSecao } from '@/components/erp/primitivos'
@@ -19,6 +19,7 @@ import {
 } from '@/domain'
 
 import {
+  anexarComprovanteDoPedido,
   registrarVendaManual,
   type ItemVendaManual,
   type ParcelaGravada,
@@ -44,6 +45,18 @@ import { carregarCatalogoDaVendaManual } from './acoes-da-venda-manual'
  * O diálogo mostra o total ao vivo antes do clique e, depois dele, o que
  * REALMENTE aconteceu: o número do pedido, o valor lançado e os ml que saíram
  * — nenhum desses três é estimado aqui, todos vêm do retorno do banco.
+ *
+ * DESCONTO: o preço de cada item continua sendo o de TABELA, e o abatimento é
+ * um campo único no bloco do total. O operador pensa em "10%", mas quem faz a
+ * conta é esta tela: só REAIS viajam para a action.
+ *
+ * CONTA COM EXTRATO: quando a conta escolhida tem extrato lido pelo ERP (hoje
+ * só o Mercado Pago), a venda NÃO lança caixa — a linha do extrato é que
+ * responde pelo dinheiro. Sem essa regra o mesmo PIX era contado duas vezes no
+ * saldo, porque `contas_saldo` soma extrato E lançamento de origem própria. O
+ * formulário troca de pergunta nesse caso: some o parcelamento (o banco recusa)
+ * e aparece o id do pagamento, que faz o casamento com a linha do extrato ser
+ * por igualdade exata. Estoque e insumos baixam na hora do mesmo jeito.
  */
 
 export interface BaseParaVenda {
@@ -60,6 +73,13 @@ export interface ContaParaVenda {
   id: string
   nome: string
   principal: boolean
+  /**
+   * O ERP lê o extrato desta conta (`contas_saldo.linhas_extrato > 0`).
+   *
+   * Muda a pergunta do formulário inteiro: nessas contas o caixa é do extrato,
+   * então a venda não lança nada e não pode ser parcelada.
+   */
+  temExtrato: boolean
 }
 
 const CANAIS = [
@@ -396,19 +416,54 @@ function DialogoVendaManual({
   // junto. Guardar `hoje()` aqui deixaria a venda de ontem com recebimento
   // hoje, sem ninguém perceber.
   const [recebidasEm, setRecebidasEm] = useState('')
+  // O dono pensa em "dei 10%", não em "abati R$ 18,99" — por isso o alternador
+  // nasce em porcentagem. O que viaja para a action é sempre reais.
+  const [descontoTexto, setDescontoTexto] = useState('')
+  const [descontoEmPct, setDescontoEmPct] = useState(true)
+  const [transacaoId, setTransacaoId] = useState('')
+  const [comprovante, setComprovante] = useState<File | null>(null)
+  /** O erro que voltou foi do arquivo — dá para registrar a venda sem ele. */
+  const [falhouOArquivo, setFalhouOArquivo] = useState(false)
+  const entradaComprovante = useRef<HTMLInputElement>(null)
+  const entradaReanexo = useRef<HTMLInputElement>(null)
   const [erro, setErro] = useState<string | null>(null)
+  const [erroAnexo, setErroAnexo] = useState<string | null>(null)
   const [feito, setFeito] = useState<{
     pedidoId: string
+    bruto: number
+    desconto: number
     total: number
     recebido: number
     mlBaixado: number
     parcelas: ParcelaGravada[]
+    caixaNoExtrato: boolean
+    comprovanteAnexado: boolean
+    avisoComprovante?: string
   } | null>(null)
   const [pendente, iniciar] = useTransition()
+  const [anexando, anexar] = useTransition()
 
   const porId = useMemo(() => new Map(bases.map((b) => [b.id, b])), [bases])
 
-  const total = linhas.reduce((a, l) => a + parseNum(l.preco) * parseNum(l.quantidade), 0)
+  const contaEscolhida = contas.find((c) => c.id === contaId)
+  // Conta cujo extrato o ERP lê: o caixa dela não é escriturado por esta venda.
+  const caixaPeloExtrato = contaEscolhida?.temExtrato ?? false
+
+  const totalBruto = linhas.reduce((a, l) => a + parseNum(l.preco) * parseNum(l.quantidade), 0)
+  /**
+   * O percentual vira REAIS aqui, e só reais viajam para a action.
+   *
+   * Se a tela aplicasse os 10% sobre o total e o banco os aplicasse sobre outra
+   * base, os dois arredondariam para centavos diferentes e a promessa que
+   * `planejarParcelamento` faz — a soma das parcelas fecha com o total — cairia
+   * na primeira venda com desconto quebrado. A conta é feita uma vez só, aqui.
+   */
+  const desconto =
+    Math.round(
+      (descontoEmPct ? (totalBruto * parseNum(descontoTexto)) / 100 : parseNum(descontoTexto)) *
+        100,
+    ) / 100
+  const totalLiquido = Math.round((totalBruto - desconto) * 100) / 100
   // Inteiro, como a quantidade que a ação envia: "2,5 decants" não existe.
   const unidades = linhas.reduce(
     (a, l) => a + (l.baseId ? Math.round(parseNum(l.quantidade)) : 0),
@@ -466,9 +521,14 @@ function DialogoVendaManual({
   // Nada é grampeado no `onChange`: apagar o campo para digitar "12" faria o
   // cursor pular para "1" no meio da digitação. Fora da faixa, quem explica é a
   // prévia, com a mesma frase que o banco levantaria.
-  const n = Math.max(1, Math.round(parseNum(parcelas)) || 1)
+  //
+  // Na conta com extrato os dois números são NEUTRALIZADOS, e não só
+  // escondidos: quem digitou "3 parcelas" e depois trocou a conta para o
+  // Mercado Pago mandaria 3 ao banco, que recusa o parcelamento nessa conta com
+  // uma exceção de plpgsql. Aqui a venda é uma só, e o caixa dela é o extrato.
+  const n = caixaPeloExtrato ? 1 : Math.max(1, Math.round(parseNum(parcelas)) || 1)
   const dias = Math.round(parseNum(intervalo)) || INTERVALO_PADRAO_DIAS
-  const k = Math.max(0, Math.round(parseNum(jaRecebidas)))
+  const k = caixaPeloExtrato ? 1 : Math.max(0, Math.round(parseNum(jaRecebidas)))
   const reparte = n >= MIN_PARCELAS
   // A data do recebimento acompanha a da venda até alguém escolher outra.
   const recebidoEm = recebidasEm || ocorridoEm
@@ -486,9 +546,9 @@ function DialogoVendaManual({
    */
   const plano = useMemo(
     () =>
-      reparte && total > 0
+      reparte && totalLiquido > 0
         ? planejarParcelamento({
-            valor: total,
+            valor: totalLiquido,
             parcelas: n,
             primeiroVencimento: k > 0 ? recebidoEm : ocorridoEm,
             intervaloDias: dias,
@@ -496,7 +556,7 @@ function DialogoVendaManual({
             recebidasEm: recebidoEm,
           })
         : null,
-    [reparte, total, n, dias, k, recebidoEm, ocorridoEm],
+    [reparte, totalLiquido, n, dias, k, recebidoEm, ocorridoEm],
   )
 
   /**
@@ -508,20 +568,51 @@ function DialogoVendaManual({
    * a venda vale, e o erro só apareceria como exceção de plpgsql.
    */
   const impedimento =
-    k > n
-      ? reparte
-        ? `Não dá para marcar ${k} parcelas já recebidas em uma venda de ${n}.`
-        : 'Sem parcelamento a venda foi recebida (1) ou não foi (0) — não existe uma terceira.'
-      : plano && !plano.ok
-        ? plano.erro
-        : null
+    // Desconto negativo primeiro de todos: `parseNum('-5')` devolve -5, e sem
+    // esta linha a prévia mostrava "Total dos itens R$ 200,00" com "Entra no
+    // caixa R$ 205,00" logo abaixo — afirmando que entra mais dinheiro do que a
+    // venda vale. A action e o plpgsql recusam, mas a prévia é a única coisa
+    // que alguém lê antes de clicar.
+    desconto < 0
+      ? 'O desconto não pode ser negativo.'
+      : // Com o desconto engolindo o total não sobra venda para parcelar, e o
+        // erro de parcela falaria de um número que não existe. A frase é a
+        // MESMA da action e a do plpgsql — a mesma regra, dita igual.
+        totalBruto > 0 && desconto >= totalBruto
+      ? 'O desconto não pode ser igual ou maior que o total dos itens.'
+      : k > n
+        ? reparte
+          ? `Não dá para marcar ${k} parcelas já recebidas em uma venda de ${n}.`
+          : 'Sem parcelamento a venda foi recebida (1) ou não foi (0) — não existe uma terceira.'
+        : plano && !plano.ok
+          ? plano.erro
+          : null
 
   // Quanto entra na conta AGORA e quanto fica devendo. Com uma parcela só, é
-  // tudo ou nada; repartida, é a soma das que nasceram baixadas.
-  const entraNoCaixa = reparte ? (plano?.ok ? plano.recebido : 0) : k >= 1 ? total : 0
-  const ficaAReceber = Math.round((total - entraNoCaixa) * 100) / 100
+  // tudo ou nada; repartida, é a soma das que nasceram baixadas. Na conta com
+  // extrato os dois são zero porque esta venda não escritura caixa nenhum —
+  // não porque a cliente ficou devendo.
+  const entraNoCaixa = caixaPeloExtrato
+    ? 0
+    : reparte
+      ? plano?.ok
+        ? plano.recebido
+        : 0
+      : k >= 1
+        ? totalLiquido
+        : 0
+  const ficaAReceber = caixaPeloExtrato
+    ? 0
+    : Math.round((totalLiquido - entraNoCaixa) * 100) / 100
 
-  const confirmar = () =>
+  /**
+   * `semArquivo` reenvia a MESMA venda sem o comprovante.
+   *
+   * O upload acontece antes da gravação, então um arquivo que o Storage recusa
+   * segura a venda inteira. A venda é o que não pode esperar — a cliente está
+   * no balcão — e o comprovante pode ser anexado depois pela ficha do pedido.
+   */
+  const confirmar = (semArquivo = false) =>
     iniciar(async () => {
       // A recusa já está escrita na tela; repeti-la aqui evita a viagem ao
       // servidor só para voltar com a mesma frase.
@@ -530,6 +621,7 @@ function DialogoVendaManual({
         return
       }
       setErro(null)
+      setFalhouOArquivo(false)
       const itens: ItemVendaManual[] = linhas
         .filter((l) => l.baseId)
         .map((l) => {
@@ -558,21 +650,53 @@ function DialogoVendaManual({
         // Sem nada recebido não há baixa para datar, e o banco recusa data de
         // recebimento sem recebimento.
         recebidasEm: k > 0 ? recebidoEm : null,
+        desconto,
+        // O id só faz sentido onde ele casa com alguma coisa: fora da conta com
+        // extrato não há linha para casar, e um id digitado antes de trocar a
+        // conta viraria uma transação de gateway que nunca existiu.
+        transacaoId: caixaPeloExtrato ? transacaoId.trim() || null : null,
+        comprovante: semArquivo ? null : comprovante,
       })
       if (!r.ok) {
         setErro(r.erro)
+        // O arquivo é a única parte desta venda que o operador pode abrir mão
+        // para seguir em frente, e ele só sabe disso se a tela oferecer.
+        setFalhouOArquivo(Boolean(comprovante) && !semArquivo && r.erro.includes('comprovante'))
         return
       }
       setFeito({
         pedidoId: r.pedidoId,
+        bruto: r.bruto,
+        desconto: r.desconto,
         total: r.total,
         recebido: r.recebido,
         mlBaixado: r.mlBaixado,
         parcelas: r.parcelas,
+        caixaNoExtrato: r.caixaNoExtrato,
+        comprovanteAnexado: r.comprovanteAnexado,
+        avisoComprovante: r.avisoComprovante,
       })
     })
 
-  const contaEscolhida = contas.find((c) => c.id === contaId)
+  /**
+   * A saída do aviso "a venda gravou, o comprovante não".
+   *
+   * Sem este botão o aviso seria um beco: a venda já existe, e a única forma de
+   * anexar o arquivo seria registrar a mesma venda de novo — baixando o estoque
+   * duas vezes. Aqui o arquivo vai para o pedido que ACABOU de nascer.
+   */
+  const reenviarComprovante = (pedidoId: string, arquivo: File) =>
+    anexar(async () => {
+      setErroAnexo(null)
+      const r = await anexarComprovanteDoPedido(pedidoId, arquivo)
+      if (!r.ok) {
+        setErroAnexo(r.erro)
+        return
+      }
+      setFeito((f) =>
+        f ? { ...f, comprovanteAnexado: true, avisoComprovante: undefined } : f,
+      )
+    })
 
   if (feito) {
     return (
@@ -583,38 +707,126 @@ function DialogoVendaManual({
             className="font-sans"
             style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--color-secundario)', textWrap: 'pretty' }}
           >
-            {feito.parcelas.length > 0
-              ? 'Tudo abaixo é o que o banco gravou nesta transação — o estoque já saiu, e o dinheiro entra parcela a parcela.'
-              : 'Tudo abaixo é o que o banco gravou nesta transação — estoque e caixa já estão em dia.'}
+            {feito.caixaNoExtrato
+              ? 'Tudo abaixo é o que o banco gravou nesta transação — o estoque já saiu, e o caixa desta conta entra pelo extrato, sem lançamento manual.'
+              : feito.parcelas.length > 0
+                ? 'Tudo abaixo é o que o banco gravou nesta transação — o estoque já saiu, e o dinheiro entra parcela a parcela.'
+                : 'Tudo abaixo é o que o banco gravou nesta transação — estoque e caixa já estão em dia.'}
           </span>
           <Previa
             linhas={[
               { rotulo: 'Pedido criado', valor: feito.pedidoId },
-              // Os dois números vêm do banco, não de dedução da tela: quanto já
-              // está na conta e quanto ainda vai entrar. Verde só no que entrou
-              // de verdade — pintar de "ok" um total que ficou a receber seria a
-              // tela dizendo que o caixa subiu quando ele não subiu.
-              {
-                rotulo: `Entrou em ${contaEscolhida?.nome ?? 'caixa'}`,
-                valor: brl(feito.recebido),
-                tom: feito.recebido > 0 ? COR.ok : COR.ouro,
-              },
-              ...(feito.total - feito.recebido > 0.004
+              // Os três números do desconto só aparecem quando houve desconto:
+              // no caso comum uma linha de total basta, e a diferença entre
+              // bruto e líquido é justamente o que precisa de explicação.
+              ...(feito.desconto > 0.004
+                ? [
+                    { rotulo: 'Total dos itens', valor: brl(feito.bruto) },
+                    {
+                      rotulo: '(−) Desconto',
+                      valor: `− ${brl(feito.desconto)}`,
+                      tom: COR.atencao,
+                    },
+                    { rotulo: 'Total da venda', valor: brl(feito.total), tom: COR.ok },
+                  ]
+                : []),
+              // Zero recebido aqui não é venda fiada: é o caixa que não passa
+              // por lançamento nenhum. Dizer "Entrou R$ 0,00" mandaria o dono
+              // procurar em Lançamentos uma linha que, de propósito, não existe.
+              ...(feito.caixaNoExtrato
                 ? [
                     {
-                      rotulo: `A receber em ${contaEscolhida?.nome ?? 'caixa'}`,
-                      valor: brl(feito.total - feito.recebido),
+                      rotulo: `Caixa pelo extrato · ${contaEscolhida?.nome ?? 'conta'}`,
+                      valor: brl(feito.total),
                       tom: COR.ouro,
                     },
                   ]
-                : []),
+                : [
+                    // Os dois números vêm do banco, não de dedução da tela: quanto já
+                    // está na conta e quanto ainda vai entrar. Verde só no que entrou
+                    // de verdade — pintar de "ok" um total que ficou a receber seria a
+                    // tela dizendo que o caixa subiu quando ele não subiu.
+                    {
+                      rotulo: `Entrou em ${contaEscolhida?.nome ?? 'caixa'}`,
+                      valor: brl(feito.recebido),
+                      tom: feito.recebido > 0 ? COR.ok : COR.ouro,
+                    },
+                    ...(feito.total - feito.recebido > 0.004
+                      ? [
+                          {
+                            rotulo: `A receber em ${contaEscolhida?.nome ?? 'caixa'}`,
+                            valor: brl(feito.total - feito.recebido),
+                            tom: COR.ouro,
+                          },
+                        ]
+                      : []),
+                  ]),
               {
                 rotulo: 'Saiu do estoque de base',
                 valor: volume(feito.mlBaixado),
                 tom: COR.ouro,
               },
+              ...(feito.comprovanteAnexado
+                ? [{ rotulo: 'Comprovante', valor: 'Anexado', tom: COR.ok }]
+                : []),
             ]}
           />
+
+          {feito.caixaNoExtrato && (
+            <span
+              className="font-sans"
+              style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+            >
+              {`O ERP lê o extrato de ${contaEscolhida?.nome ?? 'desta conta'} uma vez por hora: o crédito aparece no caixa na próxima leitura. Nenhum lançamento foi criado aqui — se fosse, o mesmo dinheiro contaria duas vezes no saldo da conta.`}
+            </span>
+          )}
+
+          {/* O aviso com o botão ao lado, e não só o aviso: a venda existe, o
+              arquivo não, e sem uma saída daqui a única forma de anexar seria
+              registrar a mesma venda outra vez. */}
+          {feito.avisoComprovante && !feito.comprovanteAnexado && (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                padding: '11px 13px',
+                border: `1px solid ${COR.atencao}`,
+                borderRadius: 10,
+                background: 'rgba(217,140,63,.08)',
+              }}
+            >
+              <span
+                className="font-sans"
+                style={{ fontSize: 11.5, lineHeight: 1.5, color: COR.atencao, textWrap: 'pretty' }}
+              >
+                {feito.avisoComprovante}
+              </span>
+              <input
+                ref={entradaReanexo}
+                type="file"
+                accept="application/pdf,image/*"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const arquivo = e.target.files?.[0]
+                  // Limpa o campo para o mesmo arquivo poder ser escolhido de
+                  // novo depois de uma falha de rede.
+                  e.target.value = ''
+                  if (arquivo) reenviarComprovante(feito.pedidoId, arquivo)
+                }}
+              />
+              <div>
+                <BotaoSecundario
+                  altura={32}
+                  onClick={() => entradaReanexo.current?.click()}
+                  desabilitado={anexando}
+                >
+                  {anexando ? 'Enviando…' : 'Anexar comprovante agora'}
+                </BotaoSecundario>
+              </div>
+              <Erro texto={erroAnexo} />
+            </div>
+          )}
 
           {feito.parcelas.length > 0 && (
             <>
@@ -650,6 +862,12 @@ function DialogoVendaManual({
                 setClienteNome('')
                 setClienteEmail('')
                 setObservacao('')
+                // O desconto e o arquivo são desta venda, não da próxima: herdar
+                // "10%" na venda seguinte é abater sem ninguém ter pedido.
+                setDescontoTexto('')
+                setTransacaoId('')
+                setComprovante(null)
+                setErroAnexo(null)
               }}
             >
               Registrar outra
@@ -689,11 +907,13 @@ function DialogoVendaManual({
           {/* O estoque não depende do dinheiro: o perfume sai do frasco hoje,
               tenha o cliente pagado tudo, metade ou nada. Só a segunda metade
               da frase muda com o parcelamento. */}
-          {reparte
-            ? 'A venda que não passou pelo checkout. Ao confirmar, o ERP baixa o perfume e os insumos do estoque e grava as parcelas — tudo na mesma transação. O estoque sai hoje; o caixa entra no que já foi recebido e nos vencimentos das demais.'
-            : k >= 1
-              ? 'A venda que não passou pelo checkout. Ao confirmar, o ERP baixa o perfume e os insumos do estoque e lança o valor recebido no caixa — as duas coisas juntas, na mesma transação.'
-              : 'A venda que não passou pelo checkout. Ao confirmar, o ERP baixa o perfume e os insumos do estoque e deixa o valor a receber — o estoque sai hoje, o caixa espera o cliente pagar.'}
+          {caixaPeloExtrato
+            ? 'A venda que não passou pelo checkout. Ao confirmar, o ERP baixa o perfume e os insumos do estoque na hora — e só isso: o caixa desta conta vem do extrato, que o ERP lê sozinho.'
+            : reparte
+              ? 'A venda que não passou pelo checkout. Ao confirmar, o ERP baixa o perfume e os insumos do estoque e grava as parcelas — tudo na mesma transação. O estoque sai hoje; o caixa entra no que já foi recebido e nos vencimentos das demais.'
+              : k >= 1
+                ? 'A venda que não passou pelo checkout. Ao confirmar, o ERP baixa o perfume e os insumos do estoque e lança o valor recebido no caixa — as duas coisas juntas, na mesma transação.'
+                : 'A venda que não passou pelo checkout. Ao confirmar, o ERP baixa o perfume e os insumos do estoque e deixa o valor a receber — o estoque sai hoje, o caixa espera o cliente pagar.'}
         </span>
 
         {bases.length === 0 ? (
@@ -854,11 +1074,19 @@ function DialogoVendaManual({
             </select>
           </Campo>
           <Campo
-            rotulo={entraNoCaixa > 0 ? 'Conta que recebeu' : 'Conta que vai receber'}
+            rotulo={
+              caixaPeloExtrato
+                ? 'Conta que recebeu'
+                : entraNoCaixa > 0
+                  ? 'Conta que recebeu'
+                  : 'Conta que vai receber'
+            }
             dica={
-              ficaAReceber > 0
-                ? 'O que já entrou é baixado aqui; o resto é baixado nesta mesma conta a cada vencimento'
-                : 'O valor entra aqui já baixado, como recebido'
+              caixaPeloExtrato
+                ? 'O ERP lê o extrato desta conta — o caixa dela entra por ele, não por este formulário'
+                : ficaAReceber > 0
+                  ? 'O que já entrou é baixado aqui; o resto é baixado nesta mesma conta a cada vencimento'
+                  : 'O valor entra aqui já baixado, como recebido'
             }
           >
             <select value={contaId} onChange={(e) => setContaId(e.target.value)} style={CAMPO}>
@@ -883,7 +1111,58 @@ function DialogoVendaManual({
           Os dois campos que continuam podendo ficar indisponíveis dizem o
           motivo embaixo, porque combinação impossível explicada é diferente de
           campo que não responde ao clique.
+
+          Na conta com extrato as quatro perguntas SOMEM em vez de ficarem
+          apagadas: nenhuma delas tem resposta lá — não há lançamento para
+          parcelar nem baixa para datar, e o banco recusa o parcelamento com uma
+          exceção. Campo desabilitado convida a insistir; o que entra no lugar é
+          a pergunta que aquela conta realmente faz.
         */}
+        {caixaPeloExtrato ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, minmax(0,1fr))',
+                gap: 12,
+              }}
+            >
+              <Campo
+                rotulo={`ID do pagamento (${contaEscolhida?.nome ?? 'gateway'})`}
+                dica="Opcional. É o número do pagamento no painel do gateway — com ele, a linha do extrato casa com esta venda por igualdade exata, e não por valor e dia parecidos."
+              >
+                <input
+                  value={transacaoId}
+                  onChange={(e) => setTransacaoId(e.target.value)}
+                  placeholder="Ex.: 1234567890"
+                  aria-label="Id do pagamento no gateway"
+                  style={CAMPO}
+                />
+              </Campo>
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 5,
+                padding: '11px 13px',
+                border: '1px solid rgba(108,140,176,.28)',
+                borderRadius: 10,
+                background: 'rgba(108,140,176,.07)',
+              }}
+            >
+              <span className="font-sans" style={{ fontSize: 11.5, fontWeight: 600, color: COR.info }}>
+                {`O caixa de ${contaEscolhida?.nome ?? 'desta conta'} vem do extrato`}
+              </span>
+              <span
+                className="font-sans"
+                style={{ fontSize: 10.5, lineHeight: 1.55, color: 'var(--color-secundario)', textWrap: 'pretty' }}
+              >
+                {`O ERP lê o extrato desta conta uma vez por hora, então o PIX desta venda vira linha de caixa sozinho na próxima leitura — não é preciso lançar nada. Se o ERP lançasse aqui também, o mesmo dinheiro contaria duas vezes no saldo. O estoque e os insumos baixam AGORA, do mesmo jeito: é a confirmação desta tela que tira o perfume do frasco. Com o id do pagamento acima, o casamento com a linha do extrato é exato.`}
+              </span>
+            </div>
+          </div>
+        ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 12 }}>
           <Campo
             rotulo="Parcelas"
@@ -948,6 +1227,7 @@ function DialogoVendaManual({
             />
           </Campo>
         </div>
+        )}
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 12 }}>
           <Campo rotulo="Cliente (opcional)" dica="Fica no pedido mesmo sem cadastro">
@@ -980,6 +1260,143 @@ function DialogoVendaManual({
             style={CAMPO}
           />
         </Campo>
+
+        {/*
+          O desconto mora AQUI, junto do total, e nunca na linha do item: o
+          preço do item é o de tabela, o mesmo que o Produto 360º e a margem por
+          item leem. Abater direto no preço apagaria de que preço a venda
+          partiu — e é justamente essa diferença que os 535 pedidos da Yampi não
+          conseguem mais explicar.
+        */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 12 }}>
+          <Campo
+            rotulo="Desconto (opcional)"
+            dica={
+              desconto > 0
+                ? `Abate ${brl(desconto)} do total dos itens — os preços de cada linha continuam sendo os de tabela`
+                : 'Em % ou em reais, sobre o total dos itens. Os preços das linhas não mudam.'
+            }
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+              <input
+                value={descontoTexto}
+                onChange={(e) => setDescontoTexto(e.target.value)}
+                inputMode="decimal"
+                aria-label={descontoEmPct ? 'Desconto em porcentagem' : 'Desconto em reais'}
+                placeholder={descontoEmPct ? '0' : '0,00'}
+                style={{ ...CAMPO, flex: 1, minWidth: 0 }}
+              />
+              <div
+                role="group"
+                aria-label="Unidade do desconto"
+                style={{
+                  display: 'flex',
+                  flex: 'none',
+                  height: 38,
+                  border: '1px solid rgba(255,255,255,.11)',
+                  borderRadius: 9,
+                  overflow: 'hidden',
+                }}
+              >
+                {(['%', 'R$'] as const).map((unidade) => {
+                  const ativo = (unidade === '%') === descontoEmPct
+                  return (
+                    <button
+                      key={unidade}
+                      type="button"
+                      onClick={() => setDescontoEmPct(unidade === '%')}
+                      aria-pressed={ativo}
+                      className="font-sans hover:brightness-125"
+                      style={{
+                        width: 40,
+                        border: 0,
+                        background: ativo ? 'rgba(239,209,140,.14)' : 'transparent',
+                        color: ativo ? COR.ouro : 'var(--color-terciario)',
+                        fontWeight: 600,
+                        fontSize: 11,
+                        lineHeight: 1,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {unidade}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </Campo>
+
+          {/*
+            Fora do `Campo` de propósito: ele é um `<label>`, e um `<label>` em
+            volta de um input de arquivo escondido abre o seletor a cada clique
+            em qualquer parte do rótulo — inclusive no botão, que abriria duas
+            vezes. O desenho é o mesmo, montado à mão.
+          */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7, minWidth: 0 }}>
+            <Rotulo>Comprovante (opcional)</Rotulo>
+            <input
+              ref={entradaComprovante}
+              type="file"
+              accept="application/pdf,image/*"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                setComprovante(e.target.files?.[0] ?? null)
+                // Zera o campo para o mesmo arquivo poder ser reescolhido
+                // depois de trocar por engano.
+                e.target.value = ''
+              }}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0, height: 38 }}>
+              <BotaoSecundario altura={38} onClick={() => entradaComprovante.current?.click()}>
+                {comprovante ? 'Trocar arquivo' : 'Anexar PDF ou imagem'}
+              </BotaoSecundario>
+              {comprovante && (
+                <span
+                  className="font-sans"
+                  style={{
+                    minWidth: 0,
+                    fontSize: 11,
+                    color: 'var(--color-secundario)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {comprovante.name}
+                </span>
+              )}
+              {comprovante && (
+                // "Remover" existe porque o upload é porteiro da venda: se o
+                // Storage recusar o arquivo, sem esta saída o operador ficaria
+                // preso — não conseguiria soltar o arquivo nem registrar a
+                // venda, com a cliente esperando no balcão.
+                <button
+                  type="button"
+                  onClick={() => setComprovante(null)}
+                  className="font-sans hover:text-ouro"
+                  style={{
+                    border: 0,
+                    background: 'transparent',
+                    padding: 0,
+                    fontSize: 10.5,
+                    color: 'var(--color-terciario)',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  Remover
+                </button>
+              )}
+            </div>
+            <span
+              className="font-sans"
+              style={{ fontSize: 10, lineHeight: 1.45, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+            >
+              PDF ou imagem do pagamento. Fica guardado no PEDIDO, não no lançamento: a venda
+              parcelada tem vários lançamentos e o comprovante é um só.
+            </span>
+          </div>
+        </div>
 
         {faltas.length > 0 && (
           <div
@@ -1018,34 +1435,66 @@ function DialogoVendaManual({
           </div>
         )}
 
-        {total > 0 && (
+        {totalBruto > 0 && (
           <Previa
             linhas={[
-              {
-                rotulo: `Total de ${plural(unidades, 'decant', 'decants')}`,
-                valor: brl(total),
-                tom: COR.ok,
-              },
+              // Três linhas SÓ quando há desconto: no caso comum uma linha de
+              // total é a tela inteira que o operador precisa ler, e o que a
+              // venda com desconto exige é justamente ver de onde saiu a
+              // diferença entre a soma dos itens e o que o cliente pagou.
+              ...(desconto > 0
+                ? [
+                    { rotulo: 'Total dos itens', valor: brl(totalBruto) },
+                    {
+                      rotulo: descontoEmPct
+                        ? `(−) Desconto (${descontoTexto.trim().replace('.', ',')}%)`
+                        : '(−) Desconto',
+                      valor: `− ${brl(desconto)}`,
+                      tom: COR.atencao,
+                    },
+                    { rotulo: 'Total da venda', valor: brl(totalLiquido), tom: COR.ok },
+                  ]
+                : [
+                    {
+                      rotulo: `Total de ${plural(unidades, 'decant', 'decants')}`,
+                      valor: brl(totalBruto),
+                      tom: COR.ok,
+                    },
+                  ]),
               { rotulo: 'Base a sair do estoque', valor: volume(mlNominal) },
               // Os dois números que separam esta venda da de sempre: o que sobe
               // no caixa AGORA e o que fica devendo. Zero em qualquer um dos
               // dois é informação, não ausência dela — por isso a linha aparece
               // mesmo valendo R$ 0,00.
-              {
-                // Sem nada recebido não há data de entrada para mostrar: pôr a
-                // data da venda ao lado de R$ 0,00 sugeriria que algo entrou.
-                rotulo:
-                  entraNoCaixa > 0
-                    ? `Entra no caixa em ${diaPt(recebidoEm)} · ${contaEscolhida?.nome ?? '—'}`
-                    : `Entra no caixa agora · ${contaEscolhida?.nome ?? '—'}`,
-                valor: brl(entraNoCaixa),
-                tom: entraNoCaixa > 0 ? COR.ok : COR.ouro,
-              },
-              {
-                rotulo: 'Fica a receber',
-                valor: brl(ficaAReceber),
-                tom: ficaAReceber > 0 ? COR.ouro : COR.ok,
-              },
+              //
+              // Na conta com extrato as duas somem: "Entra no caixa R$ 0,00" ao
+              // lado de "Fica a receber R$ 0,00" seria a tela dizendo que o
+              // dinheiro sumiu. O que ela diz é por onde ele chega.
+              ...(caixaPeloExtrato
+                ? [
+                    {
+                      rotulo: `Caixa pelo extrato · ${contaEscolhida?.nome ?? '—'}`,
+                      valor: brl(totalLiquido),
+                      tom: COR.ouro,
+                    },
+                  ]
+                : [
+                    {
+                      // Sem nada recebido não há data de entrada para mostrar: pôr a
+                      // data da venda ao lado de R$ 0,00 sugeriria que algo entrou.
+                      rotulo:
+                        entraNoCaixa > 0
+                          ? `Entra no caixa em ${diaPt(recebidoEm)} · ${contaEscolhida?.nome ?? '—'}`
+                          : `Entra no caixa agora · ${contaEscolhida?.nome ?? '—'}`,
+                      valor: brl(entraNoCaixa),
+                      tom: entraNoCaixa > 0 ? COR.ok : COR.ouro,
+                    },
+                    {
+                      rotulo: 'Fica a receber',
+                      valor: brl(ficaAReceber),
+                      tom: ficaAReceber > 0 ? COR.ouro : COR.ok,
+                    },
+                  ]),
             ]}
           />
         )}
@@ -1055,7 +1504,7 @@ function DialogoVendaManual({
             {/* O rótulo diz o total, não "N× de X": quando a divisão não fecha
                 redonda não existe um "de X" único, e a lista abaixo é que tem
                 o valor de cada parcela. */}
-            <Rotulo>{`Cronograma — ${plano.parcelas.length}× · ${brl(total)}`}</Rotulo>
+            <Rotulo>{`Cronograma — ${plano.parcelas.length}× · ${brl(totalLiquido)}`}</Rotulo>
             <Previa
               rolagem
               linhas={[
@@ -1071,7 +1520,7 @@ function DialogoVendaManual({
                 // A soma fecha exata com o total da venda — está aqui para ser
                 // conferida a olho, porque é justamente o que uma divisão que
                 // não fecha redonda faz o operador duvidar.
-                { rotulo: 'Soma das parcelas', valor: brl(total), tom: COR.ok },
+                { rotulo: 'Soma das parcelas', valor: brl(totalLiquido), tom: COR.ok },
               ]}
             />
             {plano.parcelas[0].valor !== plano.parcelas[plano.parcelas.length - 1].valor && (
@@ -1108,9 +1557,19 @@ function DialogoVendaManual({
         </span>
 
         <Erro texto={erro} />
+        {falhouOArquivo && (
+          // A saída para o arquivo que o Storage não aceitou. Sem ela o
+          // operador teria de fechar o modal e perder os itens, o desconto e o
+          // cliente que digitou, por causa de um anexo.
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <BotaoSecundario altura={34} onClick={() => confirmar(true)} desabilitado={pendente}>
+              Registrar sem o comprovante
+            </BotaoSecundario>
+          </div>
+        )}
         <Rodape
           rotulo={reparte ? `Registrar venda em ${n}×` : 'Registrar venda'}
-          aoConfirmar={confirmar}
+          aoConfirmar={() => confirmar()}
           aoCancelar={aoFechar}
           pendente={pendente}
         />

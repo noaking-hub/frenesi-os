@@ -331,6 +331,20 @@ export interface LinhaDaTela {
   situacao: SituacaoLancamento
 }
 
+/**
+ * A conta como esta tela precisa dela: a de sempre, mais `temExtrato`.
+ *
+ * `temExtrato` é "o ERP LÊ o extrato desta conta", e é o que decide se a venda
+ * manual pode criar lançamento de caixa nela. Onde o extrato existe, ele é o
+ * dono do caixa: `contas_saldo` soma as linhas do extrato MAIS os lançamentos
+ * de origem própria, então gravar o lançamento junto contaria o mesmo Pix duas
+ * vezes. Hoje só o Mercado Pago tem extrato lido (379 linhas); Inter, Sicoob,
+ * Rafael PF e dinheiro seguem como sempre foram.
+ */
+export interface ContaDaTela extends ContaFinanceira {
+  temExtrato: boolean
+}
+
 export interface TelaDeLancamentos {
   linhas: LinhaDaTela[]
   /**
@@ -346,7 +360,7 @@ export interface TelaDeLancamentos {
   resumo: ResumoDoFiltro
   panorama: PanoramaDosLancamentos
   categorias: CategoriaGerencial[]
-  contas: ContaFinanceira[]
+  contas: ContaDaTela[]
   centrosCusto: { id: string; nome: string }[]
   hoje: string
   saldoProjetado: number
@@ -460,7 +474,7 @@ export async function carregarTelaDeLancamentos(
   // PostgREST por render (19 com o detalhe aberto): duas páginas de 1.000
   // lançamentos, o catálogo inteiro de perfumes para alimentar um modal
   // fechado, e `lerContas` duas vezes na mesma renderização.
-  const [lista, panorama, categorias, contas, centros] = await Promise.all([
+  const [lista, panorama, categorias, contas, centros, extratos] = await Promise.all([
     sb.rpc('lancamentos_da_tela', {
       p_hoje: hoje,
       // Janela vazia vira `null`, não string vazia: `ocorrido_em >= ''` é erro
@@ -483,10 +497,19 @@ export async function carregarTelaDeLancamentos(
     lerCategorias(),
     lerContas(),
     lerCentrosCusto(),
+    // Quantas linhas de extrato cada conta tem. Vem de `contas_saldo` porque é
+    // lá que o número existe — `saldos_das_contas`, que `lerContas` usa, não o
+    // expõe.
+    sb.from('contas_saldo').select('id, linhas_extrato, saldo_informado'),
   ])
 
   if (lista.error) throw lista.error
   if (panorama.error) throw panorama.error
+  // Esta leitura falhar não pode virar "nenhuma conta tem extrato": seria
+  // liberar a venda manual a criar lançamento de caixa no Mercado Pago, e o
+  // mesmo Pix entraria duas vezes no saldo — uma pelo extrato, outra pelo
+  // lançamento. Falha aqui derruba a tela, que é o desfecho barato.
+  if (extratos.error) throw extratos.error
 
   const l = lista.data as {
     linhas: LinhaDaRpc[]
@@ -513,6 +536,26 @@ export async function carregarTelaDeLancamentos(
   const totalAPagar = Number(t.total_a_pagar ?? 0)
   const totalAReceber = Number(t.total_a_receber ?? 0)
   const disponivel = contas.reduce((a, c) => a + c.saldoDisponivel, 0)
+
+  // `saldo_informado` entra na conta porque `contas_saldo` tem DOIS ramos, e é
+  // ele que decide qual vale. Sem saldo informado, o saldo é extrato mais
+  // lançamentos de origem própria — é aí que o mesmo Pix contaria duas vezes.
+  // COM saldo informado, o saldo é a foto mais os lançamentos posteriores a
+  // ela, e as linhas do extrato não entram: nessa conta a venda manual PRECISA
+  // criar o lançamento, ou o dinheiro dela sumiria do saldo. A mesma regra está
+  // escrita no plpgsql de `registrar_venda_manual`; se as duas divergirem, a
+  // tela oferece um caminho que o banco recusa.
+  const comExtrato = new Set(
+    (
+      (extratos.data ?? []) as {
+        id: string
+        linhas_extrato: number | string | null
+        saldo_informado: number | string | null
+      }[]
+    )
+      .filter((c) => Number(c.linhas_extrato ?? 0) > 0 && c.saldo_informado === null)
+      .map((c) => c.id),
+  )
 
   return {
     linhas: (l.linhas ?? []).map(traduzirLinhaDaTela),
@@ -564,7 +607,7 @@ export async function carregarTelaDeLancamentos(
       })),
     },
     categorias,
-    contas,
+    contas: contas.map((c) => ({ ...c, temExtrato: comExtrato.has(c.id) })),
     centrosCusto: centros,
     hoje,
     saldoProjetado: Math.round((disponivel + totalAReceber - totalAPagar) * 100) / 100,
@@ -722,7 +765,20 @@ export interface PedidoDoLancamento {
   gateway: string | null
   valor: number
   frete: number
+  /**
+   * O abatimento que explica a diferença entre `valor` e a soma dos itens —
+   * `pedido_itens.preco` é sempre preço de tabela. Sem ele, esta tela mostrava
+   * R$ 216,00 em itens logo abaixo de "Valor do pedido: R$ 194,40" e deixava a
+   * conta em aberto na cara de quem estava conferindo dinheiro.
+   */
+  desconto: number
   cashback: number
+  /**
+   * Comprovante da venda em URL ASSINADA de uma hora, nunca o caminho no
+   * bucket privado. Ele mora no PEDIDO: uma venda parcelada tem vários
+   * lançamentos e um arquivo só, então todas as parcelas mostram o mesmo link.
+   */
+  comprovanteUrl: string | null
   compradoEm: string
   cliente: string | null
   itens: { descricao: string; variante: string | null; quantidade: number; preco: number }[]
@@ -880,7 +936,8 @@ export async function explicarLancamento(id: string): Promise<ExplicacaoLancamen
       ? sb
           .from('pedidos')
           .select(
-            'id, canal, situacao, pagamento, gateway, valor, frete, cashback, comprado_em, ' +
+            'id, canal, situacao, pagamento, gateway, valor, frete, desconto, comprovante, ' +
+              'cashback, comprado_em, ' +
               // Só o NOME do cliente: e-mail, CPF e telefone não têm o que fazer
               // num painel que explica de onde veio um lançamento.
               'clientes(nome), pedido_itens(descricao, variante_titulo, quantidade, preco)',
@@ -939,6 +996,9 @@ export async function explicarLancamento(id: string): Promise<ExplicacaoLancamen
     gateway: string | null
     valor: number | string
     frete: number | string
+    desconto: number | string | null
+    /** Caminho dentro do bucket privado `financeiro` — nunca vai cru para a tela. */
+    comprovante: string | null
     cashback: number | string
     comprado_em: string
     clientes: { nome: string } | null
@@ -949,6 +1009,17 @@ export async function explicarLancamento(id: string): Promise<ExplicacaoLancamen
       preco: number | string
     }[] | null
   } | null
+
+  // O comprovante mora em bucket PRIVADO: a tela recebe uma URL assinada de uma
+  // hora, nunca o caminho — caminho cru numa tela é endereço que não expira. É
+  // a mesma receita do comprovante de reembolso das devoluções.
+  let comprovanteUrl: string | null = null
+  if (p?.comprovante) {
+    const { data: assinada } = await sb.storage
+      .from('financeiro')
+      .createSignedUrl(p.comprovante, 60 * 60)
+    comprovanteUrl = assinada?.signedUrl ?? null
+  }
 
   return {
     id: l.id,
@@ -1009,7 +1080,9 @@ export async function explicarLancamento(id: string): Promise<ExplicacaoLancamen
           gateway: p.gateway,
           valor: Number(p.valor),
           frete: Number(p.frete ?? 0),
+          desconto: Number(p.desconto ?? 0),
           cashback: Number(p.cashback ?? 0),
+          comprovanteUrl,
           compradoEm: p.comprado_em,
           cliente: p.clientes?.nome ?? null,
           itens: (p.pedido_itens ?? []).map((i) => ({

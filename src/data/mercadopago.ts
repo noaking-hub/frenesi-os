@@ -21,7 +21,7 @@ import type {
 } from '@/domain'
 
 import { mensagemDe } from './shopify'
-import { supabaseConfigurado, supabaseServer } from './supabase'
+import { supabaseConfigurado, supabaseServer, tudoDe } from './supabase'
 
 /**
  * Mercado Pago: ler o que de fato foi pago e o que de fato foi creditado.
@@ -356,6 +356,61 @@ export interface ResultadoSincroniaMp {
 }
 
 /**
+ * Pedidos que já escrituraram o próprio caixa — e que por isso não podem
+ * disputar um crédito do extrato.
+ *
+ * A venda manual lançada numa conta SEM extrato lido (Inter, Sicoob, Rafael PF,
+ * dinheiro) nasce com lançamento próprio, de origem 'Venda manual'. O dinheiro
+ * dela não está em extrato nenhum e nunca vai estar. Só que ela continuava no
+ * índice de casamento, e o casamento por palpite — mesmo valor dentro de três
+ * dias — aceita assim que sobra um único candidato: numa loja de decants dois
+ * pedidos de R$ 216,00 na mesma semana são o normal, e o crédito da venda da
+ * loja acabava carimbado na venda de balcão que já estava paga em espécie. O
+ * pedido certo ficava órfão na fila de "entrada sem pedido" e o errado
+ * aparecia recebido duas vezes.
+ *
+ * A venda manual registrada numa conta COM extrato NÃO entra nesta lista, de
+ * propósito: ela não cria lançamento porque o extrato é o dono daquele caixa, e
+ * ela está justamente esperando o crédito chegar para conciliar.
+ *
+ * O critério é TER LANÇAMENTO, e não a origem nem o estado de cancelamento —
+ * cuidado com a vontade de "endurecer" isto depois. Quem parcela uma venda
+ * manual pelo botão Parcelar CANCELA o lançamento original e cria filhas com
+ * origem 'Parcelamento': filtrar por `origem = 'Venda manual'` ou por
+ * `cancelado_em is null` devolveria esse pedido ao índice e traria de volta o
+ * incidente descrito acima. Depois desta mudança as duas frases passaram a ser
+ * a mesma: "tem lançamento" é exatamente "não espera crédito de extrato".
+ */
+export async function pedidosComCaixaProprio(): Promise<Set<string>> {
+  const sb = supabaseServer()
+  // Só os pedidos de venda manual precisam ser perguntados: os da loja nunca
+  // têm lançamento próprio, e varrer os 1.268 lançamentos para descobrir isso
+  // seria pagar caro por uma resposta que já se sabe.
+  const manuais = await tudoDe<{ id: string }>('pedidos', (de, ate) =>
+    sb
+      .from('pedidos')
+      .select('id')
+      .in('canal', ['manual', 'whatsapp', 'instagram'])
+      .range(de, ate),
+  )
+  if (manuais.length === 0) return new Set<string>()
+
+  const ids = new Set<string>()
+  const todos = manuais.map((p) => p.id)
+  for (let i = 0; i < todos.length; i += 200) {
+    const { data, error } = await sb
+      .from('lancamentos')
+      .select('pedido_id')
+      .in('pedido_id', todos.slice(i, i + 200))
+    if (error) throw error
+    for (const l of (data ?? []) as { pedido_id: string | null }[]) {
+      if (l.pedido_id) ids.add(l.pedido_id)
+    }
+  }
+  return ids
+}
+
+/**
  * Lê o período no Mercado Pago e escreve o que aprendeu:
  *  - uma linha de extrato por crédito e por estorno;
  *  - o repasse de cada pedido conciliado com o líquido real.
@@ -402,11 +457,14 @@ export async function sincronizarMercadoPago(de: string, ate: string): Promise<R
     .limit(5000)
   if (erroPedidos) throw new ErroMercadoPago(mensagemDe(erroPedidos))
 
-  const pedidos: PedidoParaCasar[] = (pedidosCrus ?? []).map((p) => ({
-    id: p.id as string,
-    valor: Number(p.valor),
-    data: String(p.comprado_em).slice(0, 10),
-  }))
+  const caixaProprio = await pedidosComCaixaProprio()
+  const pedidos: PedidoParaCasar[] = (pedidosCrus ?? [])
+    .filter((p) => !caixaProprio.has(p.id as string))
+    .map((p) => ({
+      id: p.id as string,
+      valor: Number(p.valor),
+      data: String(p.comprado_em).slice(0, 10),
+    }))
   const indice = indexarPedidos(pedidos)
 
   const paraConciliar: Record<string, unknown>[] = []
