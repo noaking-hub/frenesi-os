@@ -275,6 +275,10 @@ export function NovoCompromisso({
     : (disponiveis[0]?.id ?? '')
   const escolhida = disponiveis.find((c) => c.id === categoriaValida)
   const contaEscolhida = contas.find((c) => c.id === contaId)
+  // Num cartão o cronograma é a FATURA, e `gravar_parcelas_do_lancamento`
+  // ignora o intervalo em dias quando a conta tem `dia_vencimento`. Oferecer o
+  // campo aqui seria oferecer um número que o banco não vai usar.
+  const diaFatura = contaEscolhida?.diaVencimento ?? null
 
   const salvar = () =>
     iniciar(async () => {
@@ -515,7 +519,9 @@ export function NovoCompromisso({
                   rotulo="Parcelas"
                   dica={
                     nParcelas > 1
-                      ? `O valor acima se repete nas ${nParcelas} parcelas, uma por mês`
+                      ? diaFatura
+                        ? `O valor acima se repete nas ${nParcelas} parcelas, uma por fatura`
+                        : `O valor acima se repete nas ${nParcelas} parcelas, uma por mês`
                       : '1 não divide. De 2 a 48, o valor acima vira o de CADA parcela'
                   }
                 >
@@ -527,17 +533,29 @@ export function NovoCompromisso({
                     style={CAMPO}
                   />
                 </Campo>
-                {nParcelas > 1 && (
-                  <Campo rotulo="Intervalo (dias)" dica="30 é o mês do cartão">
-                    <input
-                      inputMode="numeric"
-                      value={intervalo}
-                      onChange={(e) => setIntervalo(e.target.value)}
-                      placeholder="30"
-                      style={CAMPO}
-                    />
-                  </Campo>
-                )}
+                {nParcelas > 1 &&
+                  (diaFatura ? (
+                    // Sem campo para editar: no cartão o banco anda por mês de
+                    // calendário ancorado no dia da fatura, e um "30" digitado
+                    // aqui não seria usado. Trinta dias corridos não é um mês —
+                    // é o que fazia a 4ª parcela de uma compra em 20/08 cair em
+                    // 18/11, dois dias antes da fatura que vai cobrá-la.
+                    <Campo rotulo="Vencimentos" dica="No cartão, uma parcela por fatura">
+                      <div style={{ ...CAMPO, color: 'var(--color-terciario)', cursor: 'default' }}>
+                        Todo dia {diaFatura}
+                      </div>
+                    </Campo>
+                  ) : (
+                    <Campo rotulo="Intervalo (dias)" dica="30 é o mês do boleto">
+                      <input
+                        inputMode="numeric"
+                        value={intervalo}
+                        onChange={(e) => setIntervalo(e.target.value)}
+                        placeholder="30"
+                        style={CAMPO}
+                      />
+                    </Campo>
+                  ))}
               </div>
             )}
 
@@ -614,7 +632,11 @@ export function NovoCompromisso({
                 className="font-sans"
                 style={{ fontSize: 10, lineHeight: 1.45, color: 'var(--color-terciario)', textWrap: 'pretty' }}
               >
-                {`A compra inteira (${brl(parseNum(valor) * nParcelas)}) entra no resultado de ${competencia} — é quando ela aconteceu. O que se reparte é o CAIXA: ${nParcelas} parcelas de ${brl(parseNum(valor))}, uma a cada ${Math.round(parseNum(intervalo)) || INTERVALO_PADRAO_DIAS} dias, cada uma aparecendo sozinha na projeção.`}
+                {`A compra inteira (${brl(parseNum(valor) * nParcelas)}) entra no resultado de ${competencia} — é quando ela aconteceu. O que se reparte é o CAIXA: ${nParcelas} parcelas de ${brl(parseNum(valor))}, ${
+                  diaFatura
+                    ? `uma por fatura, todo dia ${diaFatura}`
+                    : `uma a cada ${Math.round(parseNum(intervalo)) || INTERVALO_PADRAO_DIAS} dias`
+                }, cada uma aparecendo sozinha na projeção.`}
               </span>
             )}
 

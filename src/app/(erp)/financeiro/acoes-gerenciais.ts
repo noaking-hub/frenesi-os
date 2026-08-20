@@ -6,7 +6,13 @@ import { operadorAtual } from '@/data/operador'
 import { sessaoAtual } from '@/data/sessao'
 import { supabaseConfigurado, supabaseServer } from '@/data/supabase'
 import type { NaturezaGerencial } from '@/domain'
-import { INTERVALO_PADRAO_DIAS, MAX_PARCELAS, MIN_PARCELAS, hojeEmSaoPaulo } from '@/domain'
+import {
+  INTERVALO_PADRAO_DIAS,
+  MAX_PARCELAS,
+  MIN_PARCELAS,
+  dividirEmParcelas,
+  hojeEmSaoPaulo,
+} from '@/domain'
 
 import { ROTAS_DO_FINANCEIRO } from './rotas'
 
@@ -146,18 +152,34 @@ export async function criarCompromisso(
   const id = `LC-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
   const hoje = hojeEmSaoPaulo()
   const venceEm = dados.venceEm || `${dados.competencia}-01`
-  // Parcelado nasce EM ABERTO, mesmo com "já pago" marcado: quem paga na hora
-  // é a primeira parcela, não a compra inteira — e é `parcelar_lancamento`,
-  // logo abaixo, que sabe marcar só ela. Gravar o total como baixado aqui e
-  // repartir depois faria o caixa registrar a compra inteira saindo hoje.
+  // Parcelado NUNCA nasce baixado pelo total, mesmo com "já pago" marcado:
+  // quem pagou hoje foi a primeira parcela, não a compra inteira. Gravar o
+  // total como baixado aqui faria o caixa registrar R$ 324,50 saindo hoje
+  // quando saíram R$ 64,90.
+  //
+  // Mas nasce baixado PELA PRIMEIRA PARCELA, e é isso que consertou o
+  // "Criar compromisso" recusado. Antes o pai nascia com `recebido = 0` e
+  // `baixado_em` nulo, e aí `parcelar_lancamento` batia no próprio invariante:
+  // pai SEM data de baixa tem teto ZERO, então nenhuma filha pode nascer
+  // recebida — a trava existe porque dar data a dinheiro sem data faz o saldo
+  // subir do nada. Só que aqui não havia dinheiro sem data: o operador acabou
+  // de declarar, no mesmo formulário, que a 1ª parcela saiu. Faltava escrever
+  // isso no pai antes de repartir.
+  //
+  // O valor vem de `dividirEmParcelas`, a MESMA aritmética que o Postgres usa
+  // (trunc por centavos, resto na primeira). Recalcular por fora com outra
+  // fórmula deixaria o teto um centavo abaixo do que a filha 1 recebe, e a
+  // recusa voltaria — agora por um centavo, que é pior de diagnosticar.
+  const primeiraParcela = dividirEmParcelas(dados.valor, parcelas)[0]
   const baixadoNoAto = parcelas > 1 ? false : dados.baixadoNoAto
+  const parceladoJaPago = parcelas > 1 && dados.baixadoNoAto
 
   const { error } = await sb.from('lancamentos').insert({
     id,
     ocorrido_em: hoje,
     competencia: `${dados.competencia}-01`,
     vence_em: venceEm,
-    baixado_em: baixadoNoAto ? venceEm : null,
+    baixado_em: baixadoNoAto || parceladoJaPago ? venceEm : null,
     descricao: dados.descricao.trim(),
     favorecido: dados.favorecido.trim() || null,
     categoria: (cat as { nome: string }).nome,
@@ -166,7 +188,10 @@ export async function criarCompromisso(
     conta_id: dados.contaId,
     tipo: dados.tipo,
     valor: dados.valor,
-    recebido: baixadoNoAto ? dados.valor : 0,
+    // Parcelado com a 1ª paga entra como baixa PARCIAL do total: R$ 64,90 de
+    // uma compra de R$ 324,50. É a leitura honesta do fato, e é ela que dá a
+    // `parcelar_lancamento` o teto exato para marcar a filha 1 como recebida.
+    recebido: baixadoNoAto ? dados.valor : parceladoJaPago ? primeiraParcela : 0,
     recorrente: Boolean(dados.recorrencia),
     recorrencia: dados.recorrencia,
     recorrencia_ate: dados.recorrenciaAte,
