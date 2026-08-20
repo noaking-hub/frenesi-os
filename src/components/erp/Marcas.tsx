@@ -27,10 +27,25 @@ const STORAGE = 'https://gxzvlknlxwihooqgctst.supabase.co/storage/v1/object/publ
 
 const MARCAS: { chave: RegExp; marca: Marca }[] = [
   { chave: /mercado\s*pago/i, marca: { cor: '#009EE3', texto: 'MP', logo: `${STORAGE}/mercado-pago.jpeg` } },
+  // Intermedium ANTES de Inter: Intermedium é o nome antigo do próprio Banco
+  // Inter, então usa a mesma logomarca. Sem esta linha o `\binter\b` não
+  // casaria ("intermedium" não tem fronteira depois de "inter") e o cartão
+  // cairia no tile neutro.
+  { chave: /intermedium/i, marca: { cor: '#FF7A00', texto: 'in', logo: `${STORAGE}/inter.jpeg` } },
   { chave: /\binter\b/i, marca: { cor: '#FF7A00', texto: 'in', logo: `${STORAGE}/inter.jpeg` } },
   { chave: /sicoob/i, marca: { cor: '#00AE9D', texto: 'Si', logo: `${STORAGE}/sicoob.jpeg` } },
+  // Infinite ANTES de Bradesco: é o cartão preto, e o vermelho da conta
+  // corrente do Rafael (PF) não pode ser o mesmo tile do cartão.
+  { chave: /infinite/i, marca: { cor: '#0A0A0A', texto: 'B', textoCor: '#D9C08A', logo: `${STORAGE}/bradesco-infinite.png` } },
   { chave: /bradesco/i, marca: { cor: '#CC092F', texto: 'B', logo: `${STORAGE}/bradesco.png` } },
   { chave: /nubank|nu\s*pagamentos/i, marca: { cor: '#820AD1', texto: 'Nu' } },
+  // Digio, Next e Méliuz ainda não têm arte no bucket — o monograma vai na
+  // cor da marca, que é o que distingue o cartão de relance. Basta subir
+  // `digio.png`, `next.png` e `meliuz.png` para `marcas` e acrescentar o
+  // campo `logo`; o tile troca sozinho.
+  { chave: /digio/i, marca: { cor: '#0F2AC8', texto: 'di' } },
+  { chave: /m[eé]liuz/i, marca: { cor: '#E5005A', texto: 'M' } },
+  { chave: /\bnext\b/i, marca: { cor: '#00FF5F', texto: 'n', textoCor: '#0B0B0B' } },
   { chave: /ita[uú]/i, marca: { cor: '#EC7000', texto: 'It' } },
   { chave: /santander/i, marca: { cor: '#EC0000', texto: 'S' } },
   { chave: /banco do brasil/i, marca: { cor: '#F9DD16', texto: 'BB', textoCor: '#1A3C8C' } },
@@ -92,44 +107,23 @@ export function TileMarca({
     )
   }
 
-  // A logomarca real vem do Storage; o monograma segue por baixo como
-  // fallback, aparecendo se a imagem falhar ou enquanto ela carrega.
-  if (m.logo) {
-    return (
-      <span
-        aria-hidden
-        style={{
-          width: tamanho,
-          height: tamanho,
-          flex: 'none',
-          borderRadius: raio,
-          overflow: 'hidden',
-          display: 'grid',
-          placeItems: 'center',
-          background: m.cor,
-          boxShadow: 'inset 0 -1px 0 rgba(0,0,0,.18)',
-        }}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={m.logo}
-          alt=""
-          width={tamanho}
-          height={tamanho}
-          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-        />
-      </span>
-    )
-  }
-
+  // O monograma é desenhado SEMPRE, e a logomarca do Storage entra por cima.
+  // Antes eram dois ramos exclusivos, e o comentário mentia: com `logo`
+  // apontando para um arquivo que ainda não subiu, sobrava um quadrado da cor
+  // do banco e nada dentro. Empilhado, a arte que falta simplesmente não cobre
+  // o monograma — e no dia em que o arquivo aparece no bucket, o tile troca
+  // sozinho, sem tocar em código. `alt=""` é o que faz o navegador esconder a
+  // imagem quebrada em vez de desenhar o ícone de foto rasgada.
   return (
     <span
       aria-hidden
       style={{
+        position: 'relative',
         width: tamanho,
         height: tamanho,
         flex: 'none',
         borderRadius: raio,
+        overflow: 'hidden',
         display: 'grid',
         placeItems: 'center',
         background: m.cor,
@@ -147,6 +141,23 @@ export function TileMarca({
           {m.texto}
         </span>
       )}
+      {m.logo ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={m.logo}
+          alt=""
+          width={tamanho}
+          height={tamanho}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            display: 'block',
+          }}
+        />
+      ) : null}
     </span>
   )
 }
