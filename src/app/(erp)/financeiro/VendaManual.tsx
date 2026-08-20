@@ -437,6 +437,7 @@ function DialogoVendaManual({
     mlBaixado: number
     parcelas: ParcelaGravada[]
     caixaNoExtrato: boolean
+    creditoVinculado: boolean
     comprovanteAnexado: boolean
     avisoComprovante?: string
   } | null>(null)
@@ -673,6 +674,7 @@ function DialogoVendaManual({
         mlBaixado: r.mlBaixado,
         parcelas: r.parcelas,
         caixaNoExtrato: r.caixaNoExtrato,
+        creditoVinculado: r.creditoVinculado,
         comprovanteAnexado: r.comprovanteAnexado,
         avisoComprovante: r.avisoComprovante,
       })
@@ -777,7 +779,9 @@ function DialogoVendaManual({
               className="font-sans"
               style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--color-terciario)', textWrap: 'pretty' }}
             >
-              {`O ERP lê o extrato de ${contaEscolhida?.nome ?? 'desta conta'} uma vez por hora: o crédito aparece no caixa na próxima leitura. Nenhum lançamento foi criado aqui — se fosse, o mesmo dinheiro contaria duas vezes no saldo da conta.`}
+              {feito.creditoVinculado
+                ? `O crédito deste pagamento JÁ estava no extrato de ${contaEscolhida?.nome ?? 'da conta'} e acabou de ser vinculado a esta venda — não é preciso esperar nada. Nenhum lançamento foi criado aqui: se fosse, o mesmo dinheiro contaria duas vezes no saldo.`
+                : `O ERP lê o extrato de ${contaEscolhida?.nome ?? 'desta conta'} uma vez por hora: o crédito aparece no caixa na próxima leitura. Nenhum lançamento foi criado aqui — se fosse, o mesmo dinheiro contaria duas vezes no saldo da conta.`}
             </span>
           )}
 

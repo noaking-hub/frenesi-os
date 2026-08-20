@@ -454,6 +454,16 @@ export type RespostaVendaManual =
        * uma entrada que, de propósito, não existe.
        */
       caixaNoExtrato: boolean
+      /**
+       * O crédito daquele id de pagamento JÁ estava no extrato quando a venda
+       * foi registrada, e passou a pertencer a ela agora.
+       *
+       * Acontece toda vez que o dinheiro cai antes de alguém lançar a venda —
+       * que é o normal, porque o PIX chega em segundos e a venda é digitada
+       * quando dá. A tela precisa dizer isso, senão o operador fica esperando
+       * um crédito que já entrou.
+       */
+      creditoVinculado: boolean
       comprovanteAnexado: boolean
       /**
        * Preenchido só quando a venda gravou e o comprovante não — o único
@@ -764,6 +774,36 @@ export async function registrarVendaManual(dados: {
 
   const pedidoId = String(linha.pedido_id)
 
+  /*
+   * O id do pagamento reivindica o crédito que já está no extrato.
+   *
+   * A ordem real dos fatos é quase sempre esta: o PIX cai, a rotina do gateway
+   * lê o extrato, e só depois alguém senta para lançar a venda. Nesse intervalo
+   * o casamento por valor+data pode ter dado aquele dinheiro a outro pedido de
+   * mesmo valor — foi o que aconteceu em 20/08, quando o crédito da Ana Wilma
+   * (R$ 306,00) virou "Venda YP-1510190952075742" uma hora antes de a venda
+   * dela existir. `ligar_extrato_por_transacao` não conserta isso sozinha: ela
+   * só olha linha sem dono.
+   *
+   * Igualdade exata vence palpite, mesmo chegando depois. Falhar aqui não pode
+   * derrubar a venda, que já está gravada — o vínculo é recuperável a qualquer
+   * momento, a venda não.
+   */
+  let creditoVinculado = false
+  const documento = (dados.transacaoId ?? '').trim()
+  if (documento) {
+    try {
+      const { data: reivindicadas, error: erroVinculo } = await sb.rpc(
+        'reivindicar_credito_do_pagamento',
+        { p_pedido_id: pedidoId, p_documento: documento },
+      )
+      if (erroVinculo) throw erroVinculo
+      creditoVinculado = Number(reivindicadas ?? 0) > 0
+    } catch (e) {
+      console.error(`[venda manual] vincular o crédito de ${pedidoId} falhou:`, e)
+    }
+  }
+
   // Agora o pedido tem id, e o comprovante sai do rascunho para a pasta dele.
   // Daqui em diante a venda JÁ EXISTE: se o move ou o update falhar, a
   // resposta continua sendo `ok: true` com um aviso — dizer "falhou" mandaria
@@ -824,6 +864,7 @@ export async function registrarVendaManual(dados: {
     recebido: Number(linha.total_recebido),
     mlBaixado: Number(linha.ml_baixado),
     caixaNoExtrato: Boolean(linha.caixa_no_extrato),
+    creditoVinculado,
     comprovanteAnexado,
     avisoComprovante,
     // O cronograma vem do banco, não da prévia: a tela de sucesso mostra o que
