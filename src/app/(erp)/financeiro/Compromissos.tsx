@@ -274,6 +274,13 @@ export function NovoCompromisso({
     ? categoriaId
     : (disponiveis[0]?.id ?? '')
   const escolhida = disponiveis.find((c) => c.id === categoriaValida)
+  // O centro de custo padrão da categoria, aplicado enquanto ninguém escolheu
+  // outro. É o que faz "Frete" nascer em Logística e "Inteligência artificial"
+  // em Tecnologia sem depender de alguém lembrar — 41 lançamentos de frete
+  // estavam sem centro nenhum justamente porque o campo dependia da memória.
+  // Derivado em vez de guardado num estado: o campo vazio SIGNIFICA "use o
+  // padrão", e assim ele acompanha a troca de categoria sozinho.
+  const centroEfetivo = centroCusto || (escolhida?.centroCusto ?? '')
   const contaEscolhida = contas.find((c) => c.id === contaId)
   // Num cartão o cronograma é a FATURA, e `gravar_parcelas_do_lancamento`
   // ignora o intervalo em dias quando a conta tem `dia_vencimento`. Oferecer o
@@ -287,8 +294,10 @@ export function NovoCompromisso({
         descricao,
         favorecido,
         categoriaId: categoriaValida,
+        // Lido do derivado, e não do estado: quem não mexeu no campo grava o
+        // padrão da categoria, não um nulo.
         contaId,
-        centroCusto: centroCusto || null,
+        centroCusto: centroEfetivo || null,
         tipo,
         // A action e o banco trabalham com o TOTAL — é assim que a DRE lê a
         // compra e é assim que `parcelar_lancamento` reparte. A tela pede a
@@ -472,9 +481,24 @@ export function NovoCompromisso({
                   style={CAMPO}
                 />
               </Campo>
-              <Campo rotulo="Centro de custo">
-                <select value={centroCusto} onChange={(e) => setCentroCusto(e.target.value)} style={CAMPO}>
-                  <option value="">Sem centro de custo</option>
+              <Campo
+                rotulo="Centro de custo"
+                dica={
+                  escolhida?.centroCusto && !centroCusto
+                    ? `Padrão de "${escolhida.nome}"`
+                    : undefined
+                }
+              >
+                <select
+                  value={centroEfetivo}
+                  onChange={(e) => setCentroCusto(e.target.value)}
+                  style={CAMPO}
+                >
+                  {/* "Sem centro de custo" só aparece quando a categoria não
+                      tem padrão. Com padrão, escolher o vazio voltaria ao
+                      padrão no instante seguinte — opção que não gruda é pior
+                      que opção que não existe. */}
+                  {!escolhida?.centroCusto && <option value="">Sem centro de custo</option>}
                   {centros.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.nome}
