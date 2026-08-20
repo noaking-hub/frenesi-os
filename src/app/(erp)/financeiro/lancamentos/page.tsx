@@ -160,6 +160,8 @@ interface Busca {
    * fila onde ele se perde.
    */
   lancamento?: string
+  /** 'nova' abre o formulário de venda manual ao chegar — é o link de Pedidos. */
+  venda?: string
 }
 
 export default async function Lancamentos({ searchParams }: { searchParams: Promise<Busca> }) {
@@ -563,6 +565,7 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
                     nome: c.nome,
                     principal: c.principal,
                   }))}
+                  abrirAoMontar={filtro.venda === 'nova'}
                 />
                 <NovoCompromisso
                   contas={p.contas}

@@ -1,3 +1,5 @@
+import Link from 'next/link'
+
 import { carregarPedidos } from '@/data/consultas'
 import { lerContas } from '@/data/financeiro'
 import { repositorio } from '@/data/repository'
@@ -59,10 +61,32 @@ export default async function Pedidos({
         configurada={shopifyConfigurada()}
         total={itens.length}
         sincronizadoEm={sincronizadoEm}
-        // A venda manual saiu daqui para o Financeiro. Quem fecha uma venda
-        // no WhatsApp vai lançar o dinheiro, não abrir a lista de pedidos da
-        // loja — e ter o formulário nos dois lugares era convidar a mesma
-        // venda a ser registrada duas vezes.
+        // O FORMULÁRIO da venda manual mora no Financeiro (um só formulário,
+        // uma só verdade), mas a PORTA fica também aqui: quem pensa "vou
+        // lançar um pedido" procura em Pedidos, e o link abre o formulário já
+        // aberto do outro lado.
+        acao={
+          <Link
+            href="/financeiro/lancamentos?venda=nova"
+            className="font-sans hover:brightness-110"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              height: 30,
+              padding: '0 13px',
+              fontWeight: 600,
+              fontSize: 11,
+              lineHeight: 1,
+              borderRadius: 8,
+              border: '1px solid rgba(255,255,255,.14)',
+              background: 'transparent',
+              color: 'var(--color-corrente)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            + Venda manual
+          </Link>
+        }
       />
       <PedidosCliente itens={itens} filaInicial={fila ? FILA_POR_SLUG[fila] : undefined} />
     </div>

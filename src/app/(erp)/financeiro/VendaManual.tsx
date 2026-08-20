@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, useTransition, type ReactNode } from 'react'
 
 import { Modal } from '@/components/erp/Modal'
 import { BotaoSecundario, Rotulo, TituloSecao } from '@/components/erp/primitivos'
@@ -261,7 +261,18 @@ function Rodape({
  * (2,3 KB) que a tela já carregou para a barra de filtros — buscá-las de novo
  * custaria uma ida ao banco para economizar nada.
  */
-export function VendaManual({ contas }: { contas: ContaParaVenda[] }) {
+export function VendaManual({
+  contas,
+  abrirAoMontar = false,
+}: {
+  contas: ContaParaVenda[]
+  /**
+   * Abre o formulário assim que a tela monta. É a porta de entrada de quem
+   * veio de Pedidos (`?venda=nova`): o formulário continua morando só aqui,
+   * mas o caminho até ele deixa de exigir saber onde ele mora.
+   */
+  abrirAoMontar?: boolean
+}) {
   const [aberto, setAberto] = useState(false)
   const [catalogo, setCatalogo] = useState<{ bases: BaseParaVenda[]; tamanhos: number[] } | null>(
     null,
@@ -284,6 +295,12 @@ export function VendaManual({ contas }: { contas: ContaParaVenda[] }) {
       setCatalogo({ bases: r.bases, tamanhos: r.tamanhos })
     })
   }
+
+  useEffect(() => {
+    if (abrirAoMontar) abrir()
+    // Só na montagem: o parâmetro da URL não muda sem remontar a tela.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <>
