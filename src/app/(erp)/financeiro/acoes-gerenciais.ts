@@ -309,6 +309,15 @@ export interface EdicaoLancamento {
   centroCusto: string | null
   documento: string
   observacao: string
+  /**
+   * Repetir esta edição nas outras parcelas da mesma compra.
+   *
+   * Uma compra em 5× vira cinco linhas, e corrigir o fornecedor ou a categoria
+   * numa só deixava as outras quatro erradas — a DRE somava a mesma compra em
+   * duas categorias, e a única saída era abrir cinco modais e repetir tudo à
+   * mão. Ignorado quando o lançamento não é parcela.
+   */
+  aplicarNasParcelas?: boolean
 }
 
 interface LinhaEmEdicao {
@@ -328,6 +337,28 @@ interface LinhaEmEdicao {
   cancelado_em: string | null
   transferencia_id: string | null
   origem: string
+  pai_id: string | null
+  parcela: number | null
+  parcelas: number | null
+}
+
+/**
+ * O radical da descrição de uma parcela, sem o "(3/5)" do fim.
+ *
+ * A propagação reescreve a descrição das irmãs, e cada uma precisa manter o
+ * PRÓPRIO número: copiar "Perfumes (1/5)" para as cinco linhas faria a lista
+ * mostrar cinco vezes a primeira parcela. O sufixo é reconhecido tanto se o
+ * operador o deixou no campo quanto se o apagou ao renomear.
+ */
+function radicalDaParcela(descricao: string): string {
+  return descricao.replace(/\s*\(\d+\/\d+\)\s*$/, '').trim()
+}
+
+/** O dia do mês que a fatura do cartão usa, respeitando mês curto. */
+function diaNaFatura(mesReferencia: string, dia: number): string {
+  const [ano, mes] = mesReferencia.split('-').map(Number)
+  const ultimo = new Date(ano, mes, 0).getDate()
+  return `${ano}-${String(mes).padStart(2, '0')}-${String(Math.min(dia, ultimo)).padStart(2, '0')}`
 }
 
 /** '' e null são a mesma coisa para o operador: "não informado". */
@@ -392,7 +423,7 @@ async function registrarAuditoria(entrada: {
 export async function editarLancamento(
   id: string,
   dados: EdicaoLancamento,
-): Promise<Resposta<{ alteracoes: number }>> {
+): Promise<Resposta<{ alteracoes: number; parcelasAtualizadas?: number }>> {
   const bloqueio = exigeSupabase('editar lançamentos')
   if (bloqueio) return bloqueio
   const semSessao = await exigeSessao('editar lançamentos')
@@ -411,7 +442,7 @@ export async function editarLancamento(
   const { data, error: erroLeitura } = await sb
     .from('lancamentos')
     .select(
-      'descricao, favorecido, valor, vence_em, categoria, categoria_id, centro_custo, conta_id, documento, observacao, tipo, competencia, baixado_em, cancelado_em, transferencia_id, origem',
+      'descricao, favorecido, valor, vence_em, categoria, categoria_id, centro_custo, conta_id, documento, observacao, tipo, competencia, baixado_em, cancelado_em, transferencia_id, origem, pai_id, parcela, parcelas',
     )
     .eq('id', id)
     .maybeSingle()
@@ -587,8 +618,120 @@ export async function editarLancamento(
     justificativa: `Edição manual de ${campos.join(', ')}`,
   })
 
+  const irmas = dados.aplicarNasParcelas
+    ? await replicarNasParcelas(sb, id, atual, patch)
+    : 0
+
   revalidarFinanceiro()
-  return { ok: true, alteracoes: campos.length }
+  return { ok: true, alteracoes: campos.length, parcelasAtualizadas: irmas }
+}
+
+/**
+ * Repete a edição nas outras parcelas da mesma compra.
+ *
+ * Roda DEPOIS do update principal e de propósito: se a edição da linha aberta
+ * for recusada — competência fechada, valor mexido depois da baixa —, nenhuma
+ * irmã pode ter sido tocada. A ordem inversa deixaria quatro parcelas alteradas
+ * e a quinta não, sem nada na tela dizendo isso.
+ *
+ * O que NÃO se propaga, e por quê:
+ *
+ * VENCIMENTO. É a única coluna em que as parcelas têm de discordar — copiar
+ * 20/09 para as cinco jogaria a compra inteira numa fatura só. Quando a CONTA
+ * muda para outro cartão, porém, as datas viram mentira (dia 20 numa fatura que
+ * fecha dia 22), e aí as parcelas ainda em aberto são reancoradas no dia da
+ * nova fatura, cada uma no seu próprio mês.
+ *
+ * VALOR de parcela já baixada. O dinheiro saiu por aquele número e o saldo da
+ * conta foi calculado com ele; reescrevê-lo faria a conta divergir do extrato
+ * sem nenhum fato por trás. É a mesma regra que a edição direta já aplica — só
+ * que aqui ela pula a linha em vez de recusar tudo, porque as demais parcelas
+ * do mesmo lote continuam legítimas.
+ *
+ * Cancelada fica de fora inteira: é registro do que deixou de valer.
+ */
+async function replicarNasParcelas(
+  sb: ReturnType<typeof supabaseServer>,
+  id: string,
+  atual: LinhaEmEdicao,
+  patch: Record<string, unknown>,
+): Promise<number> {
+  if (!atual.pai_id) return 0
+
+  const { data, error } = await sb
+    .from('lancamentos')
+    .select('id, parcela, parcelas, vence_em, baixado_em, competencia')
+    .eq('pai_id', atual.pai_id)
+    .is('cancelado_em', null)
+    .neq('id', id)
+  if (error) {
+    console.error('[financeiro] ler parcelas irmãs falhou:', error)
+    return 0
+  }
+  const irmas = (data ?? []) as unknown as {
+    id: string
+    parcela: number | null
+    parcelas: number | null
+    vence_em: string | null
+    baixado_em: string | null
+    competencia: string
+  }[]
+  if (irmas.length === 0) return 0
+
+  // O dia da fatura só é consultado quando a conta REALMENTE mudou: numa
+  // edição de categoria ou de favorecido não há por que mexer em data nenhuma.
+  let diaFatura: number | null = null
+  if (typeof patch.conta_id === 'string') {
+    const { data: conta } = await sb
+      .from('contas_bancarias')
+      .select('dia_vencimento')
+      .eq('id', patch.conta_id)
+      .maybeSingle()
+    diaFatura = (conta as { dia_vencimento: number | null } | null)?.dia_vencimento ?? null
+  }
+
+  const radical =
+    typeof patch.descricao === 'string' ? radicalDaParcela(patch.descricao) : null
+
+  let feitas = 0
+  for (const irma of irmas) {
+    const dela: Record<string, unknown> = { ...patch }
+    delete dela.vence_em
+
+    if (radical && irma.parcela && irma.parcelas) {
+      dela.descricao = `${radical} (${irma.parcela}/${irma.parcelas})`
+    }
+
+    if (irma.baixado_em) delete dela.valor
+
+    if (diaFatura && !irma.baixado_em && irma.vence_em) {
+      dela.vence_em = diaNaFatura(irma.vence_em.slice(0, 7), diaFatura)
+    }
+
+    // Editar SÓ o vencimento de uma parcela não deixa nada para as irmãs, e
+    // `atualizado_em` sozinho carimbaria quatro linhas como alteradas sem uma
+    // alteração — a tela diria "aplicado a 4 parcelas" sem que nada mudasse.
+    if (Object.keys(dela).every((k) => k === 'atualizado_em')) continue
+
+    const { error: erroIrma } = await sb.from('lancamentos').update(dela).eq('id', irma.id)
+    if (erroIrma) {
+      console.error(`[financeiro] replicar na parcela ${irma.id} falhou:`, erroIrma)
+      continue
+    }
+    feitas += 1
+  }
+
+  if (feitas > 0) {
+    await registrarAuditoria({
+      entidade: 'lancamento',
+      entidadeId: id,
+      acao: 'editar',
+      anterior: {},
+      novo: { parcelasAtualizadas: feitas },
+      justificativa: `Edição replicada em ${feitas} ${feitas > 1 ? 'parcelas' : 'parcela'} da mesma compra`,
+    })
+  }
+  return feitas
 }
 
 // ── Transferência ──────────────────────────────────────────────────────────

@@ -884,7 +884,14 @@ function Formulario({
   const [observacao, setObservacao] = useState(l.observacao ?? '')
   const [erro, setErro] = useState<string | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
+  // Ligado por padrão: corrigir o fornecedor da parcela 1 de 5 e deixar as
+  // outras quatro erradas nunca é o que se queria. Quem precisa mexer numa
+  // parcela só desmarca.
+  const [aplicarNasParcelas, setAplicarNasParcelas] = useState(true)
   const [pendente, iniciar] = useTransition()
+
+  /** Quantas outras parcelas a mesma compra tem. Zero fora de parcelamento. */
+  const irmas = l.parcela && l.parcelas ? l.parcelas - 1 : 0
 
   // Cancelado não se edita — a ação recusa, e um formulário que só sabe
   // recusar é botão inerte com campos em volta.
@@ -947,6 +954,7 @@ function Formulario({
         centroCusto: centroCusto || null,
         documento,
         observacao,
+        aplicarNasParcelas: irmas > 0 && aplicarNasParcelas,
       })
       if (!r.ok) {
         setErro(r.erro)
@@ -1092,6 +1100,38 @@ function Formulario({
         </Campo>
       </div>
 
+      {irmas > 0 && (
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 10,
+            padding: '11px 13px',
+            border: '1px solid var(--color-borda-sutil)',
+            borderRadius: 10,
+            cursor: 'pointer',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={aplicarNasParcelas}
+            onChange={(e) => setAplicarNasParcelas(e.target.checked)}
+            style={{ accentColor: '#EFD18C', width: 15, height: 15, marginTop: 2 }}
+          />
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span className="font-sans" style={{ fontSize: 12, color: 'var(--color-corrente)' }}>
+              {`Aplicar às outras ${irmas} ${irmas > 1 ? 'parcelas' : 'parcela'} desta compra`}
+            </span>
+            <span
+              className="font-sans"
+              style={{ fontSize: 10, lineHeight: 1.45, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+            >
+              {`Descrição, favorecido, categoria, conta, centro de custo, documento e observação vão para as ${l.parcelas} — cada uma mantendo o próprio "x/${l.parcelas}". O VENCIMENTO não: é onde as parcelas precisam discordar. Parcela já baixada mantém o valor dela, porque o saldo da conta foi calculado com ele.`}
+            </span>
+          </span>
+        </label>
+      )}
+
       <Previa
         linhas={[
           {
@@ -1099,6 +1139,14 @@ function Formulario({
             valor: brl(travaValor ? l.valor : parseNum(valor)),
             tom: l.tipo === 'entrada' ? COR.ok : COR.erro,
           },
+          ...(irmas > 0 && aplicarNasParcelas
+            ? [
+                {
+                  rotulo: 'Alcança',
+                  valor: `esta e mais ${irmas} ${irmas > 1 ? 'parcelas' : 'parcela'}`,
+                },
+              ]
+            : []),
           {
             rotulo: 'Entra na projeção de caixa em',
             valor: diaPt(venceEm) ?? 'sem data — fica fora da projeção',

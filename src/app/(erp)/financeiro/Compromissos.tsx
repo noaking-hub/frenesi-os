@@ -816,8 +816,15 @@ function DialogoEditar({
   const [centroCusto, setCentroCusto] = useState(lancamento.centroCusto ?? '')
   const [documento, setDocumento] = useState(lancamento.documento ?? '')
   const [observacao, setObservacao] = useState(lancamento.observacao ?? '')
+  // Ligado por padrão: quem corrige o fornecedor da parcela 1 de 5 quer as
+  // cinco corrigidas — repetir a edição em cinco modais é o trabalho que este
+  // campo existe para eliminar. Quem quiser mexer numa parcela só desmarca.
+  const [aplicarNasParcelas, setAplicarNasParcelas] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
   const [pendente, iniciar] = useTransition()
+
+  // Uma parcela sozinha (parcelas = 1) não tem irmãs para atualizar.
+  const irmas = lancamento.parcela && lancamento.parcelas ? lancamento.parcelas - 1 : 0
 
   const ehTransferencia = Boolean(lancamento.transferenciaId)
   const veioDoExtrato = lancamento.origem.startsWith('Extrato ')
@@ -858,6 +865,7 @@ function DialogoEditar({
         centroCusto: centroCusto || null,
         documento,
         observacao,
+        aplicarNasParcelas: irmas > 0 && aplicarNasParcelas,
       })
       if (!r.ok) {
         setErro(r.erro)
@@ -1028,6 +1036,38 @@ function DialogoEditar({
           </Campo>
         </div>
 
+        {irmas > 0 && (
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 10,
+              padding: '11px 13px',
+              border: '1px solid var(--color-borda-sutil)',
+              borderRadius: 10,
+              cursor: 'pointer',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={aplicarNasParcelas}
+              onChange={(e) => setAplicarNasParcelas(e.target.checked)}
+              style={{ accentColor: '#EFD18C', width: 15, height: 15, marginTop: 2 }}
+            />
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <span className="font-sans" style={{ fontSize: 12, color: 'var(--color-corrente)' }}>
+                {`Aplicar às outras ${irmas} ${irmas > 1 ? 'parcelas' : 'parcela'} desta compra`}
+              </span>
+              <span
+                className="font-sans"
+                style={{ fontSize: 10, lineHeight: 1.45, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+              >
+                {`Descrição, favorecido, categoria, conta, centro de custo, documento e observação vão para as ${lancamento.parcelas} — cada uma mantendo o próprio "x/${lancamento.parcelas}". O VENCIMENTO não: é onde as parcelas precisam discordar. Parcela já baixada mantém o valor dela, porque o saldo da conta foi calculado com ele.`}
+              </span>
+            </span>
+          </label>
+        )}
+
         <Previa
           linhas={[
             {
@@ -1035,6 +1075,14 @@ function DialogoEditar({
               valor: brl(travaValor ? lancamento.valor : parseNum(valor)),
               tom: lancamento.tipo === 'entrada' ? COR.ok : COR.erro,
             },
+            ...(irmas > 0 && aplicarNasParcelas
+              ? [
+                  {
+                    rotulo: 'Alcança',
+                    valor: `esta e mais ${irmas} ${irmas > 1 ? 'parcelas' : 'parcela'}`,
+                  },
+                ]
+              : []),
             {
               rotulo: 'Entra na projeção de caixa em',
               valor: venceEm || 'sem data — fica fora da projeção',
