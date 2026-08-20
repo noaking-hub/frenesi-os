@@ -260,7 +260,12 @@ export function NovoCompromisso({
         contaId,
         centroCusto: centroCusto || null,
         tipo,
-        valor: parseNum(valor),
+        // A action e o banco trabalham com o TOTAL — é assim que a DRE lê a
+        // compra e é assim que `parcelar_lancamento` reparte. A tela pede a
+        // parcela porque é o número que está na fatura, e multiplica aqui.
+        // Como o total é parcela × N exato, a divisão volta a dar a parcela
+        // cheia, sem centavo sobrando na primeira.
+        valor: parseNum(valor) * nParcelas,
         competencia,
         venceEm,
         documento,
@@ -329,7 +334,19 @@ export function NovoCompromisso({
                   style={CAMPO}
                 />
               </Campo>
-              <Campo rotulo="Valor">
+              {/* Com parcelamento, o número que se tem na mão é o da PARCELA:
+                  a fatura do cartão diz "5x de R$ 64,90", não "R$ 324,50 em
+                  5x". Pedir o total obrigaria a multiplicar de cabeça antes de
+                  digitar, e é onde o erro entra. O total é derivado e mostrado
+                  na prévia. */}
+              <Campo
+                rotulo={nParcelas > 1 ? 'Valor da parcela' : 'Valor'}
+                dica={
+                  nParcelas > 1
+                    ? `${nParcelas}× de ${brl(parseNum(valor))} — total de ${brl(parseNum(valor) * nParcelas)}`
+                    : undefined
+                }
+              >
                 <input
                   value={valor}
                   onChange={(e) => setValor(e.target.value)}
@@ -451,8 +468,8 @@ export function NovoCompromisso({
                   rotulo="Parcelas"
                   dica={
                     nParcelas > 1
-                      ? `${nParcelas}× de ${brl(parseNum(valor) / nParcelas)} — o valor acima é o TOTAL da compra`
-                      : '1 não divide. De 2 a 48, o total vira parcelas mensais'
+                      ? `O valor acima se repete nas ${nParcelas} parcelas, uma por mês`
+                      : '1 não divide. De 2 a 48, o valor acima vira o de CADA parcela'
                   }
                 >
                   <input
@@ -516,19 +533,22 @@ export function NovoCompromisso({
             {parseNum(valor) > 0 && (
               <Previa
                 linhas={[
-                  {
-                    rotulo: nParcelas > 1 ? 'Valor total' : 'Valor',
-                    valor: brl(parseNum(valor)),
-                    tom: tipo === 'entrada' ? COR.ok : COR.erro,
-                  },
                   ...(nParcelas > 1
                     ? [
                         {
-                          rotulo: 'Dividido em',
-                          valor: `${nParcelas}× de ${brl(parseNum(valor) / nParcelas)}`,
+                          rotulo: 'Parcela',
+                          valor: `${nParcelas}× de ${brl(parseNum(valor))}`,
+                          tom: tipo === 'entrada' ? COR.ok : COR.erro,
                         },
+                        { rotulo: 'Total da compra', valor: brl(parseNum(valor) * nParcelas) },
                       ]
-                    : []),
+                    : [
+                        {
+                          rotulo: 'Valor',
+                          valor: brl(parseNum(valor)),
+                          tom: tipo === 'entrada' ? COR.ok : COR.erro,
+                        },
+                      ]),
                   { rotulo: 'Entra no resultado de', valor: competencia },
                   {
                     rotulo: nParcelas > 1 ? 'Primeiro vencimento' : 'Entra no caixa em',
@@ -547,7 +567,7 @@ export function NovoCompromisso({
                 className="font-sans"
                 style={{ fontSize: 10, lineHeight: 1.45, color: 'var(--color-terciario)', textWrap: 'pretty' }}
               >
-                {`A compra inteira entra no resultado de ${competencia} — é quando ela aconteceu. O que se reparte é o CAIXA: cada parcela vence a cada ${Math.round(parseNum(intervalo)) || INTERVALO_PADRAO_DIAS} dias e aparece sozinha na projeção.`}
+                {`A compra inteira (${brl(parseNum(valor) * nParcelas)}) entra no resultado de ${competencia} — é quando ela aconteceu. O que se reparte é o CAIXA: ${nParcelas} parcelas de ${brl(parseNum(valor))}, uma a cada ${Math.round(parseNum(intervalo)) || INTERVALO_PADRAO_DIAS} dias, cada uma aparecendo sozinha na projeção.`}
               </span>
             )}
 
