@@ -72,7 +72,13 @@ begin
     if v_l.transferencia_id is not null then
       raise exception 'Este lançamento é uma perna de transferência entre contas. Apagar só um lado deixaria o dinheiro saindo de uma conta e não entrando em nenhuma.';
     end if;
-    if exists (select 1 from competencias_fechadas c where c.competencia = v_l.competencia) then
+    -- Pelo helper da casa, e não comparando as colunas direto:
+    -- `competencias_fechadas.competencia` é TEXT ('AAAA-MM') e
+    -- `lancamentos.competencia` é DATE. A comparação crua levantava
+    -- "operator does not exist: text = date" na cara de quem clicava em
+    -- Excluir. `competencia_esta_fechada` é a mesma função que o trigger
+    -- `bloquear_competencia_fechada` usa — uma regra, uma implementação.
+    if competencia_esta_fechada(v_l.competencia) then
       raise exception 'A competência % está fechada. Reabra o mês antes de mexer nele.', to_char(v_l.competencia, 'MM/YYYY');
     end if;
     if exists (select 1 from extrato_linhas e where e.lancamento_id = v_l.id) then
