@@ -23,7 +23,7 @@ import {
 import type { LancamentoGerencial, SituacaoLancamento } from '@/domain'
 
 import { editarLancamento } from '../acoes-gerenciais'
-import { CAMPO, Campo, Erro, Previa, Rodape } from '../Compromissos'
+import { AcoesGerenciais, CAMPO, Campo, Erro, Previa, Rodape } from '../Compromissos'
 import { useListasDeEdicao } from '../ListasDoFormulario'
 
 /**
@@ -195,6 +195,16 @@ export function DetalheDoLancamento({
           <AbaBotao chave="editar" ativa={aba === 'editar'} aoClicar={() => setAba('editar')}>
             Editar
           </AbaBotao>
+          {/* Baixar, parcelar, cancelar e excluir moravam SÓ na coluna Ações da
+              lista, em ícones de 28px. Quem abre o detalhe para conferir um
+              lançamento é justamente quem quer agir sobre ele — e não achava
+              nada aqui, porque o rodapé só tem "Cancelar" (que fecha) e
+              "Salvar alterações". As mesmas ações, no lugar onde a pergunta
+              nasce. */}
+          <span style={{ flex: 1 }} />
+          <span style={{ display: 'inline-flex', alignItems: 'center', paddingBottom: 4 }}>
+            <AcoesGerenciais lancamento={lancamento} situacao={situacao} />
+          </span>
         </nav>
 
         {/* Um painel só, com id fixo: os dois `aria-controls` apontavam para

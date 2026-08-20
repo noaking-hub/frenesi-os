@@ -35,6 +35,7 @@ import {
   cancelarCompromisso,
   criarCompromisso,
   editarLancamento,
+  excluirLancamento,
   parcelarLancamento,
 } from './acoes-gerenciais'
 
@@ -225,8 +226,15 @@ export function NovoCompromisso({
   const [recorrencia, setRecorrencia] = useState('')
   const [recorrenciaAte, setRecorrenciaAte] = useState('')
   const [baixado, setBaixado] = useState(false)
+  const [parcelas, setParcelas] = useState('1')
+  const [intervalo, setIntervalo] = useState(String(INTERVALO_PADRAO_DIAS))
   const [erro, setErro] = useState<string | null>(null)
   const [pendente, iniciar] = useTransition()
+
+  // Nunca grampeado no `onChange`: apagar o campo para digitar "12" faria o
+  // cursor pular para "1" no meio da digitação. Fora da faixa, quem explica é
+  // a prévia, com a mesma frase que o banco levantaria.
+  const nParcelas = Math.max(1, Math.round(parseNum(parcelas)) || 1)
 
   // Receita em lançamento de saída é erro de digitação oferecido como opção.
   // A natureza da categoria já responde de que lado ela pode aparecer.
@@ -260,6 +268,8 @@ export function NovoCompromisso({
         recorrencia: recorrencia || null,
         recorrenciaAte: recorrenciaAte || null,
         baixadoNoAto: baixado,
+        parcelas: nParcelas,
+        intervaloDias: Math.round(parseNum(intervalo)) || INTERVALO_PADRAO_DIAS,
       })
       if (!r.ok) {
         setErro(r.erro)
@@ -271,6 +281,7 @@ export function NovoCompromisso({
       setDocumento('')
       setObservacao('')
       setBaixado(false)
+      setParcelas('1')
       setAberto(false)
     })
 
@@ -429,6 +440,43 @@ export function NovoCompromisso({
               </Campo>
             )}
 
+            {/* PARCELAR não é REPETIR, e o campo fica escondido enquanto o
+                operador escolhe repetir justamente para as duas ideias não se
+                misturarem: repetir é a conta que volta todo mês e não acaba;
+                parcelar é um valor total quebrado em N vencimentos. Compra no
+                cartão é sempre a segunda. */}
+            {!recorrencia && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <Campo
+                  rotulo="Parcelas"
+                  dica={
+                    nParcelas > 1
+                      ? `${nParcelas}× de ${brl(parseNum(valor) / nParcelas)} — o valor acima é o TOTAL da compra`
+                      : '1 não divide. De 2 a 48, o total vira parcelas mensais'
+                  }
+                >
+                  <input
+                    inputMode="numeric"
+                    value={parcelas}
+                    onChange={(e) => setParcelas(e.target.value)}
+                    placeholder="1"
+                    style={CAMPO}
+                  />
+                </Campo>
+                {nParcelas > 1 && (
+                  <Campo rotulo="Intervalo (dias)" dica="30 é o mês do cartão">
+                    <input
+                      inputMode="numeric"
+                      value={intervalo}
+                      onChange={(e) => setIntervalo(e.target.value)}
+                      placeholder="30"
+                      style={CAMPO}
+                    />
+                  </Campo>
+                )}
+              </div>
+            )}
+
             <Campo rotulo="Observação">
               <input
                 value={observacao}
@@ -468,11 +516,39 @@ export function NovoCompromisso({
             {parseNum(valor) > 0 && (
               <Previa
                 linhas={[
-                  { rotulo: 'Valor', valor: brl(parseNum(valor)), tom: tipo === 'entrada' ? COR.ok : COR.erro },
+                  {
+                    rotulo: nParcelas > 1 ? 'Valor total' : 'Valor',
+                    valor: brl(parseNum(valor)),
+                    tom: tipo === 'entrada' ? COR.ok : COR.erro,
+                  },
+                  ...(nParcelas > 1
+                    ? [
+                        {
+                          rotulo: 'Dividido em',
+                          valor: `${nParcelas}× de ${brl(parseNum(valor) / nParcelas)}`,
+                        },
+                      ]
+                    : []),
                   { rotulo: 'Entra no resultado de', valor: competencia },
-                  { rotulo: 'Entra no caixa em', valor: baixado ? venceEm : `${venceEm} (previsto)` },
+                  {
+                    rotulo: nParcelas > 1 ? 'Primeiro vencimento' : 'Entra no caixa em',
+                    valor:
+                      nParcelas > 1
+                        ? `${venceEm}${baixado ? ' (1ª parcela já paga)' : ''}`
+                        : baixado
+                          ? venceEm
+                          : `${venceEm} (previsto)`,
+                  },
                 ]}
               />
+            )}
+            {nParcelas > 1 && (
+              <span
+                className="font-sans"
+                style={{ fontSize: 10, lineHeight: 1.45, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+              >
+                {`A compra inteira entra no resultado de ${competencia} — é quando ela aconteceu. O que se reparte é o CAIXA: cada parcela vence a cada ${Math.round(parseNum(intervalo)) || INTERVALO_PADRAO_DIAS} dias e aparece sozinha na projeção.`}
+              </span>
             )}
 
             <Erro texto={erro} />
@@ -503,11 +579,18 @@ export function AcoesGerenciais({
   // estourava o payload e derrubava a tela. Sem elas o lápis some, em vez de
   // abrir um diálogo com combos vazios.
   const { contas, categorias, centros } = useListasDeEdicao()
-  const [aberto, setAberto] = useState<'baixa' | 'parcelar' | 'cancelar' | 'editar' | null>(null)
+  const [aberto, setAberto] = useState<
+    'baixa' | 'parcelar' | 'cancelar' | 'editar' | 'excluir' | null
+  >(null)
   const encerrado = situacao === 'liquidado' || situacao === 'cancelado'
   // Liquidado ainda se edita — é o caso do que veio do extrato já baixado e
   // sem categoria. Cancelado não: o registro deixou de valer.
   const podeEditar = Boolean(contas && categorias) && situacao !== 'cancelado'
+  // A regra final é do banco, que conhece pedido, conciliação e mês fechado.
+  // Aqui só se decide quando MOSTRAR o botão: origem manual e sem
+  // transferência. Oferecer no que o banco vai recusar seria um botão que só
+  // serve para dar erro.
+  const podeExcluir = lancamento.origem === 'Manual' && !lancamento.transferenciaId
 
   return (
     <span style={{ display: 'inline-flex', gap: 5, justifyContent: 'flex-end' }}>
@@ -544,6 +627,15 @@ export function AcoesGerenciais({
       )}
       {!encerrado && (
         <BotaoIcone icone="x" rotulo="Cancelar compromisso" onClick={() => setAberto('cancelar')} />
+      )}
+      {/* Excluir aparece só no lançamento MANUAL, e é a diferença entre
+          "existiu e morreu" e "nunca deveria ter existido". O que veio do
+          extrato, de uma venda ou de uma transferência responde pelo saldo de
+          alguma coisa — o banco recusa, e a frase da recusa explica o porquê.
+          Liquidado entra: o engano mais comum é justamente marcar como pago o
+          que nem era para estar lá. */}
+      {podeExcluir && (
+        <BotaoIcone icone="lixeira" rotulo="Excluir lançamento" onClick={() => setAberto('excluir')} />
       )}
       {/* Data de baixa em dd/mm. Antes saía a data ISO inteira, que não cabia
           na coluna ao lado do lápis e vazava por cima da linha seguinte. O ano
@@ -584,6 +676,9 @@ export function AcoesGerenciais({
       )}
       {aberto === 'cancelar' && (
         <DialogoCancelar lancamento={lancamento} aoFechar={() => setAberto(null)} />
+      )}
+      {aberto === 'excluir' && (
+        <DialogoExcluir lancamento={lancamento} aoFechar={() => setAberto(null)} />
       )}
       {aberto === 'editar' && contas && categorias && (
         <DialogoEditar
@@ -1372,6 +1467,79 @@ function DialogoParcelar({
           aoConfirmar={confirmar}
           aoCancelar={aoFechar}
           pendente={pendente}
+        />
+      </div>
+    </Modal>
+  )
+}
+
+/**
+ * Apaga o que foi lançado por engano.
+ *
+ * O diálogo é irmão do Cancelar de propósito, e a diferença está escrita nele:
+ * cancelar guarda a linha com o desfecho; excluir tira do caminho o que nunca
+ * aconteceu. O motivo é opcional aqui — quem apaga um erro de digitação não
+ * tem uma história para contar, e exigir uma faria o operador inventar texto
+ * para conseguir seguir em frente. O rastro fica de qualquer jeito: o banco
+ * copia o lançamento inteiro para a auditoria antes de apagar.
+ */
+function DialogoExcluir({
+  lancamento,
+  aoFechar,
+}: {
+  lancamento: LancamentoGerencial
+  aoFechar: () => void
+}) {
+  const [motivo, setMotivo] = useState('')
+  const [erro, setErro] = useState<string | null>(null)
+  const [pendente, iniciar] = useTransition()
+
+  const confirmar = () =>
+    iniciar(async () => {
+      setErro(null)
+      const r = await excluirLancamento(lancamento.id, motivo)
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      aoFechar()
+    })
+
+  return (
+    <Modal titulo="Excluir lançamento" largura={480} aoFechar={aoFechar}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
+        <TituloSecao tamanho={16}>Excluir lançamento</TituloSecao>
+        <span
+          className="font-sans"
+          style={{ fontSize: 11.5, lineHeight: 1.55, color: 'var(--color-secundario)', textWrap: 'pretty' }}
+        >
+          {`"${lancamento.descricao}" (${brl(lancamento.valor)}) sai do ERP e não volta. Use isto para o lançamento digitado por engano — se ele existiu de verdade e não vai mais acontecer, o caminho é Cancelar, que guarda a linha com o motivo.`}
+        </span>
+        {lancamento.parcelas && lancamento.parcelas > 1 && (
+          <span
+            className="font-sans"
+            style={{ fontSize: 11.5, lineHeight: 1.55, color: COR.atencao, textWrap: 'pretty' }}
+          >
+            {`Este lançamento faz parte de um parcelamento de ${lancamento.parcelas} vezes — a série INTEIRA será apagada. Apagar uma parcela sozinha deixaria um parcelamento que não soma o total.`}
+          </span>
+        )}
+
+        <Campo rotulo="Motivo" dica="Opcional — fica guardado na auditoria">
+          <input
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+            placeholder="Lancei errado, era parcelamento…"
+            style={CAMPO}
+          />
+        </Campo>
+
+        <Erro texto={erro} />
+        <Rodape
+          rotulo="Excluir de vez"
+          aoConfirmar={confirmar}
+          aoCancelar={aoFechar}
+          pendente={pendente}
+          destrutivo
         />
       </div>
     </Modal>

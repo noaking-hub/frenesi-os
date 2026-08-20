@@ -77,6 +77,17 @@ export interface NovoCompromissoDados {
   recorrenciaAte: string | null
   /** Já pago/recebido no ato — o caso da compra no débito. */
   baixadoNoAto: boolean
+  /**
+   * Em quantas vezes a compra foi dividida. 1 não reparte.
+   *
+   * Existe porque REPETIR e PARCELAR são coisas diferentes, e confundi-las
+   * estraga a projeção de caixa: repetir é a conta que volta todo mês sem fim
+   * (aluguel, plano); parcelar é UM valor total quebrado em N vencimentos, que
+   * acaba. O cartão de crédito é sempre o segundo caso.
+   */
+  parcelas?: number
+  /** Dias entre um vencimento e o próximo. Cartão é mensal. */
+  intervaloDias?: number
 }
 
 /**
@@ -118,16 +129,35 @@ export async function criarCompromisso(
     }
   }
 
+  const parcelas = Math.round(dados.parcelas ?? 1) || 1
+  if (parcelas > 1 && (parcelas < MIN_PARCELAS || parcelas > MAX_PARCELAS)) {
+    return { ok: false, erro: `O parcelamento vai de ${MIN_PARCELAS} a ${MAX_PARCELAS} vezes.` }
+  }
+  if (parcelas > 1 && dados.recorrencia) {
+    // As duas coisas juntas não têm significado: uma série que se repete para
+    // sempre E acaba em N vezes. Recusar aqui é mais barato que descobrir
+    // depois, olhando uma projeção de caixa que não fecha.
+    return {
+      ok: false,
+      erro: 'Escolha um dos dois: repetir todo mês (conta que não acaba) ou parcelar em N vezes (valor total dividido).',
+    }
+  }
+
   const id = `LC-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
   const hoje = hojeEmSaoPaulo()
   const venceEm = dados.venceEm || `${dados.competencia}-01`
+  // Parcelado nasce EM ABERTO, mesmo com "já pago" marcado: quem paga na hora
+  // é a primeira parcela, não a compra inteira — e é `parcelar_lancamento`,
+  // logo abaixo, que sabe marcar só ela. Gravar o total como baixado aqui e
+  // repartir depois faria o caixa registrar a compra inteira saindo hoje.
+  const baixadoNoAto = parcelas > 1 ? false : dados.baixadoNoAto
 
   const { error } = await sb.from('lancamentos').insert({
     id,
     ocorrido_em: hoje,
     competencia: `${dados.competencia}-01`,
     vence_em: venceEm,
-    baixado_em: dados.baixadoNoAto ? venceEm : null,
+    baixado_em: baixadoNoAto ? venceEm : null,
     descricao: dados.descricao.trim(),
     favorecido: dados.favorecido.trim() || null,
     categoria: (cat as { nome: string }).nome,
@@ -136,7 +166,7 @@ export async function criarCompromisso(
     conta_id: dados.contaId,
     tipo: dados.tipo,
     valor: dados.valor,
-    recebido: dados.baixadoNoAto ? dados.valor : 0,
+    recebido: baixadoNoAto ? dados.valor : 0,
     recorrente: Boolean(dados.recorrencia),
     recorrencia: dados.recorrencia,
     recorrencia_ate: dados.recorrenciaAte,
@@ -150,15 +180,77 @@ export async function criarCompromisso(
     return falha(error, 'Falha ao criar o compromisso.')
   }
 
+  // A divisão é feita pela MESMA função que o botão Parcelar usa, e não por
+  // uma segunda conta escrita aqui: é ela que reparte os centavos, ancora os
+  // vencimentos e marca a primeira parcela como paga quando foi o caso. Duas
+  // implementações do mesmo cálculo divergiriam no primeiro ajuste.
+  if (parcelas > 1) {
+    const { error: erroParcelar } = await sb.rpc('parcelar_lancamento', {
+      p_lancamento_id: id,
+      p_parcelas: parcelas,
+      p_intervalo_dias: Math.round(dados.intervaloDias ?? 0) || INTERVALO_PADRAO_DIAS,
+      p_ja_recebidas: dados.baixadoNoAto ? 1 : 0,
+      p_recebidas_em: dados.baixadoNoAto ? venceEm : null,
+    })
+    if (erroParcelar) {
+      console.error('[financeiro] parcelar no ato falhou:', erroParcelar)
+      // O compromisso já existe e o parcelamento não: apagar o que acabou de
+      // nascer é o certo, senão sobra um lançamento pelo total que o operador
+      // não pediu — e ele acabaria de novo sem saber como tirá-lo.
+      await sb.from('lancamentos').delete().eq('id', id)
+      return falha(erroParcelar, 'Falha ao dividir o lançamento em parcelas.')
+    }
+  }
+
   revalidarFinanceiro()
   return { ok: true, id }
 }
 
 /**
+ * Apaga o lançamento que nunca deveria ter existido.
+ *
+ * Cancelar e excluir respondem a perguntas diferentes, e por isso os dois
+ * existem. CANCELAR é para o compromisso que existiu e morreu — o boleto
+ * renegociado, a compra que caiu: a linha fica, explicando o desfecho.
+ * EXCLUIR é para o engano — o lançamento digitado errado, a tentativa que não
+ * era aquilo. Cancelá-lo deixaria no histórico a explicação de um fato que
+ * nunca aconteceu.
+ *
+ * A linha não some sem rastro: o banco copia o lançamento inteiro para
+ * `financeiro_auditoria` antes de apagar, e é lá que fica a resposta para
+ * "o que era aquilo que sumiu do dia 20". As recusas (nascido do extrato,
+ * dinheiro de um pedido, perna de transferência, mês fechado, já conciliado)
+ * moram no plpgsql, com a frase pronta para a tela.
+ *
+ * Parcelamento vai inteiro: apagar a parcela 3 de 6 deixaria uma série que não
+ * soma o total, que é pior que o engano original.
+ */
+export async function excluirLancamento(id: string, motivo: string): Promise<Resposta<{ apagados: number }>> {
+  const bloqueio = exigeSupabase('excluir lançamentos')
+  if (bloqueio) return bloqueio
+  const semSessao = await exigeSessao('excluir lançamentos')
+  if (semSessao) return semSessao
+
+  const { data, error } = await supabaseServer().rpc('excluir_lancamento', {
+    p_id: id,
+    p_operador: await operadorAtual(),
+    p_motivo: motivo.trim() || null,
+  })
+  if (error) {
+    console.error('[financeiro] excluir lançamento falhou:', error)
+    return falha(error, 'Falha ao excluir o lançamento.')
+  }
+
+  revalidarFinanceiro()
+  return { ok: true, apagados: Number(data ?? 0) }
+}
+
+/**
  * Cancela sem apagar.
  *
- * Excluir some com a linha e com a explicação; cancelado some da fila de
- * trabalho e continua respondendo "o que aconteceu com aquele boleto?".
+ * Cancelado some da fila de trabalho e continua respondendo "o que aconteceu
+ * com aquele boleto?". Para o lançamento digitado por engano, que nunca teve
+ * desfecho a explicar, o caminho é `excluirLancamento`.
  */
 export async function cancelarCompromisso(id: string, motivo: string): Promise<Resposta> {
   const bloqueio = exigeSupabase('cancelar compromissos')
