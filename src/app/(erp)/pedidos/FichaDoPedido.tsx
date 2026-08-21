@@ -15,6 +15,7 @@ import {
   statusDoEvento,
   statusOperacional,
   type EventoTransportadora,
+  type ItemPedido,
   type Pedido,
   type Sla,
   type SituacaoLogistica,
@@ -583,7 +584,11 @@ export function FichaDoPedido({
               <Campo rotulo="Cashback usado" valor={brl(pedido.cashback)} mono />
               <CampoComprovante url={pedido.comprovanteUrl} pedidoId={pedido.id} />
             </Bloco>
-            <BlocoReembolsos pedidoId={pedido.id} valorDoPedido={pedido.valor} />
+            <BlocoReembolsos
+              pedidoId={pedido.id}
+              valorDoPedido={pedido.valor}
+              itens={pedido.itens}
+            />
           </div>
         )}
 
@@ -1110,7 +1115,15 @@ function InformarRastreio({
  * do gateway com alguns minutos ou horas de atraso, e esconder essa espera
  * faria parecer que o registro não funcionou.
  */
-function BlocoReembolsos({ pedidoId, valorDoPedido }: { pedidoId: string; valorDoPedido: number }) {
+function BlocoReembolsos({
+  pedidoId,
+  valorDoPedido,
+  itens,
+}: {
+  pedidoId: string
+  valorDoPedido: number
+  itens: ItemPedido[]
+}) {
   const [lista, setLista] = useState<ReembolsoDoPedido[] | null>(null)
   const [aberto, setAberto] = useState(false)
   const [valor, setValor] = useState('')
@@ -1249,12 +1262,42 @@ function BlocoReembolsos({ pedidoId, valorDoPedido }: { pedidoId: string; valorD
             placeholder="Motivo — ex.: item devolvido"
             style={CAMPO_REEMBOLSO}
           />
-          <input
-            value={item}
-            onChange={(e) => setItem(e.target.value)}
-            placeholder="Item (opcional) — ex.: Libre Intense 5 ml"
-            style={CAMPO_REEMBOLSO}
-          />
+          {/* Os itens do próprio pedido, não um campo em branco: quem devolve
+              devolve algo que foi comprado, e digitar o nome à mão convida a
+              escrever "libre" hoje e "Libre Intense 5ml" amanhã — dois nomes
+              para o mesmo perfume, e nenhum relatório que some os dois.
+              Escolher o item também SUGERE o valor, que é o preço de tabela
+              dele; se o pedido teve desconto, o operador corrige. Só sugere
+              quando o campo está vazio — sobrescrever um valor já digitado
+              seria apagar trabalho de quem sabia mais que o palpite. */}
+          {itens.length > 0 ? (
+            <select
+              value={item}
+              onChange={(e) => {
+                setItem(e.target.value)
+                const escolhido = itens.find((i) => rotuloDoItem(i) === e.target.value)
+                if (escolhido && !valor.trim()) {
+                  setValor(escolhido.preco.toFixed(2).replace('.', ','))
+                }
+              }}
+              style={{ ...CAMPO_REEMBOLSO, cursor: 'pointer' }}
+            >
+              <option value="">Item devolvido (opcional)</option>
+              {itens.map((i, n) => (
+                <option key={`${i.perfume}-${n}`} value={rotuloDoItem(i)}>
+                  {rotuloDoItem(i)} · {brl(i.preco)}
+                </option>
+              ))}
+              <option value="Pedido inteiro">Pedido inteiro</option>
+            </select>
+          ) : (
+            <input
+              value={item}
+              onChange={(e) => setItem(e.target.value)}
+              placeholder="Item (opcional) — este pedido não trouxe itens"
+              style={CAMPO_REEMBOLSO}
+            />
+          )}
           {/* O id do movimento é o que casa com a linha do extrato por
               igualdade exata, em vez de por valor e data aproximados — a mesma
               lição do crédito que o palpite grudou no pedido errado. */}
@@ -1344,6 +1387,20 @@ function BlocoReembolsos({ pedidoId, valorDoPedido }: { pedidoId: string; valorD
       )}
     </Bloco>
   )
+}
+
+/**
+ * O item como ele é lido na lista e gravado no reembolso.
+ *
+ * Um texto só, montado sempre da mesma forma: é ele que vai para o banco, e
+ * dois formatos diferentes para o mesmo perfume tornariam impossível somar
+ * "quanto foi devolvido de Libre Intense" mais tarde. `variante` pode ser
+ * nula — item antigo cujo SKU sumiu do catálogo —, e aí o tamanho some da
+ * etiqueta em vez de virar um chute.
+ */
+function rotuloDoItem(i: ItemPedido): string {
+  const nome = [i.marca, i.perfume].filter(Boolean).join(' ')
+  return i.variante ? `${nome} ${i.variante} ml` : nome
 }
 
 const CAMPO_REEMBOLSO = {
