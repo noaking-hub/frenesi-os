@@ -781,17 +781,35 @@ export default async function Lancamentos({ searchParams }: { searchParams: Prom
                       ? `${(pagina - 1) * LANCAMENTOS_POR_PAGINA + 1}–${(pagina - 1) * LANCAMENTOS_POR_PAGINA + listadas.length} de ${resumo.total} · página ${pagina} de ${paginas} · ${periodoNaTela}`
                       : `${plural(resumo.total, 'lançamento', 'lançamentos')} · ${periodoNaTela}`
                   }
-                  // Os três totais falam do FILTRO INTEIRO, não das 50 linhas
+                  // Os totais falam do FILTRO INTEIRO, não das 50 linhas
                   // desenhadas. É a razão de existir o `resumo` agregado no
                   // Postgres: com a lista paginada, um `reduce` sobre
                   // `listadas` faria "A pagar em aberto" encolher a cada
                   // página virada, sem erro nenhum na tela.
+                  //
+                  // ENTROU e SAIU vêm primeiro, e vêm sempre. Antes o rodapé
+                  // só mostrava o que estava EM ABERTO, e aí filtrar por
+                  // "Liquidado" — que é filtrar o que já foi pago — devolvia
+                  // três zeros embaixo de quatro lançamentos com valor na
+                  // tela. A pergunta que se faz ao filtrar é "quanto dá isto
+                  // aqui", e ela ficava sem resposta justamente no filtro mais
+                  // usado. Os números já existiam no agregado; faltava exibi-los.
+                  //
+                  // "Em aberto" só aparece quando existe algo em aberto: zero
+                  // fixo ocupando espaço ensina o olho a ignorar a linha, e aí
+                  // o dia em que ela tiver valor ninguém repara.
                   totais={[
-                    { rotulo: 'A receber em aberto', valor: brl(resumo.aReceberAberto), tom: 'ok' },
-                    { rotulo: 'A pagar em aberto', valor: brl(resumo.aPagarAberto), tom: 'erro' },
+                    { rotulo: 'Entrou', valor: brl(resumo.entrou), tom: 'ok' },
+                    { rotulo: 'Saiu', valor: brl(resumo.saiu), tom: 'erro' },
+                    ...(resumo.aReceberAberto > 0
+                      ? [{ rotulo: 'A receber em aberto', valor: brl(resumo.aReceberAberto), tom: 'ok' as const }]
+                      : []),
+                    ...(resumo.aPagarAberto > 0
+                      ? [{ rotulo: 'A pagar em aberto', valor: brl(resumo.aPagarAberto), tom: 'erro' as const }]
+                      : []),
                     {
                       rotulo: 'Resultado do filtro',
-                      valor: brl(resumo.aReceberAberto - resumo.aPagarAberto),
+                      valor: brl(resumo.entrou - resumo.saiu),
                       tom: 'ouro',
                     },
                   ]}
