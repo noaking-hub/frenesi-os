@@ -21,6 +21,12 @@ export async function registrarSaudeDaRotina(
       rotina,
       erros: extrairErros(relatorio),
       duracao_ms: typeof duracaoMs === 'number' ? Math.round(duracaoMs) : null,
+      // O relatório inteiro, e não só os erros. Rodada que não quebrou também
+      // conta história: "179 etiquetas examinadas, 0 casadas" é diagnóstico,
+      // e antes ele só existia na resposta HTTP — que o Postgres descarta em
+      // poucas horas. Uma apuração real precisou raspar `net._http_response`
+      // para reconstruir o que já estava escrito aqui do lado.
+      relatorio: relatorio ?? null,
     })
     if (error) console.error('[saude] falha ao registrar rodada:', error.message)
   } catch (e) {

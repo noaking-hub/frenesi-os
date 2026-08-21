@@ -369,8 +369,15 @@ export async function codigosDoMelhorEnvio(limite = 80): Promise<string[]> {
     // pega o que foi POSTADO lá apesar de cotado em outro lugar — a descoberta
     // grava a transportadora real em rastreio_servico (J&T/Total Express,
     // Buslog), e é por ela que estes envios entram na varredura.
-    // "jet" é como a companhia vem nomeada na conta real ("JeT"), sem o "&".
-    .or('servico_frete.ilike.ME*,rastreio_servico.ilike.*express*,rastreio_servico.ilike.*buslog*,rastreio_servico.ilike.*jet*')
+    // A J&T aparece com DOIS nomes na conta, e o filtro precisava dos dois:
+    // "JeT" (por extenso, sem o "&") e "JTE_INT" (o código do serviço). O
+    // padrão `*jet*` só pegava o primeiro — "JTE" não contém "jet" —, e por
+    // isso quatro envios vivos, descobertos pelo PRÓPRIO Melhor Envio, ficavam
+    // de fora da varredura que deveria acompanhá-los até a entrega.
+    // O "&" de "J&T" fica de fora do filtro de propósito: dentro de `or()` ele
+    // separaria parâmetros na URL, e escapá-lo aqui depende de o cliente não
+    // escapar de novo. As duas grafias sem ele cobrem os casos vistos.
+    .or('servico_frete.ilike.ME*,rastreio_servico.ilike.*express*,rastreio_servico.ilike.*buslog*,rastreio_servico.ilike.*jet*,rastreio_servico.ilike.*jte*')
     .order('rastreio_lido_em', { ascending: true, nullsFirst: true })
     .limit(limite)
   if (error) throw error

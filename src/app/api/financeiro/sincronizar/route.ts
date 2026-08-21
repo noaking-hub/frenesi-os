@@ -441,7 +441,16 @@ export async function POST(req: Request) {
       relatorio.rastreioMelhorEnvio = { erro: mensagemDe(e) }
     }
   } else if (naEtapa('logistica')) {
-    relatorio.rastreioMelhorEnvio = { pulado: 'Melhor Envio ainda não foi conectado' }
+    // Duas causas, dois recados. Antes, "não foi conectado" saía também quando
+    // o bloco tinha sido cortado pelo orçamento de tempo — e quem lesse o
+    // relatório iria refazer o OAuth de uma integração que estava conectada o
+    // tempo todo. `grupo()` é quem marca a passagem em `puladasPorTempo`; se o
+    // nome está lá, o motivo foi o relógio.
+    relatorio.rastreioMelhorEnvio = {
+      pulado: puladasPorTempo.includes('logistica')
+        ? 'Sem tempo nesta rodada — o Melhor Envio não chegou a ser consultado'
+        : 'Melhor Envio ainda não foi conectado',
+    }
   }
 
   // Venda anulada pela Shopify sai da receita nesta mesma rodada.

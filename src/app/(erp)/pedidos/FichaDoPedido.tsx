@@ -26,6 +26,7 @@ import {
   confirmarEntregaEmMaos,
   linhaDoTempoDoPedido,
 } from './actions'
+import { registrarRastreioManual } from './envios/actions'
 
 /**
  * A ficha do pedido — o painel ancorado do mockup.
@@ -340,7 +341,7 @@ export function FichaDoPedido({
                     className="font-mono"
                     style={{ fontSize: 11.5, color: 'rgba(242,237,227,.86)', overflowWrap: 'anywhere' }}
                   >
-                    {pedido.rastreio ?? 'Ainda não emitido'}
+                    {pedido.rastreio ?? 'Ainda não informado'}
                   </span>
                   {pedido.rastreio && (
                     <button
@@ -362,6 +363,15 @@ export function FichaDoPedido({
                     </button>
                   )}
                 </span>
+                {/* Entrega local não tem etiqueta: o motoboy não gera código, e
+                    oferecer o campo aqui convidaria a inventar um. */}
+                {!pedido.entregaLocal && (
+                  <InformarRastreio
+                    pedidoId={pedido.id}
+                    atual={pedido.rastreio}
+                    aoGravar={async () => setEventos(await linhaDoTempoDoPedido(pedido.id))}
+                  />
+                )}
               </div>
               <Campo rotulo="Data de coleta" valor={coleta?.quando ? (dataHora(coleta.quando) ?? '—') : '—'} />
               {/* "Sem previsão" é resposta legítima; data inventada, nunca. */}
@@ -911,6 +921,152 @@ function CampoDesconto({ desconto }: { desconto: number }) {
  * seguinte, e sem um caminho aqui a única saída seria registrar a mesma venda de
  * novo, baixando o estoque duas vezes. Por isso a ficha anexa, e não só mostra.
  */
+/**
+ * Digitar o código da etiqueta emitida no painel da Frenet.
+ *
+ * A etiqueta dos Correios e da Jadlog sai do painel da Frenet, onde o frete é
+ * mais barato — e nenhuma API lista as etiquetas de uma conta de lá. O ERP não
+ * tem como descobrir sozinho que o envio existe: ele sabe rastrear um código,
+ * não adivinhá-lo. Este campo é a ponte, e é ele que tira o pedido de
+ * "aguardando envio" sem depender de alguém preencher a Yampi.
+ *
+ * Aparece fechado quando já existe código — corrigir é exceção, informar é a
+ * regra, e um input sempre aberto ao lado de um código certo é convite a
+ * apagá-lo sem querer.
+ */
+function InformarRastreio({
+  pedidoId,
+  atual,
+  aoGravar,
+}: {
+  pedidoId: string
+  atual: string | null
+  aoGravar: () => Promise<void>
+}) {
+  const [aberto, setAberto] = useState(false)
+  const [codigo, setCodigo] = useState('')
+  const [erro, setErro] = useState<string | null>(null)
+  const [aviso, setAviso] = useState<string | null>(null)
+  const [gravando, gravar] = useTransition()
+
+  const salvar = () =>
+    gravar(async () => {
+      setErro(null)
+      setAviso(null)
+      const r = await registrarRastreioManual(pedidoId, codigo)
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      setAberto(false)
+      setCodigo('')
+      // Aviso sobrevive ao fechamento do campo de propósito: "a transportadora
+      // ainda não reconhece este código" é justamente o que precisa continuar
+      // à vista depois de gravar.
+      setAviso(r.aviso)
+      await aoGravar()
+    })
+
+  if (!aberto) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <button
+          type="button"
+          onClick={() => {
+            setAberto(true)
+            setCodigo(atual ?? '')
+          }}
+          className="font-sans hover:text-ouro"
+          style={{
+            border: 0,
+            background: 'transparent',
+            padding: 0,
+            fontSize: 11.5,
+            color: atual ? 'rgba(242,237,227,.5)' : COR.ouro,
+            textDecoration: 'underline',
+            textUnderlineOffset: 3,
+            cursor: 'pointer',
+            alignSelf: 'flex-start',
+          }}
+        >
+          {atual ? 'Corrigir código' : 'Informar código da etiqueta'}
+        </button>
+        {aviso && (
+          <span
+            className="font-sans"
+            style={{ fontSize: 10.5, lineHeight: 1.45, color: COR.ouro, textWrap: 'pretty' }}
+          >
+            {aviso}
+          </span>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <input
+          autoFocus
+          value={codigo}
+          onChange={(e) => setCodigo(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !gravando) salvar()
+            if (e.key === 'Escape') setAberto(false)
+          }}
+          placeholder="AA123456789BR"
+          spellCheck={false}
+          autoCapitalize="characters"
+          className="font-mono"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            padding: '6px 8px',
+            fontSize: 11.5,
+            color: 'var(--color-corrente)',
+            background: 'rgba(255,255,255,.04)',
+            border: '1px solid var(--color-borda-sutil)',
+            borderRadius: 8,
+            outline: 'none',
+          }}
+        />
+        <button
+          type="button"
+          onClick={salvar}
+          disabled={gravando || codigo.trim().length < 6}
+          className="font-sans"
+          style={{
+            border: `1px solid ${BORDA.ouro}`,
+            background: FUNDO.ouro,
+            color: COR.ouro,
+            borderRadius: 8,
+            padding: '6px 10px',
+            fontSize: 11.5,
+            cursor: gravando ? 'wait' : codigo.trim().length < 6 ? 'not-allowed' : 'pointer',
+            opacity: codigo.trim().length < 6 ? 0.45 : 1,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {gravando ? 'Gravando…' : 'Salvar'}
+        </button>
+      </div>
+      <span
+        className="font-sans"
+        style={{ fontSize: 10, lineHeight: 1.4, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+      >
+        {atual
+          ? 'O código atual será substituído. O pedido continua onde está.'
+          : 'Ao salvar, o pedido passa a "enviado", o aviso vai ao cliente e a Frenet começa a rastrear.'}
+      </span>
+      {erro && (
+        <span className="font-sans" style={{ fontSize: 10.5, color: COR.erro, textWrap: 'pretty' }}>
+          {erro}
+        </span>
+      )}
+    </div>
+  )
+}
+
 function CampoComprovante({ url, pedidoId }: { url: string | null; pedidoId: string }) {
   const entrada = useRef<HTMLInputElement>(null)
   const [erro, setErro] = useState<string | null>(null)

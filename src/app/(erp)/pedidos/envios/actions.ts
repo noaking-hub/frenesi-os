@@ -105,6 +105,186 @@ export async function atualizarRastreioAgora(
   }
 }
 
+/**
+ * Informar à mão o código de rastreio de um pedido.
+ *
+ * Existe porque a etiqueta dos Correios e da Jadlog é emitida no PAINEL da
+ * Frenet — lá o frete é mais barato —, e nenhuma API lista as etiquetas de uma
+ * conta da Frenet. O ERP não tem como descobrir sozinho que aquele envio
+ * existe: a Frenet rastreia um código que já se conhece, e o código nasce na
+ * hora em que a etiqueta é impressa, num painel que não conversa com ninguém.
+ * Até hoje o único lugar do mundo onde esse código podia ser digitado era a
+ * Yampi, e o ERP ficava esperando ela.
+ *
+ * Com o código gravado, tudo o mais que já existe volta a funcionar sozinho: a
+ * varredura da Frenet passa a incluir o pedido (ela filtra por
+ * `rastreio is not null`), os eventos casam pelo próprio código, o aviso de
+ * envio sai no pulso seguinte e a baixa na Shopify entra na fila.
+ *
+ * O pedido vira `enviado` no mesmo movimento, e não em dois passos: quem
+ * digita o código está dizendo que a etiqueta foi emitida. Manter "aguardando
+ * envio" com código impresso seria guardar uma contradição.
+ *
+ * A consulta à Frenet logo depois de gravar NÃO é enfeite: é a única
+ * conferência possível contra o dígito trocado. Código inventado volta sem
+ * evento nenhum, e a tela avisa em vez de deixar o cliente esperando um
+ * rastreio que não existe. Falha na consulta não desfaz a gravação — a
+ * transportadora estar fora do ar não torna a etiqueta menos real.
+ */
+export async function registrarRastreioManual(
+  pedidoId: string,
+  codigo: string,
+  servico?: string | null,
+): Promise<Resposta<{ eventos: EventoTransportadora[]; url: string | null; aviso: string | null }>> {
+  if (!supabaseConfigurado()) {
+    return { ok: false, erro: 'O Supabase precisa estar configurado para gravar o rastreio.' }
+  }
+  if (!pedidoId) return { ok: false, erro: 'Pedido não informado.' }
+
+  // Espaço no meio some junto: o código copiado do painel vem quebrado em
+  // blocos ("AA 1234 5678 BR") e a transportadora não reconhece com espaço.
+  const limpo = codigo.replace(/\s+/g, '').toUpperCase()
+  if (limpo.length < 6) {
+    return { ok: false, erro: 'Código de rastreio curto demais — confira o que veio da etiqueta.' }
+  }
+  if (limpo.length > 60) {
+    return { ok: false, erro: 'Código de rastreio longo demais — parece que veio outra coisa colada junto.' }
+  }
+
+  try {
+    const sb = supabaseServer()
+    const { data, error: erroLeitura } = await sb
+      .from('pedidos')
+      .select('id, rastreio, servico_frete, rastreio_servico, entregue_em, cancelado_em, entrega_local')
+      .eq('id', pedidoId)
+      .maybeSingle()
+    if (erroLeitura) return { ok: false, erro: mensagemDe(erroLeitura) }
+
+    const pedido = data as {
+      rastreio: string | null
+      servico_frete: string | null
+      rastreio_servico: string | null
+      entregue_em: string | null
+      cancelado_em: string | null
+      entrega_local: boolean | null
+    } | null
+    if (!pedido) return { ok: false, erro: 'Pedido não encontrado.' }
+    if (pedido.cancelado_em) {
+      return { ok: false, erro: 'Este pedido está cancelado — não há envio a registrar.' }
+    }
+
+    // Já entregue não volta para "enviado": o código pode ser corrigido, o
+    // desfecho não. Reabrir a entrega faria o pedido sumir dos indicadores de
+    // prazo e reaparecer na fila de baixa da Shopify.
+    const jaEntregue = Boolean(pedido.entregue_em)
+    const outroCodigo = pedido.rastreio && pedido.rastreio !== limpo
+
+    const { error } = await sb
+      .from('pedidos')
+      .update({
+        rastreio: limpo,
+        ...(servico?.trim() ? { rastreio_servico: servico.trim() } : {}),
+        ...(jaEntregue ? {} : { envio: 'enviado', situacao: 'enviado' }),
+        // Zera a marca da última leitura para a varredura pegar este pedido na
+        // primeira rodada, em vez de na vez dele na fila por antiguidade.
+        rastreio_lido_em: null,
+        envio_visto_em: new Date().toISOString(),
+      })
+      .eq('id', pedidoId)
+    if (error) return { ok: false, erro: mensagemDe(error) }
+
+    revalidatePath('/pedidos')
+    revalidatePath('/pedidos/envios')
+
+    // A partir daqui nada mais pode derrubar a operação: o código está
+    // gravado, e é isso que o operador pediu.
+    let aviso: string | null = outroCodigo
+      ? 'Este pedido já tinha outro código, que foi substituído.'
+      : null
+    let url: string | null = null
+
+    if (!frenetConfigurada()) {
+      return { ok: true, eventos: await eventosDoPedido(pedidoId), url, aviso }
+    }
+
+    try {
+      const leitura = await rastrearNaFrenet(limpo, servico?.trim() || pedido.rastreio_servico || pedido.servico_frete)
+      await gravarEventosRastreio(leitura.eventos)
+      url = leitura.url
+      if (leitura.url || leitura.servico) {
+        await sb
+          .from('pedidos')
+          .update({
+            ...(leitura.url ? { rastreio_url: leitura.url } : {}),
+            ...(leitura.servico ? { rastreio_servico: leitura.servico } : {}),
+          })
+          .eq('id', pedidoId)
+      }
+      if (leitura.eventos.length === 0) {
+        aviso = [
+          aviso,
+          'A transportadora ainda não devolveu nenhum evento para este código. É normal nas primeiras horas depois da postagem — mas se continuar assim amanhã, confira se o código está certo.',
+        ]
+          .filter(Boolean)
+          .join(' ')
+      }
+    } catch (e) {
+      aviso = [aviso, `Gravado, mas a consulta à transportadora falhou: ${mensagemDe(e)}`]
+        .filter(Boolean)
+        .join(' ')
+    }
+
+    revalidatePath('/pedidos/envios')
+    return { ok: true, eventos: await eventosDoPedido(pedidoId), url, aviso }
+  } catch (e) {
+    return { ok: false, erro: mensagemDe(e) }
+  }
+}
+
+/**
+ * Os pedidos esperando alguém digitar o código da etiqueta.
+ *
+ * A mesma pergunta que `sondarEnviosDaFrenet` faz para o relatório da rotina,
+ * só que devolvendo o que a TELA precisa para resolver: o cliente, para o
+ * operador conferir contra a etiqueta na mão, e o serviço cotado, para ele
+ * saber qual transportadora procurar no painel.
+ */
+export interface PendenteDeRastreio {
+  id: string
+  codigo: string
+  cliente: string
+  servicoFrete: string | null
+  compradoEm: string | null
+}
+
+export async function pedidosAguardandoRastreio(): Promise<PendenteDeRastreio[]> {
+  if (!supabaseConfigurado()) return []
+  const { data } = await supabaseServer()
+    .from('pedidos')
+    .select('id, shopify_numero, comprado_em, servico_frete, clientes(nome)')
+    .eq('pagamento', 'pago')
+    .in('situacao', ['pago', 'faturado'])
+    .is('rastreio', null)
+    .is('cancelado_em', null)
+    .eq('entrega_local', false)
+    .order('comprado_em', { ascending: true })
+    .limit(50)
+
+  return ((data ?? []) as unknown as {
+    id: string
+    shopify_numero: string | null
+    comprado_em: string | null
+    servico_frete: string | null
+    clientes: { nome: string } | null
+  }[]).map((p) => ({
+    id: p.id,
+    codigo: p.shopify_numero ?? p.id,
+    cliente: p.clientes?.nome ?? '—',
+    servicoFrete: p.servico_frete,
+    compradoEm: p.comprado_em,
+  }))
+}
+
 export interface ResultadoBaixa {
   enviados: number
   entregues: number
