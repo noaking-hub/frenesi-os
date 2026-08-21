@@ -158,6 +158,30 @@ export function servicoLegivel(servico: string | null | undefined): string | nul
  * evitar. Transportadora desconhecida devolve `null` — link que abre numa
  * consulta vazia faz o cliente concluir que o pedido se perdeu.
  */
+/**
+ * As transportadoras que o ERP sabe nomear e para as quais tem página de
+ * rastreio — a lista que o operador escolhe ao informar um código à mão.
+ *
+ * Existe porque `identificarFrete` adivinha pelo formato do código, e o
+ * formato mente fora dos dois casos inequívocos: quinze dígitos é J&T e
+ * `AA123456789BR` é Correios, mas "nove dígitos" é Jadlog E é o formato de
+ * outras transportadoras. Postado na Total Express com código de nove
+ * dígitos, o palpite diria Jadlog e o cliente receberia um link que não
+ * mostra o pacote dele. Quem postou sabe por quem postou; esta lista é o
+ * lugar de dizer.
+ *
+ * O valor é gravado em `rastreio_servico` e é lido por `identificarFrete`,
+ * que dá precedência ao rótulo em tudo que não seja um dos dois formatos
+ * inequívocos — ali o código ganha, e ganha com razão.
+ */
+export const TRANSPORTADORAS_CONHECIDAS = [
+  'Correios',
+  'Jadlog',
+  'J&T Express',
+  'Total Express',
+  'Buslog',
+] as const
+
 export function paginaDeRastreio(
   transportadora: string | null | undefined,
   codigo: string | null | undefined,

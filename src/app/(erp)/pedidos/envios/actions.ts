@@ -155,7 +155,11 @@ export async function registrarRastreioManual(
     const sb = supabaseServer()
     const { data, error: erroLeitura } = await sb
       .from('pedidos')
-      .select('id, rastreio, servico_frete, rastreio_servico, entregue_em, cancelado_em, entrega_local')
+      // `situacao` e não `cancelado_em`: em `pedidos` o cancelamento é um
+      // ESTADO do pedido, não uma data à parte — quem tem `cancelado_em` é
+      // `lancamentos`, tabela diferente. A coluna inventada aqui derrubava a
+      // gravação com "column pedidos.cancelado_em does not exist".
+      .select('id, rastreio, servico_frete, rastreio_servico, entregue_em, situacao, entrega_local')
       .eq('id', pedidoId)
       .maybeSingle()
     if (erroLeitura) return { ok: false, erro: mensagemDe(erroLeitura) }
@@ -165,11 +169,11 @@ export async function registrarRastreioManual(
       servico_frete: string | null
       rastreio_servico: string | null
       entregue_em: string | null
-      cancelado_em: string | null
+      situacao: string | null
       entrega_local: boolean | null
     } | null
     if (!pedido) return { ok: false, erro: 'Pedido não encontrado.' }
-    if (pedido.cancelado_em) {
+    if (pedido.situacao === 'cancelado') {
       return { ok: false, erro: 'Este pedido está cancelado — não há envio a registrar.' }
     }
 
@@ -263,9 +267,10 @@ export async function pedidosAguardandoRastreio(): Promise<PendenteDeRastreio[]>
     .from('pedidos')
     .select('id, shopify_numero, comprado_em, servico_frete, clientes(nome)')
     .eq('pagamento', 'pago')
+    // 'pago' e 'faturado' já EXCLUEM cancelado e entregue — em `pedidos` o
+    // cancelamento é um estado de `situacao`, não uma data à parte.
     .in('situacao', ['pago', 'faturado'])
     .is('rastreio', null)
-    .is('cancelado_em', null)
     .eq('entrega_local', false)
     .order('comprado_em', { ascending: true })
     .limit(50)

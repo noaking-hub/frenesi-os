@@ -6,6 +6,7 @@ import { PainelInferior } from '@/components/erp/Modal'
 import { COR, FUNDO, BORDA, type Tom } from '@/components/erp/tokens'
 import {
   ROTULO_LOGISTICO,
+  TRANSPORTADORAS_CONHECIDAS,
   brl,
   paginaDeRastreio,
   resumirEvento,
@@ -945,6 +946,10 @@ function InformarRastreio({
 }) {
   const [aberto, setAberto] = useState(false)
   const [codigo, setCodigo] = useState('')
+  // Vazio = deixa o ERP deduzir pelo formato do código, que é o certo na
+  // maioria dos dias. O select existe para quando o pacote saiu por uma
+  // transportadora diferente da cotada e o palpite erraria o link do e-mail.
+  const [transportadora, setTransportadora] = useState('')
   const [erro, setErro] = useState<string | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
   const [gravando, gravar] = useTransition()
@@ -953,7 +958,7 @@ function InformarRastreio({
     gravar(async () => {
       setErro(null)
       setAviso(null)
-      const r = await registrarRastreioManual(pedidoId, codigo)
+      const r = await registrarRastreioManual(pedidoId, codigo, transportadora || null)
       if (!r.ok) {
         setErro(r.erro)
         return
@@ -1050,13 +1055,36 @@ function InformarRastreio({
           {gravando ? 'Gravando…' : 'Salvar'}
         </button>
       </div>
+      <select
+        value={transportadora}
+        onChange={(e) => setTransportadora(e.target.value)}
+        aria-label="Transportadora"
+        className="font-sans"
+        style={{
+          padding: '6px 8px',
+          fontSize: 11,
+          color: transportadora ? 'var(--color-corrente)' : 'var(--color-terciario)',
+          background: 'rgba(255,255,255,.04)',
+          border: '1px solid var(--color-borda-sutil)',
+          borderRadius: 8,
+          outline: 'none',
+          cursor: 'pointer',
+        }}
+      >
+        <option value="">Transportadora: deduzir pelo código</option>
+        {TRANSPORTADORAS_CONHECIDAS.map((t) => (
+          <option key={t} value={t}>
+            {t}
+          </option>
+        ))}
+      </select>
       <span
         className="font-sans"
         style={{ fontSize: 10, lineHeight: 1.4, color: 'var(--color-terciario)', textWrap: 'pretty' }}
       >
         {atual
           ? 'O código atual será substituído. O pedido continua onde está.'
-          : 'Ao salvar, o pedido passa a "enviado", o aviso vai ao cliente e a Frenet começa a rastrear.'}
+          : 'Ao salvar, o pedido passa a "enviado", o aviso vai ao cliente e a Frenet começa a rastrear. Escolha a transportadora se o pacote saiu por outra diferente da cotada — é ela que decide o link do e-mail.'}
       </span>
       {erro && (
         <span className="font-sans" style={{ fontSize: 10.5, color: COR.erro, textWrap: 'pretty' }}>

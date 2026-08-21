@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 
 import { COR, FUNDO, BORDA } from '@/components/erp/tokens'
-import { servicoLegivel } from '@/domain'
+import { TRANSPORTADORAS_CONHECIDAS, servicoLegivel } from '@/domain'
 
 import { registrarRastreioManual, type PendenteDeRastreio } from './actions'
 
@@ -123,6 +123,10 @@ function LinhaPendente({
   aoResolver: (codigo: string, aviso: string | null) => void
 }) {
   const [codigo, setCodigo] = useState('')
+  // Vazio = "descobre pelo código". É o certo na maioria dos dias: o serviço
+  // cotado e o código costumam concordar. O select existe para o dia em que
+  // não concordam — postou por outra transportadora e o palpite erraria.
+  const [transportadora, setTransportadora] = useState('')
   const [erro, setErro] = useState<string | null>(null)
   const [gravando, gravar] = useTransition()
 
@@ -132,7 +136,7 @@ function LinhaPendente({
   const salvar = () =>
     gravar(async () => {
       setErro(null)
-      const r = await registrarRastreioManual(pendente.id, codigo)
+      const r = await registrarRastreioManual(pendente.id, codigo, transportadora || null)
       if (!r.ok) {
         setErro(r.erro)
         return
@@ -195,6 +199,30 @@ function LinhaPendente({
             outline: 'none',
           }}
         />
+        <select
+          value={transportadora}
+          onChange={(e) => setTransportadora(e.target.value)}
+          aria-label={`Transportadora do pedido ${pendente.codigo}`}
+          className="font-sans"
+          style={{
+            flex: 'none',
+            padding: '6px 8px',
+            fontSize: 11,
+            color: transportadora ? 'var(--color-corrente)' : 'var(--color-terciario)',
+            background: 'rgba(255,255,255,.04)',
+            border: '1px solid var(--color-borda-sutil)',
+            borderRadius: 8,
+            outline: 'none',
+            cursor: 'pointer',
+          }}
+        >
+          <option value="">Pelo código</option>
+          {TRANSPORTADORAS_CONHECIDAS.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
         <button
           type="button"
           onClick={salvar}
