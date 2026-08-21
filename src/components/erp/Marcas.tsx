@@ -16,6 +16,11 @@ interface Marca {
   icone?: NomeIcone
   /** Marcas de fundo claro (BB, PagBank) precisam de texto escuro. */
   textoCor?: string
+  /**
+   * Filete interno, para a marca cuja cor é escura demais para se separar do
+   * fundo do ERP sozinha. Sem ele, preto sobre preto vira buraco na linha.
+   */
+  borda?: string
   /** Logomarca real, hospedada no Storage do projeto — fora do repositório. */
   logo?: string
 }
@@ -36,7 +41,21 @@ const MARCAS: { chave: RegExp; marca: Marca }[] = [
   { chave: /sicoob/i, marca: { cor: '#00AE9D', texto: 'Si', logo: `${STORAGE}/sicoob.jpeg` } },
   // Infinite ANTES de Bradesco: é o cartão preto, e o vermelho da conta
   // corrente do Rafael (PF) não pode ser o mesmo tile do cartão.
-  { chave: /infinite/i, marca: { cor: '#0A0A0A', texto: 'B', textoCor: '#D9C08A', logo: `${STORAGE}/bradesco-infinite.png` } },
+  //
+  // O preto chapado que estava aqui não se lia: #0A0A0A sobre o fundo do ERP é
+  // um buraco na linha, ao lado de vizinhos laranja, azul e verde. O grafite em
+  // diagonal com filete dourado é o que um cartão preto parece na vida real — e
+  // aparece. A arte do cartão não entra: ela é retangular, o tile é quadrado, e
+  // `cover` corta justamente a tarja e o número que dariam o reconhecimento.
+  {
+    chave: /infinite/i,
+    marca: {
+      cor: 'linear-gradient(142deg,#332E26 0%,#17140F 44%,#0B0A08 72%,#2A241C 100%)',
+      texto: 'B',
+      textoCor: '#E4CB94',
+      borda: 'rgba(228,203,148,.42)',
+    },
+  },
   { chave: /bradesco/i, marca: { cor: '#CC092F', texto: 'B', logo: `${STORAGE}/bradesco.png` } },
   { chave: /nubank|nu\s*pagamentos/i, marca: { cor: '#820AD1', texto: 'Nu' } },
   // Digio, Next e Méliuz ainda não têm arte no bucket — o monograma vai na
@@ -128,7 +147,9 @@ export function TileMarca({
         placeItems: 'center',
         background: m.cor,
         color: m.textoCor ?? '#FFFFFF',
-        boxShadow: 'inset 0 -1px 0 rgba(0,0,0,.18)',
+        boxShadow: m.borda
+          ? `inset 0 0 0 1px ${m.borda}, inset 0 -1px 0 rgba(0,0,0,.35)`
+          : 'inset 0 -1px 0 rgba(0,0,0,.18)',
       }}
     >
       {m.icone ? (
