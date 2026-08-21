@@ -995,3 +995,196 @@ export async function atualizarRastreamento(ids: string[]): Promise<RespostaRast
     return { ok: false, erro: mensagemDe(e) }
   }
 }
+
+// ── Reembolso parcial ──────────────────────────────────────────────────────
+
+/**
+ * Dinheiro devolvido ao cliente sem cancelar o pedido.
+ *
+ * O caso que originou isto: pedido de R$ 254,00 pago por PIX, um item de
+ * R$ 62,00 devolvido, e o Mercado Pago estornando os R$ 62,00 pelo mesmo PIX.
+ * Não havia onde registrar — nem valor, nem motivo, nem comprovante — e o
+ * débito ia cair no extrato como uma saída sem dono, para alguém classificar
+ * à mão daqui a uma semana sem lembrar de qual venda era.
+ *
+ * NÃO cria lançamento, e isso é a regra da casa, não economia: a conta do
+ * Mercado Pago tem extrato lido, e nela o caixa nasce da LINHA DO EXTRATO.
+ * Um lançamento digitado aqui faria os R$ 62,00 saírem duas vezes do saldo —
+ * a mesma armadilha que a venda manual já enfrentou do outro lado.
+ *
+ * O que este registro é: a intenção declarada, com prova. Quem paga é a linha
+ * do estorno, e `casar_reembolsos_com_extrato` costura as duas assim que ela
+ * chega. Enquanto não chega, o reembolso fica visível como pendente em vez de
+ * sumir.
+ *
+ * O ESTOQUE não se mexe aqui de propósito. Reembolsar é devolver dinheiro;
+ * o produto pode ter voltado ou não, e adivinhar isso repõe frasco que nunca
+ * chegou. Retorno físico é assunto do módulo de Devoluções, que tem conferência
+ * e fotos.
+ */
+export async function registrarReembolso(dados: {
+  pedidoId: string
+  valor: number
+  motivo: string
+  item?: string | null
+  ocorridoEm: string
+  movimentoId?: string | null
+  comprovante?: File | null
+}): Promise<{ ok: true; casado: boolean } | { ok: false; erro: string }> {
+  if (!supabaseConfigurado()) {
+    return { ok: false, erro: 'O Supabase precisa estar configurado para registrar reembolsos.' }
+  }
+  const pedidoId = dados.pedidoId.trim()
+  if (!pedidoId) return { ok: false, erro: 'Pedido não informado.' }
+  if (!(dados.valor > 0)) return { ok: false, erro: 'O valor do reembolso deve ser maior que zero.' }
+  if (!dados.motivo.trim()) return { ok: false, erro: 'Diga o motivo do reembolso.' }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dados.ocorridoEm)) {
+    return { ok: false, erro: 'Data do reembolso inválida.' }
+  }
+  if (dados.comprovante) {
+    const recusa = recusaDoComprovante(dados.comprovante)
+    if (recusa) return { ok: false, erro: recusa }
+  }
+
+  const sb = supabaseServer()
+
+  const { data: pedido, error: erroPedido } = await sb
+    .from('pedidos')
+    .select('id, valor')
+    .eq('id', pedidoId)
+    .maybeSingle()
+  if (erroPedido) return { ok: false, erro: mensagemDe(erroPedido) }
+  if (!pedido) return { ok: false, erro: `Pedido ${pedidoId} não encontrado.` }
+
+  // O teto é o valor do pedido MENOS o que já foi devolvido: sem ele, dois
+  // reembolsos de R$ 200,00 numa venda de R$ 254,00 passariam, e a dedução de
+  // receita ficaria maior que a receita.
+  const { data: anteriores } = await sb
+    .from('pedido_reembolsos')
+    .select('valor')
+    .eq('pedido_id', pedidoId)
+  const jaDevolvido = ((anteriores ?? []) as { valor: number | string }[]).reduce(
+    (s, r) => s + Number(r.valor),
+    0,
+  )
+  const teto = Number((pedido as { valor: number | string }).valor) - jaDevolvido
+  if (dados.valor > teto + 0.005) {
+    return {
+      ok: false,
+      erro:
+        jaDevolvido > 0
+          ? `Este pedido já teve ${brlSimples(jaDevolvido)} devolvidos; sobram ${brlSimples(teto)} para reembolsar.`
+          : `O reembolso não pode passar do valor do pedido (${brlSimples(teto)}).`,
+    }
+  }
+
+  const id = `RB-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+
+  // O arquivo sobe ANTES do registro, com o id já decidido: gravar a linha e
+  // falhar no upload deixaria um reembolso dizendo ter comprovante que não
+  // existe. Falhar aqui não deixa rastro nenhum.
+  let comprovante: string | null = null
+  if (dados.comprovante) {
+    const caminho = `${pedidoId}/reembolso-${id}.${extensaoDoComprovante(dados.comprovante)}`
+    const { error: erroUpload } = await sb.storage
+      .from(BUCKET_FINANCEIRO)
+      .upload(caminho, dados.comprovante, {
+        contentType: dados.comprovante.type,
+        upsert: true,
+      })
+    if (erroUpload) {
+      console.error(`[reembolso] upload de ${pedidoId} falhou:`, erroUpload)
+      return { ok: false, erro: 'Não foi possível guardar o comprovante. Tente de novo.' }
+    }
+    comprovante = caminho
+  }
+
+  const { error } = await sb.from('pedido_reembolsos').insert({
+    id,
+    pedido_id: pedidoId,
+    valor: dados.valor,
+    motivo: dados.motivo.trim(),
+    item: dados.item?.trim() || null,
+    ocorrido_em: dados.ocorridoEm,
+    comprovante,
+    movimento_id: dados.movimentoId?.trim() || null,
+    criado_por: await operadorAtual(),
+  })
+  if (error) {
+    if (comprovante) await sb.storage.from(BUCKET_FINANCEIRO).remove([comprovante])
+    console.error('[reembolso] gravação falhou:', error)
+    return { ok: false, erro: mensagemDe(error) }
+  }
+
+  // Tenta casar na hora: o estorno costuma já estar no extrato quando alguém
+  // vem registrar. Falhar aqui não é erro — a rotina tenta de novo a cada
+  // rodada, e o reembolso fica marcado como "aguardando o extrato".
+  let casado = false
+  try {
+    const { data } = await sb.rpc('casar_reembolsos_com_extrato')
+    casado = Number(data ?? 0) > 0
+  } catch (e) {
+    console.error('[reembolso] casamento imediato falhou:', e)
+  }
+
+  revalidatePath('/pedidos')
+  for (const rota of ROTAS_DO_FINANCEIRO) revalidatePath(rota)
+  return { ok: true, casado }
+}
+
+/** R$ com vírgula, para as frases de recusa — sem depender do formatador da tela. */
+function brlSimples(v: number): string {
+  return `R$ ${v.toFixed(2).replace('.', ',')}`
+}
+
+export interface ReembolsoDoPedido {
+  id: string
+  valor: number
+  motivo: string
+  item: string | null
+  ocorridoEm: string
+  comprovanteUrl: string | null
+  /** Já achou a linha do estorno no extrato — o caixa está batido. */
+  conciliado: boolean
+}
+
+/**
+ * Os reembolsos de um pedido, com o comprovante em URL assinada.
+ *
+ * A URL vive uma hora, como a do comprovante da venda: o bucket é privado
+ * porque um extrato de PIX tem nome e valor de cliente dentro.
+ */
+export async function reembolsosDoPedido(pedidoId: string): Promise<ReembolsoDoPedido[]> {
+  if (!supabaseConfigurado()) return []
+  const sb = supabaseServer()
+  const { data } = await sb
+    .from('pedido_reembolsos')
+    .select('id, valor, motivo, item, ocorrido_em, comprovante, extrato_chave')
+    .eq('pedido_id', pedidoId)
+    .order('ocorrido_em', { ascending: false })
+
+  const linhas = (data ?? []) as {
+    id: string
+    valor: number | string
+    motivo: string
+    item: string | null
+    ocorrido_em: string
+    comprovante: string | null
+    extrato_chave: string | null
+  }[]
+
+  return Promise.all(
+    linhas.map(async (l) => ({
+      id: l.id,
+      valor: Number(l.valor),
+      motivo: l.motivo,
+      item: l.item,
+      ocorridoEm: l.ocorrido_em,
+      conciliado: Boolean(l.extrato_chave),
+      comprovanteUrl: l.comprovante
+        ? ((await sb.storage.from(BUCKET_FINANCEIRO).createSignedUrl(l.comprovante, 3600)).data
+            ?.signedUrl ?? null)
+        : null,
+    })),
+  )
+}

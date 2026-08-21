@@ -1140,6 +1140,15 @@ async function importarEComplementar(
   // O estorno chega pelo extrato: é agora que o pedido pago-e-devolvido
   // ganha o carimbo de divergente e sai da receita.
   try {
+    // ANTES de marcar estornados, e a ordem importa: o reembolso parcial
+    // declarado no pedido acabou de ganhar a linha do extrato como dona, e é
+    // essa soma que `marcar_estornados` compara com o valor do pedido. Rodando
+    // depois, a comparação seria feita com a linha ainda sem pedido.
+    const { data: casados } = await supabaseServer().rpc('casar_reembolsos_com_extrato')
+    if (Number(casados ?? 0) > 0) {
+      linhas.push(`${casados} reembolso(s) casado(s) com a linha do estorno.`)
+    }
+
     const { data: estornados } = await supabaseServer().rpc('marcar_estornados')
     if (Number(estornados ?? 0) > 0) {
       linhas.push(`${estornados} venda(s) estornadas saíram da receita.`)

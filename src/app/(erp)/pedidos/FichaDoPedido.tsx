@@ -26,6 +26,9 @@ import {
   atualizarRastreamento,
   confirmarEntregaEmMaos,
   linhaDoTempoDoPedido,
+  reembolsosDoPedido,
+  registrarReembolso,
+  type ReembolsoDoPedido,
 } from './actions'
 import { registrarRastreioManual } from './envios/actions'
 
@@ -580,6 +583,7 @@ export function FichaDoPedido({
               <Campo rotulo="Cashback usado" valor={brl(pedido.cashback)} mono />
               <CampoComprovante url={pedido.comprovanteUrl} pedidoId={pedido.id} />
             </Bloco>
+            <BlocoReembolsos pedidoId={pedido.id} valorDoPedido={pedido.valor} />
           </div>
         )}
 
@@ -1094,6 +1098,265 @@ function InformarRastreio({
     </div>
   )
 }
+
+/**
+ * Os reembolsos parciais do pedido, e o formulário para registrar mais um.
+ *
+ * Fica na aba Pagamento porque reembolso é dinheiro, não logística: o produto
+ * pode nem ter voltado. Quem devolve mercadoria usa o módulo de Devoluções,
+ * que tem conferência e fotos — aqui só se registra o dinheiro que saiu.
+ *
+ * "Aguardando o extrato" é estado legítimo e aparece: o estorno cai na conta
+ * do gateway com alguns minutos ou horas de atraso, e esconder essa espera
+ * faria parecer que o registro não funcionou.
+ */
+function BlocoReembolsos({ pedidoId, valorDoPedido }: { pedidoId: string; valorDoPedido: number }) {
+  const [lista, setLista] = useState<ReembolsoDoPedido[] | null>(null)
+  const [aberto, setAberto] = useState(false)
+  const [valor, setValor] = useState('')
+  const [motivo, setMotivo] = useState('')
+  const [item, setItem] = useState('')
+  const [quando, setQuando] = useState(() => new Date().toISOString().slice(0, 10))
+  const [movimento, setMovimento] = useState('')
+  const [arquivo, setArquivo] = useState<File | null>(null)
+  const [erro, setErro] = useState<string | null>(null)
+  const [gravando, gravar] = useTransition()
+  const entrada = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    let vivo = true
+    reembolsosDoPedido(pedidoId).then((r) => {
+      if (vivo) setLista(r)
+    })
+    return () => {
+      vivo = false
+    }
+  }, [pedidoId])
+
+  const devolvido = (lista ?? []).reduce((s, r) => s + r.valor, 0)
+  const numero = Number(valor.replace(/\./g, '').replace(',', '.'))
+
+  const salvar = () =>
+    gravar(async () => {
+      setErro(null)
+      const r = await registrarReembolso({
+        pedidoId,
+        valor: numero,
+        motivo,
+        item: item || null,
+        ocorridoEm: quando,
+        movimentoId: movimento || null,
+        comprovante: arquivo,
+      })
+      if (!r.ok) {
+        setErro(r.erro)
+        return
+      }
+      setAberto(false)
+      setValor('')
+      setMotivo('')
+      setItem('')
+      setMovimento('')
+      setArquivo(null)
+      setLista(await reembolsosDoPedido(pedidoId))
+    })
+
+  return (
+    <Bloco titulo="Reembolsos ao cliente">
+      {lista === null && <Nota>Carregando…</Nota>}
+      {lista?.length === 0 && !aberto && (
+        <span className="font-sans" style={{ fontSize: 11.5, color: 'var(--color-terciario)' }}>
+          Nenhum valor devolvido neste pedido.
+        </span>
+      )}
+
+      {lista?.map((r) => (
+        <div key={r.id} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+            <span className="font-mono" style={{ fontSize: 12, color: COR.erro }}>
+              −{brl(r.valor)}
+            </span>
+            <span className="font-sans" style={{ fontSize: 11, color: 'var(--color-corrente)' }}>
+              {r.motivo}
+            </span>
+            {r.comprovanteUrl && (
+              <a
+                href={r.comprovanteUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="font-sans hover:text-ouro"
+                style={{ fontSize: 10.5, color: COR.ouro, textDecoration: 'underline', textUnderlineOffset: 3 }}
+              >
+                comprovante
+              </a>
+            )}
+          </span>
+          <span className="font-sans" style={{ fontSize: 10, color: 'var(--color-terciario)' }}>
+            {(dataHora(r.ocorridoEm) ?? r.ocorridoEm)}
+            {r.item ? ` · ${r.item}` : ''} ·{' '}
+            <span style={{ color: r.conciliado ? COR.ok : COR.atencao }}>
+              {r.conciliado ? 'conciliado com o extrato' : 'aguardando o extrato'}
+            </span>
+          </span>
+        </div>
+      ))}
+
+      {devolvido > 0 && (
+        <Campo rotulo="Recebido líquido" valor={brl(valorDoPedido - devolvido)} mono />
+      )}
+
+      {!aberto ? (
+        <button
+          type="button"
+          onClick={() => setAberto(true)}
+          className="font-sans hover:text-ouro"
+          style={{
+            border: 0,
+            background: 'transparent',
+            padding: 0,
+            fontSize: 11.5,
+            color: COR.ouro,
+            textDecoration: 'underline',
+            textUnderlineOffset: 3,
+            cursor: 'pointer',
+            alignSelf: 'flex-start',
+          }}
+        >
+          Registrar reembolso
+        </button>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input
+              autoFocus
+              value={valor}
+              onChange={(e) => setValor(e.target.value)}
+              placeholder="62,00"
+              inputMode="decimal"
+              className="font-mono"
+              style={{ ...CAMPO_REEMBOLSO, flex: '0 0 92px' }}
+            />
+            <input
+              type="date"
+              value={quando}
+              onChange={(e) => setQuando(e.target.value)}
+              style={{ ...CAMPO_REEMBOLSO, flex: '0 0 130px', colorScheme: 'dark' }}
+            />
+          </div>
+          <input
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+            placeholder="Motivo — ex.: item devolvido"
+            style={CAMPO_REEMBOLSO}
+          />
+          <input
+            value={item}
+            onChange={(e) => setItem(e.target.value)}
+            placeholder="Item (opcional) — ex.: Libre Intense 5 ml"
+            style={CAMPO_REEMBOLSO}
+          />
+          {/* O id do movimento é o que casa com a linha do extrato por
+              igualdade exata, em vez de por valor e data aproximados — a mesma
+              lição do crédito que o palpite grudou no pedido errado. */}
+          <input
+            value={movimento}
+            onChange={(e) => setMovimento(e.target.value)}
+            placeholder="Id do estorno no gateway (opcional)"
+            className="font-mono"
+            style={CAMPO_REEMBOLSO}
+          />
+          <input
+            ref={entrada}
+            type="file"
+            accept="application/pdf,image/*"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              setArquivo(e.target.files?.[0] ?? null)
+              e.target.value = ''
+            }}
+          />
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => entrada.current?.click()}
+              className="font-sans hover:text-ouro"
+              style={{
+                border: 0,
+                background: 'transparent',
+                padding: 0,
+                fontSize: 11,
+                color: arquivo ? 'rgba(242,237,227,.5)' : COR.ouro,
+                textDecoration: 'underline',
+                textUnderlineOffset: 3,
+                cursor: 'pointer',
+              }}
+            >
+              {arquivo ? `${arquivo.name} · trocar` : 'Anexar comprovante'}
+            </button>
+            <span style={{ flex: 1 }} />
+            <button
+              type="button"
+              onClick={() => setAberto(false)}
+              className="font-sans"
+              style={{
+                border: 0,
+                background: 'transparent',
+                padding: 0,
+                fontSize: 11,
+                color: 'var(--color-terciario)',
+                cursor: 'pointer',
+              }}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={salvar}
+              disabled={gravando || !(numero > 0) || !motivo.trim()}
+              className="font-sans"
+              style={{
+                border: `1px solid ${BORDA.ouro}`,
+                background: FUNDO.ouro,
+                color: COR.ouro,
+                borderRadius: 8,
+                padding: '6px 12px',
+                fontSize: 11.5,
+                cursor: gravando ? 'wait' : 'pointer',
+                opacity: numero > 0 && motivo.trim() ? 1 : 0.45,
+              }}
+            >
+              {gravando ? 'Gravando…' : 'Registrar'}
+            </button>
+          </div>
+          <span
+            className="font-sans"
+            style={{ fontSize: 10, lineHeight: 1.4, color: 'var(--color-terciario)', textWrap: 'pretty' }}
+          >
+            O valor entra como dedução de receita e o caixa sai pela linha do estorno no extrato do
+            gateway — nunca em dobro. O estoque não se mexe: se o produto voltou, use Devoluções.
+          </span>
+          {erro && (
+            <span className="font-sans" style={{ fontSize: 10.5, color: COR.erro, textWrap: 'pretty' }}>
+              {erro}
+            </span>
+          )}
+        </div>
+      )}
+    </Bloco>
+  )
+}
+
+const CAMPO_REEMBOLSO = {
+  width: '100%',
+  minWidth: 0,
+  padding: '6px 8px',
+  fontSize: 11.5,
+  color: 'var(--color-corrente)',
+  background: 'rgba(255,255,255,.04)',
+  border: '1px solid var(--color-borda-sutil)',
+  borderRadius: 8,
+  outline: 'none',
+} as const
 
 function CampoComprovante({ url, pedidoId }: { url: string | null; pedidoId: string }) {
   const entrada = useRef<HTMLInputElement>(null)
