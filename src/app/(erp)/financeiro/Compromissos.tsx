@@ -266,13 +266,33 @@ export function NovoCompromisso({
   const disponiveis = categorias.filter((c) => {
     if (!c.ativa) return false
     if (c.natureza === 'transferencia') return false
+    // Numa ENTRADA, tudo que não é receita continua disponível — mas separado,
+    // no grupo "Reembolso de despesa" logo abaixo. Dinheiro que volta de uma
+    // despesa (seguro de extravio, estorno de assinatura, devolução de
+    // fornecedor) não é venda: lançar como receita infla o faturamento e
+    // estraga toda margem percentual, porque a base do cálculo cresce sem que
+    // a operação tenha vendido nada. `lancamentos_por_natureza` já soma
+    // `saída − entrada` por natureza, então a entrada abate a despesa certa
+    // sozinha — o que faltava era a tela deixar escolher.
+    //
+    // `investimento` (amortizar dívida, comprar equipamento) fica fora só do
+    // lado da entrada: ali seria dinheiro de empréstimo ENTRANDO, que é outro
+    // fato e tem outro registro. Do lado da saída ele é essencial.
     return tipo === 'entrada'
-      ? c.natureza === 'receita_operacional' || c.natureza === 'aporte_retirada'
+      ? c.natureza !== 'investimento'
       : c.natureza !== 'receita_operacional'
   })
+  const ehReceita = (n: string) => n === 'receita_operacional' || n === 'aporte_retirada'
+  const receitas = disponiveis.filter((c) => ehReceita(c.natureza))
+  const despesas = disponiveis.filter((c) => !ehReceita(c.natureza))
+  // O padrão de uma entrada é a primeira RECEITA, nunca a primeira da lista
+  // inteira: em ordem alfabética "Administrativo" vem antes de "Vendas", e um
+  // recebimento pré-selecionado como despesa é exatamente o erro que dois
+  // lançamentos reais cometeram sozinhos.
+  const preferidas = tipo === 'entrada' ? receitas : disponiveis
   const categoriaValida = disponiveis.some((c) => c.id === categoriaId)
     ? categoriaId
-    : (disponiveis[0]?.id ?? '')
+    : (preferidas[0]?.id ?? disponiveis[0]?.id ?? '')
   const escolhida = disponiveis.find((c) => c.id === categoriaValida)
   // O centro de custo padrão da categoria, aplicado enquanto ninguém escolheu
   // outro. É o que faz "Frete" nascer em Logística e "Inteligência artificial"
@@ -414,11 +434,34 @@ export function NovoCompromisso({
                   onChange={(e) => setCategoriaId(e.target.value)}
                   style={CAMPO}
                 >
-                  {disponiveis.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.nome}
-                    </option>
-                  ))}
+                  {/* Numa entrada os dois grupos aparecem separados: a receita
+                      em cima, o reembolso de despesa embaixo com esse nome. É o
+                      rótulo que impede alguém de classificar um seguro
+                      recebido como faturamento sem perceber. */}
+                  {tipo === 'entrada' ? (
+                    <>
+                      <optgroup label="Receita">
+                        {receitas.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.nome}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Reembolso de despesa (abate o custo, não é receita)">
+                        {despesas.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.nome}
+                          </option>
+                        ))}
+                      </optgroup>
+                    </>
+                  ) : (
+                    disponiveis.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nome}
+                      </option>
+                    ))
+                  )}
                 </select>
               </Campo>
             </div>

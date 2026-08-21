@@ -582,10 +582,20 @@ export async function editarLancamento(
         erro: 'Categoria de transferência só vale para transferência entre contas próprias — ela não entra no resultado.',
       }
     }
-    if (atual.tipo === 'entrada' && natureza !== 'receita_operacional' && natureza !== 'aporte_retirada' && natureza !== 'transferencia') {
+    // Entrada em categoria de DESPESA é legítima e tem nome: reembolso. Seguro
+    // de pedido extraviado, estorno de assinatura, devolução de fornecedor — é
+    // dinheiro voltando de um custo, e `lancamentos_por_natureza` já soma
+    // `saída − entrada`, então a entrada abate aquela despesa sozinha. A
+    // recusa antiga empurrava esses casos para uma categoria de receita, o que
+    // inflava o faturamento e estragava toda margem percentual.
+    //
+    // O que continua recusado é `investimento`, o rótulo da amortização de
+    // empréstimo: ali a entrada seria um empréstimo NOVO entrando, e isso é
+    // outro fato, com outro registro.
+    if (atual.tipo === 'entrada' && natureza === 'investimento') {
       return {
         ok: false,
-        erro: `"${c.nome}" é categoria de despesa e este lançamento é uma entrada. Escolha uma categoria de receita ou de aporte.`,
+        erro: `"${c.nome}" registra o pagamento de uma dívida, não um recebimento. Se entrou dinheiro de empréstimo, lance como aporte.`,
       }
     }
     if (atual.tipo === 'saida' && natureza === 'receita_operacional') {
