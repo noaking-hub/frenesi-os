@@ -693,6 +693,18 @@ export async function POST(req: Request) {
       mlConsumido: b.mlConsumido,
       falhas: b.falhas.length,
     }
+
+    // A segunda chance, DEPOIS da baixa e na mesma rodada: item vendido antes
+    // de a compra do frasco ser lançada fica em `baixa_pendencias` em vez de
+    // ser descartado, e sai do saldo assim que o lote entra. Sem isso, o ml de
+    // todo pedido faturado na janela entre a venda e o cadastro do frasco
+    // sumia — a baixa só roda uma vez por pedido.
+    const { data: reprocessadas } = await supabaseServer().rpc('reprocessar_baixas_pendentes', {
+      p_limite: 200,
+    })
+    if (Number(reprocessadas ?? 0) > 0) {
+      relatorio.baixasPendentesResolvidas = Number(reprocessadas)
+    }
   } catch (e) {
     relatorio.baixaDeEstoque = { erro: mensagemDe(e) }
   }
